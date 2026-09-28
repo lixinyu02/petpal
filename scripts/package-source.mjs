@@ -6,6 +6,7 @@ import { deflateRawSync } from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { inspectSourceEntry } from './audit-public-source.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -19,7 +20,7 @@ const checkOnly = process.argv.includes('--check');
 const sourceRoots = ['src', 'server', 'desktop', 'public', 'tests', 'scripts', 'docs'];
 // Recursive source/public roots dynamically include every shipped avatar file, without fixed artwork names.
 const requiredCompanionRoots = ['src/avatar', 'public/avatars'];
-const topFiles = ['.gitignore', 'package.json', 'package-lock.json', 'index.html', 'README.md', 'tsconfig.json', 'vite.config.ts', 'capacitor.config.ts', 'LICENSE', 'NOTICE'];
+const topFiles = ['.gitattributes', '.gitignore', 'package.json', 'package-lock.json', 'index.html', 'README.md', 'tsconfig.json', 'vite.config.ts', 'capacitor.config.ts', 'LICENSE', 'NOTICE'];
 const androidFiles = [
   'android/.gitignore', 'android/build.gradle', 'android/settings.gradle', 'android/variables.gradle', 'android/gradle.properties',
   'android/gradlew', 'android/gradlew.bat', 'android/capacitor.settings.gradle', 'android/verify-apk.ps1',
@@ -111,6 +112,7 @@ if (!checkOnly && versionSeries === '0.5') {
 
 // Fixed literals are allowed only in their reviewed fixture file, never by a broad test-name pattern.
 const syntheticSecrets = new Map([
+  ['tests/updates.test.mjs', new Set(['updates-owner-token', 'test-passphrase-123', 'owner-passphrase-123'])],
   ['tests/providers.test.mjs', new Set(['private-test-key'])],
   ['tests/backend.test.mjs', new Set(['backend-test-secret', 'secret-not-in-state-response'])],
   ['tests/codex.test.mjs', new Set(['supersecret'])],
@@ -170,6 +172,12 @@ for (const relative of [...selected].sort()) {
     }
     scanText(relative, text); content = Buffer.from(text);
   }
+  // The ZIP allowlist explicitly permits sanitized historical receipts. Reuse
+  // the public Git scanner for content (including binary/escaped key markers),
+  // while retaining this packager's independently checked source path policy.
+  const contentIssues = inspectSourceEntry({ path: relative, mode: '100644' }, content)
+    .filter(issue => issue.reason !== 'runtime, credentials, or generated artifact path');
+  if (contentIssues.length) throw new Error(`Source content rejected ${relative}: ${contentIssues.map(issue => issue.reason).join(', ')}`);
   const transformed = originalHash !== hash(content);
   if (transformed) sanitized.push(relative);
   entries.push({ path: relative, content, sha256: hash(content), bytes: content.length, transformed, mode: /\.sh$|(?:^|\/)gradlew$/.test(relative) ? 0o755 : 0o644 });

@@ -3,7 +3,7 @@
 - Date: 2026-09-28
 - Complexity: L2
 - Related design: 2026-09-28-petpal-updates-design.md
-- Current status: issue-8 done; issue-9 next
+- Current status: issue-8 / issue-9 done
 
 ## issue-8
 - ID: issue-8
@@ -13,7 +13,7 @@
 - 验收标准: 四端均有入口和真实能力说明；仅通过可信校验的合适版本可交给安装流程；取消与账号切换不产生迟到操作
 - 状态: done
 - 验证方式: 204/204 Node 测试、tsc/Vite build、Chrome桌面/391px布局与部署版本提示；Android编译与17项JVM测试；插件名及verifying轮询契约已复核
-- commit: 本次首次源码提交（feat(issue-8)）
+- commit: 0183621
 
 ## issue-9
 - ID: issue-9
@@ -21,6 +21,6 @@
 - 范围: 发布清单签名工具/文档、0.6发布准备、Git初始化、公开源检查、提交并推送lixinyu02/petpal
 - 依赖: issue-8 done
 - 验收标准: 不含本机敏感状态；源可重建；公开仓库可读取且远端提交SHA匹配
-- 状态: todo
-- 验证方式: staged文件清单/秘密扫描、相关发布工具测试、GitHub读取验证
-- commit: pending
+- 状态: done
+- 验证方式: Git index源码扫描通过；签名9项＋公开源码审计8项测试通过，source-package --check通过；GitHub确认Public/main，首次远端0183621一致，收尾提交推送后再次比对
+- commit: 本次收尾提交（chore(issue-9)）

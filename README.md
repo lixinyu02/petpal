@@ -109,7 +109,7 @@ npm run android:sync
 
 Android APK 构建：Windows 使用 `scripts/build-android.ps1`，Linux 使用 `scripts/build-android.sh`；要求 JDK 21 和 Android SDK。详见 [原生壳说明](docs/native-shells.md)。Ubuntu 桌宠透明置顶效果取决于桌面环境，X11 与 Wayland 需要分别实机确认；ARM64 对应 RK3566 时也需单独验收。
 
-项目结构：`src/` 共享前端；`src/avatar/` 双角色选择与 2D 渲染；`src/pet/` 3D 小猫与行为；`public/avatars/` 原创角色资源；`server/` 持久化、模型协议与 Codex 进程；`desktop/` Electron；`android/` 原生 Android 与悬浮服务；`tests/` 合同测试；`evidence/` 脱敏验收结果。
+项目结构：`src/` 共享前端；`src/avatar/` 双角色选择与 2D 渲染；`src/pet/` 3D 小猫与行为；`public/avatars/` 原创角色资源；`server/` 持久化、模型协议与 Codex 进程；`desktop/` Electron；`android/` 原生 Android 与悬浮服务；`tests/` 合同测试；`evidence/` 本地验收结果（不纳入 Git）。
 
 ## 验证范围
 
