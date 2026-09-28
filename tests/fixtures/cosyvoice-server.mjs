@@ -1,6 +1,7 @@
 // Loopback-only browser acceptance fixture. Returns a supplied synthetic WAV;
 // this does not load CosyVoice, run a GPU model, or prove real synthesis.
 import http from 'node:http';
+import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { validatePcmWav, REFERENCE_LIMIT } from '../../server/cosyvoice.mjs';
 
@@ -21,8 +22,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/gradio_api/upload') { json(res, [`${cache}/reference.wav`]); return; }
     if (req.method === 'POST' && req.url === '/gradio_api/call/generate_audio') {
       const value = JSON.parse(body.toString());
-      if (!/^[a-f0-9-]{36}$/.test(value.session_hash) || !Array.isArray(value.data) || value.data.length !== 10 || value.data[1] !== '3s极速复刻' || value.data[8] !== false) { json(res, { error: 'Invalid fixture request' }, 400); return; }
-      const id = `job-${jobs.size + 1}`; jobs.set(id, value.session_hash); json(res, { event_id: id }); return;
+      if (Object.hasOwn(value, 'session_hash') || !Array.isArray(value.data) || value.data.length !== 10 || value.data[1] !== '3s极速复刻' || value.data[8] !== false) { json(res, { error: 'Invalid fixture request' }, 400); return; }
+      const id = randomBytes(16).toString('hex'); jobs.set(id, id); json(res, { event_id: id }); return;
     }
     if (req.method === 'GET' && req.url.startsWith('/gradio_api/call/generate_audio/')) {
       const session = jobs.get(req.url.split('/').at(-1)); if (!session) { json(res, {}, 404); return; }
@@ -30,7 +31,7 @@ const server = http.createServer(async (req, res) => {
       const data = [{ path: streamPath, url: `http://127.0.0.1:${server.address().port}/gradio_api/stream/${streamPath}`, is_stream: true, orig_name: 'audio-stream.mp3', meta: { _type: 'gradio.FileData' } }];
       res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end(`event: generating\ndata: ${JSON.stringify(data)}\n\nevent: complete\ndata: ${JSON.stringify(data)}\n\n`); return;
     }
-    const stream = /^\/gradio_api\/stream\/([a-f0-9-]{36})\/1\/21\/playlist-file$/.exec(req.url);
+    const stream = /^\/gradio_api\/stream\/([a-f0-9]{32})\/1\/21\/playlist-file$/.exec(req.url);
     if (req.method === 'GET' && stream && [...jobs.values()].includes(stream[1])) { res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': audio.length, 'Cache-Control': 'no-store' }); res.end(audio); return; }
     json(res, { error: 'Fixture route not found' }, 404);
   } catch { if (!res.headersSent) json(res, { error: 'Fixture request failed' }, 400); else res.end(); }

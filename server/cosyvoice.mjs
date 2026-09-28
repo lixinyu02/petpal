@@ -11,6 +11,7 @@ const object = value => value && typeof value === 'object' && !Array.isArray(val
 const fields = (value, allowed) => object(value) && Object.keys(value).every(key => allowed.includes(key));
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const revision = value => typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value);
+const eventId = value => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
 class VoiceError extends Error { constructor(status, message) { super(message); this.status = status; } }
 const failure = (status, message) => new VoiceError(status, message);
 export function safeCosyVoiceError(error) {
@@ -68,17 +69,21 @@ export function cosyVoiceAudioUrl(item, baseUrl, sessionHash) {
   if (!object(item)) throw failure(502, '语音服务返回了不受支持的音频文件。');
   let expected;
   if (item.is_stream === true) {
-    // Gradio 5.4 creates this relative path from the submitted session hash.
+    // Gradio's simple call API uses its returned event ID as the session hash.
     // playlist-file joins the completed stream on the upstream; we still inspect
     // actual WAV bytes because orig_name may say mp3 even for a WAV stream.
-    const match = typeof item.path === 'string' && /^([a-f0-9-]{36})\/([0-9]{1,20})\/([0-9]{1,10})\/playlist\.m3u8$/.exec(item.path);
-    if (!match || !revision(sessionHash) || match[1] !== sessionHash || typeof item.url !== 'string') throw failure(502, '语音服务返回了不属于当前请求的音频流。');
+    const match = typeof item.path === 'string' && /^([a-f0-9]{32})\/([0-9]{1,20})\/([0-9]{1,10})\/playlist\.m3u8$/.exec(item.path);
+    if (!match || !eventId(sessionHash) || match[1] !== sessionHash || typeof item.url !== 'string') throw failure(502, '语音服务返回了不属于当前请求的音频流。');
     expected = `${baseUrl}/gradio_api/stream/${item.path}`;
   } else expected = `${baseUrl}/gradio_api/file=${cacheWav(item.path)}`;
   if (item.url != null) {
     // Exact equality also rejects credentials, query, fragment, encoded path
     // separators and traversal that URL normalization would otherwise conceal.
-    if (item.url !== expected && item.url !== new URL(expected).pathname) throw failure(502, '语音服务返回了不受支持的音频地址。');
+    // Gradio 5.4 trims /queue/join from the longer /call/generate_audio URL,
+    // leaving /gradio_a in output metadata. Accept only that exact known alias;
+    // downloads always use our canonical URL, never the supplied URL.
+    const alias = `${baseUrl}/gradio_a${expected.slice(baseUrl.length)}`;
+    if (![expected, new URL(expected).pathname, alias, new URL(alias).pathname].includes(item.url)) throw failure(502, '语音服务返回了不受支持的音频地址。');
   }
   return item.is_stream === true ? expected.replace(/playlist\.m3u8$/, 'playlist-file') : expected;
 }
@@ -208,11 +213,12 @@ export async function createCosyVoiceService({ store, dataDir, fetchImpl = globa
       if (!Array.isArray(upload) || upload.length !== 1) throw failure(502, '语音服务未接收参考音频。');
       const uploadedPath = cacheWav(upload[0]);
       const data = [input, '3s极速复刻', '', config.referenceText, { path: uploadedPath, meta: { _type: 'gradio.FileData' } }, null, '', 0, false, speed];
-      const sessionHash = randomUUID();
-      const job = parseJson(await readBounded(await request(`${config.baseUrl}/gradio_api/call/generate_audio`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data, session_hash: sessionHash }) }), RESPONSE_LIMIT, combined));
-      if (!fields(job, ['event_id']) || typeof job.event_id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(job.event_id)) throw failure(502, '语音队列未返回有效任务。');
+      // Supplying a different session_hash breaks Gradio's simple GET endpoint:
+      // it looks up the message queue by event_id rather than that custom hash.
+      const job = parseJson(await readBounded(await request(`${config.baseUrl}/gradio_api/call/generate_audio`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data }) }), RESPONSE_LIMIT, combined));
+      if (!fields(job, ['event_id']) || !eventId(job.event_id)) throw failure(502, '语音队列未返回有效任务。');
       const item = await readAudioEvent(await request(`${config.baseUrl}/gradio_api/call/generate_audio/${job.event_id}`), combined);
-      const audioUrl = cosyVoiceAudioUrl(item, config.baseUrl, sessionHash), response = await request(audioUrl);
+      const audioUrl = cosyVoiceAudioUrl(item, config.baseUrl, job.event_id), response = await request(audioUrl);
       if (!/^(?:audio\/(?:wav|x-wav|wave)|application\/octet-stream)(?:\s*;|$)/i.test(response.headers.get('content-type') || '')) { void response.body?.cancel().catch(() => {}); throw failure(502, '语音服务没有返回 WAV 音频。'); }
       const audio = await readBounded(response, COSYVOICE_AUDIO_LIMIT, combined);
       try { validatePcmWav(audio); } catch { throw failure(502, '语音服务没有返回有效的 PCM WAV 音频。'); }
