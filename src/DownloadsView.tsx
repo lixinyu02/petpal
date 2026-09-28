@@ -19,7 +19,7 @@ const formats = { apk: 'APK', 'portable-exe': '便携 EXE', 'tar.gz': 'tar.gz', 
 const installation = (item: Package) => item.format === 'apk'
   ? `${item.debug ? '调试签名，供试用。' : ''}下载 APK 后，按 Android 提示允许此来源安装。`
   : item.format === 'portable-exe' ? '下载后直接运行 EXE 便携程序。'
-  : item.format === 'tar.gz' ? '解压到新目录，运行 ./PetPal；保留旧目录便于回退。'
+  : item.format === 'tar.gz' ? '解压到新目录，运行 ./start-petpal.sh；保留旧目录便于回退。'
   : item.format === 'appimage' ? '允许文件作为程序执行，然后打开 AppImage。'
   : '下载后使用 Ubuntu 的软件安装器打开 DEB。';
 const packageLabel = (item: Package) => `v${item.version} · ${item.arch === 'universal' ? '通用' : item.arch} · ${formats[item.format]} · ${item.channel === 'preview' ? '预览版' : '稳定版'}`;

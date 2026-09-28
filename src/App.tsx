@@ -169,7 +169,7 @@ export default function App() {
     const content = draft.trim(),images=[...attachments.items];
     if ((!content&&!images.length) || attachments.uploading || busyRef.current || switchingModelRef.current) return;
     if (!connected) { setConnectionOpen(true); return; }
-    
+
     if (currentMode === 'chat' && !provider) { setView('settings'); setNotice('添加一个模型连接，就可以开始聊天了。'); return; }
     if(images.length&&provider?.supportsImages===false){setError('这个模型仅支持文字，请移除图片或切换模型。');return;}
     stopPresentation();

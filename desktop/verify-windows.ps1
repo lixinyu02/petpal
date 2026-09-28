@@ -18,7 +18,7 @@ try {
   $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
   $env:PETPAL_SMOKE_DIR = $EvidenceDirectory
   $env:PETPAL_SMOKE_PROFILE = Join-Path $project ('.tools\desktop-smoke-profiles\' + [guid]::NewGuid().ToString('N'))
-  $process = Start-Process -FilePath $Executable -ArgumentList '--smoke-test' -WorkingDirectory (Split-Path -Parent $Executable) -WindowStyle Hidden -Wait -PassThru
+  $process = Start-Process -FilePath $Executable -ArgumentList '--smoke-test' -WorkingDirectory (Split-Path -Parent $Executable) -WindowStyle Hidden -RedirectStandardOutput (Join-Path $EvidenceDirectory 'stdout.log') -RedirectStandardError (Join-Path $EvidenceDirectory 'stderr.log') -Wait -PassThru
   if ($process.ExitCode -ne 0) { throw "Desktop smoke exited $($process.ExitCode)" }
 } finally {
   $env:PATH = $priorPath
@@ -42,7 +42,7 @@ Add-Type -AssemblyName System.Drawing
 $pet = [System.Drawing.Bitmap]::FromFile((Join-Path $EvidenceDirectory 'pet.png'))
 try { if ($pet.GetPixel(0,0).A -ne 0) { throw 'Pet window corner is not transparent.' } } finally { $pet.Dispose() }
 if (-not $result.bundleFiles -or $result.bundleFiles.Count -lt 10) { throw 'Packaged runtime did not report resource byte evidence.' }
-foreach ($required in @('desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE')) {
+foreach ($required in @('desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE')) {
   if (-not @($result.bundleFiles | Where-Object { $_.path -eq $required }).Count) { throw "Missing required desktop assistant runtime member: $required" }
 }
 $generatedPackage = Get-Content -LiteralPath "$project\package.json" -Raw | ConvertFrom-Json

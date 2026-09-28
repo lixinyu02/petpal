@@ -17,7 +17,7 @@ import { normalizeAgentPermissions } from './agent-permissions.mjs';
 import { createAttachmentService, normalizeAttachmentIds, IMAGE_LIMIT } from './attachments.mjs';
 import { createDownloadsCatalog } from './downloads.mjs';
 
-const VERSION = '0.6.1';
+const VERSION = '0.7.0';
 const now = () => new Date().toISOString();
 const failure = (status, message) => Object.assign(new Error(message), { status });
 

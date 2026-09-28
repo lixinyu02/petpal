@@ -4,6 +4,10 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 const syntheticSecrets = new Map([
+  ['tests/agent-access.test.mjs', new Set(['private-agent-key', 'isolated-agent-password', 'replacement-agent-password'])],
+  ['tests/attachments.test.mjs', new Set(['isolated-attachment-password'])],
+  ['tests/auth-entry.test.mjs', new Set(['isolated-provider-key', 'isolated-voice-key', 'isolated-fixture-password'])],
+  ['tests/connection-targets.test.mjs', new Set(['native-owner-secret', 'explicit-remote-session', 'different-server-session', 'previous-local-member'])],
   ['tests/updates.test.mjs', new Set(['updates-owner-token','test-passphrase-123','owner-passphrase-123'])],
   ['tests/providers.test.mjs', new Set(['private-test-key'])],
   ['tests/backend.test.mjs', new Set(['backend-test-secret', 'secret-not-in-state-response'])],
