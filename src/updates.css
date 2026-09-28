@@ -1,0 +1,7 @@
+.updates-settings fieldset{border:0;padding:0;margin:0;min-width:0}
+.update-public-key{font-family:monospace;resize:vertical;max-width:100%;width:100%;padding:12px;border:1px solid #dce3d7;border-radius:10px;background:#fff;color:#354b3b;overflow-wrap:anywhere;box-sizing:border-box}
+.update-notes{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8}
+.update-release{margin:20px 0;padding:18px 0;border-top:1px solid #e0e6d8}
+.update-progress{display:flex;align-items:center;gap:12px;margin:18px 0}
+.update-progress progress{flex:1;min-width:0;accent-color:#637d4d}
+.update-reload{padding:16px 0}

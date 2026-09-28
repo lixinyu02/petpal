@@ -1,0 +1,41 @@
+appId: com.petpal.desktop
+productName: PetPal
+asar: true
+asarUnpack:
+  - node_modules/**
+  - server/native/**
+directories:
+  output: releases/desktop
+files:
+  - dist/**
+  - desktop/main.cjs
+  - desktop/preload.cjs
+  - desktop/updates.mjs
+  - desktop/media-permissions.cjs
+  - desktop/assets/**
+  - server/**
+  - package.json
+  - NOTICE
+  - '!server/data/**'
+  - '!**/.env*'
+  - '!**/*.test.*'
+extraMetadata:
+  main: desktop/main.cjs
+win:
+  icon: desktop/assets/icon.png
+  target:
+    - target: portable
+      arch: [x64]
+  artifactName: PetPal-${version}-Windows-${arch}.${ext}
+linux:
+  icon: desktop/assets/icon.png
+  category: Utility
+  synopsis: Personal cat companion and Codex assistant
+  description: PetPal is a personal cat companion with configurable LLM chat and a local Codex CLI service.
+  maintainer: PetPal contributors
+  target:
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64, arm64]
+  artifactName: PetPal-${version}-Ubuntu-${arch}.${ext}

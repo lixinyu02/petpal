@@ -1,0 +1,23 @@
+Third-party attribution
+=======================
+
+This notice describes bundled dependencies only. It does not assign a license
+or copyright ownership to PetPal itself.
+
+OpenCLI
+-------
+Package: @jackwener/opencli 1.8.8
+Upstream project: https://github.com/jackwener/OpenCLI
+Upstream package author: jackwener
+License: Apache License, Version 2.0
+License URL: https://www.apache.org/licenses/LICENSE-2.0
+
+PetPal distributes the unmodified official OpenCLI package, including its LICENSE
+file. PetPal's own browser wrapper uses OpenCLI's daemon protocol and page
+helpers. It is not affiliated with, endorsed by, or an official distribution
+from the OpenCLI authors. No upstream NOTICE file was present in the official
+1.8.8 npm archive. Other bundled packages retain their respective licenses.
+
+The installed upstream license is retained at:
+node_modules/@jackwener/opencli/LICENSE
+(desktop bundles place it in resources/app.asar.unpacked/node_modules/).

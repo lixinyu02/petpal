@@ -1,0 +1,15 @@
+# 角色图像生成记录
+
+本页记录 0.2.0 基线的三次内置 image_gen 调用，均要求 transparent_background=true。原图与两次定点编辑原样复制入 `public/avatars/akari/`，未使用第三方角色。运行时仅混合编辑图的眼睛/嘴部区域，其他像素来自同一原图。0.3.0 新增 `round.png`、`curious.png`、`warm.png` 的实际提示词单独记录在 [微表情素材生成记录](avatar-expression-prompts.md)。
+
+## idle.png
+
+Use case: stylized-concept. Asset type: transparent 2D anime virtual companion illustration for a real-time animated desktop app. Create ONE original gentle young ADULT Japanese anime woman, age 22-25, beautifully polished premium Live2D VTuber illustration, NOT a 3D render. Warm peach-orange shoulder-length slightly wavy hair, soft side bangs, one tiny cream ribbon hairpin, amber brown luminous eyes, kind small closed smile, warm pale skin, subtle blush. Cream ivory knit cardigan over a modest pale apricot blouse with a small bow, elegant soft everyday clothing. Waist-up portrait, full head and BOTH shoulders and forearms entirely inside frame, hands gently together near waist, slender but natural anatomy. Face exactly front facing, both eyes open, neutral symmetrical upright pose suitable for rigging. Large expressive eyes with fine lashes, detailed smooth soft cel shading and crisp delicate line art. Not chibi, not childlike, no cat ears. Hair ends around shoulders, not flowing far offscreen. Composition: vertical 2:3 canvas, character centered from top 5% to bottom 95%, ample transparent margin left/right and above head. ENTIRE background genuinely transparent alpha, no backdrop, no cast shadow, no objects or text, no watermark, no UI. Single character only. Keep silhouette clean and readable at desktop-widget size. This should look like a polished original anime companion, not a stock illustration.
+
+## blink.png
+
+Use case: precise-object-edit. Edit target: the attached original anime companion PNG. Change ONLY the two eyes to softly CLOSED eyes for a blink animation. Draw delicate relaxed downward eyelid/lash curves exactly where the eyes were. Preserve absolutely everything else pixel-aligned: exact same face, head shape, hair strands, smile, skin color, clothing, pose, canvas size 1024x1536, silhouette and transparent alpha background. No shift, zoom, crop, new accessories, skin recoloring or drawing elsewhere. This is the closed-eye frame of a rigged character and must align with the open-eye original. Background remains genuinely transparent.
+
+## talk.png
+
+Use case: precise-object-edit. Edit target: attached original anime companion PNG. Change ONLY her small mouth to a softly OPEN smiling mouth for speech animation, tasteful small shape, dark warm pink inner mouth, tiny hint of upper teeth, no tongue sticking out. Both eyes remain open exactly as original. Preserve absolutely everything else pixel aligned: exact face, eye position, head, hair, clothes, pose, hands, canvas dimensions 1024x1536, silhouette and transparent alpha background. No shift, zoom, crop, relighting or new elements. This is a mouth animation frame that must align with the original. Genuine transparent background.

@@ -1,0 +1,45 @@
+{
+  "name": "petpal",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "description": "小伴 PetPal — 四端个人桌宠与 Codex 助手",
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "node --watch server/index.mjs",
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "start": "node server/index.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "desktop": "npm run build && electron .",
+    "desktop:pack": "npm run build && electron-builder --config desktop/electron-builder.yml --dir",
+    "desktop:win": "npm run build && electron-builder --config desktop/electron-builder.yml --win portable",
+    "desktop:linux": "npm run build && electron-builder --config desktop/electron-builder.yml --linux AppImage deb",
+    "android:sync": "npm run build && cap sync android",
+    "android:open": "cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/core": "^7.4.3",
+    "@jackwener/opencli": "1.8.8",
+    "@openai/codex": "0.143.0",
+    "express": "^5.1.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.3",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@types/three": "0.180.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^9.2.1",
+    "electron": "39.8.10",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.2",
+    "vite": "^6.3.6"
+  }
+}

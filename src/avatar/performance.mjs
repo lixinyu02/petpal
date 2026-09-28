@@ -1,0 +1,153 @@
+// Text/utterance-boundary approximation, not phoneme recognition or audio analysis.
+const PHASES = new Set(['idle', 'listening', 'thinking', 'speaking', 'error']);
+const MAX_STEP = .1, MAX_BACKLOG_SECONDS = 4.8, MAX_BACKLOG_UNITS = 64, MAX_INCREMENT_CHARS = 192;
+const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+const ease = (value, target, dt, rate = 12) => value + (target - value) * (1 - Math.exp(-dt * rate));
+const neutral = () => ({ expression: 'neutral', expressionAmount: 0, mouthOpen: 0, mouthShape: 'rest', blinkLeft: 0, blinkRight: 0, browRaise: 0, blush: 0, headTilt: 0, headNod: 0, speaking: false });
+
+function cue(character) {
+  if (!character) return { shape: 'rest', open: 0, duration: .06 };
+  if (/[。！？.!?\n]/u.test(character)) return { shape: 'rest', open: 0, duration: .38 };
+  if (/[，,；;：:、…]/u.test(character)) return { shape: 'rest', open: 0, duration: .21 };
+  if (/\s/u.test(character)) return { shape: 'rest', open: 0, duration: .065 };
+  if (/[bpm闭抿唔嗯]/iu.test(character)) return { shape: 'M', open: 0, duration: .09 };
+  if (/[a]/iu.test(character)) return { shape: 'A', open: .78, duration: .075 };
+  if (/[eiy]/iu.test(character)) return { shape: 'E', open: .46, duration: .065 };
+  if (/[ouw]/iu.test(character)) return { shape: 'O', open: .65, duration: .075 };
+  if (/\p{Script=Han}/u.test(character)) {
+    // Unknown pronunciation intentionally uses a small generic articulation palette.
+    const shape = ['A', 'E', 'O'][character.codePointAt(0) % 3];
+    return { shape, open: shape === 'A' ? .66 : shape === 'O' ? .56 : .4, duration: .155 };
+  }
+  if (/[a-z0-9]/iu.test(character)) return { shape: 'E', open: .28, duration: .055 };
+  return { shape: 'rest', open: 0, duration: .065 };
+}
+
+function emotion(text) {
+  if (/不好意思|害羞|脸红|嘿嘿|embarrass|blush|\bshy\b/iu.test(text)) return 'shy';
+  if (/[!！]{2}|哇|天哪|惊喜|没想到|\bwow\b/iu.test(text)) return 'surprised';
+  if (/谢谢|感谢|喜欢|开心|陪你|抱抱|爱你|\bthanks?\b|\blove\b|[❤♥😊]/iu.test(text)) return 'warm';
+  if (/让我想|思考|也许|或许|想一想|\bhmm\b|\bperhaps\b/iu.test(text)) return 'thoughtful';
+  if (/[?？]|为什么|怎么|好奇|\bwonder\b/iu.test(text)) return 'curious';
+  return null;
+}
+
+function emotionAtBoundary(text, index) {
+  // Use the sentence actually being read, not a later sentence in the completed reply.
+  let start = Math.max(0, index - 80), end = Math.min(text.length, index + 80);
+  for (let position = index - 1; position >= start; position--) {
+    if (/[。！？.!?\n]/u.test(text[position])) { start = position + 1; break; }
+  }
+  for (let position = index; position < end; position++) {
+    if (/[。！？.!?\n]/u.test(text[position])) { end = position + 1; break; }
+  }
+  return emotion(text.slice(start, end));
+}
+
+export function createAvatarPerformance() {
+  let output = neutral(), input = { utteranceId: '', text: '', phase: 'idle' };
+  let queue = [], current = null, hidden = false, external = false, externalActive = false, externalIndex = -1;
+  let emotionKind = null, emotionRemaining = 0, motionTime = 0, blinkAt = 3.1, blinkRemaining = 0, blinkNumber = 0;
+  // Remember consumed lengths, not old message bodies. Reset/cancel must not replay a visited reply.
+  const consumed = new Map();
+  const clearMouth = () => { queue = []; current = null; output.mouthOpen = 0; output.mouthShape = 'rest'; output.speaking = false; };
+  const resetPose = () => { clearMouth(); output = neutral(); emotionKind = null; emotionRemaining = 0; motionTime = 0; blinkAt = 3.1; blinkRemaining = 0; blinkNumber = 0; };
+  const rememberLength = (id, length) => {
+    const previous = consumed.get(id) ?? 0;
+    consumed.delete(id); consumed.set(id, Math.max(length, previous));
+    while (consumed.size > 64) consumed.delete(consumed.keys().next().value);
+  };
+  const enqueue = text => {
+    for (const character of text.slice(-MAX_INCREMENT_CHARS)) {
+      queue.push(cue(character));
+      let seconds = queue.reduce((sum, event) => sum + event.duration, 0);
+      while (queue.length > MAX_BACKLOG_UNITS || seconds > MAX_BACKLOG_SECONDS) seconds -= queue.shift().duration;
+    }
+  };
+
+  function setInput(next) {
+    if (!next || typeof next.utteranceId !== 'string' || typeof next.text !== 'string' || !PHASES.has(next.phase)) throw new TypeError('Invalid avatar performance input.');
+    if (next.speech !== undefined && (!next.speech || typeof next.speech.active !== 'boolean' || typeof next.speech.charIndex !== 'number')) throw new TypeError('Invalid speech boundary input.');
+    const changed = next.utteranceId !== input.utteranceId;
+    const rewritten = !changed && !next.text.startsWith(input.text);
+    const previousLength = Math.max(changed ? 0 : input.text.length, consumed.get(next.utteranceId) ?? 0);
+    const priorExternal = external, priorActive = externalActive, priorIndex = externalIndex;
+    if (changed || rewritten) resetPose();
+    const appended = rewritten ? '' : next.text.slice(Math.min(previousLength, next.text.length));
+    const wasSpeaking = input.phase === 'speaking';
+    input = { utteranceId: next.utteranceId, text: next.text, phase: next.phase };
+    rememberLength(next.utteranceId, next.text.length);
+    external = next.speech !== undefined;
+    externalActive = external && next.speech.active && !next.speech.ended;
+    externalIndex = external && Number.isFinite(next.speech.charIndex) ? clamp(Math.floor(next.speech.charIndex), 0, next.text.length) : -1;
+    let boundaryAdvanced = false;
+    if (next.phase !== 'speaking' || hidden) { clearMouth(); emotionKind = null; emotionRemaining = 0; }
+    else if (external) {
+      queue = [];
+      if (!externalActive || next.speech.ended || externalIndex < 0 || externalIndex >= next.text.length) {
+        clearMouth(); emotionKind = null; emotionRemaining = 0;
+      }
+      else if (changed || !priorExternal || !priorActive || !wasSpeaking || externalIndex > priorIndex) {
+        clearMouth();
+        const value = cue(String.fromCodePoint(next.text.codePointAt(externalIndex)));
+        current = { ...value, remaining: Math.min(.22, value.duration + .07) };
+        boundaryAdvanced = true;
+      } else if (externalIndex < priorIndex) clearMouth();
+    } else {
+      if (priorExternal) clearMouth();
+      if (appended) enqueue(appended);
+    }
+    if (!hidden && next.phase === 'speaking' && (external ? boundaryAdvanced : appended)) {
+      const value = external ? emotionAtBoundary(next.text, externalIndex) : emotion(next.text.slice(-160));
+      if (value) { emotionKind = value; emotionRemaining = 2.1; }
+      else if (external) { emotionKind = null; emotionRemaining = 0; }
+    }
+  }
+
+  function step(deltaSeconds, { reducedMotion = false, hidden: nowHidden = false } = {}) {
+    const dt = Number.isFinite(deltaSeconds) && deltaSeconds > 0 ? Math.min(deltaSeconds, MAX_STEP) : 0;
+    hidden = Boolean(nowHidden);
+    if (hidden) {
+      clearMouth(); emotionKind = null; emotionRemaining = 0; blinkRemaining = 0;
+      output.blinkLeft = output.blinkRight = output.headTilt = output.headNod = 0;
+      return { ...output };
+    }
+    if (dt > 0) {
+      if (input.phase === 'speaking') {
+        let remainingDt = dt;
+        while (remainingDt > 0) {
+          if (!current && !external && queue.length) { const next = queue.shift(); current = { ...next, remaining: next.duration }; }
+          if (!current) break;
+          const elapsed = Math.min(remainingDt, current.remaining); current.remaining -= elapsed; remainingDt -= elapsed;
+          if (current.remaining <= .000001) current = null;
+        }
+      }
+      const targetOpen = current?.open ?? 0;
+      output.mouthOpen = targetOpen === 0 ? 0 : ease(output.mouthOpen, targetOpen, dt, 28);
+      output.mouthShape = current?.shape ?? 'rest';
+      output.speaking = input.phase === 'speaking' && Boolean(current || queue.length);
+      emotionRemaining = Math.max(0, emotionRemaining - dt);
+      const base = input.phase === 'thinking' ? 'thoughtful' : input.phase === 'listening' ? 'curious' : input.phase === 'error' ? 'surprised' : output.speaking ? 'warm' : 'neutral';
+      const selected = emotionRemaining > 0 ? emotionKind : base;
+      if (output.expression !== selected) { output.expression = selected; output.expressionAmount = 0; }
+      output.expressionAmount = ease(output.expressionAmount, selected === 'neutral' ? 0 : emotionRemaining > 0 ? .85 : .4, dt, 8);
+      const amount = output.expressionAmount;
+      const brow = { neutral: 0, warm: .1, curious: .38, thoughtful: -.18, surprised: .82, shy: -.1 }[selected] * amount;
+      output.browRaise = ease(output.browRaise, brow, dt, 9);
+      output.blush = ease(output.blush, selected === 'shy' ? .78 * amount : selected === 'warm' ? .2 * amount : 0, dt, 5);
+      if (!reducedMotion) {
+        motionTime += dt; blinkRemaining = Math.max(0, blinkRemaining - dt);
+        if (motionTime >= blinkAt) { blinkRemaining = .18; blinkAt = motionTime + [3.4, 4.3, 2.9][blinkNumber++ % 3]; }
+        const blink = blinkRemaining > 0 ? Math.sin((1 - blinkRemaining / .18) * Math.PI) : 0;
+        output.blinkLeft = clamp(blink); output.blinkRight = clamp(blink * (selected === 'shy' ? .92 : 1));
+        output.headTilt = Math.sin(motionTime * .75) * .08 + (selected === 'curious' ? .22 : selected === 'shy' ? -.16 : 0) * amount;
+        output.headNod = Math.sin(motionTime * (output.speaking ? 4 : 1.4)) * (output.speaking ? .07 : .025);
+      } else {
+        blinkRemaining = 0; output.blinkLeft = output.blinkRight = output.headTilt = output.headNod = 0;
+      }
+    }
+    return { ...output };
+  }
+  function reset() { resetPose(); input = { utteranceId: '', text: '', phase: 'idle' }; external = externalActive = false; externalIndex = -1; hidden = false; }
+  return { setInput, step, reset };
+}
