@@ -69,7 +69,7 @@ export function initConnection(defaultUrl = '') {
       const restored=native?(kind==='pairing'?native:{url:native.url,token:parsed.token}):parsed;
       setConnection(restored,kind);return getConnection();
     }}}catch{try{sessionStorage.removeItem('petpal.connection');}catch{}}
-    if(native)setConnection(native);
+    if(native)setConnection({url:native.url,token:''});
     else if(defaultUrl)setConnection({url:defaultUrl,token:''});
     return getConnection();
   })();

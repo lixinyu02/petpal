@@ -1,0 +1,15 @@
+.anime-scene{isolation:isolate}
+.anime-scene>canvas{position:absolute;inset:0}
+.anime-fallback{position:absolute;inset:0;display:grid;place-items:center;outline:none;cursor:grab}
+.anime-fallback:focus-visible{outline:2px solid #7c9270;outline-offset:-4px;border-radius:18px}
+.anime-fallback-model{position:relative;aspect-ratio:2/3;transform-origin:50% 58%;will-change:transform}
+.anime-fallback-model img{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;user-select:none}
+.anime-fallback-model .anime-layer{opacity:0}
+.anime-layer-blink{mask-image:radial-gradient(ellipse 6.7% 3.9% at 40.6% 24.7%,#000 78%,transparent 100%),radial-gradient(ellipse 6.9% 3.9% at 58.1% 23.9%,#000 78%,transparent 100%)}
+.anime-layer-talk,.anime-layer-round{mask-image:radial-gradient(ellipse 6.5% 3.1% at 50.3% 32.1%,#000 78%,transparent 100%)}
+.anime-layer-warm{mask-image:radial-gradient(ellipse 16.6% 10.6% at 49.6% 27%,#000 78%,transparent 100%)}
+.anime-layer-curious{mask-image:radial-gradient(ellipse 15% 6.6% at 49.5% 23%,#000 78%,transparent 100%)}
+.anime-scene-status{position:absolute;z-index:2;bottom:6px;left:8%;right:8%;display:flex;justify-content:center;align-items:center;gap:9px;padding:8px 12px;border-radius:12px;background:#faf8f0ed;color:#65735d;text-align:center;font-size:11px;line-height:1.5}
+.anime-scene-status button{flex-shrink:0;border:1px solid #bdcbb7;border-radius:12px;padding:5px 9px;background:#fffdf7;color:#415c3d;font:inherit;cursor:pointer}
+.anime-scene-status button:focus-visible{outline:2px solid #607950;outline-offset:2px}
+@media(prefers-reduced-motion:reduce){.anime-fallback-model{will-change:auto}}

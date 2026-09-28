@@ -55,6 +55,11 @@ test('real API wrapper account-switch and native restore behavior',async t=>{
       assert.equal(api.getConnection().token,'member-token');api.logout();
       assert.equal(api.getConnection().token,'');assert.equal(JSON.parse(disk.get('petpal.connection')).credentialKind,'none');
     });
+    await t.test('desktop starts without silently logging in the owner',async()=>{
+      disk.clear();window.petpal={connection:async()=>({url:'http://127.0.0.1:60002',token:'fresh-owner'})};
+      const api=await freshApi();
+      assert.deepEqual(await api.initConnection(),{url:'http://127.0.0.1:60002',token:''});
+    });
     await t.test('desktop restore refreshes local port but preserves member login and explicit logout',async()=>{
       window.petpal={connection:async()=>({url:'http://127.0.0.1:60002',token:'fresh-owner'})};
       for(const [kind,savedToken,expectedToken] of [['session','member','member'],['none','',''],['pairing','old-owner','fresh-owner']]){

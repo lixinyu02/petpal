@@ -1,3 +1,4 @@
+import { ConnectionDialog } from './auth/LoginGate';
 import UpdatesSettings from './UpdatesSettings';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowUp, Check, ChevronDown, CircleHelp, Code2, Coffee, Copy, Globe2, Heart, History, Link2, Loader2, Menu, MessageCircle, Monitor, Moon, MoreHorizontal, PawPrint, Pencil, Plug, Plus, Settings2, ShieldCheck, Square, Terminal, Trash2, Unplug, Volume2, X } from 'lucide-react';
@@ -291,16 +292,6 @@ export default function App() {
     {connectionOpen && <ConnectionDialog close={() => setConnectionOpen(false)}/>}
     {deleting && <div className="modal-backdrop"><section className="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title"><h2 id="delete-title">删除这段对话？</h2><p>这会删除个人服务中保存的聊天记录，无法恢复。</p><div className="button-row"><button className="secondary-button" onClick={() => setDeleting(null)}>保留</button><button className="danger-button" onClick={() => deleteChat(deleting)}>删除对话</button></div></section></div>}
   </div>;
-}
-
-function ConnectionDialog({ close }: { close(): void }) {
-  const [form, setForm] = useState<Connection>({url:getConnection().url,token:''});
-  const [method,setMethod]=useState<'password'|'token'>('password');
-  const [username,setUsername]=useState(''),[password,setPassword]=useState('');
-  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
-  async function submit(event:FormEvent){event.preventDefault();setBusy(true);setError('');try{if(method==='password')await login(form.url,username,password);else await connectWithToken(form);}catch(e){if(!isSessionChanged(e))setError((e as Error).message);}finally{setBusy(false);setPassword('');}}
-  async function localOwner(){setBusy(true);setError('');try{if(window.petpal)await connectWithToken(await window.petpal.connection());}catch(e){if(!isSessionChanged(e))setError((e as Error).message);}finally{setBusy(false);}}
-  return <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="connection-title"><div className="modal-heading"><span className="dialog-icon"><Link2 size={23}/></span><button className="icon-button" aria-label="关闭连接窗口" onClick={close}><X size={20}/></button></div><h2 id="connection-title">登录你的个人服务</h2><p>管理员创建账号并分配模型；每个账号保留自己的聊天和伙伴设置。</p><div className="auth-modes"><button className={method==='password'?'active':''} onClick={()=>setMethod('password')}>账号密码</button><button className={method==='token'?'active':''} onClick={()=>setMethod('token')}>主机配对令牌</button></div><form onSubmit={submit}><label>服务地址<input placeholder="同站点留空，或 https://pet.example.com" value={form.url} onChange={e=>setForm({...form,url:e.target.value})} autoComplete="url" disabled={!!window.petpal}/></label>{method==='password'?<><label>账号名称<input value={username} onChange={e=>setUsername(e.target.value)} autoComplete="username" required maxLength={40}/></label><label>登录密码<input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required maxLength={256}/></label></>:<label>配对令牌<input type="password" value={form.token} onChange={e=>setForm({...form,token:e.target.value})} placeholder="仅供主机管理员使用" required autoComplete="off"/></label>}<p className="field-help">登录凭据只保留在当前会话中。手机连接需要可访问的 HTTPS 服务地址。</p>{error&&<div className="form-error" role="alert">{error}</div>}<button className="primary-button full-button" disabled={busy}>{busy?<Loader2 className="spin" size={17}/>:<Link2 size={17}/>}登录服务</button></form>{window.petpal&&<button className="secondary-button full-button auth-owner" disabled={busy} onClick={localOwner}>使用本机主账号</button>}</section></div>;
 }
 
 function SettingsView({ state, connected, refresh, notice, connect, initialTab, hasDraft }: { state: State; connected: boolean; refresh(): Promise<State>; notice(message: string): void; connect(): void; hasDraft:boolean; initialTab: 'models'|'pet'|'desktop'|'accounts'|'voice'|'assistant'|'updates' }) {

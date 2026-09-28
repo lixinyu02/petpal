@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, apiBlob, getConnection, getSessionEpoch, isSessionChanged, type VoiceConfig } from '../api';
+import { api, apiBlob, getConnection, getIdentity, getSessionEpoch, isSessionChanged, type VoiceConfig } from '../api';
 import { createDevicePreferences } from '../media/device-preferences.mjs';
 import { createSpeechController, selectSpeechVoice, type SpeechState } from './speech.mjs';
 import { createRemoteSpeechController } from './remote-speech.mjs';
@@ -46,7 +46,7 @@ export function useSpeech(allowed: boolean, scope = 'guest') {
     }
     async function load() {
       const requestRevision=++revision;loading?.abort();controller.current?.stop();
-      if(!getConnection().token){install('system');return;}
+      if(!getConnection().token || !getIdentity()){controller.current?.dispose();controller.current=null;setSupported(false);setEngine('loading');setConfigError('请先登录账号后使用语音。');return;}
       const request=new AbortController();loading=request;setEngine('loading');setSupported(false);setConfigError('');
       try{
         const saved=await api<VoiceConfig>('/voice',{signal:request.signal});
@@ -71,7 +71,7 @@ export function useSpeech(allowed: boolean, scope = 'guest') {
   useEffect(()=>{if(!allowed)stop();},[allowed,stop]);
   const setEnabled=useCallback((value:boolean)=>{enabledRef.current=value;updateEnabled(value);if(!value)stop();},[stop]);
   const speak=useCallback((text:string,utteranceId:string)=>{
-    if(!allowedRef.current||document.hidden||!supported)return false;
+    if(!allowedRef.current||document.hidden||!supported||!getConnection().token||!getIdentity())return false;
     return controller.current?.speak({text,utteranceId,language:navigator.language})??false;
   },[supported]);
   const speakIfEnabled=useCallback((text:string,utteranceId:string)=>enabledRef.current?speak(text,utteranceId):false,[speak]);
