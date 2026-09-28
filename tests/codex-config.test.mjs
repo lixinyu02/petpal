@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { defaultCodexConfig, patchCodexConfig, publicCodexConfig, codexToml, isolatedCodexEnvironment, prepareCodexRuntime, parseCodexHttpOrigins, validateStoredCodexConfig } from '../server/codex-config.mjs';
@@ -34,6 +34,63 @@ test('Codex config validates endpoint, secret replacement, CAS and fixed protoco
   assert.equal(patchCodexConfig(original, { ...api, baseUrl: 'http://127.0.0.1:9988/v1/responses' }).baseUrl, 'http://127.0.0.1:9988/v1');
   assert.throws(() => patchCodexConfig(saved, { sandbox: 'danger-full-access' }), /不支持/);
   assert.throws(() => patchCodexConfig(saved, { apiKey: 'x', clearApiKey: true }), /同时/);
+});
+
+test('Codex effort validates, persists in TOML, and changes revision only when effective settings change', () => {
+  const defaults = defaultCodexConfig(); assert.equal(defaults.reasoningEffort, '');
+  const legacy = { ...defaults }; delete legacy.reasoningEffort;
+  assert.equal(publicCodexConfig(legacy).reasoningEffort, '');
+  assert.equal(patchCodexConfig(legacy, { reasoningEffort: '' }).revision, legacy.revision);
+  assert.doesNotMatch(codexToml(legacy), /model_reasoning_effort|model_supports_reasoning_summaries/);
+  let config = patchCodexConfig(legacy, { ...api, model: 'gpt-6-luna' });
+  for (const reasoningEffort of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', '']) {
+    const previous = config;
+    config = patchCodexConfig(previous, { reasoningEffort });
+    assert.equal(config.reasoningEffort, reasoningEffort); assert.notEqual(config.revision, previous.revision);
+    assert.equal(patchCodexConfig(config, { model: config.model }).revision, config.revision);
+    assert.equal(patchCodexConfig(config, { reasoningEffort }).revision, config.revision);
+    assert.equal(config.apiKey, api.apiKey); assert.equal(publicCodexConfig(config).apiKey, undefined);
+    assert.equal(publicCodexConfig(config).reasoningEffort, reasoningEffort);
+    if (reasoningEffort) {
+      assert.ok(codexToml(config).includes(`model_reasoning_effort = "${reasoningEffort}"`));
+      assert.match(codexToml(config), /model_supports_reasoning_summaries = true/);
+    } else assert.doesNotMatch(codexToml(config), /model_reasoning_effort|model_supports_reasoning_summaries/);
+  }
+  for (const reasoningEffort of [null, false, {}, [], 4, 'MAX', ' max ', 'max\n']) {
+    assert.throws(() => patchCodexConfig(config, { reasoningEffort }), error => error.status === 400);
+    assert.throws(() => validateStoredCodexConfig({ ...config, reasoningEffort }), /推理强度/);
+  }
+});
+
+test('effort-only config changes preserve secrets and history but require a new Codex conversation', async t => {
+  const f = await setup(t);
+  const initial = await (await f.request('/codex/config', { method: 'PATCH', body: { ...api, reasoningEffort: 'high' } })).json();
+  const old = await (await f.request('/conversations', { method: 'POST', body: { mode: 'codex' } })).json();
+  const response = await f.request('/codex/config', { method: 'PATCH', body: { reasoningEffort: 'max', revision: initial.revision } });
+  assert.equal(response.status, 200); const next = await response.json();
+  assert.equal(next.reasoningEffort, 'max'); assert.notEqual(next.revision, initial.revision); assert.equal(next.hasApiKey, true); assert.equal(next.apiKey, undefined);
+  assert.equal((await f.request(`/conversations/${old.id}/messages`, { method: 'POST', body: { content: 'stale' } })).status, 409);
+  assert.equal((await f.request(`/conversations/${old.id}`)).status, 200);
+  const saved = JSON.parse(await readFile(path.join(f.directory, 'state.json'), 'utf8'));
+  assert.equal(saved.codexConfig.apiKey, api.apiKey); assert.equal(saved.codexConfig.reasoningEffort, 'max');
+});
+
+test('old provider and Codex records migrate missing effort to service default without changing models, revisions or history', async t => {
+  const f = await setup(t);
+  const provider = await (await f.request('/providers', { method: 'POST', body: { name: 'Existing', baseUrl: api.baseUrl, model: 'old-model', protocol: 'responses', apiKey: api.apiKey } })).json();
+  await f.request('/codex/config', { method: 'PATCH', body: api });
+  await f.request('/conversations', { method: 'POST', body: { mode: 'codex' } });
+  await f.app.close();
+  const filename = path.join(f.directory, 'state.json'), old = JSON.parse(await readFile(filename, 'utf8'));
+  delete old.codexConfig.reasoningEffort; delete old.providers[0].reasoningEffort;
+  await writeFile(filename, JSON.stringify(old));
+  const restarted = await createPetServer({ dataDir: f.directory, token: 'reload-token', codex: stubBridge(), desktopTools: stubTools(), codexHttpOrigins: '' });
+  await restarted.close();
+  const next = JSON.parse(await readFile(filename, 'utf8'));
+  assert.deepEqual(next.codexConfig, { ...old.codexConfig, reasoningEffort: '' });
+  assert.deepEqual(next.providers, [{ ...old.providers[0], reasoningEffort: '' }]); assert.equal(next.providers[0].id, provider.id);
+  assert.deepEqual(next.conversations, old.conversations); assert.deepEqual(next.users, old.users);
+  assert.equal(next.codexConfig.revision, old.codexConfig.revision);
 });
 
 test('deployment HTTP origins parse strictly and normalize only exact HTTP authority', () => {

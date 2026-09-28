@@ -504,6 +504,7 @@ export class CodexBridge {
         threadId: actualId, input: [{ type: 'text', text: prompt }], cwd: this.workspaceRoot,
         approvalPolicy: 'on-request', approvalsReviewer: 'user', sandboxPolicy: { type: 'readOnly', networkAccess: false },
         ...(model ? { model } : {}),
+        ...(this.apiMode && this.config.reasoningEffort ? { effort: this.config.reasoningEffort } : {}),
       });
       run.turnId ||= started.turn?.id;
       if (!run.turnId && !run.settled) throw new Error('Codex 未返回有效任务 ID');

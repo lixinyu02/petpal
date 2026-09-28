@@ -54,6 +54,8 @@ Linux shell 可使用 `PETPAL_CODEX_HTTP_ORIGINS='http://gateway.example:8080' n
 
 ### CLIProxyAPI 网关
 
+0.6.1 在普通模型连接和 Codex API 设置中增加「推理强度」。选「服务默认」时不覆盖服务设置；例如 `gpt-6-luna` 配合 `max` 会实际发送 Responses `reasoning.effort=max`，Codex 也会使用这一强度。支持的级别依模型与网关而定，错误会直接显示，不会悄悄降低强度。修改 Codex 模型或强度后新建工作对话，旧历史保留。
+
 0.6 可直接连接 CLIProxyAPI 的 Responses 端点。`management.html#/login` 是管理页面；模型连接应填写 API Base URL，例如 `http://gateway.example:8317/v1`。使用「API 密钥列表（api-keys）」中的客户端密钥，不使用管理登录密码或上游 OAuth 凭证。
 
 先带客户端鉴权查询 `/v1/models`，选择该网关实际提供的文本模型，再分别配置普通聊天的 `Responses` 连接和「电脑助手」的 Codex API。网关公布模型名称不等于当前上游可用，须以非空实际回复确认。切换 Codex 后新建工作对话；原历史仍可查看。

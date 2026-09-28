@@ -1,6 +1,6 @@
 # 小伴 PetPal
 
-可以聊天、陪伴和连接真实 Codex CLI 的个人伙伴。Web、Android、Windows 与 Ubuntu 共用 React 界面和 Node 服务。当前源码版本 **0.6.0**，新增四端更新入口和 GitHub Releases 签名清单校验，保留二次元伙伴、3D 小猫、独立用户与模型权限、语音设备设置、内置 Codex 0.143.0 和 OpenCLI 1.8.8。
+可以聊天、陪伴和连接真实 Codex CLI 的个人伙伴。Web、Android、Windows 与 Ubuntu 共用 React 界面和 Node 服务。当前源码版本 **0.6.1**，普通聊天与 Codex 支持独立设置推理强度（包括 max），保留四端更新入口、二次元伙伴、3D 小猫、独立用户与模型权限、语音设备设置、内置 Codex 0.143.0 和 OpenCLI 1.8.8。
 
 ### 两种形象，同一位伙伴
 
@@ -18,7 +18,7 @@
 
 ## 开始使用
 
-源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。二进制发布入口：[GitHub Releases](https://github.com/lixinyu02/petpal/releases)。本次提供 0.6.0 源码与更新接口，尚未发布 0.6.0 二进制或签名更新清单。此前本机构建的 0.5 桌面包和 0.4 Android 包保留在本地，不纳入 Git。
+源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。二进制发布入口：[GitHub Releases](https://github.com/lixinyu02/petpal/releases)。当前提供 0.6.1 源码与更新接口，本机构建的桌面与 Android 包不纳入 Git；是否可在应用中更新以 Releases 的签名清单为准。
 
 Windows 便携版下载后直接打开对应版本程序。桌面版内置 Electron、个人服务与两个 CLI，无需另装 Node/npm。进入「连接与设置 → 电脑助手」，可填写 Responses 服务地址、模型与密钥，或继续使用本机 Codex 登录。OpenCLI 网页工具还需安装官方 Chrome Browser Bridge 扩展并选择浏览器档案。关闭主窗口后继续留在托盘，托盘菜单可显示伙伴、打开主界面或彻底退出。拖动伙伴窗口顶部的三个点移动窗口，点击顶部聊天图标打开主界面。
 

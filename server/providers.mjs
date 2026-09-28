@@ -1,6 +1,13 @@
 const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 const MAX_OUTPUT_CHARS = 2 * 1024 * 1024;
 
+export const REASONING_EFFORTS = Object.freeze(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+export function normalizeReasoningEffort(value) {
+  if (value === undefined) return '';
+  if (typeof value !== 'string' || !REASONING_EFFORTS.includes(value)) throw new Error('推理强度须为服务默认值或 none、minimal、low、medium、high、xhigh、max、ultra。');
+  return value;
+}
+
 export function normalizeBaseUrl(value, protocol) {
   let url;
   try { url = new URL(value); } catch { throw new Error('请输入完整的模型服务 URL。'); }
@@ -79,9 +86,10 @@ export async function streamProvider({ provider, messages, persona = '', signal,
   const timeout = AbortSignal.timeout(timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const history = messages.filter(message => ['user', 'assistant'].includes(message.role) && message.content).map(({ role, content }) => ({ role, content }));
+  const reasoningEffort = normalizeReasoningEffort(provider.reasoningEffort);
   const body = provider.protocol === 'responses'
-    ? { model: provider.model, instructions: persona || undefined, input: history, stream: true, store: false }
-    : { model: provider.model, messages: [...(persona ? [{ role: 'system', content: persona }] : []), ...history], stream: true };
+    ? { model: provider.model, instructions: persona || undefined, input: history, stream: true, store: false, ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}) }
+    : { model: provider.model, messages: [...(persona ? [{ role: 'system', content: persona }] : []), ...history], stream: true, ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}) };
   const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream, application/json' };
   if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`;
   let response;

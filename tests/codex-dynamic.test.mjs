@@ -55,7 +55,7 @@ createInterface({input:process.stdin}).on('line',line=>{
 });
 `;
 
-async function setup(t, execute = async () => ({ ok: true }), mode = 'api') {
+async function setup(t, execute = async () => ({ ok: true }), mode = 'api', reasoningEffort = '') {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-codex-dynamic-'));
   const file = path.join(directory, 'fixture.mjs'), log = path.join(directory, 'rpc.jsonl');
   await writeFile(file, fixture);
@@ -63,7 +63,7 @@ async function setup(t, execute = async () => ({ ok: true }), mode = 'api') {
     specs: ['petpal_status', 'petpal_action'].map(name => ({ type: 'function', name, description: name, inputSchema: { type: 'object', properties: {}, additionalProperties: false } })),
     describe(name, args) { if (Object.keys(args).length) throw new Error('参数不合法'); return { description: `执行 ${name}`, approvalRequired: name === 'petpal_action' }; }, execute,
   };
-  const config = mode === 'api' ? patchCodexConfig(defaultCodexConfig(), { mode: 'api', baseUrl: 'http://127.0.0.1:9999/v1', model: 'fixture', apiKey: 'arbitrary-secret-value' }) : undefined;
+  const config = mode === 'api' ? patchCodexConfig(defaultCodexConfig(), { mode: 'api', baseUrl: 'http://127.0.0.1:9999/v1', model: 'fixture', reasoningEffort, apiKey: 'arbitrary-secret-value' }) : undefined;
   const bridge = new CodexBridge({ workspaceRoot: path.join(directory, 'work'), dataDir: directory, config, desktopTools: tools, command: [process.execPath, file, log] });
   t.after(async () => { await bridge.close(); await rm(directory, { recursive: true, force: true }); });
   return { bridge, config, async messages() { await bridge._rpc('fixture/receipt', {}); return (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse); } };
@@ -77,6 +77,18 @@ test('dynamic specs use actual app-server shape and status tools run without app
   assert.equal(rpc.find(x => x.method === 'thread/start').params.dynamicTools[0].type, 'function');
   assert.equal(rpc.find(x => x.method === 'thread/start').params.modelProvider, 'petpal');
   assert.deepEqual(rpc.find(x => x.id === 'call-main' && x.result).result, { contentItems: [{ type: 'inputText', text: '{"ok":true}' }], success: true });
+});
+
+test('turn/start pins configured API reasoning effort while empty and host mode keep native defaults', { timeout: 15000 }, async t => {
+  for (const [mode, effort] of [['api', 'max'], ['api', ''], ['host', 'max']]) {
+    const f = await setup(t, undefined, mode, effort);
+    const first = await f.bridge.run({ prompt: 'status' });
+    await f.bridge.run({ threadId: first.threadId, prompt: 'status' });
+    const turns = (await f.messages()).filter(message => message.method === 'turn/start');
+    assert.equal(turns.length, 2);
+    for (const turn of turns) assert.equal(turn.params.effort, mode === 'api' && effort ? effort : undefined);
+    await f.bridge.close();
+  }
 });
 
 for (const decision of ['accept', 'decline']) test(`dynamic action awaits explicit ${decision}`, { timeout: 15000 }, async t => {

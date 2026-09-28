@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile, chmod, unlink, open } from 'node:fs
 import path from 'node:path';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { defaultVoiceSettings } from './voice.mjs';
+import { normalizeReasoningEffort } from './providers.mjs';
 
 export const isCompanionKind = value => value === 'anime' || value === 'cat';
 
@@ -31,6 +32,11 @@ export class JsonStore {
     }
     let changed = false;
     // Validate before backing up or replacing a legacy store.
+    for (const provider of this.state.providers) {
+      if (!provider || typeof provider !== 'object' || Array.isArray(provider)) throw new Error('本地模型连接格式无效，请保留文件并检查备份。');
+      const effort = normalizeReasoningEffort(provider.reasoningEffort);
+      if (provider.reasoningEffort === undefined) { provider.reasoningEffort = effort; changed = true; }
+    }
     if (this.state.settings.companionKind === undefined) { this.state.settings.companionKind = 'anime'; changed = true; }
     else if (!isCompanionKind(this.state.settings.companionKind)) throw new Error('本地 companionKind 无效，必须是 anime 或 cat；请保留文件并检查备份。');
     if (this.state.version === 1) {
@@ -109,5 +115,5 @@ export class JsonStore {
 }
 
 export function publicProvider(provider) {
-  return { id: provider.id, name: provider.name, protocol: provider.protocol, baseUrl: provider.baseUrl, model: provider.model, hasApiKey: Boolean(provider.apiKey) };
+  return { id: provider.id, name: provider.name, protocol: provider.protocol, baseUrl: provider.baseUrl, model: provider.model, reasoningEffort: normalizeReasoningEffort(provider.reasoningEffort), hasApiKey: Boolean(provider.apiKey) };
 }

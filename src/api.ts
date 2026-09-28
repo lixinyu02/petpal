@@ -3,11 +3,12 @@ import { createRequestScope, SessionChangedError } from './auth/request-scope.mj
 export { SessionChangedError };
 export type User = { id:string; username:string; displayName:string; role:string; isOwner:boolean; canUseCodex:boolean };
 export type ManagedUser = User & { disabled:boolean; providerIds:string[]; hasPassword:boolean };
-export type Provider = { id: string; name: string; protocol: 'chat-completions' | 'responses'; baseUrl: string; model: string; hasApiKey: boolean; editable?:boolean; testable?:boolean };
+export type ReasoningEffort = '' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+export type Provider = { id: string; name: string; protocol: 'chat-completions' | 'responses'; baseUrl: string; model: string; reasoningEffort?:ReasoningEffort; hasApiKey: boolean; editable?:boolean; testable?:boolean };
 export type Message = { id: string; role: 'user' | 'assistant'; content: string; status?: string; createdAt?: string };
 export type Conversation = { id: string; title: string; mode: 'chat' | 'codex'; providerId?: string; messages: Message[]; createdAt: string; updatedAt: string };
 export type CodexStatus = { available?: boolean; running?: boolean; version?: string; authenticated?: boolean; error?: string; message?: string; workspaceRoot?: string; mode?:'host'|'api'; configured?:boolean; apiVerified?:boolean; [key: string]: unknown };
-export type CodexConfig = { mode:'host'|'api'; baseUrl:string; model:string; hasApiKey:boolean; revision:string; protocol:'responses'; configured:boolean };
+export type CodexConfig = { mode:'host'|'api'; baseUrl:string; model:string; reasoningEffort?:ReasoningEffort; hasApiKey:boolean; revision:string; protocol:'responses'; configured:boolean };
 export type MusicAction = 'open'|'play'|'pause'|'next'|'previous';
 export type MusicPlayer = { id:'qqmusic'|'netease'; name:string; installed:boolean; session:boolean; state?:string; controls:string[]; message?:string };
 export type OpenCliStatus = {available:boolean;version:string|null;runtime:'bundled';daemon:{state:'stopped'|'owned'|'shared'|'external'|'unavailable';owned:boolean;port:number;compatible?:boolean};extension:{connected:boolean;required:true;installUrl:string};profiles:{id:string;label:string;connected:boolean}[];selectedProfileId:string|null;ready:boolean;message:string;allowedOrigins:string[]};

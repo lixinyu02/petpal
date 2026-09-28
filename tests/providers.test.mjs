@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { streamProvider, normalizeBaseUrl } from '../server/providers.mjs';
+import { streamProvider, normalizeBaseUrl, normalizeReasoningEffort, REASONING_EFFORTS } from '../server/providers.mjs';
 
 async function fixture(t, handler) {
   const server = http.createServer(handler);
@@ -11,6 +11,42 @@ async function fixture(t, handler) {
 }
 const model = (baseUrl, protocol = 'chat-completions') => ({ baseUrl, protocol, model: 'fixture-model', apiKey: 'private-test-key' });
 const input = { messages: [{ role: 'user', content: 'Hello' }], persona: 'Helpful cat' };
+
+test('reasoning efforts are explicit supported values and missing means service default', () => {
+  assert.equal(normalizeReasoningEffort(undefined), '');
+  for (const effort of REASONING_EFFORTS) assert.equal(normalizeReasoningEffort(effort), effort);
+  for (const value of [null, false, 1, [], {}, 'MAX', ' max ', 'auto', 'max\n']) assert.throws(() => normalizeReasoningEffort(value), /推理强度/);
+});
+
+test('both protocols send the selected effort in their native field and omit it for service default', async t => {
+  const requests = [];
+  const baseUrl = await fixture(t, async (req, res) => {
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    requests.push({ url: req.url, body: JSON.parse(raw) });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(req.url.endsWith('/responses')
+      ? { status: 'completed', output_text: 'fixture response' }
+      : { choices: [{ message: { content: 'fixture response' }, finish_reason: 'stop' }] }));
+  });
+  for (const protocol of ['responses', 'chat-completions']) {
+    for (const reasoningEffort of [undefined, ...REASONING_EFFORTS]) {
+      const provider = { ...model(baseUrl, protocol), model: 'gpt-6-luna', reasoningEffort };
+      assert.equal((await streamProvider({ ...input, provider })).text, 'fixture response');
+      const { body } = requests.at(-1);
+      assert.equal(body.model, 'gpt-6-luna');
+      if (protocol === 'responses') {
+        assert.deepEqual(body.reasoning, reasoningEffort ? { effort: reasoningEffort } : undefined);
+        assert.equal(body.reasoning_effort, undefined);
+      } else {
+        assert.equal(body.reasoning_effort, reasoningEffort || undefined);
+        assert.equal(body.reasoning, undefined);
+      }
+    }
+  }
+  const count = requests.length;
+  await assert.rejects(streamProvider({ ...input, provider: { ...model(baseUrl), reasoningEffort: 'invalid' } }), /推理强度/);
+  assert.equal(requests.length, count);
+});
 
 test('Chat Completions parses fragmented CRLF SSE, sends only configured key, and records real text', async t => {
   let received;

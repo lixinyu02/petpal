@@ -1,16 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {codexConfigPatch,canControlPlayer,canOpenMusicSite,playerStateLabel} from '../src/desktop-settings.mjs';
+import {codexConfigDraft,codexConfigPatch,reasoningEfforts,canControlPlayer,canOpenMusicSite,playerStateLabel} from '../src/desktop-settings.mjs';
 
 const config={mode:'api',baseUrl:'https://api.example/v1',model:'example',hasApiKey:true,revision:'saved-revision',protocol:'responses',configured:true};
 const draft={mode:'api',baseUrl:config.baseUrl,model:config.model,apiKey:'',clearApiKey:false};
 test('Codex form preserves a saved secret by omission and binds changes to the read revision',()=>{
   const patch=codexConfigPatch(config,draft);
-  assert.deepEqual(patch,{mode:'api',baseUrl:config.baseUrl,model:'example',revision:'saved-revision'});
+  assert.deepEqual(patch,{mode:'api',baseUrl:config.baseUrl,model:'example',reasoningEffort:'',revision:'saved-revision'});
   assert.equal(Object.hasOwn(patch,'hasApiKey'),false);assert.equal(Object.hasOwn(patch,'apiKey'),false);
   assert.deepEqual(codexConfigPatch(config,{...draft,apiKey:' new-key '}),{...patch,apiKey:'new-key'});
   assert.deepEqual(codexConfigPatch(config,{...draft,clearApiKey:true}),{...patch,clearApiKey:true});
   assert.throws(()=>codexConfigPatch(config,{...draft,apiKey:'key',clearApiKey:true}),/只能选择/);
+});
+test('Codex reasoning effort survives readback, unrelated edits and an explicit service-default reset',()=>{
+  const saved={...config,model:'gpt-6-luna',reasoningEffort:'max'};
+  const loaded=codexConfigDraft(saved);
+  assert.equal(loaded.reasoningEffort,'max');
+  assert.equal(loaded.apiKey,'');
+  const patch=codexConfigPatch(saved,{...loaded,model:' gpt-6-luna ',apiKey:'replacement'});
+  assert.equal(patch.reasoningEffort,'max');
+  assert.equal(codexConfigDraft({...saved,...patch}).reasoningEffort,'max');
+  const reset=codexConfigPatch(saved,{...loaded,reasoningEffort:''});
+  assert.equal(reset.reasoningEffort,'');
+  assert.equal(codexConfigDraft({...saved,...reset}).reasoningEffort,'');
+});
+test('old Codex readbacks use service default and every offered effort round-trips unchanged',()=>{
+  assert.equal(codexConfigDraft(config).reasoningEffort,'');
+  assert.equal(codexConfigPatch({...config,reasoningEffort:'high'},draft).reasoningEffort,'high');
+  for(const effort of reasoningEfforts){
+    const patch=codexConfigPatch(config,{...codexConfigDraft(config),reasoningEffort:effort});
+    assert.equal(codexConfigDraft({...config,...patch}).reasoningEffort,effort);
+  }
 });
 test('an incomplete API form cannot be saved while host mode requires no API credentials',()=>{
   assert.throws(()=>codexConfigPatch(config,{...draft,model:' '}),/模型/);

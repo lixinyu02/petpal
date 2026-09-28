@@ -82,6 +82,46 @@ test('real bundled Codex 0.143 performs Responses dynamic-tool approval and resu
   } finally { clearTimeout(timer); }
 });
 
+test('real bundled Codex sends gpt-6-luna reasoning max unchanged on initial and resumed Responses requests', { timeout: 30_000 }, async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'petpal-codex-effort-real-'));
+  const requests = [], errors = [];
+  const server = http.createServer(async (req, res) => {
+    try {
+      assert.equal(req.url, '/v1/responses'); assert.equal(req.method, 'POST');
+      assert.equal(req.headers.authorization, 'Bearer isolated-test-key');
+      const chunks = []; for await (const chunk of req) chunks.push(chunk);
+      const body = JSON.parse(Buffer.concat(chunks).toString());
+      requests.push({ model: body.model, effort: body.reasoning?.effort });
+      assert.equal(body.model, 'gpt-6-luna'); assert.equal(body.reasoning?.effort, 'max');
+      const id = `resp_effort_${requests.length}`, item = { id: `msg_effort_${requests.length}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'Native max fixture.', annotations: [] }] };
+      const frame = value => `event: ${value.type}\ndata: ${JSON.stringify(value)}\n\n`;
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(frame({ type: 'response.created', response: { id, object: 'response', status: 'in_progress', output: [] } }) +
+        frame({ type: 'response.completed', response: { id, object: 'response', model: body.model, status: 'completed', output: [item] } }));
+    } catch (error) { errors.push(error); res.writeHead(500); res.end('{}'); }
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const config = patchCodexConfig(defaultCodexConfig(), { mode: 'api', baseUrl: `http://127.0.0.1:${server.address().port}/v1`, model: 'gpt-6-luna', reasoningEffort: 'max', apiKey: 'isolated-test-key' });
+  const binary = await resolveBundledCodex(); assert.ok(binary?.file);
+  const bridge = new CodexBridge({ dataDir: directory, config, command: binary.file });
+  t.after(async () => {
+    await bridge.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+    assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-codex-effort-real-'))); await rm(directory, { recursive: true, force: true });
+  });
+  try {
+    const first = await bridge.run({ prompt: 'Return the local fixture text.', signal: AbortSignal.timeout(10_000) });
+    assert.equal(first.text, 'Native max fixture.');
+    const resumed = await bridge.run({ prompt: 'Repeat the local fixture text.', threadId: first.threadId, signal: AbortSignal.timeout(10_000) });
+    assert.equal(resumed.text, first.text); assert.equal(resumed.threadId, first.threadId);
+    assert.deepEqual(requests, [{ model: 'gpt-6-luna', effort: 'max' }, { model: 'gpt-6-luna', effort: 'max' }]);
+    const toml = await readFile(path.join(directory, 'codex', config.revision, 'config.toml'), 'utf8');
+    assert.match(toml, /model_reasoning_effort = "max"/); assert.match(toml, /model_supports_reasoning_summaries = true/);
+    assert.equal(errors.length, 0); t.diagnostic('Native CLI emitted gpt-6-luna / reasoning.effort=max in both captured HTTP bodies; no model request left loopback.');
+  } catch (error) {
+    t.diagnostic(JSON.stringify({ requests, fixtureErrors: errors.map(item => item.message) })); throw error;
+  }
+});
+
 async function within(promise, milliseconds = 10_000) {
   let timer;
   try {

@@ -68,6 +68,40 @@ test('provider secrets never roundtrip, blank preserves key, endpoint change req
   assert.equal((await request('/api/providers', { method: 'POST', body: { id: provider.id, protocol: 'invalid' } })).status, 400);
 });
 
+test('provider reasoning persists, omitted effort preserves it, and invalid changes cannot alter any provider', async t => {
+  const { request, directory, app } = await setup(t);
+  const { provider: first } = await configured(request, 'https://example.com/v1');
+  const { provider: other } = await configured(request, 'https://other.example/v1');
+  assert.equal(first.reasoningEffort, '');
+  const filename = path.join(directory, 'state.json');
+  const beforeOther = JSON.parse(await readFile(filename, 'utf8')).providers.find(provider => provider.id === other.id);
+  const response = await request('/api/providers', { method: 'POST', body: { id: first.id, model: 'gpt-6-luna', reasoningEffort: 'max' } });
+  assert.equal(response.status, 200);
+  const saved = await response.json(); assert.equal(saved.reasoningEffort, 'max'); assert.equal(saved.apiKey, undefined); assert.equal(saved.hasApiKey, true);
+  const renamed = await request('/api/providers', { method: 'POST', body: { id: first.id, name: 'Renamed' } });
+  assert.equal((await renamed.json()).reasoningEffort, 'max');
+  const beforeInvalid = await readFile(filename, 'utf8');
+  for (const reasoningEffort of [null, [], 1, 'MAX', 'auto', 'max\n']) {
+    assert.equal((await request('/api/providers', { method: 'POST', body: { id: first.id, name: 'must not change', reasoningEffort } })).status, 400);
+    assert.equal(await readFile(filename, 'utf8'), beforeInvalid);
+  }
+  const cleared = await request('/api/providers', { method: 'POST', body: { id: first.id, reasoningEffort: '' } });
+  assert.equal((await cleared.json()).reasoningEffort, '');
+  await request('/api/providers', { method: 'POST', body: { id: first.id, reasoningEffort: 'max' } });
+  const disk = JSON.parse(await readFile(filename, 'utf8'));
+  assert.deepEqual(disk.providers.find(provider => provider.id === other.id), beforeOther);
+  assert.equal(disk.providers.find(provider => provider.id === first.id).apiKey, 'secret-not-in-state-response');
+  assert.equal(disk.settings.defaultProviderId, null, 'Changing a connection must not silently select a default');
+  assert.ok(!(await (await request('/api/state')).text()).includes('secret-not-in-state-response'));
+  await app.close();
+  const restarted = await createPetServer({ dataDir: directory, token: 'backend-test-secret', codex: mockCodex() });
+  try {
+    const restored = JSON.parse(await readFile(filename, 'utf8'));
+    assert.equal(restored.providers.find(provider => provider.id === first.id).reasoningEffort, 'max');
+    assert.deepEqual(restored.providers.find(provider => provider.id === other.id), beforeOther);
+  } finally { await restarted.close(); }
+});
+
 test('real provider SSE persists user and complete assistant history across restart', async t => {
   const { request, directory, app } = await setup(t);
   const { conversation } = await configured(request, await upstream(t));

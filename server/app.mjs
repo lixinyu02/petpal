@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
 import { JsonStore, publicProvider, isCompanionKind, defaultSettings } from './store.mjs';
-import { normalizeBaseUrl, streamProvider, testProvider } from './providers.mjs';
+import { normalizeBaseUrl, normalizeReasoningEffort, streamProvider, testProvider } from './providers.mjs';
 import { CodexBridge } from './codex.mjs';
 import { tokenHash, secureEqual, username, hashPassword, verifyPassword, newSession, publicUser, createLoginLimiter } from './auth.mjs';
 import { defaultVoiceSettings, publicVoiceSettings, patchVoiceSettings } from './voice.mjs';
@@ -12,7 +12,7 @@ import { defaultCodexConfig, publicCodexConfig, patchCodexConfig, validateStored
 import { createDesktopTools } from './desktop-tools.mjs';
 import { createUpdateService } from './updates.mjs';
 
-const VERSION = '0.6.0';
+const VERSION = '0.6.1';
 const now = () => new Date().toISOString();
 const failure = (status, message) => Object.assign(new Error(message), { status });
 
@@ -35,6 +35,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const legacyCodex = !state.codexConfig;
   state.codexConfig ??= defaultCodexConfig();
   validateStoredCodexConfig(state.codexConfig, codexPolicy);
+  if (state.codexConfig.reasoningEffort === undefined) state.codexConfig.reasoningEffort = '';
   if (state.codexConfig.toolVersion !== CODEX_TOOL_VERSION) Object.assign(state.codexConfig, { toolVersion: CODEX_TOOL_VERSION, revision: randomUUID() });
   if (legacyCodex) for (const conversation of state.conversations) if (conversation.mode === 'codex') conversation.codexRevision = state.codexConfig.revision;
   const updates = createUpdateService({ ...updatesOptions, store });
@@ -257,12 +258,15 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (!existing && state.providers.length >= 32) throw failure(400, '最多保存 32 个模型连接。');
     const protocol = body.protocol ?? existing?.protocol;
     if (!['chat-completions', 'responses'].includes(protocol)) throw failure(400, '协议必须是 chat-completions 或 responses。');
-    let baseUrl;
-    try { baseUrl = normalizeBaseUrl(string(body.baseUrl ?? existing?.baseUrl, '服务地址', 2048), protocol); } catch (error) { throw failure(400, error.message); }
+    let baseUrl, reasoningEffort;
+    try {
+      baseUrl = normalizeBaseUrl(string(body.baseUrl ?? existing?.baseUrl, '服务地址', 2048), protocol);
+      reasoningEffort = normalizeReasoningEffort(body.reasoningEffort === undefined ? existing?.reasoningEffort : body.reasoningEffort);
+    } catch (error) { throw failure(400, error.message); }
     if (body.apiKey !== undefined && (typeof body.apiKey !== 'string' || body.apiKey.length > 8192 || /[\r\n]/.test(body.apiKey))) throw failure(400, 'API Key 格式无效。');
     // A key is tied to the endpoint it was entered for. Do not silently forward it to a new URL.
     if (existing?.apiKey && baseUrl !== existing.baseUrl && !body.apiKey?.trim()) throw failure(400, '服务地址变化时请重新填写 API Key，避免将原密钥发送给另一服务。');
-    const provider = { id: existing?.id ?? randomUUID(), name: string(body.name ?? existing?.name, '连接名称', 80), protocol, baseUrl, model: string(body.model ?? existing?.model, '模型 ID', 160), apiKey: body.apiKey?.trim() || existing?.apiKey || '' };
+    const provider = { id: existing?.id ?? randomUUID(), name: string(body.name ?? existing?.name, '连接名称', 80), protocol, baseUrl, model: string(body.model ?? existing?.model, '模型 ID', 160), reasoningEffort, apiKey: body.apiKey?.trim() || existing?.apiKey || '' };
     if (existing) state.providers.splice(state.providers.indexOf(existing), 1, provider); else state.providers.push(provider);
     await store.save(); res.json(visibleProvider(provider, req.user));
   });

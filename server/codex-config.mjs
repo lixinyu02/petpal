@@ -1,12 +1,12 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile, rename, chmod, unlink } from 'node:fs/promises';
-import { normalizeBaseUrl } from './providers.mjs';
+import { normalizeBaseUrl, normalizeReasoningEffort } from './providers.mjs';
 
 const failure = (status, message) => Object.assign(new Error(message), { status });
 export const CODEX_TOOL_VERSION = 'music-browser-v1';
 export const CODEX_KEY_ENV = 'PETPAL_CODEX_API_KEY';
-export const defaultCodexConfig = () => ({ mode: 'host', baseUrl: '', model: '', apiKey: '', revision: randomUUID(), toolVersion: CODEX_TOOL_VERSION });
+export const defaultCodexConfig = () => ({ mode: 'host', baseUrl: '', model: '', reasoningEffort: '', apiKey: '', revision: randomUUID(), toolVersion: CODEX_TOOL_VERSION });
 
 // Deployment-only policy. The HTTP API cannot add origins to this set.
 export function parseCodexHttpOrigins(raw) {
@@ -28,7 +28,7 @@ export function parseCodexHttpOrigins(raw) {
 }
 
 export function publicCodexConfig(value) {
-  return { mode: value.mode, baseUrl: value.baseUrl, model: value.model, hasApiKey: Boolean(value.apiKey), revision: value.revision,
+  return { mode: value.mode, baseUrl: value.baseUrl, model: value.model, reasoningEffort: normalizeReasoningEffort(value.reasoningEffort), hasApiKey: Boolean(value.apiKey), revision: value.revision,
     protocol: 'responses', configured: value.mode === 'host' || Boolean(value.baseUrl && value.model) };
 }
 
@@ -43,9 +43,11 @@ function baseUrl(value, { allowedHttpOrigins = new Set() } = {}) {
 }
 
 export function patchCodexConfig(current, body, options = {}) {
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['mode', 'baseUrl', 'model', 'apiKey', 'clearApiKey', 'revision'].includes(key))) throw failure(400, 'Codex 配置包含不支持的字段。');
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['mode', 'baseUrl', 'model', 'reasoningEffort', 'apiKey', 'clearApiKey', 'revision'].includes(key))) throw failure(400, 'Codex 配置包含不支持的字段。');
   if (body.revision !== undefined && body.revision !== current.revision) throw failure(409, 'Codex 配置已变化，请刷新设置后重试。');
   const next = { ...current };
+  try { next.reasoningEffort = normalizeReasoningEffort(body.reasoningEffort === undefined ? current.reasoningEffort : body.reasoningEffort); }
+  catch (error) { throw failure(400, error.message); }
   if (body.mode !== undefined) {
     if (!['host', 'api'].includes(body.mode)) throw failure(400, 'Codex 模式必须是 host 或 api。');
     next.mode = body.mode;
@@ -63,7 +65,7 @@ export function patchCodexConfig(current, body, options = {}) {
   if (body.clearApiKey) next.apiKey = '';
   else if (body.apiKey?.trim()) next.apiKey = body.apiKey.trim();
   if (next.mode === 'api' && (!next.baseUrl || !next.model)) throw failure(400, 'API 模式需要填写 Responses 服务地址和模型 ID。');
-  if (['mode', 'baseUrl', 'model', 'apiKey'].some(key => next[key] !== current[key])) next.revision = randomUUID();
+  if (['mode', 'baseUrl', 'model', 'apiKey'].some(key => next[key] !== current[key]) || next.reasoningEffort !== normalizeReasoningEffort(current.reasoningEffort)) next.revision = randomUUID();
   return next;
 }
 
@@ -74,8 +76,12 @@ export function validateStoredCodexConfig(value, options = {}) {
 
 // JSON string escaping is also valid for the TOML basic strings used here.
 export function codexToml(config) {
+  const reasoningEffort = normalizeReasoningEffort(config.reasoningEffort);
+  // Custom-provider models may be absent from the CLI catalog. Without this
+  // capability flag, Codex silently omits an explicitly selected effort.
   return [
     `model = ${JSON.stringify(config.model)}`, 'model_provider = "petpal"', 'approval_policy = "on-request"', 'approvals_reviewer = "user"',
+    ...(reasoningEffort ? [`model_reasoning_effort = ${JSON.stringify(reasoningEffort)}`, 'model_supports_reasoning_summaries = true'] : []),
     'sandbox_mode = "read-only"', 'cli_auth_credentials_store = "ephemeral"', 'allow_login_shell = false', 'web_search = "disabled"',
     '[features]', 'shell_tool = false', 'unified_exec = false', 'shell_snapshot = false', 'multi_agent = false', 'apps = false', 'remote_plugin = false', 'hooks = false', 'goals = false', 'tool_suggest = false', 'image_generation = false', 'enable_request_compression = false',
     '[shell_environment_policy]', 'inherit = "core"', 'ignore_default_excludes = false', `exclude = [${JSON.stringify(CODEX_KEY_ENV)}, "OPENAI_*", "CODEX_*"]`,
