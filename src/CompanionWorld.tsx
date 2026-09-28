@@ -3,7 +3,7 @@ import { ArrowUpRight, Coffee, Heart, MessageCircle, Monitor, Moon, PawPrint, Se
 import type { PetCommand } from './pet/PetScene';
 import CompanionScene from './avatar/CompanionScene';
 import { useCompanion, chooseCompanion, hydrateCompanion } from './avatar/preference';
-import type { CompanionKind, State, User } from './api';
+import { getConnection, type CompanionKind, type State, type User } from './api';
 import type { PetAction, PetInteraction } from './pet/behavior';
 import { useSpeech } from './avatar/useSpeech';
 import type { PerformanceInput } from './avatar/performance.mjs';
@@ -21,6 +21,7 @@ const responses = {
 export default function CompanionWorld() {
   const [name, setName] = useState('小伴');
   const [user, setUser] = useState<User>();
+  const [voiceScope, setVoiceScope] = useState(`guest:${getConnection().url || location.origin}`);
   const [kind] = useCompanion();
   const [syncNote, setSyncNote] = useState('');
   const selectionRevision = useRef(0);
@@ -29,7 +30,7 @@ export default function CompanionWorld() {
   const [command, setCommand] = useState<PetCommand>();
   const [response, setResponse] = useState<keyof typeof responses>('warm');
   const [preview, setPreview] = useState<PerformanceInput>();
-  const speech = useSpeech(kind === 'anime' && action !== 'sleep');
+  const speech = useSpeech(kind === 'anime' && action !== 'sleep', voiceScope);
   const count = useRef(0);
   const send = (next: PetInteraction) => { speech.stop(); setPreview(undefined); setCommand({ action: next, id: ++count.current }); };
   const saySomething = () => {
@@ -59,7 +60,7 @@ export default function CompanionWorld() {
       const connection = await initConnection();
       if (!connection.token) return;
       const state = await api<State>('/state');
-      if (alive) { setName(state.settings.petName); setUser(state.user); await hydrateCompanion(state.settings.companionKind || 'anime'); }
+      if (alive) { setName(state.settings.petName); setUser(state.user); if(state.instanceId && state.user)setVoiceScope(`${state.instanceId}:${state.user.id}`); await hydrateCompanion(state.settings.companionKind || 'anime'); }
     }).catch(() => {});
     return () => { alive = false; };
   }, []);
@@ -80,8 +81,8 @@ export default function CompanionWorld() {
       </div>
       {kind === 'anime' && <div className="companion-voice">
         <div className="companion-response-row"><select aria-label="回应心情" value={response} onChange={event => {stopTalking();setResponse(event.target.value as keyof typeof responses);}}>{Object.entries(responses).map(([value,item])=><option key={value} value={value}>{item.label}</option>)}</select><button onClick={saySomething} disabled={action === 'sleep'}><MessageCircle size={15}/>说句话</button><button onClick={stopTalking} aria-label="停止说话" disabled={!speech.playing && preview?.phase !== 'speaking'}><Square size={13}/></button></div>
-        <label className="voice-toggle"><input type="checkbox" checked={speech.enabled} disabled={!speech.supported || !speech.hasChineseVoice} onChange={event=>speech.setEnabled(event.target.checked)}/><Volume2 size={14}/>语音朗读</label>
-        <span className="voice-caption" role="status">{speech.error || (!speech.supported ? '此设备不支持系统朗读，可体验无声表情。' : !speech.hasChineseVoice ? '未发现本地中文音色，当前使用无声口型。' : speech.active ? `${speech.voiceName} · ${speech.progressBasis === 'boundary' ? '跟随朗读进度' : '按句子节奏估算口型'}` : '开启后，点“说句话”听她回应。')}</span>
+        <label className="voice-toggle"><input type="checkbox" checked={speech.enabled} disabled={!speech.supported || (speech.engine === 'system' && !speech.hasChineseVoice)} onChange={event=>speech.setEnabled(event.target.checked)}/><Volume2 size={14}/>语音朗读</label>
+        <span className="voice-caption" role="status">{speech.feedback}{!speech.playing && speech.supported && ' 开启语音朗读后，点“说句话”试听。'}</span>
       </div>}
       <p className="companion-hint">{syncNote || (kind === 'anime' ? '她会跟随你的视线，双击和她打个招呼。' : '摸摸它的脑袋，或双击让它跳一下。')}</p>
     </section>

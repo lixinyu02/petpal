@@ -26,14 +26,14 @@ function copySettings(settings) {
   return copy;
 }
 
-/** Configuration metadata only; selecting remote never enables a speech runtime. */
+/** The legacy remote mode remains metadata only; CosyVoice uses the shared server adapter. */
 export function publicVoiceSettings(settings) {
   const copy = copySettings(settings);
   for (const section of ['tts', 'asr']) {
     copy[section].hasApiKey = typeof copy[section].apiKey === 'string' && copy[section].apiKey.length > 0;
     delete copy[section].apiKey;
   }
-  return { ...copy, runtime: { tts: 'system', asr: 'not-connected', remoteConfiguredOnly: true } };
+  return { ...copy, runtime: { tts: copy.tts.mode === 'cosyvoice' ? 'cosyvoice' : 'system', asr: 'not-connected', remoteConfiguredOnly: copy.tts.mode !== 'cosyvoice' } };
 }
 
 function textField(value, label, maxLength) {
@@ -54,7 +54,7 @@ function localHostname(hostname) {
   return false;
 }
 
-function normalizeUrl(value, label) {
+export function normalizeVoiceUrl(value, label = 'TTS') {
   const input = textField(value, `${label} 服务地址`, 2048);
   if (!input) return '';
   let url;
@@ -77,13 +77,13 @@ export function patchVoiceSettings(previous, body) {
     if (!own(body, section)) continue;
     const patch = body[section], label = section.toUpperCase(), next = result[section];
     if (!record(patch)) throw invalid(`${label} 配置必须是对象。`);
-    const oldUrl = normalizeUrl(next.baseUrl, label), oldKey = next.apiKey;
+    const oldUrl = normalizeVoiceUrl(next.baseUrl, label), oldKey = next.apiKey;
     if (own(patch, 'mode')) {
-      const modes = section === 'tts' ? ['system', 'remote'] : ['disabled', 'browser', 'remote'];
+      const modes = section === 'tts' ? ['system', 'remote', 'cosyvoice'] : ['disabled', 'browser', 'remote'];
       if (!modes.includes(patch.mode)) throw invalid(`${label} 模式必须为 ${modes.join(' / ')}。`);
       next.mode = patch.mode;
     }
-    if (own(patch, 'baseUrl')) next.baseUrl = normalizeUrl(patch.baseUrl, label);
+    if (own(patch, 'baseUrl')) next.baseUrl = normalizeVoiceUrl(patch.baseUrl, label);
     for (const field of section === 'tts' ? ['model', 'voice'] : ['model', 'language']) {
       if (own(patch, field)) next[field] = textField(patch[field], `${label} ${field}`, field === 'language' ? 35 : 160);
     }
@@ -104,6 +104,7 @@ export function patchVoiceSettings(previous, body) {
     if (patch.clearApiKey === true) next.apiKey = '';
     else if (replacement) next.apiKey = replacement;
     if (next.mode === 'remote' && (!next.baseUrl || !next.model)) throw invalid(`${label} 远程模式必须填写服务地址和模型 ID。`);
+    if (section === 'tts' && next.mode === 'cosyvoice' && (next.speed < 0.5 || next.speed > 2)) throw invalid('CosyVoice 语速必须为 0.5 到 2。');
   }
   return result;
 }

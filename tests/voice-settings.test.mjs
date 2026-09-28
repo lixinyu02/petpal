@@ -92,3 +92,15 @@ test('a rejected second section never mutates previously saved first-section dat
   badRequest(() => patchVoiceSettings(previous, { tts: { voice: 'changed', apiKey: 'replaced-key' }, asr: { mode: 'remote' } }));
   assert.deepEqual(previous, before);
 });
+
+test('CosyVoice uses shared service without user URLs or models and validates its narrower speed range', () => {
+  const settings = patchVoiceSettings(null, { tts: { mode: 'cosyvoice' } });
+  assert.equal(settings.tts.baseUrl, ''); assert.equal(settings.tts.model, '');
+  assert.deepEqual(publicVoiceSettings(settings).runtime, { tts: 'cosyvoice', asr: 'not-connected', remoteConfiguredOnly: false });
+  for (const speed of [0.5, 1, 2]) assert.equal(patchVoiceSettings(settings, { tts: { speed } }).tts.speed, speed);
+  for (const speed of [0.25, 0.49, 2.01, 4]) badRequest(() => patchVoiceSettings(settings, { tts: { speed } }));
+  const legacy = patchVoiceSettings(null, remote('tts', { speed: 4, apiKey: 'legacy-key' }));
+  badRequest(() => patchVoiceSettings(legacy, { tts: { mode: 'cosyvoice' } }));
+  const switched = patchVoiceSettings(legacy, { tts: { mode: 'cosyvoice', speed: 1 } });
+  assert.equal(switched.tts.apiKey, legacy.tts.apiKey); assert.equal(switched.tts.baseUrl, legacy.tts.baseUrl);
+});

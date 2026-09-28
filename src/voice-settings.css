@@ -6,13 +6,20 @@
 .voice-config-block { margin: 0 0 26px; padding: 22px 0 0; border: 0; border-top: 1px solid #e1e7da; min-width: 0; }
 .voice-config-block legend { display: flex; align-items: center; gap: 9px; padding-right: 18px; color: #405b4a; font-size: 16px; font-weight: 600; }
 .voice-config-block label { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; color: #52624e; font-size: 13px; }
-.voice-config-block input:not([type=checkbox]), .voice-config-block select { width: 100%; min-width: 0; border: 1px solid #dce2d4; border-radius: 10px; padding: 12px 14px; color: #374c3f; background: #fffefa; font: inherit; }
+.voice-config-block input:not([type=checkbox]), .voice-config-block select, .voice-config-block textarea { width: 100%; min-width: 0; border: 1px solid #dce2d4; border-radius: 10px; padding: 12px 14px; color: #374c3f; background: #fffefa; font: inherit; }
 .voice-config-block input:focus, .voice-config-block select:focus { outline: 2px solid #8ba68d; outline-offset: 2px; }
 .voice-config-block .voice-clear-key { flex-direction: row; align-items: center; gap: 8px; }
 .voice-fields-pair { display: grid; grid-template-columns: 2fr 1fr; gap: 18px; }
 .voice-saved { display: flex; gap: 8px; align-items: flex-start; color: #446747; font-size: 13px; line-height: 1.6; }
 .voice-settings .form-error .secondary-button { margin: 10px 0 0; }
 .voice-config-block:disabled { opacity: .65; }
+.cosyvoice-section { margin-top: 34px; border-top: 1px solid #dfe5d7; padding-top: 28px; }
+.cosyvoice-section .section-title h2 { font-size: 19px; }
+.cosyvoice-section .voice-config-block { padding-top: 20px; margin-bottom: 20px; }
+.voice-config-block textarea { resize: vertical; line-height: 1.7; }
+.voice-config-block textarea:focus { outline: 2px solid #8ba68d; outline-offset: 2px; }
+.voice-preview-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.cosyvoice-upload .field-help, .cosyvoice-preview .field-help { line-height: 1.8; }
 .media-devices-section { border-top: 1px solid #dfe5d7; margin: 28px 0 34px; padding-top: 26px; }
 .media-devices-section h2 { font-size: 18px; }
 .media-device-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 22px; padding: 22px 0; border-bottom: 1px solid #e4e9de; }

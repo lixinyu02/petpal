@@ -16,6 +16,13 @@ export type DesktopToolsStatus = {music:{platform:string;players:MusicPlayer[];m
 export type CompanionKind = 'anime' | 'cat';
 export type State = { instanceId?:string; user?:User; settings: { petName: string; persona: string; companionKind: CompanionKind; defaultProviderId?:string|null }; providers: Provider[]; conversations: Conversation[]; codex: CodexStatus };
 export type Connection = { url: string; token: string };
+export type VoiceConnectionFields = {baseUrl:string;model:string;hasApiKey?:boolean;apiKey?:string;clearApiKey?:boolean};
+export type VoiceConfig = {
+  tts:VoiceConnectionFields & {mode:'system'|'remote'|'cosyvoice';voice:string;speed:number};
+  asr:VoiceConnectionFields & {mode:'disabled'|'browser'|'remote';language:string};
+  runtime?:{tts:string;asr:string;remoteConfiguredOnly:boolean};
+};
+export type CosyVoiceConfig = {configured:boolean;hasReference:boolean;referenceName:string;referenceText:string;baseUrl:string;hasApiKey:boolean;editable:boolean;revision:string};
 type CredentialKind = 'pairing'|'session'|'none';
 export type StreamEvent = { type: string; data: Record<string, any> };
 export type Identity = {instanceId:string;userId:string};
@@ -76,9 +83,19 @@ async function responseJson(response:Response,request:ReturnType<typeof requests
 export async function api<T = any>(path:string, options:RequestInit = {}):Promise<T> {
   const request=requests.begin(options.signal);
   try{
-    request.assertCurrent();const headers=new Headers(options.headers);headers.set('Content-Type','application/json');headers.set('Authorization',`Bearer ${request.connection.token}`);
+    request.assertCurrent();const headers=new Headers(options.headers);if(!headers.has('Content-Type'))headers.set('Content-Type','application/json');headers.set('Authorization',`Bearer ${request.connection.token}`);
     const response=await fetch(`${request.connection.url}/api${path}`,{...options,headers,signal:request.signal});request.assertCurrent();
     const data=await responseJson(response,request);if(path==='/state'||path==='/auth/me')acceptIdentity(data);request.assertCurrent();return data as T;
+  }finally{request.close();}
+}
+/** Binary responses retain the same immutable credentials and epoch fence as JSON. */
+export async function apiBlob(path:string, options:RequestInit = {}):Promise<Blob> {
+  const request=requests.begin(options.signal);
+  try{
+    request.assertCurrent();const headers=new Headers(options.headers);if(!headers.has('Content-Type'))headers.set('Content-Type','application/json');headers.set('Authorization',`Bearer ${request.connection.token}`);
+    const response=await fetch(`${request.connection.url}/api${path}`,{...options,headers,signal:request.signal});request.assertCurrent();
+    if(!response.ok){await responseJson(response,request);throw new Error('音频请求失败。');}
+    const blob=await response.blob();request.assertCurrent();return blob;
   }finally{request.close();}
 }
 /** Validate new credentials before atomically replacing the current account. */

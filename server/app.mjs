@@ -11,6 +11,7 @@ import { defaultVoiceSettings, publicVoiceSettings, patchVoiceSettings } from '.
 import { defaultCodexConfig, publicCodexConfig, patchCodexConfig, validateStoredCodexConfig, parseCodexHttpOrigins, CODEX_TOOL_VERSION } from './codex-config.mjs';
 import { createDesktopTools } from './desktop-tools.mjs';
 import { createUpdateService } from './updates.mjs';
+import { createCosyVoiceService, safeCosyVoiceError, REFERENCE_LIMIT } from './cosyvoice.mjs';
 
 const VERSION = '0.6.1';
 const now = () => new Date().toISOString();
@@ -26,7 +27,7 @@ function safeCodexStatus(value) {
   return value && typeof value === 'object' ? value : { available: false, error: 'Codex 状态不可用。' };
 }
 
-export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, desktopTools, updatesOptions, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
+export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, desktopTools, updatesOptions, cosyvoiceOptions, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
   const codexPolicy = { allowedHttpOrigins: parseCodexHttpOrigins(codexHttpOrigins) };
   const store = await new JsonStore(dataDir).init();
   const accessToken = await store.token(token ?? process.env.PETPAL_TOKEN);
@@ -39,6 +40,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   if (state.codexConfig.toolVersion !== CODEX_TOOL_VERSION) Object.assign(state.codexConfig, { toolVersion: CODEX_TOOL_VERSION, revision: randomUUID() });
   if (legacyCodex) for (const conversation of state.conversations) if (conversation.mode === 'codex') conversation.codexRevision = state.codexConfig.revision;
   const updates = createUpdateService({ ...updatesOptions, store });
+  const cosyvoice = await createCosyVoiceService({ ...cosyvoiceOptions, store, dataDir });
   await store.save();
   const localTools = desktopTools ?? createDesktopTools({ dataDir });
   const createBridge = config => (codexFactory ?? (options => new CodexBridge(options)))({ workspaceRoot, dataDir, config, desktopTools: localTools });
@@ -209,8 +211,46 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   });
   app.get('/api/voice', (req, res) => res.json(publicVoiceSettings(req.user.voice)));
   app.patch('/api/voice', async (req, res) => {
+    patchVoiceSettings(req.user.voice, req.body);
+    await stopTasks(task => task.mode === 'voice' && task.userId === req.user.id);
+    requireCurrentAuth(req);
     const updated = patchVoiceSettings(req.user.voice, req.body);
     req.user.voice = updated; await store.save(); res.json(publicVoiceSettings(updated));
+  });
+  app.get('/api/voice/cosyvoice', (req, res) => res.json(cosyvoice.publicConfig(isOwner(req.user))));
+  app.patch('/api/voice/cosyvoice', async (req, res) => {
+    requireAdmin(req.user);
+    try { const value = await cosyvoice.configure(req.body, { authorize: () => requireCurrentAuth(req) }); requireCurrentAuth(req); res.json(value); }
+    catch (error) { const safe = safeCosyVoiceError(error); res.status(safe.status).json({ error: safe.message }); }
+  });
+  app.post('/api/voice/cosyvoice/reference', (req, res, next) => {
+    requireAdmin(req.user);
+    if (req.headers['content-type']?.toLowerCase() !== 'audio/wav') throw failure(415, '参考音频上传只接受 audio/wav。');
+    next();
+  }, express.raw({ type: 'audio/wav', limit: REFERENCE_LIMIT, inflate: false }), async (req, res) => {
+    const controller = new AbortController(); let finish;
+    const done = new Promise(resolve => { finish = resolve; });
+    const probe = { controller, done, userId: req.user.id, sessionHash: req.sessionHash, mode: 'voice' }; probes.add(probe);
+    res.on('close', () => { if (!res.writableEnded) controller.abort(); });
+    const authorize = () => { requireCurrentAuth(req); controller.signal.throwIfAborted(); };
+    try { authorize(); const value = await cosyvoice.setReference(req.body, { authorize }); authorize(); res.json(value); }
+    catch (error) { const safe = safeCosyVoiceError(error); if (!res.destroyed) res.status(safe.status).json({ error: safe.message }); }
+    finally { probes.delete(probe); finish(); }
+  });
+  app.post('/api/voice/synthesize', async (req, res) => {
+    if (Object.keys(req.body).some(key => key !== 'text') || typeof req.body.text !== 'string') throw failure(400, '语音合成只接受 text 字段。');
+    if (req.user.voice.tts.mode !== 'cosyvoice') throw failure(409, '请先为当前账号选择并保存 CosyVoice 朗读。');
+    const controller = new AbortController(); let finish;
+    const done = new Promise(resolve => { finish = resolve; });
+    const probe = { controller, done, userId: req.user.id, sessionHash: req.sessionHash, mode: 'voice' }; probes.add(probe);
+    res.on('close', () => { if (!res.writableEnded) controller.abort(); });
+    try {
+      requireCurrentAuth(req);
+      const audio = await cosyvoice.synthesize({ userId: req.user.id, text: req.body.text, speed: req.user.voice.tts.speed, signal: controller.signal });
+      requireCurrentAuth(req); controller.signal.throwIfAborted();
+      res.status(200).set({ 'Content-Type': 'audio/wav', 'Content-Length': String(audio.length), 'Cache-Control': 'no-store', 'Content-Disposition': 'inline; filename="speech.wav"' }).send(audio);
+    } catch (error) { const safe = safeCosyVoiceError(error); if (!res.destroyed) res.status(safe.status).json({ error: safe.message }); }
+    finally { probes.delete(probe); finish(); }
   });
 
   app.get('/api/updates/config', (req, res) => res.json(updates.statusConfig()));
@@ -471,7 +511,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     for (const probe of probes) probe.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     for (const task of active.values()) task.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     if (configSwap) await configSwap.catch(() => {});
-    const results = await Promise.allSettled([bridge.close(), localTools.close(), updates.close(), ...[...active.values(), ...probes].map(task => task.done)]);
+    const results = await Promise.allSettled([bridge.close(), localTools.close(), updates.close(), cosyvoice.close(), ...[...active.values(), ...probes].map(task => task.done)]);
     let saveError;
     try { await store.queue; } catch (error) { saveError = error; }
     finally { server.closeAllConnections(); await httpClosed; }

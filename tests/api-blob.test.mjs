@@ -1,0 +1,65 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import ts from 'typescript';
+
+const source=await fs.readFile(new URL('../src/api.ts',import.meta.url),'utf8');
+const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText
+  .replaceAll("'./auth/request-scope.mjs'",JSON.stringify(new URL('../src/auth/request-scope.mjs',import.meta.url).href));
+let moduleId=0;
+const freshApi=()=>import(`data:text/javascript;base64,${Buffer.from(compiled+`\n// binary test ${++moduleId}`).toString('base64')}`);
+const deferred=()=>{let resolve;const promise=new Promise(yes=>{resolve=yes;});return{promise,resolve};};
+
+test('authenticated audio API fences credentials and binary data across account changes',async t=>{
+  const keys=['window','location','sessionStorage','fetch'];
+  const originals=new Map(keys.map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
+  const install=(key,value)=>Object.defineProperty(globalThis,key,{configurable:true,writable:true,value});
+  const window=new EventTarget();window.speechSynthesis={cancel(){}};
+  install('window',window);install('location',{origin:'https://pet.example'});
+  install('sessionStorage',{setItem(){},getItem(){return null;}});
+  try{
+    await t.test('returns audio bytes with the current token and preserves raw WAV uploads',async()=>{
+      const api=await freshApi();api.setConnection({url:'https://pet.example',token:'current'});
+      const wav=new Blob(['RIFF-audio'],{type:'audio/wav'});let sent;
+      install('fetch',async(url,options)=>{sent={url,options};return new Response(wav,{headers:{'Content-Type':'audio/wav'}});});
+      const result=await api.apiBlob('/voice/synthesize',{method:'POST',body:JSON.stringify({text:'你好'})});
+      assert.equal(sent.url,'https://pet.example/api/voice/synthesize');
+      assert.equal(sent.options.headers.get('Authorization'),'Bearer current');
+      assert.equal(sent.options.headers.get('Content-Type'),'application/json');
+      assert.equal(result.type,'audio/wav');assert.equal(await result.text(),'RIFF-audio');
+      install('fetch',async(url,options)=>{sent={url,options};return new Response('{"hasReference":true}',{headers:{'Content-Type':'application/json'}});});
+      await api.api('/voice/cosyvoice/reference',{method:'POST',headers:{'Content-Type':'audio/wav'},body:wav});
+      assert.equal(sent.options.headers.get('Content-Type'),'audio/wav');assert.equal(sent.options.body,wav);
+      assert.equal(sent.options.headers.has('Content-Disposition'),false);
+    });
+    await t.test('late Blob completion cannot be returned after switching accounts',async()=>{
+      const api=await freshApi();api.setConnection({url:'',token:'old'});
+      const reading=deferred(),late=deferred();let signal;
+      install('fetch',async(_url,options)=>{signal=options.signal;return{ok:true,blob:()=>{reading.resolve();return late.promise;}};});
+      const pending=api.apiBlob('/voice/synthesize',{method:'POST',body:'{"text":"private"}'});
+      await reading.promise;api.setConnection({url:'',token:'new'});late.resolve(new Blob(['old account audio']));
+      await assert.rejects(pending,api.SessionChangedError);assert.equal(signal.aborted,true);assert.equal(api.getConnection().token,'new');
+    });
+    await t.test('late unauthorized errors cannot log out the replacement account',async()=>{
+      const api=await freshApi();api.setConnection({url:'',token:'old'});
+      const reading=deferred(),late=deferred();
+      install('fetch',async()=>({ok:false,status:401,json:()=>{reading.resolve();return late.promise;}}));
+      const pending=api.apiBlob('/voice/synthesize',{method:'POST'});await reading.promise;
+      api.setConnection({url:'',token:'new'});late.resolve({error:'expired'});
+      await assert.rejects(pending,api.SessionChangedError);assert.equal(api.getConnection().token,'new');
+    });
+    await t.test('stopping synthesis aborts transport and rejects an ignored-abort Blob',async()=>{
+      const api=await freshApi();api.setConnection({url:'',token:'current'});
+      const reading=deferred(),late=deferred(),controller=new AbortController();let signal;
+      install('fetch',async(_url,options)=>{signal=options.signal;return{ok:true,blob:()=>{reading.resolve();return late.promise;}};});
+      const pending=api.apiBlob('/voice/synthesize',{method:'POST',signal:controller.signal});await reading.promise;
+      controller.abort();late.resolve(new Blob(['cancelled']));
+      await assert.rejects(pending,{name:'AbortError'});assert.equal(signal.aborted,true);
+    });
+    await t.test('a synthesis failure remains a server error rather than playable audio',async()=>{
+      const api=await freshApi();api.setConnection({url:'',token:'current'});
+      install('fetch',async()=>new Response('{"error":"请先配置参考声音"}',{status:409,headers:{'Content-Type':'application/json'}}));
+      await assert.rejects(api.apiBlob('/voice/synthesize',{method:'POST'}),/参考声音/);
+    });
+  }finally{for(const[key,descriptor]of originals){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];}}
+});
