@@ -18,7 +18,7 @@
 
 ## 开始使用
 
-源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。二进制发布入口：[GitHub Releases](https://github.com/lixinyu02/petpal/releases)。当前提供 0.6.1 源码与更新接口，本机构建的桌面与 Android 包不纳入 Git；是否可在应用中更新以 Releases 的签名清单为准。
+源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。[0.6.1 Release](https://github.com/lixinyu02/petpal/releases/tag/v0.6.1) 提供 [Windows x64 便携 EXE](https://github.com/lixinyu02/petpal/releases/download/v0.6.1/PetPal-0.6.1-Windows-x64.exe)、Web 静态包、签名更新清单和校验摘要；本版未提供 Ubuntu / Android 安装包。软件内更新需管理员首次配置仓库与[发布公钥](docs/petpal-update-public-key.txt)，具体行为见[更新说明](docs/updates.md)。
 
 Windows 便携版下载后直接打开对应版本程序。桌面版内置 Electron、个人服务与两个 CLI，无需另装 Node/npm。进入「连接与设置 → 电脑助手」，可填写 Responses 服务地址、模型与密钥，或继续使用本机 Codex 登录。OpenCLI 网页工具还需安装官方 Chrome Browser Bridge 扩展并选择浏览器档案。关闭主窗口后继续留在托盘，托盘菜单可显示伙伴、打开主界面或彻底退出。拖动伙伴窗口顶部的三个点移动窗口，点击顶部聊天图标打开主界面。
 

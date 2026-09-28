@@ -1,8 +1,8 @@
 # 软件内更新与 GitHub 发布
 
-0.6.0 源码已提供四端更新入口、清单验证和离线签名工具。本轮没有发布正式 0.6.0 安装包或 `petpal-update.json` 更新源，也没有生成项目的真实发布密钥。下面是维护者未来发布时执行的步骤，示例路径不表示相应文件已经存在。
+0.6.1 首个公开发行版提供 Windows x64 便携 EXE、Web 静态 ZIP、`petpal-update.json` 签名更新清单、公钥及校验摘要，下载见 [GitHub Release v0.6.1](https://github.com/lixinyu02/petpal/releases/tag/v0.6.1)。本版没有 Ubuntu / Android 安装包。以下构建与发布命令是维护者的流程示例，示例路径不代表对应平台已发布。
 
-Windows 0.6.0 正式包尚未生成。此前的 0.4 / 0.5 安装包没有本轮新增的更新入口，不能直接通过旧 0.5 UI 升级；首次使用需要手动构建、安装或部署包含更新功能的版本。启动 0.6.0 源码、生成示例配置或初始化 GitHub 仓库，都不代表已经完成生产发布。
+此前的 0.4 / 0.5 安装包没有更新入口，首次使用应手动下载包含更新功能的版本。0.6.1 发行包不内置个人服务配置或发布源信任；管理员在软件更新设置中填写 `lixinyu02/petpal` 和[发布公钥](petpal-update-public-key.txt)。公钥 SPKI DER 的 SHA-256 指纹为 `5e649530901ba590d7ed894e74c3f77e29f34e0ca0ac4c5a5bfe1dfefa300d6c`。首份清单 sequence 为 1，有效期到 `2027-09-28T00:00:00Z`；同版本客户端不会显示升级。
 
 ## 四端的实际行为
 
@@ -127,6 +127,6 @@ gh release edit v0.6.0 --repo lixinyu02/petpal --draft=false --latest
 
 Web ZIP 上传后仍需管理员把对应 `dist/` 静态资源及 `version.json` 一起部署到站点；有后端变更时还需部署匹配的服务器版本。GitHub Releases 不会自动替换个人服务。先确认站点确实在提供新版，再由网页刷新载入。
 
-## 本轮验证范围
+## 签名工具测试与发布验证
 
-`node --test tests/sign-update.test.mjs tests/updates.test.mjs` 使用操作系统临时目录和临时密钥，覆盖签名、实际文件哈希、五目标格式、错误密钥、覆盖保护、越界文件、versionCode、过期、回滚与取消。没有生成项目发布私钥、上传正式 feed、安装测试文件或发布二进制。
+`node --test tests/sign-update.test.mjs tests/updates.test.mjs` 使用操作系统临时目录和临时密钥，覆盖签名、实际文件哈希、五目标格式、错误密钥、覆盖保护、越界文件、versionCode、过期、回滚与取消。这些测试本身不会创建生产密钥或发布二进制。0.6.1 发布另行生成并保护项目签名身份，核对已验收 EXE、Web ZIP、更新清单及上传资产；详细状态见 [发布记录](workflow/2026-09-28-petpal-release-061-issues.md)。
