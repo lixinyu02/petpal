@@ -222,7 +222,7 @@ test('preload exposes only fixed update methods and captures the current session
 
 async function mainHarness() {
   const source = await readFile(new URL('../desktop/main.cjs', import.meta.url), 'utf8');
-  const require = createRequire(import.meta.url), events = new Map(), scheduled = [], calls = [];
+  const require = createRequire(new URL('../desktop/main.cjs', import.meta.url)), events = new Map(), scheduled = [], calls = [];
   let exited;
   const exit = new Promise(resolve => { exited = resolve; });
   const app = {

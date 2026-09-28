@@ -11,6 +11,7 @@ const syntheticSecrets = new Map([
   ['tests/codex-config.test.mjs', new Set(['nonstandard-provider-secret', 'config-owner-token', 'test-password-123'])],
   ['tests/codex-dynamic.test.mjs', new Set(['arbitrary-secret-value'])],
   ['tests/codex-real.test.mjs', new Set(['isolated-test-key'])],
+  ['tests/desktop-service-settings.test.mjs', new Set(['desktop-settings-fixture-token'])],
   ['scripts/browser-fixture.mjs', new Set(['petpal-browser-acceptance-only-20260926'])],
   ['tests/auth-race.test.mjs', new Set(['original-race-password', 'replacement-race-password'])],
   ['tests/users.test.mjs', new Set(['isolated-test-owner-token', 'test-password-123', 'fixture-provider-private-key', 'new-desktop-bootstrap-token', 'alice-private-voice-key', 'alice-private-asr-key', 'replacement-password', 'owner-new-password', 'incorrect-password', 'replacement-local-owner-token'])],

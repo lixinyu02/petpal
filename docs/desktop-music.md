@@ -1,4 +1,4 @@
-# 0.5 电脑音乐助手
+# 电脑音乐助手
 
 Windows 与 Ubuntu 桌面包内置 Codex CLI 0.143.0、OpenCLI 1.8.8 和所需 Node 运行环境，无须另装 npm。Android 继续使用 0.4，本次没有新 APK。桌面包只带控制工具，不带 QQ 音乐/网易云音乐客户端、Chrome 或服务商账户。
 
@@ -9,9 +9,48 @@ Windows 与 Ubuntu 桌面包内置 Codex CLI 0.143.0、OpenCLI 1.8.8 和所需 N
 3. 回到 Codex 工作台，新建对话，例如「查看 QQ 音乐现在是否可以控制」「暂停网易云音乐」。
 4. 核对具体播放器及操作的确认卡，再允许本次操作。
 
-保存配置不会调用模型。需要兼容 Responses 工具调用的服务；普通 Chat Completions 接口不能直接用于 Codex。真实模型费用按所填服务商计费。API 模式关闭 shell/exec，内置文件工具保持只读限制，音乐和网页动作通过具名工具审批执行；原有本机登录模式保留。设置更改后，旧对话仍可查看，须新建 Codex 对话使用新连接。服务地址要求 HTTPS，仅本机 localhost、127.0.0.1 或 ::1 可用 HTTP。
+保存配置不会调用模型。需要兼容 Responses 工具调用的服务；普通 Chat Completions 接口不能直接用于 Codex。真实模型费用按所填服务商计费。API 模式关闭 shell/exec，内置文件工具保持只读限制，音乐和网页动作通过具名工具审批执行；原有本机登录模式保留。设置更改后，旧对话仍可查看，须新建 Codex 对话使用新连接。默认服务地址要求 HTTPS，仅本机 localhost、127.0.0.1 或 ::1 可直接使用 HTTP。
 
 API 密钥只由后端保存，页面仅显示是否配置。密钥在个人数据目录中为明文，继承本机账户文件权限；不要分享数据目录。API 模式使用 PetPal 独立的 Codex 配置与工作区，不改写全局 Codex 配置。留空密钥保留原值；换服务地址时必须重填或明确清除。
+
+0.6 在 API 模式增加本机 Responses 流适配，兼容缺少 item / content-part 起止事件、但有真实文本增量和完整最终输出的网关。CLI 仅拿到随机的回环令牌，上游密钥由后端使用。完整标准事件不会重复；无法确认工具身份、空回复和残缺响应会明确报错。仅处理 SSE，不把普通 Chat Completions 自动改成 Responses。单次请求限制为 4 MiB，请求总时限 180 秒、空闲 30 秒，响应上限 24 MiB。
+
+### Windows 便携版与源码后台
+
+`PetPal-<版本>-Windows-x64.exe` 是便携版，双击运行，无安装向导，无需单独安装 Node、Codex 或 OpenCLI。它会自动启动监听本机随机端口的后端，关闭主窗口默认收起到托盘；在托盘选择退出才会关闭桌面后台。个人数据保存在 `%APPDATA%\petpal\data`，更换 EXE 不会将配置带给其他电脑。
+
+单独运行源码服务时，先安装依赖并执行 `npm run build`，然后在项目目录运行 `powershell -ExecutionPolicy Bypass -File scripts/Start-PetPal-Service.ps1`。脚本在隐藏窗口启动后台、确认健康状态并返回本机地址，默认 `http://127.0.0.1:4318`。配对令牌在 `.data/token`；进程回执和私有日志在 `.data`，不能公开。占用端口会报错，不会结束已有进程。它不注册系统服务或开机启动。
+
+源码启动器可读取私有 `.data/service-settings.json`，例如 `{"port":4318,"codexHttpOrigins":"http://gateway.example:8080"}`。该文件与下面桌面端的部署文件位置不同；源码服务的聊天和 Codex 配置也独立保存。
+
+### 部署者指定的 HTTP 网关
+
+0.6 源码服务支持部署时明确允许特定 HTTP origin。该例外不是 0.5 旧安装包的功能；启动环境设置 `PETPAL_CODEX_HTTP_ORIGINS` 后，再使用现有「配置 Responses API」页面填写完整 API 地址和密钥。下面只使用保留的示例域名：
+
+```powershell
+$env:PETPAL_CODEX_HTTP_ORIGINS = 'http://gateway.example:8080'
+npm start
+```
+
+Linux shell 可使用 `PETPAL_CODEX_HTTP_ORIGINS='http://gateway.example:8080' npm start`。桌面源码启动也可在设置同一环境变量后运行 `npm run desktop`。实际部署应在自己的私有启动配置中填写已确认的来源；不要把网关凭据加入源码或环境变量示例。
+
+多个 origin 用逗号分隔，例如 `http://gateway.example:8080,http://models.example:8081`。每项仅允许 `http://主机[:端口]`，不可包含结尾斜杠、API 路径、查询、片段、用户名密码或通配符。主机名大小写与默认 HTTP 80 端口由 URL 规范化；子域名、其他主机和其他端口均不匹配。例外允许该来源下的 API 路径，例如 `http://gateway.example:8080/v1`，不把 HTTP 变成 HTTPS，也不为传输提供加密。
+
+服务启动时捕获允许名单，在读取已保存配置和处理后续 PATCH 时使用同一集合。账号、设置 API 和页面都不能修改该名单；运行中改变环境变量也不会改变既有服务策略。重启仍需提供相同例外，否则保存的外部 HTTP 地址会被拒绝加载，服务不会自动扩大许可或改写地址。嵌入服务的开发者可用 `createPetServer({codexHttpOrigins:'http://gateway.example:8080'})` 显式传入同格式字符串；空字符串明确关闭外部 HTTP 例外。
+
+### 桌面端直接双击启动
+
+0.6 桌面源码支持可选的本机 `service-settings.json`，用于让新的 Windows / Ubuntu 桌面包在直接启动时保留 HTTP 例外；0.5 旧包不会读取它。文件位置固定为 Electron 用户目录：Windows 是 `%APPDATA%\petpal\service-settings.json`，Ubuntu 通常是 `~/.config/petpal/service-settings.json`（设置 `XDG_CONFIG_HOME` 时使用对应配置目录）。它位于 `data` 的同级目录，不能放进源码、EXE 或发布包。
+
+文件使用 UTF-8 JSON（兼容 BOM），最多 64 KiB，只允许一个 `codexHttpOrigins` 字符串字段。例如：
+
+```json
+{"codexHttpOrigins":"http://gateway.example:8080"}
+```
+
+启动优先级是：进程明确设置的 `PETPAL_CODEX_HTTP_ORIGINS`（包括空字符串）覆盖文件；没有设置环境变量时读取文件；文件不存在则关闭外部 HTTP 例外。空字符串可用于明确关闭例外。错误的 JSON、额外字段、不可读取的文件或非法 origin 会阻止启动，并显示文件位置和修正提示；不会忽略错误而放宽策略。修改后须从托盘完全退出，再重新启动应用。
+
+这个文件不保存 API Key、模型 ID、完整 API 路径或其他设置。服务地址、模型和密钥仍通过「电脑助手」保存到个人 `data` 目录；桌面 `data` 与源码服务的 `.data` 独立。不要复制整个源码服务状态到桌面目录，也不要把个人配置文件随软件分发。
 
 ## 音乐客户端
 

@@ -12,6 +12,7 @@ files:
   - desktop/preload.cjs
   - desktop/updates.mjs
   - desktop/media-permissions.cjs
+  - desktop/service-settings.cjs
   - desktop/assets/**
   - server/**
   - package.json

@@ -56,6 +56,8 @@ if (versionSeries === '0.5') evidenceFiles.push(...[
 const releaseEvidenceGroups = [
   { receipt: 'native/windows-final.json', files: versionSeries === '0.5'
     ? ['native/windows-final.json', 'native/windows-v05-final']
+    : versionSeries === '0.6'
+    ? ['native/windows-final.json', 'native/windows-v06-final']
     : versionSeries === '0.4'
     ? ['native/windows-final.json', ...['result.json', 'main.png', 'pet.png', 'cat-main.png', 'cat-pet.png', 'app-singlechunk-response.png', 'app-sleep-quiet.png'].map(name => `native/windows-v04-final/${name}`)]
     : ['native/windows-final.json', 'native/windows-final/result.json', 'native/windows-final/main.png', 'native/windows-final/pet.png', ...['warm', 'curious', 'thoughtful', 'surprised', 'shy', 'mobile'].map(name => `native/windows-final/anime-${name}.png`), 'native/windows-final/anime-system-speech.png', 'native/windows-final/app-singlechunk-response.png', 'native/windows-final/app-sleep-quiet.png'] },
@@ -112,6 +114,7 @@ if (!checkOnly && versionSeries === '0.5') {
 
 // Fixed literals are allowed only in their reviewed fixture file, never by a broad test-name pattern.
 const syntheticSecrets = new Map([
+  ['tests/desktop-service-settings.test.mjs', new Set(['desktop-settings-fixture-token'])],
   ['tests/updates.test.mjs', new Set(['updates-owner-token', 'test-passphrase-123', 'owner-passphrase-123'])],
   ['tests/providers.test.mjs', new Set(['private-test-key'])],
   ['tests/backend.test.mjs', new Set(['backend-test-secret', 'secret-not-in-state-response'])],
@@ -187,13 +190,13 @@ const requiredFiles = [
   'src/AccountsSettings.tsx', 'src/VoiceSettings.tsx', 'src/MediaDevicesSettings.tsx',
   'src/auth/request-scope.mjs', 'src/auth/request-scope.d.mts', 'src/media/device-preferences.mjs', 'src/media/device-preferences.d.mts', 'src/media/devices.ts',
   'server/app.mjs', 'server/codex.mjs', 'server/auth.mjs', 'server/store.mjs', 'server/voice.mjs',
-  'desktop/main.cjs', 'desktop/media-permissions.cjs', 'package-lock.json', 'android/gradle/wrapper/gradle-wrapper.jar',
+  'desktop/main.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'package-lock.json', 'android/gradle/wrapper/gradle-wrapper.jar',
   'android/app/src/main/AndroidManifest.xml', 'android/app/src/main/java/com/petpal/app/MainActivity.java', 'android/app/src/main/java/com/petpal/app/LocalMediaChromeClient.java',
   'android/app/src/main/java/com/petpal/app/PetOverlayService.java', 'android/app/src/main/java/com/petpal/app/PetOverlayWebView.java',
   'android/app/src/main/java/com/petpal/app/OverlayAssetPolicy.java', 'android/app/src/test/java/com/petpal/app/OverlayAssetPolicyTest.java',
   'tests/auth-race.test.mjs', 'tests/native-media-permissions.test.mjs',
   'src/DesktopAssistantSettings.tsx', 'src/desktop-settings.mjs', 'src/desktop-settings.d.mts', 'src/desktop-assistant.css',
-  'server/codex-config.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/native/music-windows.ps1', 'server/opencli.mjs',
+  'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/native/music-windows.ps1', 'server/opencli.mjs',
   'tests/music.test.mjs', 'tests/desktop-tools.test.mjs', 'tests/opencli.test.mjs', 'NOTICE',
 ];
 for (const required of requiredFiles) if (!selected.has(required)) throw new Error(`Required source entry missing: ${required}`);

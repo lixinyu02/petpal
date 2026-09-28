@@ -93,7 +93,9 @@ for (const decision of ['accept', 'decline']) test(`dynamic action awaits explic
 for (const prompt of ['namespace', 'unregistered', 'invalid-args', 'early', 'stale', 'command']) test(`invalid API tool request is never executable: ${prompt}`, { timeout: 15000 }, async t => {
   let count = 0; const { bridge } = await setup(t, async () => { count++; return { ok: true }; });
   const approvals = [];
-  await bridge.run({ prompt, onEvent: (type, data) => { if (type === 'approval') approvals.push(data); } });
+  const task = bridge.run({ prompt, onEvent: (type, data) => { if (type === 'approval') approvals.push(data); } });
+  if (prompt === 'stale') await assert.rejects(task, /未返回可显示的回复/);
+  else await task;
   assert.equal(count, 0); assert.equal(approvals.length, 0);
 });
 

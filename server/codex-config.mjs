@@ -8,21 +8,41 @@ export const CODEX_TOOL_VERSION = 'music-browser-v1';
 export const CODEX_KEY_ENV = 'PETPAL_CODEX_API_KEY';
 export const defaultCodexConfig = () => ({ mode: 'host', baseUrl: '', model: '', apiKey: '', revision: randomUUID(), toolVersion: CODEX_TOOL_VERSION });
 
+// Deployment-only policy. The HTTP API cannot add origins to this set.
+export function parseCodexHttpOrigins(raw) {
+  if (raw === undefined || raw === '') return new Set();
+  if (typeof raw !== 'string' || raw.length > 8192 || /[\x00-\x1f\x7f]/.test(raw)) throw new Error('PETPAL_CODEX_HTTP_ORIGINS 必须是逗号分隔的完整 HTTP origin。');
+  if (!raw.trim()) return new Set();
+  const entries = raw.split(',');
+  if (entries.length > 32) throw new Error('PETPAL_CODEX_HTTP_ORIGINS 最多包含 32 个 HTTP origin。');
+  const origins = new Set();
+  for (const entry of entries) {
+    const value = entry.trim();
+    if (!/^http:\/\/[^/?#\\\s*%@]+$/i.test(value) || value.endsWith(':')) throw new Error('Codex HTTP origin 不可包含路径、查询、片段、凭据或通配符。');
+    let url;
+    try { url = new URL(value); } catch { throw new Error('Codex HTTP origin 格式无效。'); }
+    if (url.protocol !== 'http:' || !url.hostname || url.username || url.password || url.search || url.hash || url.pathname !== '/' || url.hostname.includes('*')) throw new Error('Codex HTTP origin 不可包含路径、查询、片段、凭据或通配符。');
+    origins.add(url.origin);
+  }
+  return origins;
+}
+
 export function publicCodexConfig(value) {
   return { mode: value.mode, baseUrl: value.baseUrl, model: value.model, hasApiKey: Boolean(value.apiKey), revision: value.revision,
     protocol: 'responses', configured: value.mode === 'host' || Boolean(value.baseUrl && value.model) };
 }
 
-function baseUrl(value) {
+function baseUrl(value, { allowedHttpOrigins = new Set() } = {}) {
+  if (!(allowedHttpOrigins instanceof Set)) throw new Error('allowedHttpOrigins 必须由 parseCodexHttpOrigins 解析。');
   if (typeof value !== 'string' || !value.trim() || value.length > 2048 || /[\x00-\x20\x7f]/.test(value)) throw failure(400, '请输入完整的 Codex Responses 服务地址。');
   let normalized;
   try { normalized = normalizeBaseUrl(value, 'responses'); } catch (error) { throw failure(400, error.message); }
   const url = new URL(normalized);
-  if (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw failure(400, 'Codex 服务须使用 HTTPS；仅本机 localhost/127.0.0.1/::1 支持 HTTP。');
+  if (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) && !allowedHttpOrigins.has(url.origin)) throw failure(400, 'Codex 服务须使用 HTTPS；本机回环或部署者明确允许的 HTTP origin 除外。');
   return normalized;
 }
 
-export function patchCodexConfig(current, body) {
+export function patchCodexConfig(current, body, options = {}) {
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['mode', 'baseUrl', 'model', 'apiKey', 'clearApiKey', 'revision'].includes(key))) throw failure(400, 'Codex 配置包含不支持的字段。');
   if (body.revision !== undefined && body.revision !== current.revision) throw failure(409, 'Codex 配置已变化，请刷新设置后重试。');
   const next = { ...current };
@@ -30,7 +50,8 @@ export function patchCodexConfig(current, body) {
     if (!['host', 'api'].includes(body.mode)) throw failure(400, 'Codex 模式必须是 host 或 api。');
     next.mode = body.mode;
   }
-  if (body.baseUrl !== undefined) next.baseUrl = body.baseUrl === '' && next.mode === 'host' ? '' : baseUrl(body.baseUrl);
+  if (body.baseUrl !== undefined) next.baseUrl = body.baseUrl === '' && next.mode === 'host' ? '' : baseUrl(body.baseUrl, options);
+  else if (next.baseUrl) baseUrl(next.baseUrl, options);
   if (body.model !== undefined) {
     if (typeof body.model !== 'string' || body.model.length > 160 || /[\x00-\x1f\x7f]/.test(body.model)) throw failure(400, 'Codex 模型 ID 格式无效。');
     next.model = body.model.trim();
@@ -46,9 +67,9 @@ export function patchCodexConfig(current, body) {
   return next;
 }
 
-export function validateStoredCodexConfig(value) {
+export function validateStoredCodexConfig(value, options = {}) {
   if (!value || !['host', 'api'].includes(value.mode) || typeof value.apiKey !== 'string' || !/^[a-f0-9-]{36}$/.test(value.revision) || !['baseUrl', 'model'].every(key => typeof value[key] === 'string')) throw new Error('本地 Codex 配置无效，请保留数据并检查备份。');
-  patchCodexConfig(value, { mode: value.mode, ...(value.baseUrl ? { baseUrl: value.baseUrl } : {}), model: value.model, apiKey: value.apiKey });
+  patchCodexConfig(value, { mode: value.mode, ...(value.baseUrl ? { baseUrl: value.baseUrl } : {}), model: value.model, apiKey: value.apiKey }, options);
 }
 
 // JSON string escaping is also valid for the TOML basic strings used here.

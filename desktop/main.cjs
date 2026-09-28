@@ -1,10 +1,11 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, session, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, session, shell, dialog } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const fsSync = require('node:fs');
 const { canRequestMedia, canCheckMedia } = require('./media-permissions.cjs');
+const { readDesktopServiceSettings } = require('./service-settings.cjs');
 const { spawn } = require('node:child_process');
 
 let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
@@ -107,7 +108,8 @@ function showPet() {
       skipTaskbar: true, show: false, title: '小伴桌宠', icon: iconPath,
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
     });
-    petWindow.setAlwaysOnTop(true, 'floating');
+    // Windows requires pop-up-menu to retain the native WS_EX_TOPMOST flag.
+    petWindow.setAlwaysOnTop(true, process.platform === 'win32' ? 'pop-up-menu' : 'floating');
     if (process.platform !== 'win32') petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     secureWindow(petWindow);
     petWindow.once('ready-to-show', () => petWindow?.showInactive());
@@ -333,6 +335,7 @@ async function inspectAppFixture() {
 
 async function boot() {
   const { createPetServer } = await import(pathToFileURL(path.join(root, 'server', 'app.mjs')).href);
+  const serviceSettings = await readDesktopServiceSettings(app.getPath('userData'));
   const workspaceRoot = process.env.PETPAL_WORKSPACE || path.join(app.getPath('userData'), 'workspace');
   await fs.mkdir(workspaceRoot, { recursive: true });
   backend = await createPetServer({
@@ -341,6 +344,7 @@ async function boot() {
     staticDir: path.join(root, 'dist'),
     allowedOrigins: [],
     workspaceRoot,
+    codexHttpOrigins: serviceSettings.codexHttpOrigins,
   });
   await new Promise((resolve, reject) => {
     backend.server.once('error', reject);
@@ -467,7 +471,7 @@ async function boot() {
       const bytes = await fs.readFile(absolute);
       return [{ path: relative.split(path.sep).join('/'), bytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }];
     };
-    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
+    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
     if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'result.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
     if (!health.ok || !bridge.hasToken || !codex.available || !desktopTools.opencli.available || desktopTools.opencli.version !== '1.8.8') exitCode = 1;
@@ -480,6 +484,7 @@ else {
   app.on('second-instance', () => { if (origin) showMain(); });
   app.whenReady().then(boot).catch(error => {
     console.error('PetPal startup failed:', error.message);
+    if (error.code === 'PETPAL_DESKTOP_SERVICE_SETTINGS' && !process.argv.includes('--smoke-test')) dialog.showErrorBox('小伴启动失败', error.message);
     exitCode = 1;
     app.quit();
   });

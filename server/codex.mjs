@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import { createRequire } from 'node:module';
 import { prepareCodexRuntime, publicCodexConfig } from './codex-config.mjs';
+import { createCodexTransport } from './codex-transport.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -136,10 +137,12 @@ export class CodexBridge {
     this.toolNames = new Set((desktopTools?.specs ?? []).filter(spec => spec.type === 'function').map(spec => spec.name));
     this.dynamicTasks = new Set();
     this.child = null;
+    this.transport = null;
     this.initializing = null;
     this.closed = false;
     this.closing = null;
     this.childClosures = new WeakMap();
+    this.transportClosures = new WeakMap();
     this.pending = new Map();
     this.runs = new Map();
     this.resuming = new Set();
@@ -185,48 +188,69 @@ export class CodexBridge {
   }
 
   async _start() {
-    const executable = await resolveCodexCommand(this.command);
-    const runtime = this.apiMode ? await prepareCodexRuntime(this.config, this.dataDir) : null;
-    if (runtime) this.workspaceRoot = runtime.workspaceRoot;
-    await mkdir(this.workspaceRoot, { recursive: true });
+    // A failed child may still be closing its HTTP response or private listener.
+    // Finish that generation before publishing another CLI/runtime configuration.
+    await Promise.all(this.terminations);
+    await Promise.allSettled([...this.dynamicTasks]);
     if (this.closed) throw new Error('Codex 后台已关闭');
-    const child = spawn(executable.file, [...executable.args,
-      'app-server', '--listen', 'stdio://',
-      '-c', 'sandbox_mode="read-only"', '-c', 'approval_policy="on-request"', '-c', 'approvals_reviewer="user"',
-      ...(this.apiMode ? ['-c', 'features.shell_tool=false', '-c', 'features.unified_exec=false'] : []),
-    ], {
-      cwd: this.workspaceRoot, stdio: ['pipe', 'pipe', 'pipe'], shell: false,
-      windowsHide: true, detached: process.platform !== 'win32',
-      env: runtime?.env ?? { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-    });
-    this.child = child;
-    // Register immediately: exit/taskkill completion can precede stdio closure on Windows.
-    this.childClosures.set(child, new Promise(resolve => child.once('close', resolve)));
-    this.lastError = null;
-    const decoder = new StringDecoder('utf8');
-    let buffer = '';
-    child.stdout.on('data', (chunk) => {
-      buffer += decoder.write(chunk);
-      if (buffer.length > MAX_LINE) return this._fail(new Error('Codex 返回的数据超过安全长度限制'), child);
-      let newline;
-      while ((newline = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, newline).trim();
-        buffer = buffer.slice(newline + 1);
-        if (!line) continue;
-        try { this._message(JSON.parse(line)); }
-        catch { this._fail(new Error('Codex 返回了无效的协议数据'), child); break; }
-      }
-    });
-    // Drain stderr so the process cannot deadlock; never persist provider/config secrets from it.
-    child.stderr.on('data', () => {});
-    child.stdin.on('error', () => this._fail(new Error('Codex 后台输入通道已关闭'), child));
-    child.on('error', () => this._fail(new Error('无法启动 Codex CLI，请检查安装与可执行文件权限'), child));
-    child.on('exit', (code) => this._fail(new Error(`Codex 后台已退出${Number.isInteger(code) ? `（代码 ${code}）` : ''}`), child));
+    const executable = await resolveCodexCommand(this.command);
+    if (this.closed) throw new Error('Codex 后台已关闭');
+    let transport;
+    let runtime;
+    let child;
     try {
+      if (this.apiMode) {
+        transport = await createCodexTransport({ config: this.config });
+        if (this.closed) throw new Error('Codex 后台已关闭');
+        this.transport = transport;
+        // Only the loopback credential reaches Codex. Preserve this.config for
+        // public status and redaction of the actual upstream credential.
+        runtime = await prepareCodexRuntime({ ...this.config, baseUrl: transport.baseUrl, apiKey: transport.apiKey }, this.dataDir);
+      }
+      if (runtime) this.workspaceRoot = runtime.workspaceRoot;
+      await mkdir(this.workspaceRoot, { recursive: true });
+      if (this.closed) throw new Error('Codex 后台已关闭');
+      child = spawn(executable.file, [...executable.args,
+        'app-server', '--listen', 'stdio://',
+        '-c', 'sandbox_mode="read-only"', '-c', 'approval_policy="on-request"', '-c', 'approvals_reviewer="user"',
+        ...(this.apiMode ? ['-c', 'features.shell_tool=false', '-c', 'features.unified_exec=false'] : []),
+      ], {
+        cwd: this.workspaceRoot, stdio: ['pipe', 'pipe', 'pipe'], shell: false,
+        windowsHide: true, detached: process.platform !== 'win32',
+        env: runtime?.env ?? { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      });
+      this.child = child;
+      // Register immediately: exit/taskkill completion can precede stdio closure on Windows.
+      this.childClosures.set(child, new Promise(resolve => child.once('close', resolve)));
+      this.lastError = null;
+      const decoder = new StringDecoder('utf8');
+      let buffer = '';
+      child.stdout.on('data', (chunk) => {
+        buffer += decoder.write(chunk);
+        if (buffer.length > MAX_LINE) return this._fail(new Error('Codex 返回的数据超过安全长度限制'), child);
+        let newline;
+        while ((newline = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          if (!line) continue;
+          try { this._message(JSON.parse(line)); }
+          catch { this._fail(new Error('Codex 返回了无效的协议数据'), child); break; }
+        }
+      });
+      // Drain stderr so the process cannot deadlock; never persist provider/config secrets from it.
+      child.stderr.on('data', () => {});
+      child.stdin.on('error', () => this._fail(new Error('Codex 后台输入通道已关闭'), child));
+      child.on('error', () => this._fail(new Error('无法启动 Codex CLI，请检查安装与可执行文件权限'), child));
+      child.on('exit', (code) => this._fail(new Error(`Codex 后台已退出${Number.isInteger(code) ? `（代码 ${code}）` : ''}`), child));
       this.identity = await this._rpc('initialize', { clientInfo: { name: 'petpal', title: '小伴 PetPal', version: '0.5.0' }, capabilities: { experimentalApi: true } });
       this._send({ method: 'initialized', params: {} });
     } catch (error) {
-      this._fail(error, child);
+      if (child && child === this.child) this._fail(error, child);
+      if (transport) {
+        if (this.transport === transport) this.transport = null;
+        await this._disposeTransport(transport);
+      }
+      await Promise.all(this.terminations);
       throw error;
     }
   }
@@ -522,6 +546,9 @@ export class CodexBridge {
     if (run.settled || run.finishing) return;
     run.finishing = true;
     this._appendText(run, '', true);
+    if (!error && !run.aborted && this.apiMode && !run.text.trim()) {
+      error = new Error('Codex Responses 服务未返回可显示的回复，请检查服务的流式响应兼容性后重试。');
+    }
     run.settled = true;
     clearTimeout(run.interruptTimeout);
     run.signal?.removeEventListener('abort', run.onAbort);
@@ -532,7 +559,7 @@ export class CodexBridge {
     for (const [id, approval] of this.approvals) if (approval.run === run) this.approvals.delete(id);
     // Stop is complete only after owned tool processes have actually exited.
     Promise.allSettled([...run.toolTasks]).then(() => {
-      this.runs.delete(run.threadId);
+      if (this.runs.get(run.threadId) === run) this.runs.delete(run.threadId);
       if (error || run.aborted) run.reject(run.aborted ? abortError() : error);
       else run.resolve({ threadId: run.threadId, text: run.text });
     });
@@ -543,6 +570,9 @@ export class CodexBridge {
     this.lastError = error.message;
     this.child = null;
     this.identity = null;
+    const transport = this.transport;
+    this.transport = null;
+    if (transport) this._disposeTransport(transport);
     for (const pending of this.pending.values()) { clearTimeout(pending.timeout); pending.reject(error); }
     this.pending.clear();
     for (const run of this.runs.values()) this._finish(run, error);
@@ -552,6 +582,19 @@ export class CodexBridge {
       this.terminations.add(termination);
       termination.finally(() => this.terminations.delete(termination));
     }
+  }
+
+  _disposeTransport(transport) {
+    const existing = this.transportClosures.get(transport);
+    if (existing) return existing;
+    const cleanup = Promise.resolve().then(async () => {
+      try { await transport.cancelAll(); }
+      finally { await transport.close(); }
+    }).catch(() => {});
+    this.transportClosures.set(transport, cleanup);
+    this.terminations.add(cleanup);
+    cleanup.finally(() => this.terminations.delete(cleanup));
+    return cleanup;
   }
 
   async _terminate(child) {

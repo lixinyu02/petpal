@@ -41,7 +41,7 @@ Add-Type -AssemblyName System.Drawing
 $pet = [System.Drawing.Bitmap]::FromFile((Join-Path $EvidenceDirectory 'pet.png'))
 try { if ($pet.GetPixel(0,0).A -ne 0) { throw 'Pet window corner is not transparent.' } } finally { $pet.Dispose() }
 if (-not $result.bundleFiles -or $result.bundleFiles.Count -lt 10) { throw 'Packaged runtime did not report resource byte evidence.' }
-foreach ($required in @('desktop/media-permissions.cjs', 'server/codex-config.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE')) {
+foreach ($required in @('desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE')) {
   if (-not @($result.bundleFiles | Where-Object { $_.path -eq $required }).Count) { throw "Missing required desktop assistant runtime member: $required" }
 }
 $generatedPackage = Get-Content -LiteralPath "$project\package.json" -Raw | ConvertFrom-Json

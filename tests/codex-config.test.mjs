@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { defaultCodexConfig, patchCodexConfig, publicCodexConfig, codexToml, isolatedCodexEnvironment, prepareCodexRuntime } from '../server/codex-config.mjs';
+import { defaultCodexConfig, patchCodexConfig, publicCodexConfig, codexToml, isolatedCodexEnvironment, prepareCodexRuntime, parseCodexHttpOrigins, validateStoredCodexConfig } from '../server/codex-config.mjs';
 import { createPetServer } from '../server/app.mjs';
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -13,7 +13,7 @@ const stubBridge = () => ({ async status() { return { available: true }; }, asyn
 async function setup(t, overrides = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-codex-config-'));
   const bridges = [];
-  const app = await createPetServer({ dataDir: directory, token: 'config-owner-token', desktopTools: stubTools(), codexFactory: () => { const bridge = stubBridge(); bridges.push(bridge); return bridge; }, ...overrides });
+  const app = await createPetServer({ dataDir: directory, token: 'config-owner-token', desktopTools: stubTools(), codexFactory: () => { const bridge = stubBridge(); bridges.push(bridge); return bridge; }, codexHttpOrigins: '', ...overrides });
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
   const request = (route, { method = 'GET', body, token = app.token, signal } = {}) => fetch(`http://127.0.0.1:${app.server.address().port}/api${route}`, { method, signal, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   t.after(async () => { await app.close(); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-codex-config-'))); await rm(directory, { recursive: true, force: true }); });
@@ -34,6 +34,75 @@ test('Codex config validates endpoint, secret replacement, CAS and fixed protoco
   assert.equal(patchCodexConfig(original, { ...api, baseUrl: 'http://127.0.0.1:9988/v1/responses' }).baseUrl, 'http://127.0.0.1:9988/v1');
   assert.throws(() => patchCodexConfig(saved, { sandbox: 'danger-full-access' }), /不支持/);
   assert.throws(() => patchCodexConfig(saved, { apiKey: 'x', clearApiKey: true }), /同时/);
+});
+
+test('deployment HTTP origins parse strictly and normalize only exact HTTP authority', () => {
+  assert.deepEqual([...parseCodexHttpOrigins(undefined)], []);
+  assert.deepEqual([...parseCodexHttpOrigins('  ')], []);
+  assert.deepEqual([...parseCodexHttpOrigins('http://GATEWAY.example:8080, http://gateway.example:8080,http://models.example:80,http://[2001:db8::1]:8081')], ['http://gateway.example:8080', 'http://models.example', 'http://[2001:db8::1]:8081']);
+  for (const value of [null, [], new Set(), 'gateway.example:8080', 'https://gateway.example', 'http://gateway.example/', 'http://gateway.example/v1', 'http://gateway.example?', 'http://gateway.example#', 'http://user:pass@gateway.example', 'http://@gateway.example', 'http://*.example', 'http://gateway.example:*', 'http://gateway.example:', 'http://gateway.example:70000', 'http://gateway.example\\v1', 'http://gateway.example\n', 'http://%67ateway.example', 'http://one.example,,http://two.example', 'http://one.example,', 'http://two.example,' .repeat(33)]) assert.throws(() => parseCodexHttpOrigins(value));
+});
+
+test('HTTP exceptions match scheme host and port without widening default Codex policy', () => {
+  const original = defaultCodexConfig(), allowedHttpOrigins = parseCodexHttpOrigins('http://gateway.example:8080,http://models.example:80');
+  const options = { allowedHttpOrigins }, configured = { ...api, baseUrl: 'http://gateway.example:8080/v1/responses' };
+  assert.throws(() => patchCodexConfig(original, configured), /HTTPS/);
+  const saved = patchCodexConfig(original, configured, options);
+  assert.equal(saved.baseUrl, 'http://gateway.example:8080/v1');
+  assert.equal(patchCodexConfig(saved, { model: 'next-model' }, options).model, 'next-model');
+  assert.throws(() => patchCodexConfig(saved, { model: 'next-model' }), /HTTPS/);
+  assert.doesNotThrow(() => validateStoredCodexConfig(saved, options));
+  assert.throws(() => validateStoredCodexConfig(saved), /HTTPS/);
+  for (const baseUrl of ['http://gateway.example/v1', 'http://gateway.example:8081/v1', 'http://sub.gateway.example:8080/v1', 'http://gateway.example.evil.test:8080/v1', 'http://other.example:8080/v1']) assert.throws(() => patchCodexConfig(original, { ...api, baseUrl }, options), /HTTPS/);
+  assert.equal(patchCodexConfig(original, { ...api, baseUrl: 'http://models.example:80/v1' }, options).baseUrl, 'http://models.example/v1');
+  for (const baseUrl of ['https://other.example/v1', 'http://localhost:9090/v1', 'http://127.0.0.1:9090/v1', 'http://[::1]:9090/v1']) assert.doesNotThrow(() => patchCodexConfig(original, { ...api, baseUrl }));
+});
+
+test('owner API cannot grant itself HTTP origins or broaden an existing deployment exception', async t => {
+  const f = await setup(t, { codexHttpOrigins: 'http://gateway.example:8080' });
+  const selected = { ...api, baseUrl: 'http://gateway.example:8080/v1' };
+  for (const policy of [{ allowedHttpOrigins: ['http://evil.example:8080'] }, { codexHttpOrigins: 'http://evil.example:8080' }, { PETPAL_CODEX_HTTP_ORIGINS: 'http://evil.example:8080' }]) {
+    const response = await f.request('/codex/config', { method: 'PATCH', body: { ...selected, ...policy } });
+    assert.equal(response.status, 400);
+  }
+  const accepted = await f.request('/codex/config', { method: 'PATCH', body: selected });
+  assert.equal(accepted.status, 200);
+  assert.equal((await accepted.json()).baseUrl, selected.baseUrl);
+  const rejected = await f.request('/codex/config', { method: 'PATCH', body: { ...selected, baseUrl: 'http://gateway.example:8081/v1' } });
+  assert.equal(rejected.status, 400);
+  const stored = JSON.parse(await readFile(path.join(f.directory, 'state.json'), 'utf8'));
+  assert.equal(stored.codexConfig.baseUrl, selected.baseUrl);
+  for (const key of ['allowedHttpOrigins', 'codexHttpOrigins', 'PETPAL_CODEX_HTTP_ORIGINS']) assert.equal(stored.codexConfig[key], undefined);
+  const defaultServer = await setup(t);
+  assert.equal((await defaultServer.request('/codex/config', { method: 'PATCH', body: selected })).status, 400);
+});
+
+test('configured HTTP endpoint reloads only with the same explicit deployment origin', async t => {
+  const f = await setup(t, { codexHttpOrigins: 'http://gateway.example:8080' });
+  const selected = { ...api, baseUrl: 'http://gateway.example:8080/v1' };
+  assert.equal((await f.request('/codex/config', { method: 'PATCH', body: selected })).status, 200);
+  await f.app.close();
+  const options = { dataDir: f.directory, token: 'reload-token', codex: stubBridge(), desktopTools: stubTools() };
+  const before = await readFile(path.join(f.directory, 'state.json'), 'utf8');
+  await assert.rejects(createPetServer({ ...options, codexHttpOrigins: '' }), /HTTPS/);
+  await assert.rejects(createPetServer({ ...options, codexHttpOrigins: 'http://gateway.example:8081' }), /HTTPS/);
+  assert.equal(await readFile(path.join(f.directory, 'state.json'), 'utf8'), before);
+  const restarted = await createPetServer({ ...options, codexHttpOrigins: 'http://gateway.example:8080' });
+  await restarted.close();
+  const stored = JSON.parse(await readFile(path.join(f.directory, 'state.json'), 'utf8'));
+  assert.equal(stored.codexConfig.baseUrl, selected.baseUrl); assert.equal(stored.codexConfig.apiKey, api.apiKey);
+});
+
+test('server captures the environment allowlist at startup and explicit empty option overrides it', async t => {
+  const before = process.env.PETPAL_CODEX_HTTP_ORIGINS;
+  t.after(() => { if (before === undefined) delete process.env.PETPAL_CODEX_HTTP_ORIGINS; else process.env.PETPAL_CODEX_HTTP_ORIGINS = before; });
+  process.env.PETPAL_CODEX_HTTP_ORIGINS = 'http://gateway.example:8080';
+  const captured = await setup(t, { codexHttpOrigins: undefined }), explicitEmpty = await setup(t, { codexHttpOrigins: '' });
+  process.env.PETPAL_CODEX_HTTP_ORIGINS = 'http://other.example:8080';
+  const selected = { ...api, baseUrl: 'http://gateway.example:8080/v1' };
+  assert.equal((await captured.request('/codex/config', { method: 'PATCH', body: selected })).status, 200);
+  assert.equal((await captured.request('/codex/config', { method: 'PATCH', body: { ...selected, baseUrl: 'http://other.example:8080/v1' } })).status, 400);
+  assert.equal((await explicitEmpty.request('/codex/config', { method: 'PATCH', body: selected })).status, 400);
 });
 
 test('isolated Codex TOML contains no key and environment cannot inherit global auth', async t => {

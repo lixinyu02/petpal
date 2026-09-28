@@ -8,7 +8,7 @@ import { normalizeBaseUrl, streamProvider, testProvider } from './providers.mjs'
 import { CodexBridge } from './codex.mjs';
 import { tokenHash, secureEqual, username, hashPassword, verifyPassword, newSession, publicUser, createLoginLimiter } from './auth.mjs';
 import { defaultVoiceSettings, publicVoiceSettings, patchVoiceSettings } from './voice.mjs';
-import { defaultCodexConfig, publicCodexConfig, patchCodexConfig, validateStoredCodexConfig, CODEX_TOOL_VERSION } from './codex-config.mjs';
+import { defaultCodexConfig, publicCodexConfig, patchCodexConfig, validateStoredCodexConfig, parseCodexHttpOrigins, CODEX_TOOL_VERSION } from './codex-config.mjs';
 import { createDesktopTools } from './desktop-tools.mjs';
 import { createUpdateService } from './updates.mjs';
 
@@ -26,14 +26,15 @@ function safeCodexStatus(value) {
   return value && typeof value === 'object' ? value : { available: false, error: 'Codex 状态不可用。' };
 }
 
-export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, desktopTools, updatesOptions } = {}) {
+export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, desktopTools, updatesOptions, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
+  const codexPolicy = { allowedHttpOrigins: parseCodexHttpOrigins(codexHttpOrigins) };
   const store = await new JsonStore(dataDir).init();
   const accessToken = await store.token(token ?? process.env.PETPAL_TOKEN);
   const ownerTokenHash = tokenHash(accessToken);
   const state = store.state;
   const legacyCodex = !state.codexConfig;
   state.codexConfig ??= defaultCodexConfig();
-  validateStoredCodexConfig(state.codexConfig);
+  validateStoredCodexConfig(state.codexConfig, codexPolicy);
   if (state.codexConfig.toolVersion !== CODEX_TOOL_VERSION) Object.assign(state.codexConfig, { toolVersion: CODEX_TOOL_VERSION, revision: randomUUID() });
   if (legacyCodex) for (const conversation of state.conversations) if (conversation.mode === 'codex') conversation.codexRevision = state.codexConfig.revision;
   const updates = createUpdateService({ ...updatesOptions, store });
@@ -312,7 +313,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.patch('/api/codex/config', async (req, res) => {
     requireCodex(req.user);
     if (configChanging || codexReaders || [...active.values()].some(task => task.mode === 'codex')) throw failure(409, 'Codex 正在工作或读取状态，请先停止任务后再修改配置。');
-    const previous = state.codexConfig, next = patchCodexConfig(previous, req.body);
+    const previous = state.codexConfig, next = patchCodexConfig(previous, req.body, codexPolicy);
     if (next.revision === previous.revision) return res.json(publicCodexConfig(previous));
     configChanging = true;
     configSwap = (async () => {

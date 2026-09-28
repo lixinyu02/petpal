@@ -72,7 +72,7 @@ for (const directory of ['dist', 'server']) for (const absolute of await walk(pa
   if (file.startsWith('server/data/') || /(?:^|\/)\.env|\.test\./.test(file)) continue;
   await compare(file, file.startsWith('server/native/'));
 }
-for (const file of ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/media-permissions.cjs', 'package.json']) await compare(file);
+for (const file of ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/updates.mjs', 'package.json']) await compare(file);
 for (const file of ['server/codex-config.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1']) assert.ok(compared.has(file), `Required assistant module missing: ${file}`);
 const metadata = JSON.parse(packedBytes('package.json'));
 assert.equal(metadata.version, version);
