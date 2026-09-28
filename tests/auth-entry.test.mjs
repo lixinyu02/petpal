@@ -25,7 +25,7 @@ function referenceWav() {
 
 async function fixture(t, credential) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-auth-entry-'));
-  const calls = { provider: 0, voice: 0, updates: 0, codexStatus: 0, codexRun: 0, codexApproval: 0, desktopStatus: 0, desktopDescribe: 0, desktopExecute: 0 };
+  const calls = { provider: 0, voice: 0, updates: 0, downloads: 0, codexStatus: 0, codexRun: 0, codexApproval: 0, desktopStatus: 0, desktopDescribe: 0, desktopExecute: 0 };
   const upstream = http.createServer((request, response) => {
     calls.provider++; request.resume();
     response.writeHead(200, { 'Content-Type': 'application/json' });
@@ -77,6 +77,7 @@ async function fixture(t, credential) {
     },
     cosyvoiceOptions: { fetchImpl: async () => { calls.voice++; throw new Error('Unexpected voice upstream request'); } },
     updatesOptions: { fetchImpl: async () => { calls.updates++; throw new Error('Unexpected update upstream request'); } },
+    downloadsOptions: { fetchImpl: async () => { calls.downloads++; throw new Error('Unexpected download catalog request'); } },
   });
   await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${app.server.address().port}/api`;
@@ -97,6 +98,7 @@ async function fixture(t, credential) {
 function protectedRequests(f) {
   return [
     ['/auth/me'], ['/auth/logout', 'POST', {}], ['/state'],
+    ['/attachments', 'POST', undefined, Buffer.from('unauthorized image bytes')], ['/attachments/123e4567-e89b-42d3-a456-426614174000'], ['/downloads'],
     ['/settings', 'PATCH', { petName: 'unexpected replacement' }],
     ['/voice'], ['/voice', 'PATCH', { tts: { mode: 'system' } }],
     ['/voice/cosyvoice'], ['/voice/cosyvoice', 'PATCH', { referenceText: 'unexpected replacement' }],

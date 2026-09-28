@@ -1,20 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { normalizeAgentPermissions } from './agent-permissions.mjs';
+import { normalizeAttachmentIds } from './attachments.mjs';
 
 const failure = (status, message, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 const now = () => new Date().toISOString();
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const identifier = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{8,128}$/.test(value);
 const empty = () => ({ revision: 0, paused: false, queue: [], run: null, submissions: [] });
-const content = value => {
-  if (typeof value !== 'string' || !value.trim() || value.length > 32000) throw failure(400, 'Agent 消息须为 1 至 32000 个字符。');
-  return value.trim();
+const content = (value, images = []) => {
+  if ((value !== undefined && typeof value !== 'string') || (value?.length ?? 0) > 32000 || (!value?.trim() && !images.length)) throw failure(400, 'Agent 消息需要文字或图片，文字最多 32000 个字符。');
+  return value?.trim() ?? '';
 };
-const attachments = value => {
-  if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length) throw failure(400, '当前 Agent 版本尚不接受图片附件。');
-  return [];
-};
+const attachments = normalizeAttachmentIds;
 const publicEntry = entry => ({ id: entry.id, submissionId: entry.submissionId, revision: entry.revision, content: entry.content, attachmentIds: [...entry.attachmentIds], permissions: { ...entry.permissions }, providerId: entry.providerId, model: entry.model, effort: entry.effort, createdAt: entry.createdAt });
 const receipt = entry => ({ submissionId: entry.submissionId, entryId: entry.entryId, status: entry.status, ...(entry.error ? { error: entry.error } : {}) });
 const publicRun = run => run ? Object.fromEntries(['id', 'submissionId', 'status', 'turnId', 'permissions', 'providerId', 'model', 'effort', 'startedAt', 'finishedAt', 'message', 'error'].filter(key => run[key] !== undefined).map(key => [key, structuredClone(run[key])])) : null;
@@ -28,12 +25,12 @@ export function restoreAgentState(conversation) {
   let changed = false;
   for (const entry of agent.queue) {
     if (!object(entry) || !identifier(entry.id) || queueIds.has(entry.id) || !identifier(entry.submissionId) || entry.conversationId !== conversation.id || !Number.isSafeInteger(entry.revision) || entry.revision < 1 || !object(entry.auth) || entry.auth.userId !== conversation.userId || typeof entry.auth.sessionHash !== 'string' || typeof entry.auth.bootstrap !== 'boolean' || !Number.isSafeInteger(entry.auth.generation) || entry.auth.generation < 0) throw new Error('本地 Agent 任务归属无效。');
-    content(entry.content); attachments(entry.attachmentIds); normalizeAgentPermissions(entry.permissions);
+    content(entry.content, attachments(entry.attachmentIds)); normalizeAgentPermissions(entry.permissions);
     queueIds.add(entry.id); if (entry.auth.generation !== 0) { entry.auth.generation = 0; changed = true; }
   }
   for (const item of agent.submissions) {
     if (!object(item) || !identifier(item.submissionId) || ids.has(item.submissionId) || !identifier(item.entryId) || receiptIds.has(item.entryId) || !/^[a-f0-9]{64}$/.test(item.fingerprint) || !['queued', 'running', 'completed', 'cancelled', 'error', 'steered', 'dispatching', 'uncertain'].includes(item.status)) throw new Error('本地 Agent 提交记录无效。');
-    content(item.content); ids.add(item.submissionId); receiptIds.add(item.entryId);
+    content(item.content, attachments(item.attachmentIds)); ids.add(item.submissionId); receiptIds.add(item.entryId);
   }
   for (const entry of agent.queue) if (!agent.submissions.some(item => item.submissionId === entry.submissionId && item.entryId === entry.id && item.status === 'queued')) throw new Error('本地 Agent 队列与提交记录不一致。');
   for (const item of agent.submissions) if (item.status === 'queued' && !agent.queue.some(entry => entry.id === item.entryId && entry.submissionId === item.submissionId)) throw new Error('本地 Agent 提交记录缺少队列任务。');
@@ -53,7 +50,7 @@ export function restoreAgentState(conversation) {
 }
 
 /** Persistent receipts and short per-conversation locks own task lifetime, not HTTP. */
-export function createAgentTasks({ store, active, approvals, getBridge, authorize, resolveModel, redact = value => value }) {
+export function createAgentTasks({ store, active, approvals, getBridge, authorize, resolveModel, resolveImages = async () => [], redact = value => value }) {
   const locks = new Map(), generations = new Map(), removed = new Set();
   let closed = false;
   const data = conversation => conversation.agent ??= empty();
@@ -79,14 +76,15 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
   const projection = conversation => {
     const agent = conversation.agent ?? empty();
     return { revision: agent.revision, paused: agent.paused, queue: agent.queue.map(publicEntry), run: publicRun(agent.run),
-      submissions: agent.submissions.slice(-10).map(item => ({ ...receipt(item), content: item.content, createdAt: item.createdAt })),
+      submissions: agent.submissions.slice(-10).map(item => ({ ...receipt(item), content: item.content, attachmentIds: [...(item.attachmentIds ?? [])], createdAt: item.createdAt })),
       approvals: [...approvals].filter(([, value]) => value.conversationId === conversation.id && !value.task.controller.signal.aborted).map(([id, value]) => ({ id, kind: value.kind || '操作请求', description: value.description || 'Agent 请求确认。' })) };
   };
   const request = (body, kind) => {
     const allowed = ['submissionId', 'content', 'attachmentIds', 'permissions', 'providerId', ...(kind === 'steer' ? ['expectedTurnId'] : [])];
     if (!object(body) || Object.keys(body).some(key => !allowed.includes(key)) || !identifier(body.submissionId)) throw failure(400, 'Agent 提交字段或 submissionId 无效。');
     if (kind === 'steer' && (typeof body.expectedTurnId !== 'string' || !body.expectedTurnId || body.expectedTurnId.length > 200)) throw failure(400, '插入指令需要有效的 expectedTurnId。');
-    const value = { kind, content: content(body.content), attachmentIds: attachments(body.attachmentIds), permissions: body.permissions === undefined ? null : normalizeAgentPermissions(body.permissions), providerId: body.providerId === undefined ? null : body.providerId,
+    const attachmentIds = attachments(body.attachmentIds);
+    const value = { kind, content: content(body.content, attachmentIds), attachmentIds, permissions: body.permissions === undefined ? null : normalizeAgentPermissions(body.permissions), providerId: body.providerId === undefined ? null : body.providerId,
       ...(kind === 'steer' ? { expectedTurnId: body.expectedTurnId, inheritProvider: body.providerId === undefined } : {}) };
     const fingerprint = createHash('sha256').update(JSON.stringify(value)).digest('hex');
     return { value, fingerprint };
@@ -113,7 +111,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
   };
   const reserve = (agent, entry, fingerprint) => {
     if (agent.submissions.length >= 500) throw failure(409, '这个会话已达到 500 次 Agent 提交，请创建新会话。');
-    const record = { submissionId: entry.submissionId, entryId: entry.id, fingerprint, status: 'dispatching', content: entry.content, createdAt: entry.createdAt };
+    const record = { submissionId: entry.submissionId, entryId: entry.id, fingerprint, status: 'dispatching', content: entry.content, attachmentIds: [...entry.attachmentIds], createdAt: entry.createdAt };
     agent.submissions.push(record); return record;
   };
   const clearApprovals = task => { for (const id of task.approvalIds) if (approvals.get(id)?.task === task) approvals.delete(id); };
@@ -143,7 +141,8 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     try {
       const expiresAt = check(entry); task.controller.signal.throwIfAborted();
       if (Number.isFinite(expiresAt)) expiry = setTimeout(() => { void revoke(value => value.sessionHash === entry.auth.sessionHash).catch(() => {}); }, Math.max(0, expiresAt - Date.now()));
-      result = await getBridge().run({ conversationId: conversation.id, prompt: entry.content, threadId: conversation.threadId, permissions: entry.permissions, images: [], ...(entry.model ? { model: entry.model } : {}), ...(entry.effort ? { effort: entry.effort } : {}), signal: task.controller.signal, onEvent });
+      const images = await resolveImages(entry.auth.userId, entry.attachmentIds); check(entry); task.controller.signal.throwIfAborted();
+      result = await getBridge().run({ conversationId: conversation.id, prompt: entry.content, threadId: conversation.threadId, permissions: entry.permissions, images, ...(entry.model ? { model: entry.model } : {}), ...(entry.effort ? { effort: entry.effort } : {}), signal: task.controller.signal, onEvent });
       check(entry); task.controller.signal.throwIfAborted();
     } catch (caught) { error = caught; }
     clearTimeout(expiry);
@@ -180,9 +179,9 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
       const task = { controller, done, finish, mode: 'codex', userId: entry.auth.userId, sessionHash: entry.auth.sessionHash, providerId: entry.providerId, approvalIds: new Set(), agentEntry: entry };
       active.set(conversation.id, task); agent.queue.shift(); record.status = 'running';
       agent.run = { id: entry.id, submissionId: entry.submissionId, status: 'running', turnId: null, permissions: { ...entry.permissions }, providerId: entry.providerId, model: entry.model, effort: entry.effort, startedAt: now() };
-      const userMessage = { id: randomUUID(), role: 'user', content: entry.content, status: 'complete', createdAt: now(), agentSubmissionId: entry.submissionId };
+      const userMessage = { id: randomUUID(), role: 'user', content: entry.content, ...(entry.attachmentIds.length ? { attachmentIds: [...entry.attachmentIds] } : {}), status: 'complete', createdAt: now(), agentSubmissionId: entry.submissionId };
       const assistant = { id: randomUUID(), role: 'assistant', content: '', status: 'streaming', createdAt: now(), model: entry.model, agentRunId: entry.id };
-      if (!conversation.messages.length) conversation.title = entry.content.slice(0, 32);
+      if (!conversation.messages.length) conversation.title = entry.content.slice(0, 32) || '图片任务';
       conversation.messages.push(userMessage, assistant); bump(conversation);
       try { await save(conversation); check(entry); controller.signal.throwIfAborted(); }
       catch (error) {
@@ -206,13 +205,14 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
         if (JSON.stringify(entry.permissions) !== JSON.stringify(task.agentEntry.permissions) || entry.providerId !== task.agentEntry.providerId || entry.model !== task.agentEntry.model || entry.effort !== task.agentEntry.effort) throw failure(409, '运行中不能修改模型或权限，请加入下一条任务。');
         if (conversation.messages.length >= 500) throw failure(409, '会话消息已达上限，请新建会话。');
         const record = reserve(agent, entry, fingerprint); bump(conversation); await save(conversation);
-        try { check(entry); task.controller.signal.throwIfAborted(); }
+        let images;
+        try { images = await resolveImages(entry.auth.userId, entry.attachmentIds); check(entry); task.controller.signal.throwIfAborted(); }
         catch (error) { record.status = 'cancelled'; agent.paused = true; bump(conversation); await save(conversation); throw error; }
         try {
-          await getBridge().steer({ conversationId: conversation.id, expectedTurnId: body.expectedTurnId, content: entry.content, images: [] });
+          await getBridge().steer({ conversationId: conversation.id, expectedTurnId: body.expectedTurnId, content: entry.content, images });
           // Delivered means exactly that, even if a revocation arrived during the RPC.
           record.status = 'steered';
-          conversation.messages.push({ id: randomUUID(), role: 'user', content: entry.content, status: 'complete', createdAt: now(), agentSubmissionId: entry.submissionId, agentRunId: task.agentEntry.id, steered: true });
+          conversation.messages.push({ id: randomUUID(), role: 'user', content: entry.content, ...(entry.attachmentIds.length ? { attachmentIds: [...entry.attachmentIds] } : {}), status: 'complete', createdAt: now(), agentSubmissionId: entry.submissionId, agentRunId: task.agentEntry.id, steered: true });
         } catch (error) {
           if (error.code === 'turn_not_active') {
             try { check(entry); enqueue(conversation, entry, record); }
@@ -240,7 +240,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
       if (!Number.isSafeInteger(body.revision) || body.revision !== entry.revision) throw failure(409, '队列内容已变化，请刷新后重试。');
       check({ ...entry, auth: { ...auth, generation: epoch(auth) } });
       if (remove) { agent.queue = agent.queue.filter(item => item !== entry); agent.submissions.find(item => item.entryId === id).status = 'cancelled'; }
-      else { const next = content(body.content), images = attachments(body.attachmentIds); entry.content = next; entry.attachmentIds = images; entry.revision++; }
+      else { const images = attachments(body.attachmentIds), next = content(body.content, images); check({ ...entry, content: next, attachmentIds: images, auth: { ...auth, generation: epoch(auth) } }); entry.content = next; entry.attachmentIds = images; entry.revision++; }
       bump(conversation); await save(conversation);
     });
   }

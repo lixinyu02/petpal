@@ -2,6 +2,14 @@ const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 const MAX_OUTPUT_CHARS = 2 * 1024 * 1024;
 
 export const REASONING_EFFORTS = Object.freeze(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+export function normalizeSupportsImages(value, model = '') {
+  if (value !== undefined && typeof value !== 'boolean') throw new Error('图片能力须为布尔值。');
+  if (String(model).toLowerCase() === 'halogen-qwen3.8-flash-next') return false;
+  return value ?? true;
+}
+export function assertImageSupport(provider, messages) {
+  if (!normalizeSupportsImages(provider.supportsImages, provider.model) && messages.some(message => message.attachmentIds?.length || message.images?.length)) throw Object.assign(new Error('此模型仅支持文本，请选择支持图片的模型或新建纯文本会话。'), { status: 400 });
+}
 export function normalizeReasoningEffort(value) {
   if (value === undefined) return '';
   if (typeof value !== 'string' || !REASONING_EFFORTS.includes(value)) throw new Error('推理强度须为服务默认值或 none、minimal、low、medium、high、xhigh、max、ultra。');
@@ -85,7 +93,14 @@ async function boundedJson(response) {
 export async function streamProvider({ provider, messages, persona = '', signal, onEvent, timeoutMs = 600000 }) {
   const timeout = AbortSignal.timeout(timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-  const history = messages.filter(message => ['user', 'assistant'].includes(message.role) && message.content).map(({ role, content }) => ({ role, content }));
+  assertImageSupport(provider, messages);
+  const history = messages.filter(message => ['user', 'assistant'].includes(message.role) && (message.content || message.images?.length)).map(({ role, content, images }) => {
+    if (!images?.length) return { role, content };
+    if (role !== 'user' || !Array.isArray(images) || images.length > 4 || images.some(image => typeof image.dataUrl !== 'string' || !/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/.test(image.dataUrl))) throw new Error('图片上下文格式无效。');
+    return { role, content: provider.protocol === 'responses'
+      ? [...(content ? [{ type: 'input_text', text: content }] : []), ...images.map(image => ({ type: 'input_image', image_url: image.dataUrl }))]
+      : [...(content ? [{ type: 'text', text: content }] : []), ...images.map(image => ({ type: 'image_url', image_url: { url: image.dataUrl } }))] };
+  });
   const reasoningEffort = normalizeReasoningEffort(provider.reasoningEffort);
   const body = provider.protocol === 'responses'
     ? { model: provider.model, instructions: persona || undefined, input: history, stream: true, store: false, ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}) }

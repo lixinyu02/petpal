@@ -2,7 +2,8 @@ import { mkdir, readFile, rename, writeFile, chmod, unlink, open } from 'node:fs
 import path from 'node:path';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { defaultVoiceSettings } from './voice.mjs';
-import { normalizeReasoningEffort } from './providers.mjs';
+import { normalizeReasoningEffort, normalizeSupportsImages } from './providers.mjs';
+import { validateStoredAttachments, normalizeAttachmentIds } from './attachments.mjs';
 import { restoreAgentState } from './agent-tasks.mjs';
 
 export const isCompanionKind = value => value === 'anime' || value === 'cat';
@@ -37,6 +38,8 @@ export class JsonStore {
       if (!provider || typeof provider !== 'object' || Array.isArray(provider)) throw new Error('本地模型连接格式无效，请保留文件并检查备份。');
       const effort = normalizeReasoningEffort(provider.reasoningEffort);
       if (provider.reasoningEffort === undefined) { provider.reasoningEffort = effort; changed = true; }
+      const supportsImages = normalizeSupportsImages(provider.supportsImages, provider.model);
+      if (provider.supportsImages !== supportsImages) { provider.supportsImages = supportsImages; changed = true; }
     }
     if (this.state.settings.companionKind === undefined) { this.state.settings.companionKind = 'anime'; changed = true; }
     else if (!isCompanionKind(this.state.settings.companionKind)) throw new Error('本地 companionKind 无效，必须是 anime 或 cat；请保留文件并检查备份。');
@@ -72,10 +75,14 @@ export class JsonStore {
     const principal = state.users.find(user => user.id === state.ownerId);
     if (!principal || principal.disabled || principal.role !== 'admin') throw new Error('本地主机 owner 无效，不能停用或降权。');
     if (state.sessions.some(session => !ids.has(session.userId) || !/^[a-f0-9]{64}$/.test(session.tokenHash) || !Number.isFinite(session.expiresAt))) throw new Error('本地登录会话数据无效。');
+    if (validateStoredAttachments(state)) changed = true;
     for (const conversation of this.state.conversations) {
       if (!ids.has(conversation.userId)) throw new Error('本地会话缺少有效用户归属，已停止加载。');
       if (restoreAgentState(conversation)) changed = true;
+      for (const entry of conversation.agent?.queue ?? []) for (const id of normalizeAttachmentIds(entry.attachmentIds)) if (!state.attachments.some(item => item.id === id && item.userId === conversation.userId)) throw new Error('本地 Agent 图片归属无效。');
+      for (const entry of conversation.agent?.submissions ?? []) for (const id of normalizeAttachmentIds(entry.attachmentIds)) if (!state.attachments.some(item => item.id === id && item.userId === conversation.userId)) throw new Error('本地 Agent 回执图片归属无效。');
       for (const message of conversation.messages ?? []) {
+        if (message.attachmentIds !== undefined) for (const id of normalizeAttachmentIds(message.attachmentIds)) if (!state.attachments.some(item => item.id === id && item.userId === conversation.userId)) throw new Error('本地消息图片归属无效。');
         if (message.status === 'streaming') { message.status = 'error'; message.error = '服务上次退出时回复尚未完成，可以重新发送。'; changed = true; }
       }
     }
@@ -119,5 +126,5 @@ export class JsonStore {
 }
 
 export function publicProvider(provider) {
-  return { id: provider.id, name: provider.name, protocol: provider.protocol, baseUrl: provider.baseUrl, model: provider.model, reasoningEffort: normalizeReasoningEffort(provider.reasoningEffort), hasApiKey: Boolean(provider.apiKey) };
+  return { id: provider.id, name: provider.name, protocol: provider.protocol, baseUrl: provider.baseUrl, model: provider.model, reasoningEffort: normalizeReasoningEffort(provider.reasoningEffort), supportsImages: normalizeSupportsImages(provider.supportsImages, provider.model), hasApiKey: Boolean(provider.apiKey) };
 }

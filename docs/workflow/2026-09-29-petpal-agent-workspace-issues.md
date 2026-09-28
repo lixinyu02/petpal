@@ -8,7 +8,7 @@
 
 - Goal: 统一登录后的 Chat / Agent 工作台并补齐执行、图片、下载及移动端角色能力。
 - Ordering rule: 按 issue 顺序完成，同一 issue 内分文件并行协作。
-- Current status: issue-19/20 done; issue-21 in_progress
+- Current status: issue-19/20/21 done; issue-22 in_progress
 
 ## issue-19
 
@@ -39,9 +39,9 @@
 - 范围: Chat/Agent、连接与模型弹层、多模态附件、CLI 引导、下载中心
 - 依赖: issue-20
 - 验收标准: 两模式入口明确；本地远程凭据隔离；图片确实传入两类模型链路；下载对应真实发布包
-- 状态: in_progress
-- 验证方式: 会话/附件/协议测试，Chrome UI 全流程
-- commit: pending
+- 状态: done
+- 验证方式: 全量403/403测试通过，TypeScript/Vite通过。Chrome验证模型搜索/键盘切换、仅文字提示、纯图片Chat、原生steer、排队编辑/停止/恢复；暂停只读队列后更改草稿为完整访问，恢复仍显示实际只读快照。注入POST确认丢失并隐去轮询回执后重试，两次endpoint/payload/UUID完全一致；已恢复原fetch。运行中进入下载后可返回停止/追加。下载目录读取真实GH资产、Ubuntu未发布时正确显示空。实际CSS viewport412px无横向溢出，二次元webgl可见；临时viewport已恢复。附件按用户隔离、串行上下文转换、32MiB/16张总额；前端视口按需加载且最多3并发。未以浏览器模拟视口声称手机实机验收。
+- commit: 本次 feat(issue-21) 提交
 
 ## issue-22
 
@@ -50,6 +50,6 @@
 - 范围: 线上更新、APK / Windows / Ubuntu 产物与发布、文档
 - 依赖: issue-21
 - 验收标准: 已发布源码与资源匹配、无凭据、认证与核心交互线上可用、下载入口可用
-- 状态: todo
+- 状态: in_progress
 - 验证方式: 相关回归、原生构建/签名/内容审计、Chrome 与有限无害真实任务
 - commit: pending

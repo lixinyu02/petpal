@@ -8,14 +8,15 @@ export type AgentPermissions = { access:'read-only'|'workspace-write'|'full-acce
 export type User = { id:string; username:string; displayName:string; role:string; isOwner:boolean; canUseCodex:boolean; agentAccess:AgentAccess };
 export type ManagedUser = User & { disabled:boolean; providerIds:string[]; hasPassword:boolean };
 export type ReasoningEffort = '' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
-export type Provider = { id: string; name: string; protocol: 'chat-completions' | 'responses'; baseUrl: string; model: string; reasoningEffort?:ReasoningEffort; hasApiKey: boolean; editable?:boolean; testable?:boolean };
-export type Message = { id: string; role: 'user' | 'assistant'; content: string; model?: string; status?: string; createdAt?: string };
+export type Provider = { id: string; name: string; protocol: 'chat-completions' | 'responses'; baseUrl: string; model: string; reasoningEffort?:ReasoningEffort; hasApiKey: boolean; editable?:boolean; testable?:boolean; supportsImages?:boolean };
+export type Attachment = {id:string;mimeType:string;name:string;size:number;width:number;height:number};
+export type Message = { id: string; role: 'user' | 'assistant'; content: string; model?: string; status?: string; createdAt?: string; attachments?:Attachment[]; steered?:boolean };
 export type AgentQueueEntry = { id:string; submissionId:string; revision:number; content:string; attachmentIds:string[]; permissions:AgentPermissions; providerId:string|null; model:string; effort:string; createdAt:string };
 export type AgentRun = { id:string; submissionId:string; status:'running'|'stopping'|'completed'|'cancelled'|'error'; turnId:string|null; permissions:AgentPermissions; providerId:string|null; model:string; effort:string; startedAt:string; finishedAt?:string; error?:string };
 export type AgentSubmission = {submissionId:string;entryId:string;status:'queued'|'running'|'completed'|'cancelled'|'error'|'steered'|'uncertain';content?:string;createdAt?:string};
 export type AgentState = { revision:number; paused:boolean; queue:AgentQueueEntry[]; run:AgentRun|null; approvals:{id:string;kind:string;description:string}[]; submissions?:AgentSubmission[] };
 export type Conversation = { id: string; title: string; mode: 'chat' | 'codex'; providerId?: string; messages: Message[]; createdAt: string; updatedAt: string; agent?:AgentState };
-export type CodexStatus = { available?: boolean; running?: boolean; version?: string; authenticated?: boolean; error?: string; message?: string; workspaceRoot?: string; mode?:'host'|'api'; configured?:boolean; apiVerified?:boolean; [key: string]: unknown };
+export type CodexStatus = { available?: boolean; running?: boolean; version?: string; authenticated?: boolean; error?: string; message?: string; workspaceRoot?: string; mode?:'host'|'api'; configured?:boolean; apiVerified?:boolean; eligibleProviderIds?:string[]; model?:string; reasoningEffort?:string; [key: string]: unknown };
 export type CodexConfig = { mode:'host'|'api'; baseUrl:string; model:string; reasoningEffort?:ReasoningEffort; hasApiKey:boolean; revision:string; protocol:'responses'; configured:boolean };
 export type MusicAction = 'open'|'play'|'pause'|'next'|'previous';
 export type MusicPlayer = { id:'qqmusic'|'netease'; name:string; installed:boolean; session:boolean; state?:string; controls:string[]; message?:string };
@@ -102,7 +103,7 @@ export async function switchExecutionTarget(target:'local'|'remote',defaultRemot
 function message(data:any,status:number){return data.error?.message||data.error||data.message||`请求失败 (${status})`;}
 async function responseJson(response:Response,request:ReturnType<typeof requests.begin>) {
   const data=await response.json().catch(()=>({}));request.assertCurrent();
-  if(!response.ok){if(response.status===401&&request.connection.token)setConnection({url:request.connection.url,token:''});throw new Error(message(data,response.status));}
+  if(!response.ok){if(response.status===401&&request.connection.token)setConnection({url:request.connection.url,token:''});throw Object.assign(new Error(message(data,response.status)),{status:response.status});}
   return data;
 }
 export async function api<T = any>(path:string, options:RequestInit = {}):Promise<T> {
@@ -137,10 +138,10 @@ export function logout() {
   const previous=getConnection();setConnection({url:previous.url,token:''});
   if(previous.token){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4000);void connectionFetch(`${previous.url}/api/auth/logout`,{method:'POST',headers:{Authorization:`Bearer ${previous.token}`},signal:controller.signal}).catch(()=>{}).finally(()=>clearTimeout(timer));}
 }
-export async function streamMessage(id:string,content:string,signal:AbortSignal,onEvent:(event:StreamEvent)=>void) {
+export async function streamMessage(id:string,content:string,signal:AbortSignal,onEvent:(event:StreamEvent)=>void,attachmentIds:string[] = []) {
   const request=requests.begin(signal);let reader:ReadableStreamDefaultReader<Uint8Array>|undefined;
   try{
-    request.assertCurrent();const response=await connectionFetch(`${request.connection.url}/api/conversations/${encodeURIComponent(id)}/messages`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${request.connection.token}`},body:JSON.stringify({content}),signal:request.signal});request.assertCurrent();
+    request.assertCurrent();const response=await connectionFetch(`${request.connection.url}/api/conversations/${encodeURIComponent(id)}/messages`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${request.connection.token}`},body:JSON.stringify({content,attachmentIds}),signal:request.signal});request.assertCurrent();
     if(!response.ok){await responseJson(response,request);return;}
     if(!response.body)throw new Error('当前环境不支持流式回复。');
     reader=response.body.getReader();const decoder=new TextDecoder();let buffer='',terminal=false;
