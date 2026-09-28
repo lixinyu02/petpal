@@ -8,7 +8,7 @@
 
 - Goal: 统一登录后的 Chat / Agent 工作台并补齐执行、图片、下载及移动端角色能力。
 - Ordering rule: 按 issue 顺序完成，同一 issue 内分文件并行协作。
-- Current status: issue-19/20/21 done; issue-22 in_progress
+- Current status: issue-19/20/21/22 done
 
 ## issue-19
 
@@ -50,6 +50,6 @@
 - 范围: 线上更新、APK / Windows / Ubuntu 产物与发布、文档
 - 依赖: issue-21
 - 验收标准: 已发布源码与资源匹配、无凭据、认证与核心交互线上可用、下载入口可用
-- 状态: in_progress
-- 验证方式: 线上 0.7.0 保留实例、账号、原聊天与模型配置；真实 Luna 文本/图片及只读 Codex 任务成功，匿名语音/附件/下载/任务均拒绝。Chrome 线上确认 test 的 Chat/Agent、模型与权限选项；最终静态资源 23/23 与公网一致。Android code9 同旧签名、23/23前端一致；Ubuntu x64/arm64 各6966文件归档比对一致、原生ELF/权限通过；Windows最终原生运行与GitHub发布验证继续收尾。
-- commit: 本次 build(issue-22)；公开发布后的最终状态另行记录
+- 状态: done
+- 验证方式: 线上 0.7.0 保留实例、账号、原聊天与模型配置；真实 Luna 文本/图片及只读 Codex 任务成功，匿名语音/附件/下载/任务均拒绝。Chrome 线上确认 test 的 Chat/Agent、模型与权限选项；最终静态资源 23/23 与公网一致。Android code9 同旧签名、23/23前端一致；Ubuntu x64/arm64 各6966文件归档比对一致、原生ELF/权限通过；Windows最终包1969项字节比对、127项冻结输入及fresh-profile真实运行通过。短窗口修正后桌面正文231px、手机短屏至少160px；最终安装包均包含修正。GitHub v0.7.0 已公开发布为 latest，9/9资产大小与SHA-256匹配，实际tag指向ecb52c6；匿名更新清单/公钥/校验和逐字节一致，签名sequence3与5目标有效。Chrome登录下载页确认Android/Windows/Ubuntu 0.7.0及Ubuntu两种架构链接。临时传输文件、分支和上传代理已清理，原代理与配置保留。Android/Ubuntu真机边界见验收文档。
+- commit: e9eff46、ecb52c6；发布收尾记录见 docs(issue-22) 提交
