@@ -1,6 +1,6 @@
 import UpdatesSettings from './UpdatesSettings';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowUp, Check, ChevronDown, CircleHelp, Code2, Coffee, Copy, Globe2, Heart, History, Link2, Loader2, Menu, MessageCircle, Monitor, Moon, MoreHorizontal, PawPrint, Pencil, Plug, Plus, Settings2, ShieldCheck, Square, Terminal, Trash2, Unplug, X } from 'lucide-react';
+import { ArrowUp, Check, ChevronDown, CircleHelp, Code2, Coffee, Copy, Globe2, Heart, History, Link2, Loader2, Menu, MessageCircle, Monitor, Moon, MoreHorizontal, PawPrint, Pencil, Plug, Plus, Settings2, ShieldCheck, Square, Terminal, Trash2, Unplug, Volume2, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { PetOverlay as Overlay, showPet } from './platform/overlay';
 import { useCompanion, hydrateCompanion, readCompanion } from './avatar/preference';
@@ -30,6 +30,7 @@ export default function App() {
   const [providerId, setProviderId] = useState('');
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [switchingModel, setSwitchingModel] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -41,11 +42,12 @@ export default function App() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [responsePerformance, setResponsePerformance] = useState<PerformanceInput>({ utteranceId: '', text: '', phase: 'idle' });
   const voiceScope = state.instanceId && state.user ? `${state.instanceId}:${state.user.id}` : `guest:${getConnection().url || location.origin}`;
-  const speech = useSpeech(companionKind === 'anime' && view === 'chat' && !connectionOpen && mood !== 'sleep', voiceScope);
+  const speech = useSpeech(view === 'chat' && !connectionOpen && mood !== 'sleep', voiceScope);
   const awakeRef = useRef(mood !== 'sleep');
   awakeRef.current = mood !== 'sleep';
   const abortRef = useRef<AbortController | null>(null);
   const busyRef = useRef(false);
+  const switchingModelRef = useRef(false);
   const activeRef = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -67,6 +69,10 @@ export default function App() {
     setResponsePerformance({ utteranceId, text, phase: document.hidden || !awakeRef.current ? 'idle' : phase });
   }
   function stopPresentation() { speech.stop(); performancePhase('idle'); }
+  function readReply(message: Message) {
+    performancePhase('idle');
+    speech.speak(message.content, `${message.id}-manual-${Date.now()}`);
+  }
   function finishResponse(text: string, utteranceId: string, requestId: number) {
     // Keep newly arrived text observable when React batches delta + done in one SSE read.
     // The renderer consumes each character once; this bounded tail only drains that queue.
@@ -114,18 +120,20 @@ export default function App() {
     moodTimer.current = setTimeout(() => { setMood('idle'); setPetSay('我在这里，听你说。'); }, 5500);
   }
   function newChat(nextMode = mode) {
+    if (switchingModelRef.current) { setNotice('正在切换模型，请稍候。'); return; }
     if (busyRef.current) { setNotice('先停止当前回复，再开启新对话。'); return; }
     stopPresentation();
     setSelected(null); setMode(nextMode === 'codex' && !state.user?.canUseCodex ? 'chat' : nextMode); setProviderId(state.settings.defaultProviderId || state.providers[0]?.id || ''); setView('chat'); setDraft(''); setError(''); setMobileNav(false); setApprovals([]);
   }
   function selectChat(c: Conversation) {
+    if (switchingModelRef.current) { setNotice('正在切换模型，请稍候。'); return; }
     if (busyRef.current) { setNotice('当前对话正在回复，请完成或停止后切换。'); return; }
     stopPresentation();
     setSelected(c.id); setMode(c.mode); setView('chat'); setError(''); setMobileNav(false); setApprovals([]);
   }
   async function send(event?: FormEvent) {
     event?.preventDefault(); const content = draft.trim();
-    if (!content || busyRef.current) return;
+    if (!content || busyRef.current || switchingModelRef.current) return;
     if (!connected) { setConnectionOpen(true); return; }
     if (currentMode === 'codex' && !state.user?.canUseCodex) { setNotice('Codex 电脑助手仅供主机管理员使用。'); return; }
     if (currentMode === 'chat' && !provider) { setView('settings'); setNotice('添加一个模型连接，就可以开始聊天了。'); return; }
@@ -209,6 +217,18 @@ export default function App() {
     catch (e) { setError((e as Error).message); }
   }
   function chooseSuggestion(text: string) { setDraft(text); inputRef.current?.focus(); }
+  async function changeModel(nextId: string) {
+    if (busyRef.current || switchingModelRef.current || !state.providers.some(p => p.id === nextId)) return;
+    if (!conversation) { setProviderId(nextId); return; }
+    if (conversation.mode !== 'chat' || conversation.providerId === nextId) return;
+    switchingModelRef.current = true; setSwitchingModel(true); setError('');
+    try {
+      const updated = await api<Conversation>(`/conversations/${encodeURIComponent(conversation.id)}`, { method: 'PATCH', body: JSON.stringify({ providerId: nextId }) });
+      setState(previous => ({ ...previous, conversations: previous.conversations.map(item => item.id === updated.id ? updated : item) }));
+      setProviderId(nextId); setNotice('模型已切换，将沿用当前对话内容。');
+    } catch (error) { if (!isSessionChanged(error)) setError((error as Error).message); }
+    finally { switchingModelRef.current = false; if (getSessionEpoch() === accountEpoch) setSwitchingModel(false); }
+  }
 
   if (petOnly) return <div className="floating-pet"><div className="pet-drag-handle" title="拖动小猫">•••</div><button className="floating-bubble" onClick={() => window.petpal?.showMain()}>{busy ? '我在认真工作…' : `${state.settings.petName}在这里，点我聊聊`}<MessageCircle size={15}/></button><button className="floating-cat" aria-label="抚摸小猫" onClick={() => interact('happy')} onDoubleClick={() => window.petpal?.showMain()}><Cat mood={mood}/></button><button className="floating-hide" aria-label="隐藏桌宠" onClick={() => window.petpal?.hidePet()}><X size={15}/></button></div>;
 
@@ -233,15 +253,36 @@ export default function App() {
       <header className="topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileNav(true)}><Menu size={21}/></button><span className="breadcrumb">我的空间</span><span className="breadcrumb-divider">/</span><strong>{view === 'settings' ? '连接与设置' : currentMode === 'codex' ? 'Codex 电脑助手' : '陪伴空间'}</strong></div><div className="topbar-actions"><span className="today">{new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric' }).format(new Date())}</span><button className="avatar account-entry" aria-label="我的账号" onClick={() => { stopPresentation(); setSettingsTab('accounts'); setView('settings'); }}>{state.user?.displayName?.slice(0,1) || '我'}</button><a className="single-companion-return" href="/" aria-label="回到伙伴身边"><PawPrint size={20}/></a></div></header>
       {!ready ? <div className="loading-view"><Loader2 className="spin"/>正在准备你的小伴…</div> : view === 'settings' ? <SettingsView state={state} connected={connected} refresh={refresh} notice={setNotice} connect={() => setConnectionOpen(true)} initialTab={settingsTab} hasDraft={!!draft.trim()}/> : <div className="workspace">
         <section className="chat-area">
-          <div className="chat-toolbar"><span className="mode-label"><span className={`status-light ${connected ? 'online' : ''}`}/>{currentMode === 'codex' ? '听你安排，帮你操作' : '随时听你说'}</span><div className="model-picker">{currentMode === 'chat' ? <><Plug size={13}/><select aria-label="当前模型连接" value={conversation?.providerId || providerId} disabled={busy || !!conversation} onChange={e => setProviderId(e.target.value)}>{!state.providers.length && <option value="">还未连接模型</option>}{state.providers.map(p => <option value={p.id} key={p.id}>{p.name} · {p.model}</option>)}</select><ChevronDown size={13}/></> : <><Terminal size={14}/><span>{state.codex.mode === 'api' ? 'Codex · Responses API' : 'Codex · 本机配置'}</span><button className="assistant-tool-settings" onClick={() => { stopPresentation(); setSettingsTab('assistant'); setView('settings'); }}>配置</button></>}</div></div>
+          <div className="chat-toolbar"><span className="mode-label"><span className={`status-light ${connected ? 'online' : ''}`}/>{currentMode === 'codex' ? '听你安排，帮你操作' : '随时听你说'}</span><div className="model-picker">{currentMode === 'chat' ? <><Plug size={13}/><select aria-label="当前模型连接" value={conversation?.providerId || providerId} disabled={busy || switchingModel} onChange={e => void changeModel(e.target.value)}>{!state.providers.length && <option value="">还未连接模型</option>}{state.providers.map(p => <option value={p.id} key={p.id}>{p.name} · {p.model}</option>)}</select><ChevronDown size={13}/></> : <><Terminal size={14}/><span>{state.codex.mode === 'api' ? 'Codex · Responses API' : 'Codex · 本机配置'}</span><button className="assistant-tool-settings" onClick={() => { stopPresentation(); setSettingsTab('assistant'); setView('settings'); }}>配置</button></>}</div></div>
           <div className="chat-scroll" ref={scrollRef} aria-live="polite" aria-busy={busy}>
-            {!conversation?.messages.length ? <div className="welcome"><div className="welcome-symbol">{currentMode === 'codex' ? <Terminal size={28}/> : <span className="mini-sun">✳</span>}</div><span className="eyebrow">{currentMode === 'codex' ? 'YOUR DESKTOP ASSISTANT' : 'A LITTLE COMPANY, EVERY DAY'}</span><h1>{currentMode === 'codex' ? <>听听音乐，<br/>把电脑交给小伴。</> : <>今天，<br/>也一起过吧。</>}</h1><p>{currentMode === 'codex' ? '连接 Codex API 后，让小伴帮你控制音乐播放器，或在浏览器里打开音乐官网。' : `我是${state.settings.petName}。想聊的、想做的，慢慢告诉我。`}</p><div className="suggestions">{(currentMode === 'codex' ? [{ icon: Monitor, title: '看看音乐播放器', text: '请检查 QQ 音乐和网易云音乐的安装及媒体会话状态，暂不打开或播放。' }, { icon: Globe2, title: '连接音乐网页', text: '请检查 OpenCLI 和浏览器桥的状态，告诉我还需要完成哪些连接步骤。' }] : [{ icon: Coffee, title: '聊聊今天', text: '小伴，陪我聊聊今天吧。' }, { icon: Pencil, title: '把想法写下来', text: '我有一个还不成熟的想法，想和你一起梳理。' }]).map(item => <button key={item.title} onClick={() => chooseSuggestion(item.text)}><item.icon size={19}/><span>{item.title}</span><span className="suggestion-arrow">↗</span></button>)}</div>{!connected && <button className="inline-connect" onClick={() => setConnectionOpen(true)}><Link2 size={14}/>连接个人服务，开始第一段对话</button>}{connected && currentMode === 'chat' && !state.providers.length && <button className="inline-connect" onClick={() => setView('settings')}><Plus size={14}/>{state.user?.isOwner ? '添加模型连接，开始聊天' : '还没有可用模型，请联系管理员分配'}</button>}</div> : <div className="messages">{conversation.messages.map(message => <div key={message.id} className={`message message-${message.role}`}><span className={`message-avatar ${message.role === 'assistant' ? 'pet-avatar' : ''}`}>{message.role === 'assistant' ? <PawPrint size={16}/> : '我'}</span><div className="message-content"><div className="message-author">{message.role === 'assistant' ? state.settings.petName : '我'}{message.role === 'assistant' && <span>{currentMode === 'codex' ? 'Codex' : provider?.model || ''}</span>}</div><div className="message-text">{message.content || (busy && message.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : <span className="muted">{message.status === 'cancelled' ? '已停止回复' : '未收到回复'}</span>)}</div>{message.status === 'error' && <small className="message-error">回复未完成</small>}{message.status === 'cancelled' && message.content && <small className="muted">已停止</small>}{message.role === 'assistant' && message.content && !busy && <button className="copy-message" aria-label="复制回复" onClick={() => navigator.clipboard.writeText(message.content).then(() => setNotice('已复制回复')).catch(() => setNotice('当前环境无法访问剪贴板'))}><Copy size={13}/></button>}</div></div>)}</div>}
+            {!conversation?.messages.length ? <div className="welcome"><div className="welcome-symbol">{currentMode === 'codex' ? <Terminal size={28}/> : <span className="mini-sun">✳</span>}</div><span className="eyebrow">{currentMode === 'codex' ? 'YOUR DESKTOP ASSISTANT' : 'A LITTLE COMPANY, EVERY DAY'}</span><h1>{currentMode === 'codex' ? <>听听音乐，<br/>把电脑交给小伴。</> : <>今天，<br/>也一起过吧。</>}</h1><p>{currentMode === 'codex' ? '连接 Codex API 后，让小伴帮你控制音乐播放器，或在浏览器里打开音乐官网。' : `我是${state.settings.petName}。想聊的、想做的，慢慢告诉我。`}</p><div className="suggestions">{(currentMode === 'codex' ? [{ icon: Monitor, title: '看看音乐播放器', text: '请检查 QQ 音乐和网易云音乐的安装及媒体会话状态，暂不打开或播放。' }, { icon: Globe2, title: '连接音乐网页', text: '请检查 OpenCLI 和浏览器桥的状态，告诉我还需要完成哪些连接步骤。' }] : [{ icon: Coffee, title: '聊聊今天', text: '小伴，陪我聊聊今天吧。' }, { icon: Pencil, title: '把想法写下来', text: '我有一个还不成熟的想法，想和你一起梳理。' }]).map(item => <button key={item.title} onClick={() => chooseSuggestion(item.text)}><item.icon size={19}/><span>{item.title}</span><span className="suggestion-arrow">↗</span></button>)}</div>{!connected && <button className="inline-connect" onClick={() => setConnectionOpen(true)}><Link2 size={14}/>连接个人服务，开始第一段对话</button>}{connected && currentMode === 'chat' && !state.providers.length && <button className="inline-connect" onClick={() => setView('settings')}><Plus size={14}/>{state.user?.isOwner ? '添加模型连接，开始聊天' : '还没有可用模型，请联系管理员分配'}</button>}</div> : <div className="messages">{conversation.messages.map(message => {
+              const ownsSpeech = speech.utteranceId.startsWith(message.id + '-manual-') || speech.utteranceId.startsWith(message.id + '-auto-');
+              const isReading = ownsSpeech && speech.playing;
+              const canRead = message.role === 'assistant' && message.status === 'complete' && !!message.content.trim();
+              return <div key={message.id} className={`message message-${message.role}`}>
+                <span className={`message-avatar ${message.role === 'assistant' ? 'pet-avatar' : ''}`}>{message.role === 'assistant' ? <PawPrint size={16}/> : '我'}</span>
+                <div className="message-content">
+                  <div className="message-author">{message.role === 'assistant' ? state.settings.petName : '我'}{message.role === 'assistant' && <span>{currentMode === 'codex' ? 'Codex' : message.model || ''}</span>}</div>
+                  <div className="message-text">{message.content || (busy && message.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : <span className="muted">{message.status === 'cancelled' ? '已停止回复' : '未收到回复'}</span>)}</div>
+                  {message.status === 'error' && <small className="message-error">回复未完成</small>}
+                  {message.status === 'cancelled' && message.content && <small className="muted">已停止</small>}
+                  {message.role === 'assistant' && message.content && <div className="message-actions">
+                    <button type="button" className="copy-message" aria-label="复制回复" title="复制回复" disabled={busy} onClick={() => navigator.clipboard.writeText(message.content).then(() => setNotice('已复制回复')).catch(() => setNotice('当前环境无法访问剪贴板'))}><Copy size={13}/></button>
+                    {canRead && <button type="button" className={`message-read ${isReading ? 'message-read-active' : ''}`} aria-label={isReading ? '停止朗读这条回复' : '朗读这条回复'} aria-pressed={isReading} disabled={!isReading && (busy || !speech.supported || mood === 'sleep')} title={mood === 'sleep' ? '唤醒小伴后可继续朗读' : !speech.supported ? speech.feedback : isReading ? '停止这条回复的语音' : '朗读这条回复'} onClick={() => isReading ? stopPresentation() : readReply(message)}>
+                      {isReading ? speech.pending ? <Loader2 size={14} className="spin"/> : <Square size={12}/> : <Volume2 size={14}/>}
+                      <span>{isReading ? speech.pending ? '准备语音中 · 停止' : '播放中 · 停止' : '朗读'}</span>
+                    </button>}
+                  </div>}
+                  {ownsSpeech && speech.error && <p className="message-speech-error" role="status">{speech.error}</p>}
+                </div>
+              </div>;
+            })}</div>}
             {approvals.map(approval => <div className="approval" key={approval.id}><ShieldCheck size={21}/><div><strong>Codex 请求你的确认</strong><p>{approval.description}</p><div className="button-row"><button className="secondary-button" onClick={() => approve(approval, 'decline')}>拒绝</button><button className="primary-button" onClick={() => approve(approval, 'accept')}>允许本次</button></div></div></div>)}
           </div>
-          <div className="composer-area">{error && <div className="error-banner" role="alert"><span>{error}</span><button className="icon-button" aria-label="关闭错误提示" onClick={() => setError('')}><X size={15}/></button></div>}{busy && status && <div className="stream-status"><Loader2 size={12} className="spin"/>{status}</div>}<form className={`composer ${busy ? 'composer-busy' : ''}`} onSubmit={send}><textarea ref={inputRef} aria-label="消息" placeholder={currentMode === 'codex' ? '例如：帮我打开 QQ 音乐' : `和${state.settings.petName}说点什么…`} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} rows={2} maxLength={20000} disabled={busy}/><div className="composer-bottom"><span className="composer-hint">{currentMode === 'codex' ? <><ShieldCheck size={13}/>{state.codex.mode === 'api' ? '受限工具 · 操作先确认' : '本机配置 · 操作需确认'}</> : <><PawPrint size={14}/>小伴，认真听着呢</>}</span>{busy ? <button className="send-button stop-button" type="button" aria-label="停止生成" onClick={stop}><Square size={16}/></button> : <button className="send-button" aria-label="发送消息" type="submit" disabled={!draft.trim()}><ArrowUp size={21}/></button>}</div></form>{companionKind === 'anime' && <div className="speech-controls">
-            <div className="speech-controls-row"><label className="speech-toggle"><input type="checkbox" checked={speech.enabled} disabled={!speech.supported} onChange={e => speech.setEnabled(e.target.checked)}/><span>自动朗读回复</span><small>默认关闭</small></label><button type="button" disabled={busy || !lastReply || !speech.supported || mood === 'sleep'} onClick={() => { performancePhase('idle'); if (lastReply) speech.speak(lastReply.content, `${lastReply.id}-manual-${Date.now()}`); }}>朗读上一条</button>{speech.playing && <button type="button" className="speech-stop" onClick={stopPresentation}><Square size={11}/>停止朗读</button>}</div>
+          <div className="composer-area">{error && <div className="error-banner" role="alert"><span>{error}</span><button className="icon-button" aria-label="关闭错误提示" onClick={() => setError('')}><X size={15}/></button></div>}{busy && status && <div className="stream-status"><Loader2 size={12} className="spin"/>{status}</div>}<form className={`composer ${busy ? 'composer-busy' : ''}`} onSubmit={send}><textarea ref={inputRef} aria-label="消息" placeholder={currentMode === 'codex' ? '例如：帮我打开 QQ 音乐' : `和${state.settings.petName}说点什么…`} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} rows={2} maxLength={20000} disabled={busy}/><div className="composer-bottom"><span className="composer-hint">{currentMode === 'codex' ? <><ShieldCheck size={13}/>{state.codex.mode === 'api' ? '受限工具 · 操作先确认' : '本机配置 · 操作需确认'}</> : <><PawPrint size={14}/>小伴，认真听着呢</>}</span>{busy ? <button className="send-button stop-button" type="button" aria-label="停止生成" onClick={stop}><Square size={16}/></button> : <button className="send-button" aria-label="发送消息" type="submit" disabled={!draft.trim() || switchingModel}><ArrowUp size={21}/></button>}</div></form><div className="speech-controls">
+            <div className="speech-controls-row"><label className="speech-toggle"><input type="checkbox" checked={speech.enabled} disabled={!speech.supported} onChange={e => speech.setEnabled(e.target.checked)}/><span>自动朗读回复</span><small>默认关闭</small></label><button type="button" disabled={busy || !lastReply || !speech.supported || mood === 'sleep'} onClick={() => { if (lastReply) readReply(lastReply); }}>朗读上一条</button>{speech.playing && <button type="button" className="speech-stop" onClick={stopPresentation}><Square size={11}/>停止朗读</button>}</div>
             <p className="speech-feedback" role="status">{mood === 'sleep' ? '小伴正在休息，唤醒后可继续朗读。' : speech.feedback}{speech.engine === 'system' && speech.playing && speech.progressBasis === 'estimated' && <span>口型按语句进度近似呈现</span>}</p>
-          </div>}<p className="composer-footnote">{currentMode === 'codex' ? (state.codex.mode === 'api' ? '真实 Codex CLI · 独立 API 配置与具名工具' : '真实 Codex CLI · 使用主机已有登录与配置') : 'AI 也会有不确定的时候，重要的事情记得核实。'}<span>Enter 发送 · Shift Enter 换行</span></p></div>
+          </div><p className="composer-footnote">{currentMode === 'codex' ? (state.codex.mode === 'api' ? '真实 Codex CLI · 独立 API 配置与具名工具' : '真实 Codex CLI · 使用主机已有登录与配置') : 'AI 也会有不确定的时候，重要的事情记得核实。'}<span>Enter 发送 · Shift Enter 换行</span></p></div>
         </section>
         <aside className="pet-panel"><div className="pet-panel-heading"><span>你的小伙伴</span><span className="live-tag"><span/>{speech.active ? '朗读中' : responsePerformance.phase === 'speaking' ? '回应中' : busy ? '思考中' : mood === 'sleep' ? '打盹中' : '在你身边'}</span></div><div className="pet-scene"><div className="scene-circle"/><svg className="scene-leaf" viewBox="0 0 90 120" aria-hidden="true"><path d="M42 118V44m0 50C3 85 8 54 42 75m0-9c33-6 40-31 8-28m-8 4C17 32 24 5 42 15" fill="#b7c8a5" stroke="#9bad8a" strokeWidth="2"/><path d="M26 100h34l-5 20H31z" fill="#d9cbb5" stroke="none"/></svg><button className="pet-touch" aria-label="抚摸小伴" onClick={() => interact('happy')}><Cat mood={mood === 'sleep' ? 'sleep' : busy ? 'thinking' : mood} performanceInput={performanceInput}/></button><div className="scene-floor"/></div><div className="pet-name"><h2>{state.settings.petName}</h2><span>{companionKind === 'anime' ? '温柔的二次元伙伴' : '一只喜欢陪着你的小猫'}</span></div><div className="pet-speech">{busy ? '让我想一想，马上就好…' : petSay}</div><div className="pet-actions"><button onClick={() => interact('happy')}><Heart size={18}/><span>摸摸头</span></button><button onClick={() => interact('eat')}><Coffee size={18}/><span>喂零食</span></button><button onClick={() => interact('sleep')}><Moon size={18}/><span>歇一会</span></button></div><a className="motion-preview-link" href="/">回到伙伴身边 <span>↗</span></a><div className="pet-panel-bottom"><div className="quiet-note"><span>✦</span><p>不用每一刻都很有生产力。<br/>有我陪着，发会儿呆也很好。</p></div>{window.petpal ? <button className="desktop-pet-button" onClick={() => window.petpal?.showPet()}><Monitor size={16}/>放到桌面上<span>↗</span></button> : Capacitor.isNativePlatform() ? <button className="desktop-pet-button" onClick={() => setView('settings')}><Monitor size={16}/>开启悬浮伙伴<span>↗</span></button> : <div className="platform-note"><Monitor size={14}/><span>桌面版支持透明悬浮伙伴</span></div>}</div></aside>
       </div>}

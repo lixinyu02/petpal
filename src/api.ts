@@ -5,7 +5,7 @@ export type User = { id:string; username:string; displayName:string; role:string
 export type ManagedUser = User & { disabled:boolean; providerIds:string[]; hasPassword:boolean };
 export type ReasoningEffort = '' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 export type Provider = { id: string; name: string; protocol: 'chat-completions' | 'responses'; baseUrl: string; model: string; reasoningEffort?:ReasoningEffort; hasApiKey: boolean; editable?:boolean; testable?:boolean };
-export type Message = { id: string; role: 'user' | 'assistant'; content: string; status?: string; createdAt?: string };
+export type Message = { id: string; role: 'user' | 'assistant'; content: string; model?: string; status?: string; createdAt?: string };
 export type Conversation = { id: string; title: string; mode: 'chat' | 'codex'; providerId?: string; messages: Message[]; createdAt: string; updatedAt: string };
 export type CodexStatus = { available?: boolean; running?: boolean; version?: string; authenticated?: boolean; error?: string; message?: string; workspaceRoot?: string; mode?:'host'|'api'; configured?:boolean; apiVerified?:boolean; [key: string]: unknown };
 export type CodexConfig = { mode:'host'|'api'; baseUrl:string; model:string; reasoningEffort?:ReasoningEffort; hasApiKey:boolean; revision:string; protocol:'responses'; configured:boolean };
@@ -57,7 +57,7 @@ function acceptIdentity(value:{instanceId?:string;user?:User}) {
   if(identity?.instanceId===value.instanceId&&identity.userId===value.user.id)return;
   identity={instanceId:value.instanceId,userId:value.user.id};notify();
 }
-export function initConnection() {
+export function initConnection(defaultUrl = '') {
   initialization ??= (async()=>{
     const native=window.petpal?await window.petpal.connection():undefined;
     const params=new URLSearchParams(location.hash.slice(1)),token=params.get('token');
@@ -70,6 +70,7 @@ export function initConnection() {
       setConnection(restored,kind);return getConnection();
     }}}catch{try{sessionStorage.removeItem('petpal.connection');}catch{}}
     if(native)setConnection(native);
+    else if(defaultUrl)setConnection({url:defaultUrl,token:''});
     return getConnection();
   })();
   return initialization.then(()=>getConnection());

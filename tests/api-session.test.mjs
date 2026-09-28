@@ -65,5 +65,26 @@ test('real API wrapper account-switch and native restore behavior',async t=>{
         assert.equal((await api.initConnection()).token,'later');
       }
     });
+    await t.test('mobile default selects a server without credentials and keeps explicit connections',async()=>{
+      delete window.petpal;disk.clear();
+      const api=await freshApi();
+      assert.deepEqual(await api.initConnection('https://mobile.example'),{url:'https://mobile.example',token:''});
+      api.setConnection({url:'https://personal.example',token:'later'});
+      const restored=await freshApi();
+      assert.deepEqual(await restored.initConnection('https://mobile.example'),{url:'https://personal.example',token:'later'});
+      restored.logout();
+      const loggedOut=await freshApi();
+      assert.deepEqual(await loggedOut.initConnection('https://mobile.example'),{url:'https://personal.example',token:''});
+      disk.clear();
+      const web=await freshApi();assert.deepEqual(await web.initConnection(),{url:'',token:''});
+    });
+    await t.test('a default server never becomes the destination of a URL pairing token',async()=>{
+      disk.set('petpal.connection',JSON.stringify({url:'https://personal.example',token:'later',credentialKind:'session'}));
+      location.hash='#token=later';
+      try{
+        const api=await freshApi();
+        assert.deepEqual(await api.initConnection('https://mobile.example'),{url:'',token:'later'});
+      }finally{location.hash='';disk.clear();}
+    });
   }finally{for(const[key,descriptor]of original){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];}}
 });

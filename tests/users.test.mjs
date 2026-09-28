@@ -26,8 +26,8 @@ async function setup(t, options = {}) {
     const response = await request('/admin/users', { method: 'POST', body: { username: name, displayName: `Member ${name}`, password, providerIds } });
     assert.equal(response.status, 201); const { user } = await response.json(); return { user, ...await login(name) };
   };
-  const provider = async (name = 'Fixture', baseUrl = 'https://example.com/v1') => {
-    const response = await request('/providers', { method: 'POST', body: { name, baseUrl, protocol: 'chat-completions', model: 'fixture', apiKey: 'fixture-provider-private-key' } });
+  const provider = async (name = 'Fixture', baseUrl = 'https://example.com/v1', model = 'fixture') => {
+    const response = await request('/providers', { method: 'POST', body: { name, baseUrl, protocol: 'chat-completions', model, apiKey: 'fixture-provider-private-key' } });
     assert.equal(response.status, 200); return response.json();
   };
   const conversation = async (token, providerId) => {
@@ -47,6 +47,142 @@ async function hangingUpstream(t) {
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   return `http://127.0.0.1:${server.address().port}/v1`;
 }
+
+test('members switch an existing chat to another assigned model while retaining context and reply attribution', async t => {
+  const requests = [];
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = []; for await (const chunk of req) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString()); requests.push(body);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ message: { content: `reply from ${body.model}` }, finish_reason: 'stop' }] }));
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve)); });
+  const { request, member, provider, conversation, directory } = await setup(t);
+  const baseUrl = `http://127.0.0.1:${upstream.address().port}/v1`;
+  const first = await provider('First', baseUrl, 'first-model'), second = await provider('Second', baseUrl, 'second-model');
+  const alice = await member('alice', [first.id, second.id]);
+  await request('/settings', { token: alice.token, method: 'PATCH', body: { defaultProviderId: first.id } });
+  const other = await conversation(alice.token, first.id);
+  const chat = await conversation(alice.token, first.id);
+  await (await request(`/conversations/${chat.id}/messages`, { token: alice.token, method: 'POST', body: { content: 'first prompt' } })).text();
+  const before = await (await request(`/conversations/${chat.id}`, { token: alice.token })).json();
+  assert.equal(before.messages[1].model, 'first-model');
+  const switched = await request(`/conversations/${chat.id}`, { token: alice.token, method: 'PATCH', body: { providerId: ` ${second.id} ` } });
+  assert.equal(switched.status, 200);
+  const updated = await switched.json();
+  assert.equal(updated.id, before.id); assert.equal(updated.providerId, second.id);
+  assert.equal(updated.title, before.title); assert.equal(updated.createdAt, before.createdAt);
+  assert.deepEqual(updated.messages, before.messages); assert.ok(Date.parse(updated.updatedAt) >= Date.parse(before.updatedAt));
+  assert.equal(updated.userId, undefined);
+  await (await request(`/conversations/${chat.id}/messages`, { token: alice.token, method: 'POST', body: { content: 'follow-up prompt' } })).text();
+  assert.deepEqual(requests.map(item => item.model), ['first-model', 'second-model']);
+  assert.deepEqual(requests[1].messages.filter(item => item.role !== 'system'), [
+    { role: 'user', content: 'first prompt' }, { role: 'assistant', content: 'reply from first-model' }, { role: 'user', content: 'follow-up prompt' },
+  ]);
+  const disk = JSON.parse(await readFile(path.join(directory, 'state.json'), 'utf8'));
+  const saved = disk.conversations.find(item => item.id === chat.id);
+  assert.equal(saved.providerId, second.id);
+  assert.deepEqual(saved.messages.filter(item => item.role === 'assistant').map(item => item.model), ['first-model', 'second-model']);
+  assert.deepEqual(saved.messages.slice(0, before.messages.length), before.messages);
+  assert.equal(disk.users.find(item => item.id === alice.user.id).settings.defaultProviderId, first.id);
+  const untouched = disk.conversations.find(item => item.id === other.id);
+  assert.equal(untouched.providerId, first.id); assert.deepEqual(untouched.messages, []); assert.equal(untouched.updatedAt, other.updatedAt);
+});
+
+test('switching legacy chats preserves all messages without guessing missing historical model metadata', async t => {
+  const messages = [
+    { id: 'user', role: 'user', content: 'original prompt', status: 'complete' },
+    { id: 'legacy', role: 'assistant', content: 'original reply', status: 'complete' },
+    { id: 'known', role: 'assistant', content: 'already attributed reply', status: 'complete', model: 'recorded-model' },
+  ];
+  const legacy = JSON.stringify({ version: 1, settings: { petName: 'Pet', persona: 'Keep context', companionKind: 'cat' },
+    providers: [{ id: 'original', name: 'Original', protocol: 'chat-completions', baseUrl: 'https://example.com/v1', model: 'original-model', apiKey: '' }],
+    conversations: [{ id: 'legacy-chat', title: 'History', mode: 'chat', providerId: 'original', messages, createdAt: '2020-01-01T00:00:00.000Z', updatedAt: '2020-01-01T00:00:00.000Z' }] });
+  const { request, provider, directory } = await setup(t, { legacy });
+  const next = await provider('New', 'https://example.com/v1', 'new-model');
+  const response = await request('/conversations/legacy-chat', { method: 'PATCH', body: { providerId: next.id } });
+  assert.equal(response.status, 200); const updated = await response.json();
+  assert.deepEqual(updated.messages, messages); assert.equal(updated.providerId, next.id);
+  assert.equal(updated.createdAt, '2020-01-01T00:00:00.000Z'); assert.notEqual(updated.updatedAt, updated.createdAt);
+  const back = await request('/conversations/legacy-chat', { method: 'PATCH', body: { providerId: 'original' } });
+  assert.deepEqual((await back.json()).messages, messages, 'unknown models stay unknown and recorded models must never be relabeled');
+  assert.deepEqual(JSON.parse(await readFile(path.join(directory, 'state.json'), 'utf8')).conversations[0].messages, messages);
+});
+
+test('chat model patch rejects cross-account access, unauthorized models and every unrelated field without mutation', async t => {
+  const { request, member, provider, conversation, directory } = await setup(t);
+  const first = await provider('First'), second = await provider('Second'), privateModel = await provider('Private');
+  const alice = await member('alice', [first.id, second.id]), bob = await member('bob', [second.id]);
+  const chat = await conversation(alice.token, first.id);
+  const before = await readFile(path.join(directory, 'state.json'), 'utf8');
+  const attempts = [
+    { token: null, body: { providerId: second.id }, status: 401 },
+    { token: bob.token, body: { providerId: second.id }, status: 404 },
+    { token: ownerToken, body: { providerId: second.id }, status: 404 },
+    { token: alice.token, body: { providerId: privateModel.id }, status: 404 },
+    { token: alice.token, body: { providerId: 'missing' }, status: 404 },
+    ...[{}, { providerId: null }, { providerId: '' }, { providerId: [] }, { providerId: 1 }, { providerId: 'x'.repeat(129) },
+      ...['mode', 'messages', 'userId', 'title', 'threadId', 'updatedAt'].map(key => ({ providerId: second.id, [key]: 'forged' }))]
+      .map(body => ({ token: alice.token, body, status: 400 })),
+  ];
+  for (const { token, body, status } of attempts) {
+    assert.equal((await request(`/conversations/${chat.id}`, { token, method: 'PATCH', body })).status, status, JSON.stringify(body));
+    assert.equal(await readFile(path.join(directory, 'state.json'), 'utf8'), before);
+  }
+});
+
+test('chat model cannot change during an active reply and can change after it stops', async t => {
+  const { request, member, provider, conversation } = await setup(t);
+  const first = await provider('Active', await hangingUpstream(t), 'active-model'), second = await provider('Next');
+  const alice = await member('alice', [first.id, second.id]); const chat = await conversation(alice.token, first.id);
+  const response = await request(`/conversations/${chat.id}/messages`, { token: alice.token, method: 'POST', body: { content: 'ongoing prompt' } });
+  const stream = response.text();
+  try {
+    assert.equal((await request(`/conversations/${chat.id}`, { token: alice.token, method: 'PATCH', body: { providerId: second.id } })).status, 409);
+    const current = await (await request(`/conversations/${chat.id}`, { token: alice.token })).json();
+    assert.equal(current.providerId, first.id); assert.equal(current.messages[1].status, 'streaming'); assert.equal(current.messages[1].model, 'active-model');
+  } finally { await request(`/conversations/${chat.id}/stop`, { token: alice.token, method: 'POST' }); await stream; }
+  const stopped = await (await request(`/conversations/${chat.id}`, { token: alice.token })).json();
+  const switched = await request(`/conversations/${chat.id}`, { token: alice.token, method: 'PATCH', body: { providerId: second.id } });
+  assert.equal(switched.status, 200); assert.deepEqual((await switched.json()).messages, stopped.messages);
+});
+
+test('Codex conversations reject chat model changes without altering their thread or history', async t => {
+  const { request, provider, directory } = await setup(t);
+  const next = await provider();
+  const chat = await (await request('/conversations', { method: 'POST', body: { mode: 'codex' } })).json();
+  await (await request(`/conversations/${chat.id}/messages`, { method: 'POST', body: { content: 'owner work' } })).text();
+  const before = await readFile(path.join(directory, 'state.json'), 'utf8');
+  const response = await request(`/conversations/${chat.id}`, { method: 'PATCH', body: { providerId: next.id } });
+  assert.equal(response.status, 400); assert.match((await response.json()).error, /Codex/);
+  assert.equal(await readFile(path.join(directory, 'state.json'), 'utf8'), before);
+});
+
+for (const unavailable of ['deleted', 'revoked']) test(`legacy chat can leave a ${unavailable} model without inventing or exposing old reply attribution`, async t => {
+  const { provider, member, conversation, directory, app } = await setup(t);
+  const old = await provider('Old'), next = await provider('Allowed');
+  const alice = await member('alice', [old.id, next.id]); const chat = await conversation(alice.token, old.id);
+  await app.close();
+  const file = path.join(directory, 'state.json'), disk = JSON.parse(await readFile(file, 'utf8'));
+  disk.users.find(item => item.id === alice.user.id).providerIds = [next.id];
+  if (unavailable === 'deleted') disk.providers = disk.providers.filter(item => item.id !== old.id);
+  else disk.providers.find(item => item.id === old.id).model = 'ungranted-new-model';
+  const history = [{ id: 'legacy-reply', role: 'assistant', content: 'keep this reply', status: 'complete' }];
+  disk.conversations.find(item => item.id === chat.id).messages = history;
+  await writeFile(file, JSON.stringify(disk));
+  const restored = await createPetServer({ dataDir: directory, token: ownerToken, codex: stubCodex() });
+  try {
+    await new Promise(resolve => restored.server.listen(0, '127.0.0.1', resolve));
+    const response = await fetch(`http://127.0.0.1:${restored.server.address().port}/api/conversations/${chat.id}`, {
+      method: 'PATCH', headers: { Authorization: `Bearer ${alice.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ providerId: next.id }),
+    });
+    assert.equal(response.status, 200); const switched = await response.json();
+    assert.equal(switched.providerId, next.id); assert.deepEqual(switched.messages, history);
+    assert.equal(JSON.stringify(switched).includes('ungranted-new-model'), false);
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).conversations.find(item => item.id === chat.id).messages, history);
+  } finally { await restored.close(); }
+});
 
 test('v1 migration backs up exact original bytes and assigns all existing data to a stable owner', async t => {
   const legacy = JSON.stringify({ version: 1, settings: { petName: 'Existing pet', persona: 'Existing persona', companionKind: 'cat' }, providers: [{ id: 'old-provider', name: 'Old', protocol: 'responses', baseUrl: 'https://example.com/v1', model: 'old-model', apiKey: 'old-key' }], conversations: [{ id: 'old-chat', title: 'Old history', mode: 'chat', providerId: 'old-provider', messages: [{ id: 'm1', role: 'assistant', content: 'retain me', status: 'streaming' }], createdAt: 'old', updatedAt: 'old' }] }, null, 2);

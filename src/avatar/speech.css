@@ -8,4 +8,12 @@
 .speech-controls .speech-stop { color: #8e5a48; border-bottom-color: #cdb5a6; }
 .speech-feedback { margin: 7px 0 0; font-size: 10px; line-height: 1.65; color: #858a7f; }
 .speech-feedback span { display: block; }
+.message-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.message-actions .copy-message { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; margin: 0; }
+.message-read { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 7px; border: 0; border-radius: 6px; background: transparent; color: #617558; font-size: 12px; cursor: pointer; }
+.message-read:hover:not(:disabled) { background: #edf1e8; }
+.message-read-active { color: #8e5a48; background: #f8eee7; }
+.message-read-active:hover:not(:disabled) { background: #f2e5db; }
+.message-speech-error { margin: 6px 0 0; color: #995e4b; font-size: 12px; line-height: 1.6; }
 @media (max-width: 600px) { .speech-toggle small { display: none; } .speech-controls-row { gap: 7px 11px; } }
+@media (pointer: coarse) { .message-read, .message-actions .copy-message { min-height: 44px; } .message-actions .copy-message { min-width: 44px; } }

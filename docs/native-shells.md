@@ -19,7 +19,9 @@ npm run desktop:linux
 
 ## Android
 
-这是 Capacitor 原生 APK，复用同一 React 前端；不是只添加主屏幕的 PWA。Android 连接用户配置的 HTTPS 后端，默认没有运行中的后端地址。后端需显式允许来源 `https://localhost`。提供商密钥始终保存在后端，APK 不包含密钥。Android 不本地运行 Codex CLI，可使用连接后端的 Codex 工作模式。
+这是 Capacitor 原生 APK，复用同一 React 前端；不是只添加主屏幕的 PWA。从 0.6.2 开始，Android 首次打开预填 `https://magicdatou.top:44318`，可改为其他 HTTPS 后端，已有会话连接优先；登录凭据仍只保存在当前会话。后端需显式允许来源 `https://localhost`。提供商密钥始终保存在后端，APK 不包含密钥。
+
+Android / Web 支持 Chat 与远程 Codex；远程 Codex / OpenCLI 在连接的后端电脑运行，不能据此控制手机上的其他 App。当前远程 Agent 仅对主机 owner 开放，普通成员使用管理员分配的聊天模型。Windows / Ubuntu 桌面包内置 Codex CLI、OpenCLI 和后端，可在本机使用两种模式。Android 包不内置这些 CLI 或 Node 运行时。
 
 原生 `PetOverlay` 插件提供 `status()`、`requestPermission()`、`showPet({ companionKind })`、兼容的 `start({ companionKind })`、`stop()`。参数只接受 `anime` / `cat`，省略或非法值默认 `anime`；已运行时再次调用会更新该窗口的角色。`status()` 返回权限、服务是否运行及当前角色。TypeScript 声明和包装位于 `src/platform/overlay.ts`。用户先允许「显示在其他应用上层」，回到小伴后主动开启桌宠；插件不会在权限设置页返回后自动启动。Android 13+ 还会请求通知权限。
 

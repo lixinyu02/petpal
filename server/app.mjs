@@ -343,6 +343,14 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     state.conversations.unshift(conversation); await store.save(); res.status(201).json(visibleConversation(conversation));
   });
   app.get('/api/conversations/:id', (req, res) => res.json(visibleConversation(conversationById(req.params.id, req.user))));
+  app.patch('/api/conversations/:id', async (req, res) => {
+    const conversation = conversationById(req.params.id, req.user); assertIdle(conversation.id);
+    if (conversation.mode !== 'chat') throw failure(400, 'Codex 工作会话不能切换聊天模型。');
+    if (Object.keys(req.body).some(key => key !== 'providerId')) throw failure(400, '会话更新只接受 providerId 字段。');
+    const provider = providerById(string(req.body.providerId, '模型连接', 128), req.user);
+    conversation.providerId = provider.id; conversation.updatedAt = now();
+    await store.save(); res.json(visibleConversation(conversation));
+  });
   app.delete('/api/conversations/:id', async (req, res) => {
     const conversation = conversationById(req.params.id, req.user); assertIdle(conversation.id);
     state.conversations.splice(state.conversations.indexOf(conversation), 1); await store.save(); res.json({ ok: true });
@@ -428,7 +436,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const task = { controller, done, mode: conversation.mode, userId: req.user.id, sessionHash: req.sessionHash, providerId: provider?.id ?? null, approvalIds: new Set() };
     active.set(conversation.id, task);
     const user = { id: randomUUID(), role: 'user', content, status: 'complete', createdAt: now() };
-    const assistant = { id: randomUUID(), role: 'assistant', content: '', status: 'streaming', createdAt: now() };
+    const assistant = { id: randomUUID(), role: 'assistant', content: '', status: 'streaming', createdAt: now(), ...(provider ? { model: provider.model } : {}) };
     if (!conversation.messages.length) conversation.title = content.slice(0, 32);
     conversation.messages.push(user, assistant); conversation.updatedAt = now();
     let heartbeat;
