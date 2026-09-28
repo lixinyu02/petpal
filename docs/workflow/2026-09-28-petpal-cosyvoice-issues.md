@@ -55,3 +55,11 @@
 - Chrome 在临时 loopback 实例（隔离账号数据、相同前端/修复后端、真实上游与示例参考声音）实际进入播放，停止后立即回到待命，短句自然结束；此处未使用模拟音频。域名上的生产链路由上述认证 WAV 请求验证；不把 loopback 浏览器验收说成已登录公网 UI，未人工确认物理喇叭/听感。
 - 主账号引擎已保存为 cosyvoice；实例 ID、用户数及会话 ID 全部保持，匿名合成接口仍为 401。用户同意沿用 HTTP，未新增端口转发或修改已发布 v0.6.1 资产。
 - 协议依据：Gradio 5.4.0 [事件和会话](https://github.com/gradio-app/gradio/blob/gradio%405.4.0/gradio/queueing.py#L45)、[简化 GET](https://github.com/gradio-app/gradio/blob/gradio%405.4.0/gradio/routes.py#L1086)、[root URL 参数](https://github.com/gradio-app/gradio/blob/gradio%405.4.0/gradio/queueing.py#L615)、[裁剪实现](https://github.com/gradio-app/gradio/blob/gradio%405.4.0/gradio/route_utils.py#L391)。
+
+### 2026-09-29 音色质量跟进
+
+- 用户反馈此前音频电子感较重。追溯确认参考声音是 Microsoft Huihui 系统 TTS，尽管结果确实由 CosyVoice 生成，不能由此证明自然度；此前听感未人工验收。
+- 改用官方 `asset/zero_shot_prompt.wav` 做同文案对比。原文件 Float32 WAV 只转为 PCM16，24 kHz/mono/3.48 秒保持；参考原文为“希望你以后能够做的比我还好呦。”。出处和 SHA-256 保存在私有 `official-reference-provenance.json`，未把第三方音频提交到仓库。
+- 旧配置/参考声音已备份，更换期间先清空参考文本使配置暂不可合成，再上传并保存新文本，避免混用参考音和文本。主账号仍为 cosyvoice/1 倍速。
+- 固定上游适配和生产域名分别生成同文案，均为 7.36 秒、353324 bytes；SHA-256 同为 `f44ca6a2808b4c383dc746f7446d9c096969940baa1aa9e67d0a3c3197d3c506`。证明传输未更改声音，不把这一技术验证当作用户听感满意。新样例交用户试听。
+- 只读审查确认：访客/新成员默认 system；已登录 cosyvoice 无静默回退，WAV 原样返回且播放器不变调。公开文档补充了此区别。本次没有产品代码变更，使用真实合成与字节一致性验证，不重复运行未变代码的测试。
