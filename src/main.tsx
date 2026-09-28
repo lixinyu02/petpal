@@ -6,11 +6,12 @@ import { getSessionEpoch, initConnection, subscribeSession } from './api';
 import { Capacitor } from '@capacitor/core';
 import { PetOverlay as NativeOverlay } from './platform/overlay';
 import LoginGate from './auth/LoginGate';
+import { isPassiveNativeOverlay } from './auth/overlay-entry.mjs';
 const App = lazy(() => import('./App'));
 const CompanionWorld = lazy(() => import('./CompanionWorld'));
 const PetOverlay = lazy(() => import('./pet/PetOverlay'));
 const params = new URLSearchParams(location.search);
-const overlay = (params.has('overlay') || params.has('pet')) && (Capacitor.isNativePlatform() || !!window.petpal);
+const overlay = isPassiveNativeOverlay(location.href, Capacitor.isNativePlatform() || !!window.petpal);
 function SessionRoot(){
   const epoch=useSyncExternalStore(subscribeSession,getSessionEpoch,getSessionEpoch);
   const[ready,setReady]=useState(overlay);
