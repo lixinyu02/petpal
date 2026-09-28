@@ -5,3 +5,24 @@
 @media(max-width:1050px){.workspace-controls{padding:16px 20px}.workspace-mode-note{display:none}}
 @media(max-width:600px){.workspace-controls{padding:11px 14px}.workspace-mode-row{align-items:flex-start;gap:8px}.mode-switch button{padding:8px 10px;gap:5px}.mode-switch span{display:none}.workspace-model-row{margin-top:9px}.agent-send-choice select{max-width:160px}.composer-tools{gap:2px}.composer-area .agent-queue{max-height:150px}}
 @media(prefers-reduced-motion:reduce){.mode-switch button{transition:none}}
+
+/* Keep messages readable when the window or on-screen keyboard reduces height. */
+@media(max-height:820px){
+  .chat-area{overflow-y:auto}
+  .chat-scroll{min-height:180px}
+  .workspace-controls{flex-shrink:0;padding-top:10px;padding-bottom:10px}
+  .workspace-model-row{margin-top:8px}
+  .workspace-controls .agent-onboarding{margin:8px 0 0;padding:8px 0 0;border-bottom:0}
+  .agent-onboarding-ready .agent-onboarding-copy>p{display:none}
+  .composer-area{padding-top:8px;padding-bottom:10px}
+  .composer textarea{padding-top:10px;padding-bottom:4px}
+  .composer-bottom{padding-bottom:8px}
+  .composer-area .speech-controls{padding-top:7px}
+  .composer-footnote{margin-top:6px}
+  .composer-area .agent-queue{max-height:120px}
+}
+@media(max-height:640px){
+  .topbar{height:52px}
+  .chat-scroll{min-height:160px}
+  .chat-area .workspace-controls{padding-top:7px;padding-bottom:7px}
+}
