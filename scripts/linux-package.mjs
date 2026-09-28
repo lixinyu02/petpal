@@ -21,7 +21,7 @@ const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'ut
 const electronVersion = metadata.devDependencies.electron;
 const codexVersion = metadata.dependencies['@openai/codex'];
 const opencliVersion = metadata.dependencies['@jackwener/opencli'];
-const requiredApplicationSource = ['server/updates.mjs', 'desktop/updates.mjs', 'server/app.mjs', 'server/auth.mjs', 'server/codex.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/index.mjs', 'server/providers.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'NOTICE'];
+const requiredApplicationSource = ['server/updates.mjs', 'desktop/updates.mjs', 'server/app.mjs', 'server/auth.mjs', 'server/codex.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/index.mjs', 'server/providers.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'NOTICE'];
 const opencliPrefix = 'node_modules/@jackwener/opencli';
 const requiredOpencliFiles = ['package.json', 'LICENSE', 'cli-manifest.json', 'dist/src/main.js', 'dist/src/daemon.js', 'dist/src/browser/base-page.js'];
 if (![electronVersion, codexVersion, opencliVersion].every(version => /^\d+\.\d+\.\d+$/.test(version))) throw new Error('Electron, Codex and OpenCLI versions must be exact.');
@@ -252,7 +252,7 @@ try {
       appId: 'com.petpal.desktop', productName: 'PetPal', asar: false, electronVersion, electronDist: runtime,
       npmRebuild: false, nodeGypRebuild: false, buildDependenciesFromSource: false,
       removePackageScripts: false, removePackageKeywords: false,
-      directories: { output: builderOutput }, files: ['dist/**', 'server/**', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/updates.mjs', 'desktop/assets/**', 'package.json', 'NOTICE'],
+      directories: { output: builderOutput }, files: ['dist/**', 'server/**', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'desktop/updates.mjs', 'desktop/assets/**', 'package.json', 'NOTICE'],
       linux: { executableName: 'petpal', category: 'Utility' },
     } });
     const unpacked = path.join(builderOutput, arch === 'x64' ? 'linux-unpacked' : `linux-${arch}-unpacked`);

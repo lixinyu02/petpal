@@ -7,6 +7,7 @@ import { CodexBridge } from '../server/codex.mjs';
 import { defaultCodexConfig, patchCodexConfig } from '../server/codex-config.mjs';
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+const fullAsk = { access: 'full-access', approval: 'ask' };
 const fixture = String.raw`
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
@@ -91,10 +92,25 @@ test('turn/start pins configured API reasoning effort while empty and host mode 
   }
 });
 
+test('authorized per-turn model and effort override API defaults without changing credentials or runtime revision', { timeout: 15000 }, async t => {
+  const { bridge, config, messages } = await setup(t, undefined, 'api', 'max');
+  const before = structuredClone(config);
+  const first = await bridge.run({ prompt: 'status', model: 'assigned-model', effort: 'high' });
+  await bridge.run({ prompt: 'status', threadId: first.threadId });
+  const rpc = await messages(), turns = rpc.filter(message => message.method === 'turn/start');
+  assert.equal(turns[0].params.model, 'assigned-model'); assert.equal(turns[0].params.effort, 'high');
+  assert.equal(turns[1].params.model, 'fixture'); assert.equal(turns[1].params.effort, 'max');
+  assert.deepEqual(config, before);
+  assert.ok(bridge.child.spawnargs.includes('features.shell_tool=true'));
+  assert.ok(bridge.child.spawnargs.includes('features.unified_exec=true'));
+  assert.equal(turns.every(turn => turn.params.sandboxPolicy.type === 'readOnly'), true);
+  assert.equal(turns.every(turn => turn.params.approvalPolicy === 'on-request'), true);
+});
+
 for (const decision of ['accept', 'decline']) test(`dynamic action awaits explicit ${decision}`, { timeout: 15000 }, async t => {
   let count = 0; const { bridge } = await setup(t, async () => { count++; return { ok: true }; });
   const pending = deferred();
-  const run = bridge.run({ prompt: 'action', onEvent: (event, data) => { if (event === 'approval') pending.resolve(data); } });
+  const run = bridge.run({ prompt: 'action', permissions: fullAsk, onEvent: (event, data) => { if (event === 'approval') pending.resolve(data); } });
   const approval = await pending.promise;
   assert.equal(count, 0); assert.equal(approval.kind, 'desktopTool');
   bridge.approve(approval.id, decision); await run;
@@ -102,7 +118,7 @@ for (const decision of ['accept', 'decline']) test(`dynamic action awaits explic
   assert.throws(() => bridge.approve(approval.id, 'accept'), /不存在|过期/);
 });
 
-for (const prompt of ['namespace', 'unregistered', 'invalid-args', 'early', 'stale', 'command']) test(`invalid API tool request is never executable: ${prompt}`, { timeout: 15000 }, async t => {
+for (const prompt of ['namespace', 'unregistered', 'invalid-args', 'early', 'stale']) test(`invalid API tool request is never executable: ${prompt}`, { timeout: 15000 }, async t => {
   let count = 0; const { bridge } = await setup(t, async () => { count++; return { ok: true }; });
   const approvals = [];
   const task = bridge.run({ prompt, onEvent: (type, data) => { if (type === 'approval') approvals.push(data); } });
@@ -114,7 +130,7 @@ for (const prompt of ['namespace', 'unregistered', 'invalid-args', 'early', 'sta
 test('duplicate callId is rejected while the original awaits approval', { timeout: 15000 }, async t => {
   let count = 0; const { bridge, messages } = await setup(t, async () => { count++; return { ok: true }; });
   const approval = deferred();
-  const run = bridge.run({ prompt: 'double', onEvent: (type, data) => { if (type === 'approval') approval.resolve(data); } });
+  const run = bridge.run({ prompt: 'double', permissions: fullAsk, onEvent: (type, data) => { if (type === 'approval') approval.resolve(data); } });
   const pending = await approval.promise;
   // An ordinary stdin receipt can overtake a reply enqueued by a later stdout
   // callback. Wait for this exact reply to be consumed and logged by the child.
@@ -128,7 +144,7 @@ test('duplicate callId is rejected while the original awaits approval', { timeou
 test('stop declines waiting dynamic approval and never executes its late acceptance', { timeout: 15000 }, async t => {
   let count = 0; const { bridge } = await setup(t, async () => { count++; });
   const controller = new AbortController(), pending = deferred();
-  const run = bridge.run({ prompt: 'action', signal: controller.signal, onEvent: (type, data) => { if (type === 'approval') pending.resolve(data); } });
+  const run = bridge.run({ prompt: 'action', permissions: fullAsk, signal: controller.signal, onEvent: (type, data) => { if (type === 'approval') pending.resolve(data); } });
   const approval = await pending.promise; const stopped = assert.rejects(run, error => error.name === 'AbortError');
   controller.abort(); assert.throws(() => bridge.approve(approval.id, 'accept'), /不存在|过期/); await stopped;
   assert.equal(count, 0);
@@ -140,7 +156,7 @@ test('stop waits for dynamic runner cleanup and suppresses its late successful o
     started.resolve(); await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true })); aborted.resolve(); await released.promise; return { ok: true, late: 'MUST_NOT_SURFACE' };
   });
   const controller = new AbortController();
-  const run = bridge.run({ prompt: 'action', signal: controller.signal, onEvent: (type, data) => { if (type === 'approval') bridge.approve(data.id, 'accept'); } });
+  const run = bridge.run({ prompt: 'action', permissions: fullAsk, signal: controller.signal, onEvent: (type, data) => { if (type === 'approval') bridge.approve(data.id, 'accept'); } });
   let finished = false; const rejected = assert.rejects(run, error => error.name === 'AbortError').then(() => { finished = true; });
   await started.promise; controller.abort(); await aborted.promise;
   assert.equal(finished, false); released.resolve(); await rejected;
@@ -150,7 +166,7 @@ test('stop waits for dynamic runner cleanup and suppresses its late successful o
 
 test('tool errors and output scrub the exact custom API secret', { timeout: 15000 }, async t => {
   const { bridge } = await setup(t, async () => { throw new Error('arbitrary-secret-value'); });
-  const result = await bridge.run({ prompt: 'action', onEvent: (type, data) => { if (type === 'approval') bridge.approve(data.id, 'accept'); } });
+  const result = await bridge.run({ prompt: 'action', permissions: fullAsk, onEvent: (type, data) => { if (type === 'approval') bridge.approve(data.id, 'accept'); } });
   assert.ok(!result.text.includes('arbitrary-secret-value')); assert.match(result.text, /已隐藏/);
 });
 
@@ -158,4 +174,36 @@ test('API secret split across streamed model deltas never reaches output', { tim
   const { bridge } = await setup(t); const chunks = [];
   const result = await bridge.run({ prompt: 'leak', onEvent: (type, data) => { if (type === 'delta') chunks.push(data.text); } });
   assert.equal(result.text, 'before [已隐藏] after'); assert.equal(chunks.join(''), result.text);
+});
+
+test('dynamic host actions require full access independently of CLI approval policy', { timeout: 15000 }, async t => {
+  let count = 0; const { bridge } = await setup(t, async () => { count++; return { ok: true }; });
+  for (const access of ['read-only', 'workspace-write']) for (const approval of ['ask', 'auto', 'review']) {
+    const events = [];
+    const result = await bridge.run({ prompt: 'action', permissions: { access, approval }, onEvent: type => events.push(type) });
+    assert.match(result.text, /完全访问权限/); assert.equal(count, 0); assert.equal(events.includes('approval'), false);
+  }
+  const events = [];
+  await bridge.run({ prompt: 'action', permissions: { access: 'full-access', approval: 'auto' }, onEvent: type => events.push(type) });
+  assert.equal(count, 1); assert.equal(events.includes('approval'), false);
+});
+
+test('automatic CLI review does not implicitly authorize application desktop actions', { timeout: 15000 }, async t => {
+  let count = 0; const { bridge } = await setup(t, async () => { count++; return { ok: true }; });
+  const pending = deferred();
+  const task = bridge.run({ prompt: 'action', permissions: { access: 'full-access', approval: 'review' }, onEvent: (type, data) => { if (type === 'approval') pending.resolve(data); } });
+  const approval = await pending.promise; assert.equal(count, 0);
+  bridge.approve(approval.id, 'accept'); await task; assert.equal(count, 1);
+});
+
+test('API mode surfaces native CLI approval while automatic execution refuses unexpected elevation', { timeout: 15000 }, async t => {
+  const { bridge, messages } = await setup(t);
+  const pending = deferred();
+  const task = bridge.run({ prompt: 'command', onEvent: (type, data) => { if (type === 'approval') pending.resolve(data); } });
+  const approval = await pending.promise; assert.equal(approval.kind, 'command');
+  bridge.approve(approval.id, 'decline'); await task;
+  const events = [];
+  await bridge.run({ prompt: 'command', permissions: { access: 'read-only', approval: 'auto' }, onEvent: type => events.push(type) });
+  assert.equal(events.includes('approval'), false);
+  assert.equal((await messages()).filter(x => x.id === 'call-main' && x.result?.decision === 'decline').length, 2);
 });

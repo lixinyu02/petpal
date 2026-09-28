@@ -33,7 +33,8 @@ export function newSession(userId) {
 }
 export function publicUser(user, ownerId) {
   const isOwner = user.id === ownerId;
-  return { id: user.id, username: user.username, displayName: user.displayName, role: user.role, isOwner, canUseCodex: isOwner };
+  const agentAccess = isOwner ? 'full' : user.agentAccess ?? 'none';
+  return { id: user.id, username: user.username, displayName: user.displayName, role: user.role, isOwner, agentAccess, canUseCodex: agentAccess !== 'none' };
 }
 export function createLoginLimiter() {
   const buckets = new Map(), windowMs = 15 * 60 * 1000;

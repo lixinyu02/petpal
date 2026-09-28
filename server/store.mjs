@@ -3,11 +3,12 @@ import path from 'node:path';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { defaultVoiceSettings } from './voice.mjs';
 import { normalizeReasoningEffort } from './providers.mjs';
+import { restoreAgentState } from './agent-tasks.mjs';
 
 export const isCompanionKind = value => value === 'anime' || value === 'cat';
 
 export const defaultSettings = () => ({ petName: '小伴', companionKind: 'anime', persona: '你是小伴，一位温柔、好奇的个人 AI 伙伴。用自然简洁的中文陪伴用户，诚实回答问题，不假装已经执行没有执行的操作。', defaultProviderId: null });
-const owner = () => ({ id: randomUUID(), username: 'owner', displayName: '主机管理员', role: 'admin', disabled: false, providerIds: [], password: null, voice: defaultVoiceSettings(), createdAt: new Date().toISOString() });
+const owner = () => ({ id: randomUUID(), username: 'owner', displayName: '主机管理员', role: 'admin', agentAccess: 'full', disabled: false, providerIds: [], password: null, voice: defaultVoiceSettings(), createdAt: new Date().toISOString() });
 const initialState = () => {
   const user = owner();
   // Keep the owner's legacy top-level profile and history layout for lossless migration.
@@ -59,6 +60,8 @@ export class JsonStore {
       if (!validText(user.id) || ids.has(user.id) || !/^[a-z0-9][a-z0-9_.-]{2,39}$/.test(user.username) || names.has(user.username) || !validText(user.displayName) || !['admin', 'member'].includes(user.role) || typeof user.disabled !== 'boolean' || !Array.isArray(user.providerIds) || user.providerIds.some(id => !validText(id))) throw new Error('本地用户记录无效，请保留文件并检查备份。');
       ids.add(user.id); names.add(user.username);
       if (user.id !== state.ownerId && user.role !== 'member') throw new Error('仅主机 owner 可拥有管理员权限。');
+      if (user.agentAccess === undefined) { user.agentAccess = user.id === state.ownerId ? 'full' : 'none'; changed = true; }
+      if (!['none', 'workspace', 'full'].includes(user.agentAccess) || (user.id === state.ownerId && user.agentAccess !== 'full')) throw new Error('本地 Agent 授权无效。');
       const settings = user.id === state.ownerId ? state.settings : user.settings;
       if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('本地用户设置无效。');
       if (settings.companionKind === undefined) { settings.companionKind = 'anime'; changed = true; }
@@ -71,6 +74,7 @@ export class JsonStore {
     if (state.sessions.some(session => !ids.has(session.userId) || !/^[a-f0-9]{64}$/.test(session.tokenHash) || !Number.isFinite(session.expiresAt))) throw new Error('本地登录会话数据无效。');
     for (const conversation of this.state.conversations) {
       if (!ids.has(conversation.userId)) throw new Error('本地会话缺少有效用户归属，已停止加载。');
+      if (restoreAgentState(conversation)) changed = true;
       for (const message of conversation.messages ?? []) {
         if (message.status === 'streaming') { message.status = 'error'; message.error = '服务上次退出时回复尚未完成，可以重新发送。'; changed = true; }
       }

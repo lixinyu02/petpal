@@ -13,6 +13,7 @@ files:
   - desktop/updates.mjs
   - desktop/media-permissions.cjs
   - desktop/service-settings.cjs
+  - desktop/remote-http.cjs
   - desktop/assets/**
   - server/**
   - package.json

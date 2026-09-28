@@ -83,7 +83,7 @@ export function codexToml(config) {
     `model = ${JSON.stringify(config.model)}`, 'model_provider = "petpal"', 'approval_policy = "on-request"', 'approvals_reviewer = "user"',
     ...(reasoningEffort ? [`model_reasoning_effort = ${JSON.stringify(reasoningEffort)}`, 'model_supports_reasoning_summaries = true'] : []),
     'sandbox_mode = "read-only"', 'cli_auth_credentials_store = "ephemeral"', 'allow_login_shell = false', 'web_search = "disabled"',
-    '[features]', 'shell_tool = false', 'unified_exec = false', 'shell_snapshot = false', 'multi_agent = false', 'apps = false', 'remote_plugin = false', 'hooks = false', 'goals = false', 'tool_suggest = false', 'image_generation = false', 'enable_request_compression = false',
+    '[features]', 'shell_tool = true', 'unified_exec = true', 'shell_snapshot = false', 'multi_agent = false', 'apps = false', 'remote_plugin = false', 'hooks = false', 'goals = false', 'tool_suggest = false', 'image_generation = false', 'enable_request_compression = false',
     '[shell_environment_policy]', 'inherit = "core"', 'ignore_default_excludes = false', `exclude = [${JSON.stringify(CODEX_KEY_ENV)}, "OPENAI_*", "CODEX_*"]`,
     '[model_providers.petpal]', 'name = "PetPal Responses"', `base_url = ${JSON.stringify(config.baseUrl)}`, 'wire_api = "responses"',
     'requires_openai_auth = false', 'supports_websockets = false', 'request_max_retries = 0', 'stream_max_retries = 0',

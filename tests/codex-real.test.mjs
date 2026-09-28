@@ -63,17 +63,18 @@ test('real bundled Codex 0.143 performs Responses dynamic-tool approval and resu
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 60000); timer.unref();
   try {
-    const result = await bridge.run({ prompt: '请调用模拟音乐工具，然后报告结果。', signal: controller.signal, onEvent: (event, data) => { if (event === 'approval') { approvals++; bridge.approve(data.id, 'accept'); } } });
+    const result = await bridge.run({ prompt: '请调用模拟音乐工具，然后报告结果。', permissions: { access: 'full-access', approval: 'ask' }, signal: controller.signal, onEvent: (event, data) => { if (event === 'approval') { approvals++; bridge.approve(data.id, 'accept'); } } });
     assert.match(result.text, /模拟音乐工具已完成/);
     assert.equal(executes, 1); assert.equal(approvals, 1); assert.equal(requests.length, 2);
     const tools = JSON.stringify(requests[0].tools);
     assert.match(tools, /petpal_music_command/);
-    assert.doesNotMatch(tools, /"(?:shell|exec_command|write_stdin|local_shell|create_goal)"/);
+    assert.match(tools, /"(?:shell|exec_command|local_shell)"/, 'the native CLI exposes its execution tool under explicit full access');
+    assert.doesNotMatch(tools, /"create_goal"/);
     assert.match(JSON.stringify(requests[1].input), /isolated-mock/);
     const resumed = await bridge.run({ threadId: result.threadId, prompt: '继续报告模拟结果。', signal: controller.signal });
     assert.equal(resumed.threadId, result.threadId); assert.match(resumed.text, /模拟音乐工具已完成/);
     patchProbe = true;
-    await bridge.run({ prompt: 'Isolated negative test: attempt a file patch, which must be refused.', signal: controller.signal, onEvent: (event) => { assert.notEqual(event, 'approval', 'API file escalation must be rejected, never offered as a desktop action'); } });
+    await bridge.run({ prompt: 'Isolated negative test: attempt a file patch, which must be refused.', permissions: { access: 'read-only', approval: 'auto' }, signal: controller.signal, onEvent: (event) => { assert.notEqual(event, 'approval', 'automatic read-only execution must refuse elevation without prompting'); } });
     await assert.rejects(stat(patchTarget), error => error.code === 'ENOENT');
     assert.ok(requests.some(body => body.input?.some(item => item.type === 'custom_tool_call_output' && /reject|denied|approval|read.only/i.test(JSON.stringify(item.output)))), 'native file tool returned a denied result');
     const toml = await readFile(path.join(directory, 'codex', config.revision, 'config.toml'), 'utf8');

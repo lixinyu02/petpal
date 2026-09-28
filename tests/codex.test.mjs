@@ -45,6 +45,13 @@ createInterface({input:process.stdin}).on('line',line=>{
  }
  if(m.method==='thread/start'){reply(m,{thread:{id:'thread-'+(++threadNumber)}});return;}
  if(m.method==='thread/resume'){reply(m,{thread:{id:p.threadId}});return;}
+ if(m.method==='turn/steer'){
+   const content=p.input.find(item=>item.type==='text')?.text;
+   if(content==='steer-fail'){send({id:m.id,error:{code:-32600,message:'private provider details'}});return;}
+   if(content==='steer-wrong'){reply(m,{turnId:'other-turn'});return;}
+   if(content==='steer-end'){complete(p.threadId,p.expectedTurnId);reply(m,{turnId:p.expectedTurnId});return;}
+   reply(m,{turnId:p.expectedTurnId});return;
+ }
  if(m.method==='turn/start'){
    const threadId=p.threadId,turnId='turn-'+(++turnNumber),prompt=p.input[0].text;
    active.set(threadId,turnId);
@@ -206,6 +213,82 @@ test('same thread cannot start two active turns', { timeout: 10_000 }, async (t)
   const rejected = assert.rejects(task, error => error.name === 'AbortError');
   controller.abort();
   await rejected;
+});
+
+test('same conversation is locked through initialization and only unlocks after run cleanup', { timeout: 10_000 }, async t => {
+  const { bridge } = await setup(t);
+  const controller = new AbortController();
+  let ready; const started = new Promise(resolve => { ready = resolve; });
+  const task = bridge.run({ conversationId: 'chat-a', prompt: 'wait', signal: controller.signal, onEvent: type => { if (type === 'turn') ready(); } });
+  await assert.rejects(bridge.run({ conversationId: 'chat-a', prompt: 'duplicate' }), /运行中/);
+  await started;
+  const rejected = assert.rejects(task, error => error.name === 'AbortError'); controller.abort(); await rejected;
+  assert.equal((await bridge.run({ conversationId: 'chat-a', prompt: 'after stop' })).text, '你好，小猫！');
+});
+
+test('every selected permission reaches thread start, resume and turn start without model mutation', { timeout: 15_000 }, async t => {
+  const { bridge, messages } = await setup(t);
+  for (const access of ['read-only', 'workspace-write', 'full-access']) for (const approval of ['ask', 'auto', 'review']) {
+    const permissions = { access, approval };
+    const first = await bridge.run({ prompt: 'hello', model: 'chosen-model', effort: 'max', permissions });
+    await bridge.run({ prompt: 'hello again', threadId: first.threadId, model: 'next-model', effort: 'high', permissions });
+  }
+  const rpc = (await messages()).filter(message => ['thread/start', 'thread/resume', 'turn/start'].includes(message.method));
+  let index = 0;
+  for (const access of ['read-only', 'workspace-write', 'full-access']) for (const approval of ['ask', 'auto', 'review']) {
+    const group = rpc.slice(index, index + 4); index += 4;
+    assert.equal(group.length, 4);
+    for (const [offset, message] of group.entries()) {
+      assert.equal(message.params.model, offset < 2 ? 'chosen-model' : 'next-model');
+      assert.equal(message.params.approvalPolicy, approval === 'auto' ? 'never' : 'on-request');
+      assert.equal(message.params.approvalsReviewer, approval === 'review' ? 'auto_review' : 'user');
+      if (message.method === 'turn/start') {
+        assert.equal(message.params.sandboxPolicy.type, access === 'full-access' ? 'dangerFullAccess' : access === 'workspace-write' ? 'workspaceWrite' : 'readOnly');
+        assert.equal(message.params.effort, offset < 2 ? 'max' : 'high');
+      } else assert.equal(message.params.sandbox, access === 'full-access' ? 'danger-full-access' : access);
+    }
+  }
+});
+
+test('steer targets the expected active turn, carries trusted images and never silently replays uncertain delivery', { timeout: 10_000 }, async t => {
+  const { bridge, messages } = await setup(t);
+  const controller = new AbortController(); let ready;
+  const started = new Promise(resolve => { ready = resolve; }), events = [];
+  const task = bridge.run({ conversationId: 'web-chat', prompt: 'wait', signal: controller.signal,
+    onEvent: (type, data) => { events.push({ type, ...data }); if (type === 'turn') ready(data.turnId); } });
+  const turnId = await started;
+  for (const [conversationId, expectedTurnId] of [['other-chat', turnId], ['web-chat', 'stale-turn']]) {
+    await assert.rejects(bridge.steer({ conversationId, expectedTurnId, content: 'must not send' }), error => error.code === 'turn_not_active');
+  }
+  const file = path.resolve('trusted-image.png');
+  assert.deepEqual(await bridge.steer({ conversationId: 'web-chat', expectedTurnId: turnId, content: 'please also inspect', images: [{ path: file }] }), { turnId });
+  for (const content of ['steer-fail', 'steer-wrong']) await assert.rejects(bridge.steer({ conversationId: 'web-chat', expectedTurnId: turnId, content }), error => error.code === 'steer_delivery_uncertain' && !error.message.includes('private provider'));
+  const rpc = (await messages()).filter(message => message.method === 'turn/steer');
+  assert.equal(rpc.length, 3); assert.deepEqual(rpc[0].params.input, [{ type: 'text', text: 'please also inspect' }, { type: 'localImage', path: file }]);
+  assert.equal(rpc[0].params.threadId, 'thread-1'); assert.equal(rpc[0].params.expectedTurnId, turnId);
+  assert.equal(events.filter(event => event.type === 'turn').length, 1);
+  const rejected = assert.rejects(task, error => error.name === 'AbortError'); controller.abort(); await rejected;
+  await assert.rejects(bridge.steer({ conversationId: 'web-chat', expectedTurnId: turnId, content: 'late' }), error => error.code === 'turn_not_active');
+});
+
+test('successful steer acknowledgement remains confirmed if the turn finishes before its response', { timeout: 10_000 }, async t => {
+  const { bridge } = await setup(t); let ready;
+  const started = new Promise(resolve => { ready = resolve; });
+  const task = bridge.run({ conversationId: 'ending', prompt: 'wait', onEvent: (type, data) => { if (type === 'turn') ready(data.turnId); } });
+  const turnId = await started;
+  assert.deepEqual(await bridge.steer({ conversationId: 'ending', expectedTurnId: turnId, content: 'steer-end' }), { turnId });
+  await task;
+});
+
+test('image-only input is supported but remote URLs, relative paths and oversized inputs never start CLI', { timeout: 10_000 }, async t => {
+  const { bridge, messages } = await setup(t);
+  for (const images of [[{ path: '../secret.png' }], [{ path: 'https://example.com/private.png' }], [{ path: path.resolve('x.png'), url: 'other' }], Array.from({ length: 5 }, () => ({ path: path.resolve('x.png') }))]) {
+    await assert.rejects(bridge.run({ images })); assert.equal(bridge.child, null);
+  }
+  await assert.rejects(bridge.run({ prompt: 'x'.repeat(32001) }));
+  const image = { path: path.resolve('accepted.png') };
+  await bridge.run({ images: [image] });
+  assert.deepEqual((await messages()).find(message => message.method === 'turn/start').params.input, [{ type: 'localImage', path: image.path }]);
 });
 
 test('unsupported permission requests are declined without broader access', { timeout: 10_000 }, async (t) => {

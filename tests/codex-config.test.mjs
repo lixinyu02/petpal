@@ -174,7 +174,8 @@ test('isolated Codex TOML contains no key and environment cannot inherit global 
   assert.ok(runtime.workspaceRoot.startsWith(path.join(directory, 'codex', config.revision)));
   const contents = await readFile(path.join(runtime.env.CODEX_HOME, 'config.toml'), 'utf8');
   assert.equal(contents, codexToml(config)); assert.ok(!contents.includes(api.apiKey));
-  assert.match(contents, /wire_api = "responses"/); assert.match(contents, /shell_tool = false/);
+  assert.match(contents, /wire_api = "responses"/); assert.match(contents, /shell_tool = true/); assert.match(contents, /unified_exec = true/);
+  assert.match(contents, /sandbox_mode = "read-only"/); assert.match(contents, /approval_policy = "on-request"/);
   assert.match(contents, /exclude = \["PETPAL_CODEX_API_KEY"/);
 });
 

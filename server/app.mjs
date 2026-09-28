@@ -12,6 +12,8 @@ import { defaultCodexConfig, publicCodexConfig, patchCodexConfig, validateStored
 import { createDesktopTools } from './desktop-tools.mjs';
 import { createUpdateService } from './updates.mjs';
 import { createCosyVoiceService, safeCosyVoiceError, REFERENCE_LIMIT } from './cosyvoice.mjs';
+import { createAgentTasks } from './agent-tasks.mjs';
+import { normalizeAgentPermissions } from './agent-permissions.mjs';
 
 const VERSION = '0.6.1';
 const now = () => new Date().toISOString();
@@ -105,7 +107,13 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const visibleUser = user => publicUser(user, state.ownerId);
   const managedUser = user => ({ ...visibleUser(user), disabled: user.disabled, providerIds: isOwner(user) ? state.providers.map(provider => provider.id) : [...user.providerIds], hasPassword: Boolean(user.password), createdAt: user.createdAt });
   const requireAdmin = user => { if (!isOwner(user)) throw failure(403, '仅管理员可管理账号和模型。'); };
-  const requireCodex = user => { if (!isOwner(user)) throw failure(403, 'Codex 仅供主机 owner 使用。'); };
+  const requireCodex = user => { if (!visibleUser(user).canUseCodex) throw failure(403, '此账号尚未获管理员授权使用 Agent。'); };
+  const normalizeAgentAccess = value => { if (!['none', 'workspace', 'full'].includes(value)) throw failure(400, 'Agent 授权须为 none、workspace 或 full。'); return value; };
+  const requirePermissions = (user, value) => {
+    requireCodex(user); const permissions = normalizeAgentPermissions(value);
+    if (visibleUser(user).agentAccess !== 'full' && permissions.access === 'full-access') throw failure(403, '此账号未获完整主机权限。');
+    return permissions;
+  };
   const requireCurrentAuth = req => {
     if (req.user.disabled || (!req.bootstrap && !state.sessions.some(session => session.tokenHash === req.sessionHash && session.userId === req.user.id && session.expiresAt > Date.now()))) throw failure(401, '登录凭据已过期或已撤销。');
   };
@@ -123,16 +131,46 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   };
   const conversationById = (id, user) => { const result = state.conversations.find(item => item.id === id && item.userId === user.id); if (!result) throw failure(404, '会话不存在。'); return result; };
   const providerById = (id, user) => { const result = state.providers.find(item => item.id === id && canUseProvider(user, item.id)); if (!result) throw failure(404, '模型连接不存在或未获授权。'); return result; };
-  const visibleConversation = conversation => ({ id: conversation.id, title: conversation.title, mode: conversation.mode, providerId: conversation.providerId, messages: conversation.messages, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, ...(conversation.threadId ? { threadId: conversation.threadId } : {}), ...(conversation.mode === 'codex' ? { codexRevision: conversation.codexRevision, codexConfigChanged: conversation.codexRevision !== state.codexConfig.revision } : {}) });
-  const publicState = async user => ({ instanceId: state.instanceId, user: visibleUser(user), settings: settingsFor(user), providers: state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider => visibleProvider(provider, user)), conversations: state.conversations.filter(item => item.userId === user.id).map(visibleConversation), codex: isOwner(user) ? redactCodex(await readCodexStatus()) : { available: false, running: false, disabled: true, message: 'Codex 仅供主机 owner 使用。' } });
+  const eligibleProviders = user => state.providers.filter(provider => canUseProvider(user, provider.id) && state.codexConfig.mode === 'api' && state.codexConfig.baseUrl && provider.protocol === 'responses' && normalizeBaseUrl(provider.baseUrl, 'responses') === normalizeBaseUrl(state.codexConfig.baseUrl, 'responses')).map(provider => provider.id);
+  const userCodexStatus = async user => {
+    if (!visibleUser(user).canUseCodex) return { available: false, running: false, disabled: true, eligibleProviderIds: [], message: '此账号尚未获管理员授权使用 Agent。' };
+    const status = redactCodex(await readCodexStatus());
+    return { ...(isOwner(user) ? status : { available: status.available, running: status.running, authenticated: status.authenticated, configured: status.configured, error: status.error, message: status.message }), ...publicCodexConfig(state.codexConfig), eligibleProviderIds: eligibleProviders(user) };
+  };
+  const visibleConversation = conversation => ({ id: conversation.id, title: conversation.title, mode: conversation.mode, providerId: conversation.providerId, messages: conversation.messages, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, ...(conversation.threadId ? { threadId: conversation.threadId } : {}), ...(conversation.mode === 'codex' ? { codexRevision: conversation.codexRevision, codexConfigChanged: conversation.codexRevision !== state.codexConfig.revision, agent: agentTasks.snapshot(conversation) } : {}) });
+  const publicState = async user => ({ instanceId: state.instanceId, user: visibleUser(user), settings: settingsFor(user), providers: state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider => visibleProvider(provider, user)), conversations: state.conversations.filter(item => item.userId === user.id).map(visibleConversation), codex: await userCodexStatus(user) });
   const assertIdle = id => { if (active.has(id)) throw failure(409, '这个会话正在回复，请先停止。'); };
   const stopTasks = async predicate => {
+    const agentStopped = agentTasks.revoke(predicate);
     const stoppedProbes = [...probes].filter(predicate);
     for (const probe of stoppedProbes) probe.controller.abort(new DOMException('账号权限已变更。', 'AbortError'));
     const tasks = [...active.values()].filter(predicate);
     for (const task of tasks) task.controller.abort(new DOMException('登录或模型权限已撤销。', 'AbortError'));
-    await Promise.all([...tasks, ...stoppedProbes].map(task => task.done));
+    await Promise.all([agentStopped, ...[...tasks, ...stoppedProbes].map(task => task.done)]);
   };
+  const resolveAgentModel = (userId, providerId) => {
+    const user = state.users.find(item => item.id === userId); if (!user) throw failure(401, '账号不可用。');
+    if (configChanging) throw failure(409, 'Agent 配置正在切换。');
+    const config = state.codexConfig;
+    if (providerId === null) return { model: config.model || '', effort: config.reasoningEffort || '', codexRevision: config.revision };
+    const provider = providerById(providerId, user);
+    if (!eligibleProviders(user).includes(provider.id)) throw failure(400, 'Agent 模型必须来自当前同一 Responses 服务；其他连接仍可用于 Chat。');
+    return { model: provider.model, effort: provider.reasoningEffort || '', codexRevision: config.revision };
+  };
+  const agentTasks = createAgentTasks({ store, active, approvals, getBridge: () => bridge, redact: redactCodex, resolveModel: resolveAgentModel,
+    authorize: entry => {
+      const user = state.users.find(item => item.id === entry.auth.userId);
+      const session = state.sessions.find(item => item.userId === user?.id && item.tokenHash === entry.auth.sessionHash && item.expiresAt > Date.now());
+      const bootstrap = entry.auth.bootstrap && secureEqual(entry.auth.sessionHash, ownerTokenHash) && isOwner(user ?? {});
+      if (!user || user.disabled || (!bootstrap && !session)) throw failure(401, 'Agent 提交所属账号或登录已失效。');
+      requirePermissions(user, entry.permissions);
+      const conversation = state.conversations.find(item => item.id === entry.conversationId && item.userId === user.id);
+      if (!conversation || conversation.mode !== 'codex' || conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Agent 会话已删除或配置已变化，请新建会话。');
+      const current = resolveAgentModel(user.id, entry.providerId);
+      if (entry.codexRevision !== current.codexRevision || entry.model !== current.model || entry.effort !== current.effort) throw failure(409, 'Agent 模型配置已变化，请重新提交。');
+      return bootstrap ? undefined : session.expiresAt;
+    },
+  });
   const providerIds = value => {
     if (!Array.isArray(value) || value.length > 32 || value.some(id => typeof id !== 'string' || !state.providers.some(provider => provider.id === id))) throw failure(400, '模型授权列表无效。');
     return [...new Set(value)];
@@ -179,11 +217,11 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     requireAdmin(req.user);
     if (req.body.role !== undefined || req.body.isOwner !== undefined || req.body.canUseCodex !== undefined) throw failure(400, '新账号只能是普通成员。');
     const name = username(req.body.username), displayName = string(req.body.displayName ?? name, '显示名称', 64);
-    const grants = providerIds(req.body.providerIds ?? []), password = await hashPassword(req.body.password);
+    const grants = providerIds(req.body.providerIds ?? []), agentAccess = normalizeAgentAccess(req.body.agentAccess ?? 'none'), password = await hashPassword(req.body.password);
     requireCurrentAuth(req); providerIds(grants);
     if (state.users.length >= 100) throw failure(400, '最多保存 100 个账号。');
     if (state.users.some(user => user.username === name)) throw failure(409, '这个账号名称已被使用。');
-    const user = { id: randomUUID(), username: name, displayName, role: 'member', disabled: false, providerIds: grants, password, settings: defaultSettings(), voice: defaultVoiceSettings(), createdAt: now() };
+    const user = { id: randomUUID(), username: name, displayName, role: 'member', agentAccess, disabled: false, providerIds: grants, password, settings: defaultSettings(), voice: defaultVoiceSettings(), createdAt: now() };
     state.users.push(user); await store.save(); res.status(201).json({ user: managedUser(user) });
   });
   app.patch('/api/admin/users/:id', async (req, res) => {
@@ -198,10 +236,12 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       patch.disabled = req.body.disabled;
     }
     if (req.body.providerIds !== undefined) { const grants = providerIds(req.body.providerIds); if (!isOwner(user)) patch.providerIds = grants; }
+    if (req.body.agentAccess !== undefined) { patch.agentAccess = normalizeAgentAccess(req.body.agentAccess); if (isOwner(user) && patch.agentAccess !== 'full') throw failure(400, '主机 owner 的 Agent 权限不可降级。'); }
     if (req.body.password !== undefined) patch.password = await hashPassword(req.body.password);
     requireCurrentAuth(req);
     if (patch.providerIds !== undefined) providerIds(patch.providerIds);
-    const revoked = patch.password !== undefined || patch.disabled === true || (patch.providerIds !== undefined && user.providerIds.some(id => !patch.providerIds.includes(id)));
+    const rank = { none: 0, workspace: 1, full: 2 };
+    const revoked = patch.password !== undefined || patch.disabled === true || (patch.agentAccess !== undefined && rank[patch.agentAccess] < rank[user.agentAccess]) || (patch.providerIds !== undefined && user.providerIds.some(id => !patch.providerIds.includes(id)));
     Object.assign(user, patch);
     const settings = settingsFor(user);
     if (settings.defaultProviderId && !canUseProvider(user, settings.defaultProviderId)) settings.defaultProviderId = null;
@@ -353,18 +393,20 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   });
   app.delete('/api/conversations/:id', async (req, res) => {
     const conversation = conversationById(req.params.id, req.user); assertIdle(conversation.id);
+    if (conversation.mode === 'codex') await agentTasks.stop(conversation, { clear: true });
     state.conversations.splice(state.conversations.indexOf(conversation), 1); await store.save(); res.json({ ok: true });
   });
   app.post('/api/conversations/:id/stop', async (req, res) => {
-    conversationById(req.params.id, req.user); const task = active.get(req.params.id);
+    const conversation = conversationById(req.params.id, req.user); const task = active.get(req.params.id);
+    if (conversation.mode === 'codex') { await agentTasks.stop(conversation); res.json({ ok: true, stopped: Boolean(task), conversation: visibleConversation(conversation) }); return; }
     task?.controller.abort(new DOMException('用户已停止生成。', 'AbortError'));
     if (task) await task.done;
     res.json({ ok: true, stopped: Boolean(task) });
   });
   app.get('/api/codex/config', (req, res) => { requireCodex(req.user); res.json(publicCodexConfig(state.codexConfig)); });
   app.patch('/api/codex/config', async (req, res) => {
-    requireCodex(req.user);
-    if (configChanging || codexReaders || [...active.values()].some(task => task.mode === 'codex')) throw failure(409, 'Codex 正在工作或读取状态，请先停止任务后再修改配置。');
+    requireAdmin(req.user);
+    if (configChanging || codexReaders || agentTasks.hasPending() || [...active.values()].some(task => task.mode === 'codex')) throw failure(409, 'Codex 正在工作或队列未清空，请先停止任务后再修改配置。');
     const previous = state.codexConfig, next = patchCodexConfig(previous, req.body, codexPolicy);
     if (next.revision === previous.revision) return res.json(publicCodexConfig(previous));
     configChanging = true;
@@ -389,10 +431,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     requireCurrentAuth(req);
     res.json(publicCodexConfig(state.codexConfig));
   });
-  app.get('/api/codex/status', async (req, res) => { requireCodex(req.user); const value = await readCodexStatus(); requireCurrentAuth(req); res.json(redactCodex(value)); });
-  app.get('/api/desktop-tools/status', async (req, res) => { requireCodex(req.user); const value = await localTools.status(); requireCurrentAuth(req); res.json(redactCodex(value)); });
+  app.get('/api/codex/status', async (req, res) => { requireCodex(req.user); const value = await userCodexStatus(req.user); requireCurrentAuth(req); requireCodex(req.user); res.json(value); });
+  app.get('/api/desktop-tools/status', async (req, res) => { requireAdmin(req.user); const value = await localTools.status(); requireCurrentAuth(req); res.json(redactCodex(value)); });
   app.post('/api/desktop-tools/action', async (req, res) => {
-    requireCodex(req.user);
+    requireAdmin(req.user);
     if (Object.keys(req.body).some(key => !['tool', 'arguments'].includes(key)) || typeof req.body.tool !== 'string' || !req.body.arguments || typeof req.body.arguments !== 'object' || Array.isArray(req.body.arguments)) throw failure(400, '桌面工具请求格式无效。');
     try { localTools.describe(req.body.tool, req.body.arguments); } catch (error) { throw failure(400, redactCodex(error.message)); }
     const controller = new AbortController();
@@ -416,6 +458,32 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (!['accept', 'decline'].includes(req.body?.decision)) throw failure(400, '审批决定无效。');
     try { const result = await bridge.approve(req.params.id, req.body.decision); approvals.delete(req.params.id); res.json(result); }
     catch (error) { throw failure(409, error.message); }
+  });
+
+  const agentConversation = req => {
+    requireCurrentAuth(req); requireCodex(req.user);
+    const conversation = conversationById(req.params.id, req.user);
+    if (conversation.mode !== 'codex') throw failure(400, '只有 Agent 会话可使用任务队列。');
+    if (conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Agent 配置已变化，请新建会话。');
+    return conversation;
+  };
+  const agentAuth = req => ({ userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap });
+  for (const kind of ['submit', 'steer']) app.post(`/api/conversations/:id/agent/${kind}`, async (req, res) => {
+    const conversation = agentConversation(req);
+    const submission = await agentTasks.submit(conversation, req.body, agentAuth(req), kind);
+    requireCurrentAuth(req); requireCodex(req.user);
+    res.status(200).json({ conversation: visibleConversation(conversation), submission });
+  });
+  for (const method of ['patch', 'delete']) app[method]('/api/conversations/:id/agent/queue/:entryId', async (req, res) => {
+    const conversation = agentConversation(req);
+    await agentTasks.edit(conversation, req.params.entryId, req.body, agentAuth(req), method === 'delete');
+    requireCurrentAuth(req); res.json({ conversation: visibleConversation(conversation) });
+  });
+  app.post('/api/conversations/:id/agent/queue/resume', async (req, res) => {
+    const conversation = agentConversation(req);
+    if (Object.keys(req.body).length) throw failure(400, '恢复队列不接受权限或内容覆盖。');
+    await agentTasks.resume(conversation, agentAuth(req)); requireCurrentAuth(req);
+    res.json({ conversation: visibleConversation(conversation) });
   });
 
   app.post('/api/conversations/:id/messages', async (req, res) => {
@@ -452,7 +520,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       if (controller.signal.aborted) return;
       if (event === 'thread') { conversation.threadId = data.threadId; return; }
       if (event === 'approval' && typeof data?.id === 'string') {
-        approvals.set(data.id, { userId: req.user.id, conversationId: conversation.id, task }); task.approvalIds.add(data.id);
+        approvals.set(data.id, { userId: req.user.id, conversationId: conversation.id, task, kind: data.kind, description: data.description }); task.approvalIds.add(data.id);
       }
       if (event === 'delta') {
         if (typeof data?.text !== 'string') return;
@@ -473,7 +541,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       res.flushHeaders(); send('meta', { conversationId: conversation.id });
       heartbeat = setInterval(() => { if (!res.destroyed) res.write(': keepalive\n\n'); }, 15000); heartbeat.unref();
       const result = conversation.mode === 'codex'
-        ? await bridge.run({ prompt: content, threadId: conversation.threadId, signal: controller.signal, onEvent })
+        ? await bridge.run({ conversationId: conversation.id, permissions: requirePermissions(req.user), prompt: content, threadId: conversation.threadId, signal: controller.signal, onEvent })
         : await streamProvider({ provider, messages: [...history, user], persona: settingsFor(req.user).persona, signal: controller.signal, onEvent });
       controller.signal.throwIfAborted();
       if (result.threadId) conversation.threadId = result.threadId;
@@ -493,6 +561,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       clearInterval(heartbeat); active.delete(conversation.id); finish();
       for (const id of task.approvalIds) if (approvals.get(id)?.task === task) approvals.delete(id);
       if (!res.writableEnded) res.end();
+      if (conversation.mode === 'codex') agentTasks.kick(conversation);
     }
   });
 
@@ -519,7 +588,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     for (const probe of probes) probe.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     for (const task of active.values()) task.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     if (configSwap) await configSwap.catch(() => {});
-    const results = await Promise.allSettled([bridge.close(), localTools.close(), updates.close(), cosyvoice.close(), ...[...active.values(), ...probes].map(task => task.done)]);
+    const results = await Promise.allSettled([agentTasks.close(), bridge.close(), localTools.close(), updates.close(), cosyvoice.close(), ...[...active.values(), ...probes].map(task => task.done)]);
     let saveError;
     try { await store.queue; } catch (error) { saveError = error; }
     finally { server.closeAllConnections(); await httpClosed; }

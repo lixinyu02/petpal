@@ -4,8 +4,13 @@ import fs from 'node:fs/promises';
 import ts from 'typescript';
 
 let moduleId=0;
+const nativeSource=await fs.readFile(new URL('../src/auth/native-fetch.ts',import.meta.url),'utf8');
+const nativeCompiled=ts.transpileModule(nativeSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+const nativeUrl='data:text/javascript;base64,'+Buffer.from(nativeCompiled).toString('base64');
 const source=await fs.readFile(new URL('../src/api.ts',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText
+  .replaceAll("'./auth/native-fetch'",JSON.stringify(nativeUrl))
+  .replaceAll("'./auth/connection-targets.mjs'",JSON.stringify(new URL('../src/auth/connection-targets.mjs',import.meta.url).href))
   .replaceAll("'./auth/request-scope.mjs'",JSON.stringify(new URL('../src/auth/request-scope.mjs',import.meta.url).href));
 const freshApi=()=>import(`data:text/javascript;base64,${Buffer.from(compiled+`\n// module ${++moduleId}`).toString('base64')}`);
 const deferred=()=>{let resolve;const promise=new Promise(yes=>{resolve=yes;});return{promise,resolve};};
@@ -63,7 +68,7 @@ test('real API wrapper account-switch and native restore behavior',async t=>{
     await t.test('desktop restore refreshes local port but preserves member login and explicit logout',async()=>{
       window.petpal={connection:async()=>({url:'http://127.0.0.1:60002',token:'fresh-owner'})};
       for(const [kind,savedToken,expectedToken] of [['session','member','member'],['none','',''],['pairing','old-owner','fresh-owner']]){
-        disk.set('petpal.connection',JSON.stringify({url:'http://127.0.0.1:60001',token:savedToken,credentialKind:kind}));
+        disk.set('petpal.connection',JSON.stringify({url:'http://127.0.0.1:60001',token:savedToken,credentialKind:kind,target:'local'}));
         const api=await freshApi();await api.initConnection();
         assert.deepEqual(api.getConnection(),{url:'http://127.0.0.1:60002',token:expectedToken});
         api.setConnection({url:'http://127.0.0.1:60002',token:'later'});
@@ -83,6 +88,21 @@ test('real API wrapper account-switch and native restore behavior',async t=>{
       disk.clear();
       const web=await freshApi();assert.deepEqual(await web.initConnection(),{url:'',token:''});
     });
+    await t.test('desktop target switching never transfers remote credentials into local owner access',async()=>{
+      disk.clear();window.petpal={connection:async()=>({url:'http://127.0.0.1:60002',token:'local-owner'})};
+      disk.set('petpal.connection',JSON.stringify({url:'https://remote.example',token:'remote-member',credentialKind:'session',target:'remote'}));
+      const api=await freshApi();await api.initConnection();
+      assert.equal(api.getExecutionTarget(),'remote');
+      assert.deepEqual(api.getConnection(),{url:'https://remote.example',token:'remote-member'});
+      await api.switchExecutionTarget('local');
+      assert.deepEqual(api.getConnection(),{url:'http://127.0.0.1:60002',token:''});
+      api.setConnection({url:'http://127.0.0.1:60002',token:'local-member'},'session');
+      await api.switchExecutionTarget('remote');
+      assert.deepEqual(api.getConnection(),{url:'https://remote.example',token:'remote-member'});
+      await api.switchExecutionTarget('local');
+      assert.deepEqual(api.getConnection(),{url:'http://127.0.0.1:60002',token:'local-member'});
+      delete window.petpal;disk.clear();
+    });
     await t.test('a default server never becomes the destination of a URL pairing token',async()=>{
       disk.set('petpal.connection',JSON.stringify({url:'https://personal.example',token:'later',credentialKind:'session'}));
       location.hash='#token=later';
@@ -90,6 +110,20 @@ test('real API wrapper account-switch and native restore behavior',async t=>{
         const api=await freshApi();
         assert.deepEqual(await api.initConnection('https://mobile.example'),{url:'',token:'later'});
       }finally{location.hash='';disk.clear();}
+    });
+    await t.test('a late native target lookup cannot resurrect credentials after logout or a newer selection',async()=>{
+      for(const interrupt of ['logout','remote']){
+        disk.clear();const lookup=deferred();
+        window.petpal={connection:()=>lookup.promise};
+        const api=await freshApi();api.setConnection({url:'https://remote.example',token:'member'},'session','remote');
+        const pending=api.switchExecutionTarget('local');
+        if(interrupt==='logout')api.logout();else await api.switchExecutionTarget('remote');
+        lookup.resolve({url:'http://127.0.0.1:60002',token:'owner'});
+        await assert.rejects(pending,api.SessionChangedError);
+        assert.equal(api.getExecutionTarget(),'remote');
+        assert.deepEqual(api.getConnection(),{url:'https://remote.example',token:interrupt==='logout'?'':'member'});
+      }
+      delete window.petpal;disk.clear();
     });
   }finally{for(const[key,descriptor]of original){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];}}
 });

@@ -3,8 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import ts from 'typescript';
 
+const nativeSource=await fs.readFile(new URL('../src/auth/native-fetch.ts',import.meta.url),'utf8');
+const nativeCompiled=ts.transpileModule(nativeSource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;
+const nativeUrl='data:text/javascript;base64,'+Buffer.from(nativeCompiled).toString('base64');
 const source=await fs.readFile(new URL('../src/api.ts',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText
+  .replaceAll("'./auth/native-fetch'",JSON.stringify(nativeUrl))
+  .replaceAll("'./auth/connection-targets.mjs'",JSON.stringify(new URL('../src/auth/connection-targets.mjs',import.meta.url).href))
   .replaceAll("'./auth/request-scope.mjs'",JSON.stringify(new URL('../src/auth/request-scope.mjs',import.meta.url).href));
 let moduleId=0;
 const freshApi=()=>import(`data:text/javascript;base64,${Buffer.from(compiled+`\n// binary test ${++moduleId}`).toString('base64')}`);

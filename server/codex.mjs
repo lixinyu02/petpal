@@ -8,6 +8,8 @@ import { StringDecoder } from 'node:string_decoder';
 import { createRequire } from 'node:module';
 import { prepareCodexRuntime, publicCodexConfig } from './codex-config.mjs';
 import { createCodexTransport } from './codex-transport.mjs';
+import { AGENT_ACCESS, AGENT_APPROVAL, defaultAgentPermissions, normalizeAgentPermissions, codexPermissionParams } from './agent-permissions.mjs';
+import { normalizeReasoningEffort } from './providers.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -19,6 +21,22 @@ const APPROVAL_METHODS = new Map([
 ]);
 
 const abortError = () => Object.assign(new Error('Codex 任务已停止'), { name: 'AbortError' });
+const turnInactive = () => Object.assign(new Error('要引导的 Agent 任务已结束或已切换。'), { code: 'turn_not_active', status: 409 });
+const steerUncertain = () => Object.assign(new Error('无法确认引导是否已送达，请检查当前任务后再试；不会自动重复发送。'), { code: 'steer_delivery_uncertain', status: 409 });
+
+// Paths are resolved from authorized uploads by the service, never from raw HTTP
+// input. This final protocol boundary still rejects remote URLs and malformed paths.
+function userInput(content, images = []) {
+  if (typeof content !== 'string' || content.length > 32000 || !Array.isArray(images) || images.length > 4) throw new Error('Agent 消息或图片格式无效。');
+  const input = content.trim() ? [{ type: 'text', text: content }] : [];
+  for (const image of images) {
+    if (!image || typeof image !== 'object' || Array.isArray(image) || Object.keys(image).some(key => key !== 'path') ||
+        typeof image.path !== 'string' || image.path.length > 4096 || /[\x00-\x1f\x7f]/.test(image.path) || !path.isAbsolute(image.path)) throw new Error('Agent 图片必须来自已验证的本地上传。');
+    input.push({ type: 'localImage', path: image.path });
+  }
+  if (!input.length) throw new Error('请输入 Codex 任务或添加图片。');
+  return input;
+}
 const safeText = (value) => String(value ?? '')
   .replace(/\b(sk-[\w-]{8,}|eyJ[\w-]+\.[\w-]+\.[\w-]+)\b/g, '[已隐藏]')
   .replace(/(Bearer\s+)[^\s"']+/gi, '$1[已隐藏]')
@@ -30,7 +48,7 @@ function protocolError(method, error, apiMode = false) {
   if (/auth|login|unauthorized|401/i.test(source)) message += apiMode ? '：请检查桌面助手的 API Key 与 Responses 服务配置' : '：请在这台电脑运行 codex login 完成登录';
   else if (/rate.limit|quota|429/i.test(source)) message += '：额度或速率受限，请稍后重试';
   else if (/model.*(?:not|invalid|support)/i.test(source)) message += '：当前模型不可用，请检查 Codex 模型配置';
-  else if (/sandbox/i.test(source)) message += '：只读沙箱不可用，请检查本机 Codex 沙箱设置';
+  else if (/sandbox/i.test(source)) message += '：所选沙箱不可用，请检查执行主机的 Codex 沙箱设置';
   else if (typeof error?.code === 'number') message += `（代码 ${error.code}）`;
   // Never return raw RPC diagnostics: provider errors can contain request headers.
   return new Error(message);
@@ -146,6 +164,7 @@ export class CodexBridge {
     this.pending = new Map();
     this.runs = new Map();
     this.resuming = new Set();
+    this.conversations = new Set();
     this.approvals = new Map();
     this.sequence = 0;
     this.lastError = null;
@@ -156,8 +175,9 @@ export class CodexBridge {
   async status() {
     const base = {
       workspaceRoot: this.workspaceRoot, sandbox: 'read-only', approvalPolicy: 'on-request',
+      permissions: defaultAgentPermissions(), permissionControls: { access: [...AGENT_ACCESS], approval: [...AGENT_APPROVAL] }, supportsSteer: true,
       activeRuns: this.runs.size, pendingApprovals: this.approvals.size,
-      ...(this.config ? { ...publicCodexConfig(this.config), credentialConfigured: Boolean(this.config.apiKey), apiVerified: false, executionMode: this.apiMode ? 'controlled-tools' : 'host-read-only' } : {}),
+      ...(this.config ? { ...publicCodexConfig(this.config), credentialConfigured: Boolean(this.config.apiKey), apiVerified: false, executionMode: 'sandboxed-cli' } : {}),
     };
     try {
       await this._ensureStarted();
@@ -213,7 +233,7 @@ export class CodexBridge {
       child = spawn(executable.file, [...executable.args,
         'app-server', '--listen', 'stdio://',
         '-c', 'sandbox_mode="read-only"', '-c', 'approval_policy="on-request"', '-c', 'approvals_reviewer="user"',
-        ...(this.apiMode ? ['-c', 'features.shell_tool=false', '-c', 'features.unified_exec=false'] : []),
+        ...(this.apiMode ? ['-c', 'features.shell_tool=true', '-c', 'features.unified_exec=true'] : []),
       ], {
         cwd: this.workspaceRoot, stdio: ['pipe', 'pipe', 'pipe'], shell: false,
         windowsHide: true, detached: process.platform !== 'win32',
@@ -291,7 +311,7 @@ export class CodexBridge {
     if (run.turnId && eventTurn && eventTurn !== run.turnId) return;
     switch (message.method) {
       case 'turn/started':
-        run.turnId = params.turn.id;
+        this._recordTurn(run, params.turn.id);
         this._emit(run, 'status', { state: 'working', message: 'Codex 正在处理' });
         if (run.aborted) this._interrupt(run);
         break;
@@ -316,7 +336,7 @@ export class CodexBridge {
       }
       case 'serverRequest/resolved':
         for (const [id, approval] of this.approvals) {
-          if (approval.rpcId === params.requestId) this.approvals.delete(id);
+          if (approval.rpcId === params.requestId) { this.approvals.delete(id); this._emit(run, 'approval-resolved', { id }); }
         }
         this._emit(run, 'status', { state: 'working', message: '审批请求已处理' });
         break;
@@ -341,9 +361,9 @@ export class CodexBridge {
       return;
     }
     if (message.method === 'item/tool/call') { this._dynamicTool(message, run); return; }
-    if (kind && this.apiMode) {
+    if (kind && run.permissions.approval === 'auto') {
       this._send({ id: message.id, result: { decision: 'decline' } });
-      this._emit(run, 'status', { state: 'blocked', message: 'API 助手仅可使用已注册的桌面工具，已拒绝额外命令或文件权限' });
+      this._emit(run, 'status', { state: 'blocked', message: '自动运行不会额外提权，已拒绝超出当前授权范围的请求' });
       return;
     }
     if (!kind) {
@@ -415,7 +435,10 @@ export class CodexBridge {
       description = this.desktopTools.describe(call.name, call.arguments);
       if (!description || typeof description.description !== 'string' || !description.description.trim() || typeof description.approvalRequired !== 'boolean') throw new Error('工具未提供可审阅的描述。');
     } catch (error) { this._replyDynamic(call, false, { error: safeText(this._redact(error.message)) }); return; }
-    if (description.approvalRequired) {
+    if (description.approvalRequired && run.permissions.access !== 'full-access') {
+      this._replyDynamic(call, false, { error: '主机音乐和浏览器操作需要完全访问权限；当前只允许查询状态。' }); return;
+    }
+    if (description.approvalRequired && run.permissions.approval !== 'auto') {
       const id = randomUUID();
       this.approvals.set(id, { rpcId: message.id, run, dynamic: call });
       this._emit(run, 'approval', { id, kind: 'desktopTool', description: safeText(this._redact(description.description)).slice(0, 8000) });
@@ -470,19 +493,48 @@ export class CodexBridge {
     }
   }
 
-  async run({ prompt, threadId, model, signal, onEvent } = {}) {
-    if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('请输入 Codex 任务');
+  _recordTurn(run, turnId) {
+    if (typeof turnId !== 'string' || !turnId || run.settled || run.turnId === turnId) return;
+    if (run.turnId) throw new Error('Codex 返回了与当前任务不一致的任务 ID');
+    run.turnId = turnId;
+    this._emit(run, 'turn', { turnId });
+  }
+
+  async steer({ conversationId, expectedTurnId, content, images } = {}) {
+    const input = userInput(content, images);
+    if (typeof conversationId !== 'string' || !conversationId || typeof expectedTurnId !== 'string' || !expectedTurnId) throw turnInactive();
+    const run = [...this.runs.values()].find(item => item.conversationId === conversationId);
+    if (!run || run.settled || run.aborted || run.turnId !== expectedTurnId || run.child !== this.child) throw turnInactive();
+    // Only this preflight is known not to have delivered. Every error after the
+    // write is uncertain, so callers must never retry it as a queued prompt.
+    let result;
+    try { result = await this._rpc('turn/steer', { threadId: run.threadId, expectedTurnId, input }); }
+    catch { throw steerUncertain(); }
+    if (result.turnId !== expectedTurnId) throw steerUncertain();
+    return { turnId: result.turnId };
+  }
+
+  async run({ prompt = '', threadId, conversationId, model, effort, permissions, images, signal, onEvent } = {}) {
+    const input = userInput(prompt, images);
+    permissions = normalizeAgentPermissions(permissions);
+    if (model !== undefined && (typeof model !== 'string' || !model.trim() || model.length > 160 || /[\x00-\x1f\x7f]/.test(model))) throw new Error('Agent 模型 ID 无效。');
+    if (effort !== undefined) effort = normalizeReasoningEffort(effort);
+    if (conversationId !== undefined && (typeof conversationId !== 'string' || !conversationId || conversationId.length > 160)) throw new Error('Agent 会话 ID 无效。');
     if (threadId && (this.runs.has(threadId) || this.resuming.has(threadId))) throw new Error('此 Codex 会话已有运行中的任务');
+    if (conversationId && this.conversations.has(conversationId)) throw new Error('此 Codex 会话已有运行中的任务');
     if (signal?.aborted) throw abortError();
     if (threadId) this.resuming.add(threadId);
+    if (conversationId) this.conversations.add(conversationId);
     let run;
     try {
       await this._ensureStarted();
       const auth = await this._readAccount();
       if (!auth.authenticated) throw new Error('Codex 尚未登录。请在这台电脑运行 codex login，然后重试');
       if (signal?.aborted) throw abortError();
-      model = this.apiMode ? this.config.model : model;
-      const threadParams = { cwd: this.workspaceRoot, sandbox: 'read-only', approvalPolicy: 'on-request', approvalsReviewer: 'user', ...(model ? { model } : {}), ...(this.apiMode ? { modelProvider: 'petpal', developerInstructions: '使用已提供的 PetPal 桌面工具处理音乐与浏览器任务。没有工具或执行失败时如实说明，不得声称已完成。' } : {}) };
+      model ??= this.apiMode ? this.config.model : undefined;
+      effort = effort || (this.apiMode ? this.config.reasoningEffort : '');
+      const { sandboxPolicy, ...threadPermissions } = codexPermissionParams(permissions, this.workspaceRoot);
+      const threadParams = { cwd: this.workspaceRoot, ...threadPermissions, ...(model ? { model } : {}), ...(this.apiMode ? { modelProvider: 'petpal', developerInstructions: '根据本轮访问范围执行任务。音乐与浏览器优先使用 PetPal 桌面工具；受限权限不允许操作主机软件。没有工具或执行失败时如实说明，不得声称已完成。' } : {}) };
       const result = await this._rpc(threadId ? 'thread/resume' : 'thread/start', { ...threadParams, ...(threadId ? { threadId } : { dynamicTools: this.desktopTools?.specs ?? [] }) });
       const actualId = result.thread?.id;
       if (typeof actualId !== 'string' || !actualId) throw new Error('Codex 未返回有效会话 ID');
@@ -492,7 +544,7 @@ export class CodexBridge {
       const completion = new Promise((yes, no) => { resolve = yes; reject = no; });
       // A notification can finish a turn before the turn/start response arrives.
       completion.catch(() => {});
-      run = { threadId: actualId, turnId: null, text: '', onEvent, resolve, reject, signal,
+      run = { threadId: actualId, conversationId, permissions, turnId: null, text: '', onEvent, resolve, reject, completion, signal,
         aborted: false, settled: false, interrupting: false, items: new Map(), streamedItems: new Set(), dynamicCalls: new Map(), toolTasks: new Set(), child: this.child };
       run.onAbort = () => { run.aborted = true; this._interrupt(run); };
       signal?.addEventListener('abort', run.onAbort, { once: true });
@@ -501,20 +553,22 @@ export class CodexBridge {
       this._emit(run, 'status', { state: 'starting', message: '正在启动 Codex 任务' });
       if (signal?.aborted || run.aborted) throw abortError();
       const started = await this._rpc('turn/start', {
-        threadId: actualId, input: [{ type: 'text', text: prompt }], cwd: this.workspaceRoot,
-        approvalPolicy: 'on-request', approvalsReviewer: 'user', sandboxPolicy: { type: 'readOnly', networkAccess: false },
+        threadId: actualId, input, cwd: this.workspaceRoot,
+        approvalPolicy: threadPermissions.approvalPolicy, approvalsReviewer: threadPermissions.approvalsReviewer, sandboxPolicy,
         ...(model ? { model } : {}),
-        ...(this.apiMode && this.config.reasoningEffort ? { effort: this.config.reasoningEffort } : {}),
+        ...(effort ? { effort } : {}),
       });
-      run.turnId ||= started.turn?.id;
+      this._recordTurn(run, started.turn?.id);
       if (!run.turnId && !run.settled) throw new Error('Codex 未返回有效任务 ID');
       if (run.aborted && !run.settled) this._interrupt(run);
       return await completion;
     } catch (error) {
       if (run && !run.settled) this._finish(run, error);
+      if (run) await run.completion.catch(() => {});
       throw error;
     } finally {
       if (threadId) this.resuming.delete(threadId);
+      if (conversationId) this.conversations.delete(conversationId);
     }
   }
 
@@ -559,7 +613,7 @@ export class CodexBridge {
     }
     for (const [id, approval] of this.approvals) if (approval.run === run) this.approvals.delete(id);
     // Stop is complete only after owned tool processes have actually exited.
-    Promise.allSettled([...run.toolTasks]).then(() => {
+    Promise.allSettled([...run.toolTasks, ...(run.child !== this.child ? [this.childClosures.get(run.child)] : [])]).then(() => {
       if (this.runs.get(run.threadId) === run) this.runs.delete(run.threadId);
       if (error || run.aborted) run.reject(run.aborted ? abortError() : error);
       else run.resolve({ threadId: run.threadId, text: run.text });
