@@ -9,6 +9,7 @@ const nativeUrl='data:text/javascript;base64,'+Buffer.from(nativeCompiled).toStr
 const source=await fs.readFile(new URL('../src/api.ts',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText
   .replaceAll("'./auth/native-fetch'",JSON.stringify(nativeUrl))
+  .replaceAll("'./avatar/speech-stream.mjs'",JSON.stringify(new URL('../src/avatar/speech-stream.mjs',import.meta.url).href))
   .replaceAll("'./auth/connection-targets.mjs'",JSON.stringify(new URL('../src/auth/connection-targets.mjs',import.meta.url).href))
   .replaceAll("'./auth/request-scope.mjs'",JSON.stringify(new URL('../src/auth/request-scope.mjs',import.meta.url).href));
 let moduleId=0;
@@ -65,6 +66,27 @@ test('authenticated audio API fences credentials and binary data across account 
       const api=await freshApi();api.setConnection({url:'',token:'current'});
       install('fetch',async()=>new Response('{"error":"请先配置参考声音"}',{status:409,headers:{'Content-Type':'application/json'}}));
       await assert.rejects(api.apiBlob('/voice/synthesize',{method:'POST'}),/参考声音/);
+    });
+    await t.test('stream holds the old credential scope while consumer is waiting and drops late audio on account switch',async()=>{
+      const api=await freshApi();api.setConnection({url:'https://pet.example',token:'old'});
+      const consuming=deferred(),release=deferred();let sent,output=0,cancelled=false;
+      const frames=[{type:'format',format:'pcm_s16le',sampleRate:24000,channels:1},{type:'audio',data:'AQI='},{type:'audio',data:'AwQ='},{type:'end',bytes:4}];
+      install('fetch',async(url,options)=>{
+        sent={url,options};return new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode(frames.map(value=>JSON.stringify(value)+'\n').join('')));},cancel(){cancelled=true;}}),{headers:{'content-type':'application/x-ndjson'}});
+      });
+      const pending=api.apiSpeechStream('你好',new AbortController().signal,{onFormat(){},async onAudio(){output++;consuming.resolve();await release.promise;}});
+      const rejected=assert.rejects(pending,api.SessionChangedError);
+      await consuming.promise;
+      assert.equal(sent.url,'https://pet.example/api/voice/synthesize/stream');
+      assert.equal(sent.options.headers.Authorization,'Bearer old');assert.equal(sent.options.signal.aborted,false);
+      api.setConnection({url:'https://pet.example',token:'new'});release.resolve();await rejected;
+      assert.equal(sent.options.signal.aborted,true);assert.equal(output,1);assert.equal(cancelled,true);assert.equal(api.getConnection().token,'new');
+    });
+    await t.test('stream unauthorized response expires only the current account',async()=>{
+      const api=await freshApi();api.setConnection({url:'',token:'expired'});
+      install('fetch',async()=>new Response('{"error":"请登录"}',{status:401,headers:{'content-type':'application/json'}}));
+      await assert.rejects(api.apiSpeechStream('你好',new AbortController().signal,{onFormat(){},onAudio(){}}),/请登录/);
+      assert.equal(api.getConnection().token,'');
     });
   }finally{for(const[key,descriptor]of originals){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];}}
 });

@@ -1,13 +1,14 @@
 'use strict';
 
-const REMOTE_LIMITS = Object.freeze({ concurrency: 8, requestBytes: 16 * 1024 ** 2, responseBytes: 64 * 1024 ** 2, chunkBytes: 64 * 1024, headerBytes: 16 * 1024, headerTimeoutMs: 30000, synthesisTimeoutMs: 190000, idleTimeoutMs: 120000 });
+const REMOTE_LIMITS = Object.freeze({ concurrency: 8, requestBytes: 16 * 1024 ** 2, responseBytes: 64 * 1024 ** 2, chunkBytes: 64 * 1024, headerBytes: 16 * 1024, headerTimeoutMs: 30000, synthesisTimeoutMs: 190000, idleTimeoutMs: 120000, ackTimeoutMs: 30000 });
 const methods = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const requestHeaders = new Set(['authorization', 'content-type', 'accept', 'accept-language']);
 const responseHeaders = new Set(['content-type', 'content-length', 'content-disposition', 'cache-control', 'etag', 'last-modified', 'retry-after']);
 const requestId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 
 function validateRemoteRequest(input, limits = REMOTE_LIMITS) {
-  if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['id', 'url', 'method', 'headers', 'body', 'bodyEncoding'].includes(key)) || !requestId(input.id)) throw new Error('远程请求标识或格式无效。');
+  if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['id', 'url', 'method', 'headers', 'body', 'bodyEncoding', 'flowControl'].includes(key)) || !requestId(input.id)) throw new Error('远程请求标识或格式无效。');
+  if (input.flowControl !== undefined && input.flowControl !== 'ack-v1') throw new Error('远程响应流控制格式无效。');
   if (typeof input.url !== 'string' || input.url.length > 4096 || /[\u0000-\u0020\\#]/.test(input.url)) throw new Error('远程服务地址无效。');
   let url;
   try { url = new URL(input.url); } catch { throw new Error('远程服务地址无效。'); }
@@ -34,7 +35,7 @@ function validateRemoteRequest(input, limits = REMOTE_LIMITS) {
       body = input.body;
     }
   }
-  return { id: input.id, url: url.href, method, headers, body };
+  return { id: input.id, url: url.href, method, headers, body, flowControl: input.flowControl };
 }
 
 function isPetPalReleaseUrl(value) {
@@ -83,18 +84,18 @@ function createDesktopRemoteHttp({ isAllowed, fetchImpl = globalThis.fetch, limi
     if (existing?.requests.has(input.id)) throw new Error('远程请求标识重复。');
     if ((existing?.requests.size || 0) >= limits.concurrency) throw new Error('同时进行的远程请求过多。');
     const state = ownerState(owner), controller = new AbortController();
-    const entry = { controller, done: null }; state.requests.set(input.id, entry);
+    const entry = { controller, done: null, acknowledgement: null }; state.requests.set(input.id, entry);
     const emit = payload => {
       if (!allowed(event)) { controller.abort(new Error('远程窗口已关闭或离开。')); return; }
       try { event.senderFrame.send('petpal:remote:event', input.id, payload); }
       catch { controller.abort(new Error('远程窗口已关闭或离开。')); }
     };
     entry.done = (async () => {
-      let timer, reader, finished = false;
+      let timer, reader, finished = false, sequence = 0;
       const deadline = (ms, message) => { clearTimeout(timer); timer = setTimeout(() => controller.abort(new Error(message)), ms); timer.unref?.(); };
       try {
-        // CosyVoice sends headers only after its bounded (180 s) synthesis completes.
-        const synthesizing = input.method === 'POST' && new URL(input.url).pathname === '/api/voice/synthesize';
+        // Both voice routes may need the bounded synthesis budget for cold starts.
+        const synthesizing = input.method === 'POST' && ['/api/voice/synthesize', '/api/voice/synthesize/stream'].includes(new URL(input.url).pathname);
         deadline(synthesizing ? limits.synthesisTimeoutMs : limits.headerTimeoutMs, '远程服务连接超时。');
         const response = await abortable(fetchImpl(input.url, { method: input.method, headers: input.headers, body: input.body, signal: controller.signal, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' }), controller.signal);
         controller.signal.throwIfAborted(); clearTimeout(timer);
@@ -115,7 +116,17 @@ function createDesktopRemoteHttp({ isAllowed, fetchImpl = globalThis.fetch, limi
             if (received > limits.responseBytes) throw new Error('远程响应超过大小限制。');
             for (let offset = 0; offset < value.byteLength; offset += limits.chunkBytes) {
               controller.signal.throwIfAborted();
-              emit({ type: 'chunk', bytes: Array.from(value.subarray(offset, offset + limits.chunkBytes)) });
+              const chunk = { type: 'chunk', bytes: Array.from(value.subarray(offset, offset + limits.chunkBytes)) };
+              if (input.flowControl === 'ack-v1') {
+                // Exactly one IPC chunk may be in flight. Install the waiter before
+                // sending so an immediate consumer acknowledgement cannot be lost.
+                chunk.sequence = ++sequence;
+                const consumed = new Promise(resolve => { entry.acknowledgement = { sequence, resolve }; });
+                deadline(limits.ackTimeoutMs, '远程响应读取停滞，已停止请求。');
+                emit(chunk);
+                try { await abortable(consumed, controller.signal); }
+                finally { entry.acknowledgement = null; }
+              } else emit(chunk);
             }
           }
         }
@@ -127,6 +138,7 @@ function createDesktopRemoteHttp({ isAllowed, fetchImpl = globalThis.fetch, limi
         emit({ type: 'error', message });
       } finally {
         clearTimeout(timer);
+        entry.acknowledgement = null;
         if (!finished) controller.abort(new Error('远程请求已结束。'));
         if (reader) { if (!finished) void reader.cancel().catch(() => {}); try { reader.releaseLock(); } catch {} }
         state.requests.delete(input.id); cleanupOwner(owner, state);
@@ -137,6 +149,17 @@ function createDesktopRemoteHttp({ isAllowed, fetchImpl = globalThis.fetch, limi
   return {
     request,
     async abort(event, id) { assertAllowed(event); if (!requestId(id)) throw new Error('远程请求标识无效。'); owners.get(event.sender)?.requests.get(id)?.controller.abort(new Error('远程请求已取消。')); },
+    async acknowledge(event, id, sequence) {
+      assertAllowed(event);
+      if (!requestId(id) || !Number.isSafeInteger(sequence) || sequence < 1) throw new Error('远程响应确认格式无效。');
+      const entry = owners.get(event.sender)?.requests.get(id);
+      // A legitimate ACK can arrive after an abort has already removed its request.
+      if (!entry || entry.controller.signal.aborted) return;
+      const pending = entry.acknowledgement;
+      if (!pending || pending.sequence !== sequence) throw new Error('远程响应确认顺序无效。');
+      entry.acknowledgement = null;
+      pending.resolve();
+    },
     cancelOwner,
     async close() {
       closed = true;

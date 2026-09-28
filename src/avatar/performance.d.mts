@@ -6,7 +6,7 @@ export interface PerformanceInput {
   text: string;
   phase: PerformancePhase;
   /** UTF-16 text position from optional playback boundary events; not an audio phoneme measurement. */
-  speech?: { active: boolean; charIndex: number; ended?: boolean };
+  speech?: { active: boolean; charIndex: number; ended?: boolean; /** PCM energy envelope, not phoneme recognition. */ audioLevel?:number };
 }
 export interface AvatarPerformanceSnapshot {
   expression: AvatarExpression;

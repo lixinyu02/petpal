@@ -6,6 +6,7 @@ import { normalizeVoiceUrl } from './voice.mjs';
 export const REFERENCE_LIMIT = 5 * 1024 * 1024;
 export const COSYVOICE_AUDIO_LIMIT = 20 * 1024 * 1024;
 export const COSYVOICE_TEXT_LIMIT = 1000;
+export const COSYVOICE_STREAM_CHUNK = 24576;
 const RESPONSE_LIMIT = 128 * 1024, SSE_LIMIT = 1024 * 1024;
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const fields = (value, allowed) => object(value) && Object.keys(value).every(key => allowed.includes(key));
@@ -185,10 +186,12 @@ export async function createCosyVoiceService({ store, dataDir, fetchImpl = globa
     })();
     try { return await mutation; } finally { changing = false; }
   };
-  const synthesize = async ({ userId, text, speed = 1, signal } = {}) => {
+  // Both transports reserve the same user/global slot and rate allowance.
+  const withSynthesis = async ({ userId, text, speed = 1, signal, streaming = false } = {}, consume) => {
     assertLive(); signal?.throwIfAborted();
     const input = checkText(text, COSYVOICE_TEXT_LIMIT, '合成文本', false);
     if (typeof speed !== 'number' || !Number.isFinite(speed) || speed < 0.5 || speed > 2) throw failure(400, 'CosyVoice 语速必须为 0.5 到 2。');
+    if (streaming && speed !== 1) throw failure(409, '实时语音仅支持 1.0 倍语速，请使用完整音频朗读。');
     const config = state.cosyvoiceConfig;
     if (!config.baseUrl || !config.reference || !config.referenceText) throw failure(409, '管理员尚未配置完整的 CosyVoice 服务与参考声音。');
     if (running.has(userId) || running.size >= maxConcurrent) throw failure(429, '语音服务忙，请稍后再试。');
@@ -198,6 +201,10 @@ export async function createCosyVoiceService({ store, dataDir, fetchImpl = globa
     recent.push(time); rates.set(userId, recent);
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(failure(504, '语音生成超时，请稍后重试。')), timeoutMs);
     const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal; running.set(userId, controller);
+    const checkCurrent = () => {
+      combined.throwIfAborted();
+      if (state.cosyvoiceConfig.revision !== config.revision) throw failure(409, '语音配置已变化，请重新开始朗读。');
+    };
     const request = async (url, init = {}) => {
       combined.throwIfAborted();
       const headers = new Headers(init.headers); if (config.apiKey) headers.set('Authorization', `Bearer ${config.apiKey}`);
@@ -207,28 +214,83 @@ export async function createCosyVoiceService({ store, dataDir, fetchImpl = globa
       return response;
     };
     try {
-      const reference = await readReference(config.reference); combined.throwIfAborted();
-      const form = new FormData(); form.append('files', new Blob([reference], { type: 'audio/wav' }), 'reference.wav');
-      const upload = parseJson(await readBounded(await request(`${config.baseUrl}/gradio_api/upload`, { method: 'POST', body: form }), RESPONSE_LIMIT, combined));
-      if (!Array.isArray(upload) || upload.length !== 1) throw failure(502, '语音服务未接收参考音频。');
-      const uploadedPath = cacheWav(upload[0]);
-      const data = [input, '3s极速复刻', '', config.referenceText, { path: uploadedPath, meta: { _type: 'gradio.FileData' } }, null, '', 0, false, speed];
-      // Supplying a different session_hash breaks Gradio's simple GET endpoint:
-      // it looks up the message queue by event_id rather than that custom hash.
-      const job = parseJson(await readBounded(await request(`${config.baseUrl}/gradio_api/call/generate_audio`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data }) }), RESPONSE_LIMIT, combined));
-      if (!fields(job, ['event_id']) || !eventId(job.event_id)) throw failure(502, '语音队列未返回有效任务。');
-      const item = await readAudioEvent(await request(`${config.baseUrl}/gradio_api/call/generate_audio/${job.event_id}`), combined);
-      const audioUrl = cosyVoiceAudioUrl(item, config.baseUrl, job.event_id), response = await request(audioUrl);
-      if (!/^(?:audio\/(?:wav|x-wav|wave)|application\/octet-stream)(?:\s*;|$)/i.test(response.headers.get('content-type') || '')) { void response.body?.cancel().catch(() => {}); throw failure(502, '语音服务没有返回 WAV 音频。'); }
-      const audio = await readBounded(response, COSYVOICE_AUDIO_LIMIT, combined);
-      try { validatePcmWav(audio); } catch { throw failure(502, '语音服务没有返回有效的 PCM WAV 音频。'); }
-      combined.throwIfAborted(); if (state.cosyvoiceConfig.revision !== config.revision) throw failure(409, '语音配置已变化，请重新开始朗读。');
-      return audio;
+      const reference = await readReference(config.reference); checkCurrent();
+      const result = await consume({ input, speed, config, reference, request, signal: combined, checkCurrent });
+      checkCurrent(); return result;
     } catch (error) {
       if (combined.aborted) throw controller.signal.aborted ? safeCosyVoiceError(controller.signal.reason) : failure(409, '语音请求已停止。');
       throw safeCosyVoiceError(error);
     } finally { clearTimeout(timer); running.delete(userId); }
   };
+  const synthesize = args => withSynthesis(args, async ({ input, speed, config, reference, request, signal }) => {
+    const form = new FormData(); form.append('files', new Blob([reference], { type: 'audio/wav' }), 'reference.wav');
+    const upload = parseJson(await readBounded(await request(`${config.baseUrl}/gradio_api/upload`, { method: 'POST', body: form }), RESPONSE_LIMIT, signal));
+    if (!Array.isArray(upload) || upload.length !== 1) throw failure(502, '语音服务未接收参考音频。');
+    const uploadedPath = cacheWav(upload[0]);
+    const data = [input, '3s极速复刻', '', config.referenceText, { path: uploadedPath, meta: { _type: 'gradio.FileData' } }, null, '', 0, false, speed];
+    // Supplying a different session_hash breaks Gradio's simple GET endpoint:
+    // it looks up the message queue by event_id rather than that custom hash.
+    const job = parseJson(await readBounded(await request(`${config.baseUrl}/gradio_api/call/generate_audio`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data }) }), RESPONSE_LIMIT, signal));
+    if (!fields(job, ['event_id']) || !eventId(job.event_id)) throw failure(502, '语音队列未返回有效任务。');
+    const item = await readAudioEvent(await request(`${config.baseUrl}/gradio_api/call/generate_audio/${job.event_id}`), signal);
+    const audioUrl = cosyVoiceAudioUrl(item, config.baseUrl, job.event_id), response = await request(audioUrl);
+    if (!/^(?:audio\/(?:wav|x-wav|wave)|application\/octet-stream)(?:\s*;|$)/i.test(response.headers.get('content-type') || '')) { void response.body?.cancel().catch(() => {}); throw failure(502, '语音服务没有返回 WAV 音频。'); }
+    const audio = await readBounded(response, COSYVOICE_AUDIO_LIMIT, signal);
+    try { validatePcmWav(audio); } catch { throw failure(502, '语音服务没有返回有效的 PCM WAV 音频。'); }
+    return audio;
+  });
+  const synthesizeStream = async ({ onFrame, ...args } = {}) => {
+    if (typeof onFrame !== 'function') throw failure(400, '语音流接收器不可用。');
+    return withSynthesis({ ...args, streaming: true }, async ({ input, config, reference, request, signal, checkCurrent }) => {
+      const form = new FormData();
+      form.set('tts_text', input); form.set('mode', 'zero_shot'); form.set('prompt_text', config.referenceText); form.set('seed', '0');
+      form.set('prompt_wav', new Blob([reference], { type: 'audio/wav' }), 'reference.wav');
+      const response = await request(`${config.baseUrl}/api/tts/stream`, { method: 'POST', body: form });
+      const length = response.headers.get('content-length');
+      if (response.headers.get('content-type') !== 'application/octet-stream' || response.headers.get('x-audio-format') !== 'pcm_s16le' || response.headers.get('x-audio-sample-rate') !== '24000' || response.headers.get('x-audio-channels') !== '1' || !response.body || (length !== null && (!/^\d+$/.test(length) || Number(length) > COSYVOICE_AUDIO_LIMIT))) {
+        void response.body?.cancel().catch(() => {});
+        throw failure(502, '语音服务没有返回受支持的 24 kHz 单声道 PCM 音频流。');
+      }
+      const reader = response.body.getReader(); let total = 0, complete = false;
+      const abort = () => { void reader.cancel().catch(() => {}); };
+      signal.addEventListener('abort', abort, { once: true });
+      // Waiting for a slow consumer remains part of the synthesis deadline.
+      const emit = async frame => {
+        checkCurrent();
+        await new Promise((resolve, reject) => {
+          const cancelled = () => { cleanup(); reject(signal.reason); };
+          const cleanup = () => signal.removeEventListener('abort', cancelled);
+          signal.addEventListener('abort', cancelled, { once: true });
+          if (signal.aborted) { cancelled(); return; }
+          Promise.resolve().then(() => { checkCurrent(); return onFrame(frame, signal); }).then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
+        });
+        checkCurrent();
+      };
+      try {
+        await emit({ type: 'format', format: 'pcm_s16le', sampleRate: 24000, channels: 1 });
+        while (true) {
+          checkCurrent(); const { done, value } = await reader.read(); checkCurrent();
+          if (done) break;
+          total += value.byteLength;
+          if (total > COSYVOICE_AUDIO_LIMIT) throw failure(502, '语音服务响应超过允许大小。');
+          // Network chunks need not align to a PCM sample. Preserve every byte;
+          // the client carries an unmatched byte into the next audio frame.
+          for (let offset = 0; offset < value.byteLength; offset += COSYVOICE_STREAM_CHUNK) {
+            const chunk = Buffer.from(value.buffer, value.byteOffset + offset, Math.min(COSYVOICE_STREAM_CHUNK, value.byteLength - offset));
+            await emit({ type: 'audio', data: chunk.toString('base64') });
+          }
+        }
+        if (!total || total % 2 || (length !== null && Number(length) !== total)) throw failure(502, '语音服务返回了空白或不完整的 PCM 音频流。');
+        complete = true;
+        await emit({ type: 'end', bytes: total });
+        return { bytes: total };
+      } finally {
+        signal.removeEventListener('abort', abort);
+        if (!complete) void reader.cancel().catch(() => {});
+        reader.releaseLock();
+      }
+    });
+  };
   const close = async () => { closed = true; for (const controller of running.values()) controller.abort(failure(503, '语音服务正在退出。')); if (mutation) await mutation.catch(() => {}); };
-  return { publicConfig, configure, setReference, synthesize, close };
+  return { publicConfig, configure, setReference, synthesize, synthesizeStream, close };
 }

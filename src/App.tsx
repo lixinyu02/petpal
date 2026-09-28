@@ -85,7 +85,7 @@ export default function App() {
   const shownApprovals=currentMode==='codex'?conversation?.agent?.approvals||[]:approvals;
   const lastReply = conversation?.messages.slice().reverse().find(message => message.role === 'assistant' && message.status === 'complete' && message.content.trim());
   const performanceInput: PerformanceInput = mood === 'sleep' ? { utteranceId: 'sleep', text: '', phase: 'idle' } : speech.playing
-    ? { utteranceId: speech.utteranceId, text: speech.text, phase: 'speaking', speech: { active: speech.active, charIndex: speech.charIndex, ended: speech.ended } }
+    ? { utteranceId: speech.utteranceId, text: speech.text, phase: 'speaking', speech: { active: speech.active, charIndex: speech.charIndex, ended: speech.ended, audioLevel:speech.audioLevel } }
     : { ...responsePerformance, ...(speech.enabled ? { speech: { active: false, charIndex: 0, ended: true } } : {}) };
 
   function performancePhase(phase: PerformancePhase, text = '', utteranceId = '') {
@@ -174,6 +174,7 @@ export default function App() {
     if(images.length&&provider?.supportsImages===false){setError('这个模型仅支持文字，请移除图片或切换模型。');return;}
     stopPresentation();
     busyRef.current = true; setBusy(true); setError(''); setApprovals([]); setStatus('正在想怎么回答你…');
+    speech.prepare();
     const controller = new AbortController(); abortRef.current = controller;
     const requestId = ++requestSequence.current;
     let target = conversation;
@@ -300,7 +301,7 @@ export default function App() {
     if((!agentSubmissionRef.current&&!content&&!images.length)||attachments.uploading||agentSendLock.current||switchingModelRef.current)return;
     if(!state.user?.canUseCodex){setError('请联系管理员开通 Agent。');return;}
     if(!state.user.isOwner&&!agentProviderId){setError('当前主机没有分配给你的 Agent 模型，请联系管理员。');return;}
-    agentSendLock.current=true;setAgentSubmitting(true);setError('');stopPresentation();
+    agentSendLock.current=true;setAgentSubmitting(true);setError('');stopPresentation();speech.prepare();
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),40000);
     try{
       let target=conversation;

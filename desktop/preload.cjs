@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('petpal', Object.freeze({
   hidePet: () => ipcRenderer.invoke('petpal:hide-pet'),
   remoteRequest,
   remoteAbort: id => ipcRenderer.invoke('petpal:remote:abort', id),
+  remoteAck: (id, sequence) => ipcRenderer.invoke('petpal:remote:ack', id, sequence),
   updates: Object.freeze({
     status: () => updateCall('status'),
     check: () => updateCall('check'),

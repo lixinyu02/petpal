@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import ts from 'typescript';
+import { EventEmitter } from 'node:events';
+import remoteHttp from '../desktop/remote-http.cjs';
 
 const source = await fs.readFile(new URL('../src/auth/native-fetch.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
@@ -12,15 +14,16 @@ const encoder = new TextEncoder();
 test('renderer native fetch preserves destinations, credentials, streaming and cancellation', async t => {
   const originals = new Map(['window', 'location', 'fetch'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const install = (key, value) => Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
-  const harness = () => {
-    const completed = deferred(), aborted = [], requests = []; let emit;
+  const harness = (flowControlled = false) => {
+    const completed = deferred(), aborted = [], requests = [], acknowledgements = []; let emit;
     const bridge = {
       connection() { throw new Error('Transport must not obtain native owner credentials'); },
       remoteRequest(request, callback) { requests.push(request); emit = callback; return completed.promise; },
       async remoteAbort(id) { aborted.push(id); },
+      ...(flowControlled ? { async remoteAck(id, sequence) { acknowledgements.push({ id, sequence }); } } : {}),
     };
     install('window', { petpal: bridge });
-    return { requests, aborted, completed, event: event => emit(event) };
+    return { requests, aborted, completed, acknowledgements, bridge, event: event => emit(event) };
   };
   install('location', { origin: 'http://127.0.0.1:4318' });
   install('fetch', () => { throw new Error('Unexpected browser fetch'); });
@@ -45,6 +48,7 @@ test('renderer native fetch preserves destinations, credentials, streaming and c
       assert.equal(request.url, 'https://service.example/api/conversations/id/messages');
       assert.deepEqual(request.headers, { authorization: 'Bearer remote-member', 'content-type': 'application/json' });
       assert.equal(request.body, '{"content":"你好"}'); assert.equal(request.method, 'POST');
+      assert.equal(Object.hasOwn(request, 'flowControl'), false); // Legacy bridges must not receive a new request field.
       h.event({ type: 'headers', status: 200, headers: { 'content-type': 'text/event-stream' } });
       const data = encoder.encode('event: delta\ndata: {"text":"你好"}\n\n');
       const pending = (await response).text();
@@ -92,6 +96,91 @@ test('renderer native fetch preserves destinations, credentials, streaming and c
       h.event({ type: 'headers', status: 200, headers: {} });
       const reader = (await pending).body.getReader(); await reader.cancel(); reader.releaseLock();
       assert.deepEqual(h.aborted, [h.requests[0].id]); h.event({ type: 'end' }); h.completed.resolve();
+    });
+
+    await t.test('ACK capability disables prefetch and confirms a chunk only on the next consumer read', async () => {
+      const h = harness(true), pending = connectionFetch('https://service.example/api/voice/synthesize/stream');
+      assert.equal(h.requests[0].flowControl, 'ack-v1');
+      h.event({ type: 'headers', status: 200, headers: { 'content-type': 'application/x-ndjson' } });
+      h.event({ type: 'chunk', sequence: 1, bytes: [1, 2] });
+      const reader = (await pending).body.getReader(); await new Promise(setImmediate);
+      assert.deepEqual(h.acknowledgements, []);
+      assert.deepEqual((await reader.read()).value, Uint8Array.from([1, 2]));
+      await new Promise(setImmediate); assert.deepEqual(h.acknowledgements, []);
+      const second = reader.read(); await new Promise(setImmediate);
+      assert.deepEqual(h.acknowledgements, [{ id: h.requests[0].id, sequence: 1 }]);
+      h.event({ type: 'chunk', sequence: 2, bytes: [3] });
+      assert.deepEqual((await second).value, Uint8Array.from([3]));
+      await new Promise(setImmediate); assert.equal(h.acknowledgements.length, 1);
+      const eof = reader.read(); await new Promise(setImmediate);
+      assert.equal(h.acknowledgements[1].sequence, 2);
+      h.event({ type: 'end' }); h.completed.resolve();
+      assert.equal((await eof).done, true); reader.releaseLock();
+      assert.deepEqual(h.aborted, []);
+    });
+
+    await t.test('cancel and abort discard unacknowledged buffered data without requesting more', async () => {
+      for (const action of ['cancel', 'abort']) {
+        const h = harness(true), controller = new AbortController();
+        const pending = connectionFetch('https://service.example/api/voice/synthesize/stream', { signal: controller.signal });
+        h.event({ type: 'headers', status: 200, headers: {} });
+        h.event({ type: 'chunk', sequence: 1, bytes: [42] });
+        const reader = (await pending).body.getReader();
+        if (action === 'cancel') await reader.cancel();
+        else { controller.abort(); await assert.rejects(reader.read(), error => error.name === 'AbortError'); }
+        h.event({ type: 'chunk', sequence: 2, bytes: [99] }); h.event({ type: 'end' }); h.completed.resolve();
+        assert.deepEqual(h.acknowledgements, []); assert.deepEqual(h.aborted, [h.requests[0].id]); reader.releaseLock();
+      }
+    });
+
+    await t.test('invalid ACK sequences, oversized chunks and extra in-flight chunks fail closed', async () => {
+      for (const chunks of [
+        [{ bytes: [1] }], [{ sequence: 2, bytes: [1] }], [{ sequence: 1, bytes: [] }],
+        [{ sequence: 1, bytes: new Array(65537).fill(1) }],
+        [{ sequence: 1, bytes: [1] }, { sequence: 2, bytes: [2] }],
+      ]) {
+        const h = harness(true), pending = connectionFetch('https://service.example/api/voice/synthesize/stream');
+        h.event({ type: 'headers', status: 200, headers: {} });
+        const response = await pending;
+        for (const chunk of chunks) h.event({ type: 'chunk', ...chunk });
+        await assert.rejects(response.text(), /顺序或大小无效/);
+        assert.deepEqual(h.aborted, [h.requests[0].id]); h.completed.resolve();
+      }
+    });
+
+    await t.test('ACK IPC failure errors the body and cancels the native request', async () => {
+      const h = harness(true), pending = connectionFetch('https://service.example/api/voice/synthesize/stream');
+      h.bridge.remoteAck = async () => { throw new Error('ACK unavailable'); };
+      h.event({ type: 'headers', status: 200, headers: {} }); h.event({ type: 'chunk', sequence: 1, bytes: [1] });
+      const reader = (await pending).body.getReader(); await reader.read();
+      await assert.rejects(reader.read(), /ACK unavailable/);
+      assert.deepEqual(h.aborted, [h.requests[0].id]); h.completed.resolve(); reader.releaseLock();
+    });
+
+    await t.test('actual main transport and renderer stream keep a bounded window through EOF', async () => {
+      const owner = new EventEmitter(); owner.isDestroyed = () => false;
+      const events = [], acknowledgements = []; let receive, run;
+      const event = { sender: owner, senderFrame: { send(_channel, _id, payload) { events.push(payload); receive(payload); } } };
+      const manager = remoteHttp.createDesktopRemoteHttp({ isAllowed: input => input === event, limits: { chunkBytes: 2 }, fetchImpl: async () => new Response('123456') });
+      install('window', { petpal: {
+        remoteRequest(request, callback) { receive = callback; run = manager.request(event, request); return run; },
+        remoteAbort: id => manager.abort(event, id),
+        remoteAck(id, sequence) { acknowledgements.push(sequence); return manager.acknowledge(event, id, sequence); },
+      } });
+      try {
+        const response = await connectionFetch('https://service.example/api/voice/synthesize/stream');
+        await new Promise(setImmediate); assert.equal(events.filter(value => value.type === 'chunk').length, 1);
+        const reader = response.body.getReader(), chunks = [];
+        while (true) {
+          const result = await reader.read(); if (result.done) break; chunks.push(result.value);
+          await new Promise(setImmediate);
+          assert.equal(events.filter(value => value.type === 'chunk').length, chunks.length);
+          assert.equal(acknowledgements.length, chunks.length - 1);
+        }
+        reader.releaseLock(); await run;
+        assert.equal(Buffer.concat(chunks).toString(), '123456'); assert.deepEqual(acknowledgements, [1, 2, 3]);
+        assert.equal(events.at(-1).type, 'end'); assert.equal(owner.listenerCount('destroyed'), 0);
+      } finally { await manager.close(); }
     });
 
     await t.test('native rejection and premature completion reject headers or body', async () => {

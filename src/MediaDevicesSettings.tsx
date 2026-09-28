@@ -57,6 +57,7 @@ export default function MediaDevicesSettings({ scope }: { scope: string }) {
   function select(field: DeviceField, value: string) {
     stop(); setError(''); setMessage('设备选择已更新。');
     const next = { ...preferences, [field]: value }; setPreferences(storage.current?.write(next) ?? next);
+    if(field==='speakerId')window.dispatchEvent(new Event('petpal:audio-output-change'));
   }
   async function startCapture(kind: 'microphone' | 'camera') {
     stop(); setError(''); setMessage(''); setPending(true);
@@ -116,7 +117,7 @@ export default function MediaDevicesSettings({ scope }: { scope: string }) {
     {!available && <p className="form-error" role="status">此环境未提供设备访问接口。请使用 HTTPS、本机 localhost，或支持媒体权限的应用环境。</p>}
     <div className="media-device-row"><div><h3><Mic size={18}/>麦克风输入</h3>{picker('microphoneId', 'audioinput', '麦克风')}<meter aria-label="麦克风输入电平" min="0" max="100" value={level}/><span className="field-help">{active === 'microphone' ? `输入电平 ${level}%` : '点击测试时才申请麦克风权限。'}</span></div><button type="button" className="secondary-button" disabled={!available || pending} onClick={() => void startCapture('microphone')}>测试麦克风</button></div>
     <div className="media-device-row"><div><h3><Camera size={18}/>摄像头输入</h3>{picker('cameraId', 'videoinput', '摄像头')}<video ref={video} muted playsInline hidden={active !== 'camera'} aria-label="本地摄像头预览"/><span className="field-help">点击预览时才申请摄像头权限。</span></div><button type="button" className="secondary-button" disabled={!available || pending} onClick={() => void startCapture('camera')}>预览摄像头</button></div>
-    <div className="media-device-row"><div><h3><Volume2 size={18}/>扬声器输出</h3>{picker('speakerId', 'audiooutput', '扬声器')}<p className="field-help">{canRouteOutput ? '用于测试音及可指定输出的音频播放。设备名称可能需要麦克风权限后才能显示。' : '此环境只能跟随系统默认输出，请在系统设置中选择扬声器。'}现有系统语音朗读始终跟随系统输出。</p></div><button type="button" className="secondary-button" disabled={pending} onClick={() => void testOutput()}>播放测试音</button></div>
+    <div className="media-device-row"><div><h3><Volume2 size={18}/>扬声器输出</h3>{picker('speakerId', 'audiooutput', '扬声器')}<p className="field-help">{canRouteOutput ? '用于测试音及可指定输出的音频播放。设备名称可能需要麦克风权限后才能显示。' : '此环境只能跟随系统默认输出，请在系统设置中选择扬声器。'}系统语音始终跟随系统输出。CosyVoice 流式播放还需要浏览器支持 Web Audio 输出选择；不支持时会提示你选择系统默认设备。</p></div><button type="button" className="secondary-button" disabled={pending} onClick={() => void testOutput()}>播放测试音</button></div>
     {(active || pending) && <button type="button" className="secondary-button" onClick={() => { stop(); setMessage('设备测试已停止。'); }}><Square size={14}/>停止设备测试</button>}
     {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="field-help" role="status">{message}</p>}
   </section>;

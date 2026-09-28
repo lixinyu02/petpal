@@ -316,6 +316,54 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     } catch (error) { const safe = safeCosyVoiceError(error); if (!res.destroyed) res.status(safe.status).json({ error: safe.message }); }
     finally { probes.delete(probe); finish(); }
   });
+  app.post('/api/voice/synthesize/stream', async (req, res) => {
+    if (Object.keys(req.body).some(key => key !== 'text') || typeof req.body.text !== 'string') throw failure(400, '语音合成只接受 text 字段。');
+    if (req.user.voice.tts.mode !== 'cosyvoice') throw failure(409, '请先为当前账号选择并保存 CosyVoice 朗读。');
+    const controller = new AbortController(); let finish, terminalSent = false;
+    const done = new Promise(resolve => { finish = resolve; });
+    const probe = { controller, done, userId: req.user.id, sessionHash: req.sessionHash, mode: 'voice' }; probes.add(probe);
+    const onClose = () => { if (!res.writableEnded) controller.abort(); };
+    res.on('close', onClose);
+    const sendFrame = async (frame, signal) => {
+      const authorize = () => {
+        requireCurrentAuth(req); signal.throwIfAborted();
+        if (res.destroyed || res.writableEnded) throw new DOMException('语音连接已关闭。', 'AbortError');
+      };
+      authorize();
+      if (!res.headersSent) res.status(200).set({ 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+      await new Promise((resolve, reject) => {
+        const cleanup = () => { res.off('drain', drain); res.off('close', closed); res.off('error', failed); signal.removeEventListener('abort', cancelled); };
+        const failed = error => { cleanup(); reject(error); };
+        const closed = () => failed(new DOMException('语音连接已关闭。', 'AbortError'));
+        const cancelled = () => failed(signal.reason);
+        const drain = () => { cleanup(); try { authorize(); resolve(); } catch (error) { reject(error); } };
+        res.once('drain', drain); res.once('close', closed); res.once('error', failed); signal.addEventListener('abort', cancelled, { once: true });
+        try {
+          authorize();
+          const writable = res.write(JSON.stringify(frame) + '\n');
+          if (frame.type === 'end' || frame.type === 'error') terminalSent = true;
+          if (writable) drain();
+        } catch (error) { failed(error); }
+      });
+    };
+    try {
+      requireCurrentAuth(req);
+      await cosyvoice.synthesizeStream({ userId: req.user.id, text: req.body.text, speed: req.user.voice.tts.speed, signal: controller.signal, onFrame: sendFrame });
+      if (!res.destroyed && !res.writableEnded) res.end();
+    } catch (error) {
+      const safe = safeCosyVoiceError(error);
+      if (!res.destroyed && !res.writableEnded) {
+        if (!res.headersSent) res.status(safe.status).json({ error: safe.message });
+        else {
+          // A deadline/config error can be reported to a still-authorized client;
+          // revoked/disconnected clients receive no additional frame. Never wait
+          // indefinitely for a stalled consumer just to deliver an error.
+          if (!terminalSent) await sendFrame({ type: 'error', message: safe.message }, AbortSignal.any([controller.signal, AbortSignal.timeout(1000)])).catch(() => {});
+          if (!res.destroyed && !res.writableEnded) res.end();
+        }
+      }
+    } finally { res.off('close', onClose); probes.delete(probe); finish(); }
+  });
 
   app.get('/api/updates/config', (req, res) => res.json(updates.statusConfig()));
   app.patch('/api/updates/config', async (req, res) => {

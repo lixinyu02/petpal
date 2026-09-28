@@ -1,4 +1,4 @@
-// Text/utterance-boundary approximation, not phoneme recognition or audio analysis.
+// Text boundary shapes plus optional PCM energy envelope; not phoneme recognition.
 const PHASES = new Set(['idle', 'listening', 'thinking', 'speaking', 'error']);
 const MAX_STEP = .1, MAX_BACKLOG_SECONDS = 4.8, MAX_BACKLOG_UNITS = 64, MAX_INCREMENT_CHARS = 192;
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
@@ -46,7 +46,7 @@ function emotionAtBoundary(text, index) {
 
 export function createAvatarPerformance() {
   let output = neutral(), input = { utteranceId: '', text: '', phase: 'idle' };
-  let queue = [], current = null, hidden = false, external = false, externalActive = false, externalIndex = -1;
+  let queue = [], current = null, hidden = false, external = false, externalActive = false, externalIndex = -1, externalAudio = null;
   let emotionKind = null, emotionRemaining = 0, motionTime = 0, blinkAt = 3.1, blinkRemaining = 0, blinkNumber = 0;
   // Remember consumed lengths, not old message bodies. Reset/cancel must not replay a visited reply.
   const consumed = new Map();
@@ -79,6 +79,7 @@ export function createAvatarPerformance() {
     rememberLength(next.utteranceId, next.text.length);
     external = next.speech !== undefined;
     externalActive = external && next.speech.active && !next.speech.ended;
+    externalAudio = external && Number.isFinite(next.speech.audioLevel) ? (externalActive ? clamp(next.speech.audioLevel) : 0) : null;
     externalIndex = external && Number.isFinite(next.speech.charIndex) ? clamp(Math.floor(next.speech.charIndex), 0, next.text.length) : -1;
     let boundaryAdvanced = false;
     if (next.phase !== 'speaking' || hidden) { clearMouth(); emotionKind = null; emotionRemaining = 0; }
@@ -108,6 +109,7 @@ export function createAvatarPerformance() {
     const dt = Number.isFinite(deltaSeconds) && deltaSeconds > 0 ? Math.min(deltaSeconds, MAX_STEP) : 0;
     hidden = Boolean(nowHidden);
     if (hidden) {
+      externalAudio = null;
       clearMouth(); emotionKind = null; emotionRemaining = 0; blinkRemaining = 0;
       output.blinkLeft = output.blinkRight = output.headTilt = output.headNod = 0;
       return { ...output };
@@ -122,10 +124,11 @@ export function createAvatarPerformance() {
           if (current.remaining <= .000001) current = null;
         }
       }
-      const targetOpen = current?.open ?? 0;
+      const audible = input.phase === 'speaking' && externalActive && externalAudio !== null;
+      const targetOpen = audible ? (externalAudio > .025 ? clamp(externalAudio * .85, .06, .85) : 0) : current?.open ?? 0;
       output.mouthOpen = targetOpen === 0 ? 0 : ease(output.mouthOpen, targetOpen, dt, 28);
-      output.mouthShape = current?.shape ?? 'rest';
-      output.speaking = input.phase === 'speaking' && Boolean(current || queue.length);
+      output.mouthShape = audible ? (targetOpen > 0 ? (current?.shape && current.shape !== 'rest' && current.shape !== 'M' ? current.shape : 'A') : 'rest') : current?.shape ?? 'rest';
+      output.speaking = input.phase === 'speaking' && (audible ? targetOpen > 0 : Boolean(current || queue.length));
       emotionRemaining = Math.max(0, emotionRemaining - dt);
       const base = input.phase === 'thinking' ? 'thoughtful' : input.phase === 'listening' ? 'curious' : input.phase === 'error' ? 'surprised' : output.speaking ? 'warm' : 'neutral';
       const selected = emotionRemaining > 0 ? emotionKind : base;
@@ -148,6 +151,6 @@ export function createAvatarPerformance() {
     }
     return { ...output };
   }
-  function reset() { resetPose(); input = { utteranceId: '', text: '', phase: 'idle' }; external = externalActive = false; externalIndex = -1; hidden = false; }
+  function reset() { resetPose(); input = { utteranceId: '', text: '', phase: 'idle' }; external = externalActive = false; externalIndex = -1; externalAudio = null; hidden = false; }
   return { setInput, step, reset };
 }

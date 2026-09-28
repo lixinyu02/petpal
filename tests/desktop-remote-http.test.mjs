@@ -37,6 +37,9 @@ test('request validation restricts transport, API path, caller headers, methods,
   for (const body of ['a', 'YQ=', 'Y!==', 'YR==', 'YQ==\n']) assert.throws(() => validateRemoteRequest(input({ method: 'POST', body, bodyEncoding: 'base64' })));
   assert.deepEqual(validateRemoteRequest(input({ method: 'POST', body: 'AP8K', bodyEncoding: 'base64' })).body, Buffer.from([0, 255, 10]));
   assert.equal(validateRemoteRequest(input({ method: 'post', body: '你好' })).body, '你好');
+  for (const flowControl of [true, false, null, 'ack-v2', {}, 1]) assert.throws(() => validateRemoteRequest(input({ flowControl })), /流控制/);
+  assert.equal(validateRemoteRequest(input({ flowControl: 'ack-v1' })).flowControl, 'ack-v1');
+  assert.equal(validateRemoteRequest(input()).flowControl, undefined);
 });
 
 test('untrusted/pet frames cannot initiate or cancel requests and validation precedes fetch', async t => {
@@ -44,6 +47,7 @@ test('untrusted/pet frames cannot initiate or cancel requests and validation pre
   const f = fixture(t, { fetchImpl: async () => { calls++; return new Response('ok'); } });
   await assert.rejects(f.manager.request({ ...f.event }, input()), /可信主窗口/);
   await assert.rejects(f.manager.abort({ ...f.event }, 'request-1'), /可信主窗口/);
+  await assert.rejects(f.manager.acknowledge({ ...f.event }, 'request-1', 1), /可信主窗口/);
   await assert.rejects(f.manager.request(f.event, input({ url: 'file:///api/state' })), /HTTP|地址/);
   assert.equal(calls, 0);
 });
@@ -137,6 +141,65 @@ test('response limits apply to decoded chunks even without Content-Length and sp
   await declared.manager.request(declared.event, input()); assert.equal(declared.events.some(event => event.type === 'headers'), false);
 });
 
+test('ACK flow control permits only one bounded chunk until the renderer consumes it', async t => {
+  const first = deferred(); let upstreamReads = 0;
+  const body = new ReadableStream({ pull(controller) { upstreamReads++; controller.enqueue(Buffer.from(upstreamReads === 1 ? '12345' : '67')); if (upstreamReads === 2) controller.close(); } }, { highWaterMark: 0 });
+  const f = fixture(t, { limits: { chunkBytes: 2 }, fetchImpl: async () => new Response(body), onEvent: event => { if (event.type === 'chunk') first.resolve(); } });
+  const pending = f.manager.request(f.event, input({ flowControl: 'ack-v1' }));
+  await first.promise; await new Promise(setImmediate);
+  const chunks = () => f.events.filter(event => event.type === 'chunk');
+  assert.equal(chunks().length, 1); assert.equal(chunks()[0].sequence, 1); assert.equal(upstreamReads, 1);
+  for (const sequence of [0, -1, 1.5, '1', Number.MAX_SAFE_INTEGER + 1]) await assert.rejects(f.manager.acknowledge(f.event, 'request-1', sequence), /格式/);
+  await assert.rejects(f.manager.acknowledge({ ...f.event }, 'request-1', 1), /可信主窗口/);
+  await assert.rejects(f.manager.acknowledge(f.event, 'request-1', 2), /顺序/);
+  assert.equal(chunks().length, 1);
+  await f.manager.acknowledge(f.event, 'request-1', 1); await new Promise(setImmediate);
+  assert.equal(chunks().length, 2); assert.equal(upstreamReads, 1);
+  await assert.rejects(f.manager.acknowledge(f.event, 'request-1', 1), /顺序/);
+  await f.manager.acknowledge(f.event, 'request-1', 2); await new Promise(setImmediate);
+  assert.equal(chunks().length, 3); assert.equal(upstreamReads, 1);
+  await f.manager.acknowledge(f.event, 'request-1', 3); await new Promise(setImmediate);
+  assert.equal(chunks().length, 4); assert.equal(upstreamReads, 2);
+  assert.equal(f.events.some(event => event.type === 'end'), false);
+  await f.manager.acknowledge(f.event, 'request-1', 4); await pending;
+  assert.equal(f.events.at(-1).type, 'end');
+  assert.deepEqual(chunks().map(event => event.bytes.length), [2, 2, 1, 2]);
+  assert.equal(Buffer.concat(chunks().map(event => Buffer.from(event.bytes))).toString(), '1234567');
+  await f.manager.acknowledge(f.event, 'request-1', 4); // Harmless late ACK after cleanup.
+});
+
+test('abort, owner close, navigation, renderer destruction and shutdown release an ACK waiter', async t => {
+  for (const action of ['abort', 'owner-close', 'navigate', 'destroy', 'shutdown']) {
+    const first = deferred(); let cancelled = 0, signal;
+    const f = fixture(t, { fetchImpl: async (_url, init) => {
+      signal = init.signal;
+      return new Response(new ReadableStream({ start(controller) { controller.enqueue(Buffer.from('private')); }, cancel() { cancelled++; } }));
+    }, onEvent: event => { if (event.type === 'chunk') first.resolve(); } });
+    const pending = f.manager.request(f.event, input({ flowControl: 'ack-v1' })); await first.promise;
+    if (action === 'abort') await f.manager.abort(f.event, 'request-1');
+    else if (action === 'owner-close') f.manager.cancelOwner(f.owner);
+    else if (action === 'navigate') f.owner.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    else if (action === 'destroy') f.destroy();
+    else await f.manager.close();
+    await pending;
+    assert.equal(signal.aborted, true, action); assert.equal(cancelled, 1, action);
+    assert.equal(f.events.filter(event => event.type === 'chunk').length, 1, action);
+    assert.equal(f.owner.listenerCount('destroyed'), 0, action);
+    assert.equal(f.owner.listenerCount('did-start-navigation'), 0, action);
+  }
+});
+
+test('a missing ACK times out and flow-controlled responses retain the total byte limit', async t => {
+  const keepAlive = setTimeout(() => {}, 1000); t.after(() => clearTimeout(keepAlive));
+  const stalled = fixture(t, { limits: { ackTimeoutMs: 5 }, fetchImpl: async () => new Response('audio') });
+  await stalled.manager.request(stalled.event, input({ flowControl: 'ack-v1' }));
+  assert.match(stalled.events.at(-1).message, /读取停滞/);
+  const excessive = fixture(t, { limits: { responseBytes: 5 }, fetchImpl: async () => new Response('123456') });
+  await excessive.manager.request(excessive.event, input({ flowControl: 'ack-v1' }));
+  assert.equal(excessive.events.some(event => event.type === 'chunk'), false);
+  assert.match(excessive.events.at(-1).message, /大小限制/);
+});
+
 test('header and idle timeout close stalled requests; upstream error strings remain private', async t => {
   // Keep a test-owned timer because production bridge deadlines deliberately do not keep the app alive.
   const keepAlive = setTimeout(() => {}, 1000); t.after(() => clearTimeout(keepAlive));
@@ -149,7 +212,7 @@ test('header and idle timeout close stalled requests; upstream error strings rem
 });
 
 test('only POST voice synthesis gets the server-compatible longer header deadline', async t => {
-  for (const [method, route, succeeds] of [['POST', '/api/voice/synthesize', true], ['GET', '/api/voice/synthesize', false], ['POST', '/api/voice/synthesize/other', false], ['POST', '/api/auth/login', false]]) {
+  for (const [method, route, succeeds] of [['POST', '/api/voice/synthesize', true], ['POST', '/api/voice/synthesize/stream', true], ['GET', '/api/voice/synthesize/stream', false], ['GET', '/api/voice/synthesize', false], ['POST', '/api/voice/synthesize/other', false], ['POST', '/api/auth/login', false]]) {
     const f = fixture(t, { limits: { headerTimeoutMs: 5, synthesisTimeoutMs: 200 }, fetchImpl: async () => { await new Promise(resolve => setTimeout(resolve, 25)); return new Response('audio'); } });
     await f.manager.request(f.event, input({ method, url: `https://remote.example${route}` }));
     assert.equal(f.events.at(-1).type, succeeds ? 'end' : 'error', `${method} ${route}`);
@@ -199,4 +262,14 @@ test('preload keeps the stream callback when the invoke reply arrives before the
   await pending; assert.deepEqual(events.map(event => event.type), ['headers', 'chunk', 'end']);
   ipc.emit('petpal:remote:event', {}, 'request-1', { type: 'chunk', bytes: [99] });
   assert.equal(events.length, 3);
+});
+
+test('preload exposes explicit ACK capability with only the request id and sequence', async () => {
+  let api; const calls = [];
+  const ipc = new EventEmitter(); ipc.invoke = async (...args) => { calls.push(args); };
+  vm.runInNewContext(await readFile(new URL('../desktop/preload.cjs', import.meta.url), 'utf8'), {
+    require: () => ({ ipcRenderer: ipc, contextBridge: { exposeInMainWorld: (_name, value) => { api = value; } } }),
+  });
+  await api.remoteAck('request-1', 3);
+  assert.deepEqual(calls, [['petpal:remote:ack', 'request-1', 3]]);
 });

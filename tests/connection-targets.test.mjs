@@ -50,6 +50,7 @@ test('asynchronous native target discovery cannot overwrite a later logout or ta
   const nativeModule = dataModule(await fs.readFile(new URL('../src/auth/native-fetch.ts', import.meta.url), 'utf8'));
   const source = (await fs.readFile(new URL('../src/api.ts', import.meta.url), 'utf8'))
     .replaceAll("'./auth/native-fetch'", JSON.stringify(nativeModule))
+    .replaceAll("'./avatar/speech-stream.mjs'", JSON.stringify(new URL('../src/avatar/speech-stream.mjs', import.meta.url).href))
     .replaceAll("'./auth/request-scope.mjs'", JSON.stringify(new URL('../src/auth/request-scope.mjs', import.meta.url).href))
     .replaceAll("'./auth/connection-targets.mjs'", JSON.stringify(new URL('../src/auth/connection-targets.mjs', import.meta.url).href));
   const disk = new Map(), window = new EventTarget();

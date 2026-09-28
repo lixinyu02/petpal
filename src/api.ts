@@ -2,6 +2,7 @@ import { connectionFetch, type RemoteRequest, type RemoteEvent } from './auth/na
 import { restoreTargetConnection } from './auth/connection-targets.mjs';
 import type { DesktopUpdates } from './platform/updates';
 import { createRequestScope, SessionChangedError } from './auth/request-scope.mjs';
+import { readSpeechStream, type SpeechStreamHandlers } from './avatar/speech-stream.mjs';
 export { SessionChangedError };
 export type AgentAccess = 'none'|'workspace'|'full';
 export type AgentPermissions = { access:'read-only'|'workspace-write'|'full-access'; approval:'ask'|'auto'|'review' };
@@ -36,7 +37,7 @@ type CredentialKind = 'pairing'|'session'|'none';
 export type StreamEvent = { type: string; data: Record<string, any> };
 export type Identity = {instanceId:string;userId:string};
 declare global {
-  interface Window { petpal?: { connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; updates?:DesktopUpdates }; }
+  interface Window { petpal?: { connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; remoteAck?(id:string,sequence:number):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; updates?:DesktopUpdates }; }
 }
 const requests = createRequestScope();
 const listeners = new Set<()=>void>();
@@ -122,6 +123,21 @@ export async function apiBlob(path:string, options:RequestInit = {}):Promise<Blo
     const response=await connectionFetch(`${request.connection.url}/api${path}`,{...options,headers,signal:request.signal});request.assertCurrent();
     if(!response.ok){await responseJson(response,request);throw new Error('音频请求失败。');}
     const blob=await response.blob();request.assertCurrent();return blob;
+  }finally{request.close();}
+}
+/** Keep the credential snapshot and cancellation scope alive until playback consumes the stream. */
+export async function apiSpeechStream(text:string, signal:AbortSignal, handlers:SpeechStreamHandlers):Promise<void> {
+  const request=requests.begin(signal);
+  try {
+    request.assertCurrent();
+    const response=await connectionFetch(`${request.connection.url}/api/voice/synthesize/stream`,{
+      method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${request.connection.token}`},
+      body:JSON.stringify({text}),signal:request.signal,
+    });
+    request.assertCurrent();
+    if(!response.ok){await responseJson(response,request);throw new Error('语音流请求失败。');}
+    await readSpeechStream(response,{...handlers,signal:request.signal,assertCurrent:request.assertCurrent});
+    request.assertCurrent();
   }finally{request.close();}
 }
 /** Validate new credentials before atomically replacing the current account. */

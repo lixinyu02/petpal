@@ -43,7 +43,7 @@ export default function CompanionWorld() {
   const stopTalking = () => { speech.stop(); setPreview(previous => previous ? {...previous,phase:'idle'} : previous); };
   const displayPerformance: PerformanceInput | undefined = speech.playing ? {
     utteranceId: speech.utteranceId, text: speech.text, phase: speech.active ? 'speaking' : 'idle',
-    speech: { active:speech.active,charIndex:speech.charIndex,ended:speech.ended },
+    speech: { active:speech.active,charIndex:speech.charIndex,ended:speech.ended,audioLevel:speech.audioLevel },
   } : preview;
   useEffect(() => {
     if (speech.ended && speech.utteranceId) setPreview(previous => previous?.utteranceId === speech.utteranceId ? {...previous,phase:'idle'} : previous);

@@ -395,6 +395,7 @@ async function boot() {
   remoteHttp = createDesktopRemoteHttp({ isAllowed: event => isTrusted(event) && event.sender === mainWindow?.webContents });
   ipcMain.handle('petpal:remote:request', (event, request) => remoteHttp.request(event, request));
   ipcMain.handle('petpal:remote:abort', (event, id) => remoteHttp.abort(event, id));
+  ipcMain.handle('petpal:remote:ack', (event, id, sequence) => remoteHttp.acknowledge(event, id, sequence));
   const updaterModule = await import(pathToFileURL(path.join(__dirname, 'updates.mjs')).href);
   verifyDownloadedUpdate = updaterModule.verifyDownloadedUpdate;
   updates = new updaterModule.DesktopUpdateManager({

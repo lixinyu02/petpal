@@ -10,6 +10,22 @@ const run = (controller, seconds, options) => {
 const input = (text, extra = {}) => ({ utteranceId: 'reply-1', text, phase: 'speaking', ...extra });
 const mouthActive = frames => frames.some(frame => frame.mouthOpen > .05);
 
+test('streaming PCM energy controls mouth even between text boundaries and closes in silence or buffering',()=>{
+  const controller=createAvatarPerformance();
+  const speech={active:true,charIndex:0,ended:false,audioLevel:.7};
+  controller.setInput(input('你好，小伴。',{speech}));
+  assert.equal(mouthActive(run(controller,.5)),true);
+  controller.setInput(input('你好，小伴。',{speech:{...speech,audioLevel:0}}));
+  assert.equal(controller.step(.025).mouthOpen,0);
+  controller.setInput(input('你好，小伴。',{speech:{...speech,audioLevel:.5}}));
+  assert.ok(controller.step(.025).mouthOpen>0);
+  controller.setInput(input('你好，小伴。',{speech:{...speech,active:false}}));
+  assert.equal(controller.step(.025).mouthOpen,0);
+  controller.setInput(input('你好，小伴。',{speech}));
+  assert.equal(controller.step(.025,{hidden:true}).mouthOpen,0);
+  controller.reset();assert.equal(controller.step(.025).mouthOpen,0);
+});
+
 test('text deltas articulate once; identical snapshots and completed history never replay', () => {
   const controller = createAvatarPerformance();
   controller.setInput(input('a'));
