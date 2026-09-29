@@ -4,6 +4,8 @@ import { createCatModel } from './CatModel';
 import { createPetBehavior } from './behavior';
 import type { PetAction, PetBehaviorState as PetSnapshot, PetInteraction } from './behavior';
 import { bindCompanionGestures } from './interaction.mjs';
+import { createCompanionFeedback } from './gesture-feedback.mjs';
+import './gesture-feedback.css';
 
 export type PetCommand = { action: PetInteraction; id: number };
 type Props = { command?: PetCommand; compact?: boolean; onState?: (state: PetSnapshot) => void; onReady?: () => void; onInteract?: (action: PetInteraction) => void; interactive?: boolean; className?: string };
@@ -79,6 +81,7 @@ export default function PetScene({ command, compact = false, onState, onReady, o
     media.addEventListener('change', reduced); document.addEventListener('visibilitychange', visibility);
     const pointerPosition = (x: number, y: number) => { const rect = canvas.getBoundingClientRect(); return new THREE.Vector2((x - rect.left) / Math.max(1,rect.width) * 2 - 1, 1 - (y - rect.top) / Math.max(1,rect.height) * 2); };
     const raycaster = new THREE.Raycaster();
+    const feedback = createCompanionFeedback(container, { motionQuery: media });
     const unbindGestures = bindCompanionGestures(canvas, {
       enabled: () => interactive && !disposed,
       hitTest: (x, y) => {
@@ -93,6 +96,7 @@ export default function PetScene({ command, compact = false, onState, onReady, o
       },
       onPointer: (x,y) => { const point = pointerPosition(x,y); controller.setPointer(point.x,point.y); },
       onLeave: () => controller.clearPointer(),
+      onFeedback: value => feedback.update(value, canvas),
     });
     const lost = (event: Event) => { event.preventDefault(); unbindGestures(); setFailure('3D 画面暂时中断，点击重试即可重新唤起小猫。'); cancelAnimationFrame(raf); };
     canvas.addEventListener('webglcontextlost', lost);
@@ -111,6 +115,7 @@ export default function PetScene({ command, compact = false, onState, onReady, o
       cat.group.rotation.y = THREE.MathUtils.damp(cat.group.rotation.y, yaw, 5, dt);
       bowl.visible = state.action === 'eat'; bowl.position.set(state.x, 0, 0.85);
       renderer.render(scene, camera); frames++;
+      unbindGestures.refresh();
       if (frames < 4 || frames % 15 === 0) { canvas.dataset.renderFrames = String(frames); canvas.dataset.petAction = state.action; canvas.dataset.petX = state.x.toFixed(3); }
       if (frames === 2) callbacks.current.onReady?.();
       if (state.action !== previousAction || time - sentAt > 0.5) { previousAction = state.action; sentAt = time; callbacks.current.onState?.(state); }
@@ -119,7 +124,7 @@ export default function PetScene({ command, compact = false, onState, onReady, o
     return () => {
       disposed = true; cancelAnimationFrame(raf); observer.disconnect(); resizeObserver.disconnect();
       document.removeEventListener('visibilitychange', visibility); media.removeEventListener('change', reduced);
-      unbindGestures(); canvas.removeEventListener('webglcontextlost', lost);
+      unbindGestures(); feedback.dispose(); canvas.removeEventListener('webglcontextlost', lost);
       cat.dispose(); floorGeometry.dispose(); floorMaterial.dispose(); bowlGeometry.dispose(); bowlMaterial.dispose(); foodGeometry.dispose(); foodMaterial.dispose(); key.shadow.map?.dispose();
       renderer.dispose(); renderer.forceContextLoss(); canvas.remove(); behavior.current = null;
     };

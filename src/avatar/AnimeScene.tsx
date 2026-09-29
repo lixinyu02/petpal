@@ -5,6 +5,8 @@ import type { PetAction, PetBehaviorState, PetInteraction } from '../pet/behavio
 import { createAvatarPerformance, type PerformanceInput } from './performance.mjs';
 import { loadAvatarImage, loadAvatarImages, type AvatarImageName } from './anime-resources.mjs';
 import { bindCompanionGestures, portraitCoordinates, portraitContains } from '../pet/interaction.mjs';
+import { createCompanionFeedback } from '../pet/gesture-feedback.mjs';
+import '../pet/gesture-feedback.css';
 import './anime-scene.css';
 
 type Props = { command?: PetCommand; compact?: boolean; onState?: (state: PetBehaviorState) => void; onReady?: () => void; onInteract?: (action: PetInteraction) => void; interactive?: boolean; className?: string; speaking?: boolean; performanceInput?: PerformanceInput };
@@ -182,10 +184,12 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     const move = (x: number, y: number) => { const rect = container.getBoundingClientRect(); pointerX = THREE.MathUtils.clamp((x-rect.left)/Math.max(1,rect.width)*2-1,-1,1); pointerY = THREE.MathUtils.clamp(1-(y-rect.top)/Math.max(1,rect.height)*2,-1,1); };
     const leave = () => { pointerX = pointerY = 0; };
     const surfaces: HTMLElement[] = canvas ? [canvas, fallback] : [fallback];
+    const feedback = createCompanionFeedback(container, { motionQuery: media });
     const unbindGestures = surfaces.map(surface => bindCompanionGestures(surface, {
       enabled: () => interactive && loaded && !disposed && surface.getAttribute('aria-hidden') !== 'true',
       hitTest: (x,y) => portraitContains(portraitCoordinates(container.getBoundingClientRect(),x,y),hitMask),
       getAction: () => action, emit: next => interact(next,true), onPointer: move, onLeave: leave,
+      onFeedback: value => feedback.update(value, surface),
     }));
     const lost = (event: Event) => { event.preventDefault(); useFallback('网格绘图连接已暂停，已切换轻量角色；可以重试恢复。'); }; canvas?.addEventListener('webglcontextlost', lost);
     const releaseGpu = () => {
@@ -247,6 +251,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
         fallback.dataset.renderFrames = String(++fallbackFrames);
       }
       const visible = gpuFailed ? fallback : canvas;
+      unbindGestures.forEach(binding => binding.refresh());
       if (visible) {
         visible.dataset.petAction = action; visible.dataset.blink = Math.max(uniforms.blinkLeft.value,uniforms.blinkRight.value).toFixed(2); visible.dataset.speaking = String(pose.speaking); visible.dataset.gazeX = gazeX.toFixed(2);
         visible.dataset.expression=pose.expression; visible.dataset.mouthShape=pose.mouthShape; visible.dataset.mouthOpen=uniforms.mouth.value.toFixed(3); visible.dataset.speechSource=input.speech ? 'playback-progress' : 'text'; visible.dataset.phase=input.phase;
@@ -257,6 +262,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     return () => {
       disposed = true; abort.abort(); performance.reset(); cancelAnimationFrame(raf); resizeObserver?.disconnect(); observer?.disconnect(); window.removeEventListener('resize', resize); document.removeEventListener('visibilitychange', visibility);
       unbindGestures.forEach(unbind => unbind());
+      feedback.dispose();
       releaseGpu(); geometry.dispose(); material.dispose(); canvas?.remove(); fallback.remove();
     };
   }, [compact, attempt, interactive]);

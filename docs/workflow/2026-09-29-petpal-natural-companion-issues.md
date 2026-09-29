@@ -3,7 +3,7 @@
 - Date: 2026-09-29
 - Complexity: L2
 - Related design: 2026-09-29-petpal-natural-companion-design.md
-- Current status: issue-29 in_progress
+- Current status: issue-30 in_progress
 
 ## issue-27
 
@@ -25,7 +25,7 @@
 - 验收标准: 临时断网可恢复可用状态，已领取任务不重放，账号边界和未知执行状态保持准确
 - 状态: done
 - 验证方式: 执行器/API/真实HTTP集成56项、队列/访问35项、smoke14项通过；全量549项首次548通过，唯一随机禁用端口夹具已修复且CosyVoice15项复验通过；此前Windows临时目录EBUSY清理已加有界重试、真实CLI6项通过；TS与语法通过
-- commit: 本次 fix(issue-28) 提交
+- commit: 6af7d62
 
 ## issue-29
 
@@ -34,9 +34,9 @@
 - 范围: 角色命中后的鼠标小手、按住轻抚与触控短暂反馈
 - 依赖: issue-28
 - 验收标准: 小手只在角色命中时出现；按下/轻抚/松开反馈同步；滚动、多指、隐藏和减少动态行为正确，无操作按钮
-- 状态: in_progress
-- 验证方式: 手势反馈回归、Chrome 两角色鼠标与触控、清理与可访问性检查
-- commit: pending
+- 状态: done
+- 验证方式: 定向25项与全量563项通过，TS/Vite通过；Chrome小手命中、动作同步、停移静态、空白恢复、触控消退、减少动态与WebGL降级通过
+- commit: 本次 feat(issue-29) 提交
 
 ## issue-30
 
@@ -45,6 +45,6 @@
 - 范围: 冻结构建、线上备份部署、四端包、更新签名、GitHub 发布与说明
 - 依赖: issue-29
 - 验收标准: 保留线上账号与历史，网页验收通过；包与冻结源码一致、下载可用，明确未验收的实机边界
-- 状态: todo
+- 状态: in_progress
 - 验证方式: 原生 smoke、归档读回、Chrome 公网验收、GitHub 哈希及签名
 - commit: pending

@@ -1,10 +1,11 @@
 /** One gesture policy for both renderers. No DOM dependency; clocks are injectable. */
-export function createCompanionGestures({ emit, getAction, now = () => performance.now(), schedule = setTimeout, unschedule = clearTimeout }) {
+export function createCompanionGestures({ emit, getAction, onFeedback = () => {}, now = () => performance.now(), schedule = setTimeout, unschedule = clearTimeout }) {
   let press = null, holdTimer, tapTimer, lastTap = null, blocked = false;
   const pointers = new Set();
   const clearHold = () => { unschedule(holdTimer); holdTimer = undefined; };
   const clearTap = () => { unschedule(tapTimer); tapTimer = undefined; lastTap = null; };
-  const release = () => { clearHold(); press = null; };
+  const feedback = (phase, point) => { if (point?.pointerType !== 'keyboard') onFeedback({ ...point, phase }); };
+  const release = () => { clearHold(); if (press) feedback('cancel', press); press = null; };
   const cancel = () => { release(); clearTap(); pointers.clear(); blocked = false; };
   const respond = action => emit(action === 'pet' && getAction() === 'sleep' ? 'wake' : action);
   function tap(point) {
@@ -24,29 +25,37 @@ export function createCompanionGestures({ emit, getAction, now = () => performan
     if (blocked || !point.hit) { clearTap(); return false; }
     release();
     press = { ...point, time: now(), moved: false, held: false, strokeAt: -Infinity };
+    feedback('press', point);
     holdTimer = schedule(() => {
       holdTimer = undefined;
       if (!press || press.moved || blocked) return;
       clearTap(); press.held = true;
+      feedback('cancel', press);
       respond(getAction() === 'sleep' ? 'wake' : 'sleep');
     }, 700);
     return true;
   }
   function move(point) {
-    if (!press || point.id !== press.id || blocked) return;
+    if (!press || point.id !== press.id || blocked) return false;
     const dx = point.x - press.x, dy = point.y - press.y;
-    if (!point.hit) { release(); clearTap(); return; }
+    if (!point.hit) { release(); clearTap(); return false; }
     // Let vertical touch movement become a normal browser scroll. A cancelled
     // pointer never becomes a tap or a delayed long press.
-    if (press.pointerType === 'touch' && Math.abs(dy) > 10) { release(); clearTap(); return; }
-    if (Math.hypot(dx, dy) <= 9 || press.held) return;
+    if (press.pointerType === 'touch' && Math.abs(dy) > 10) { release(); clearTap(); return false; }
+    if (press.held) return true;
+    if (Math.hypot(dx, dy) <= 9 && !press.moved) { feedback('press', point); return true; }
     press.moved = true; clearHold(); clearTap();
+    feedback('stroke', point);
     if (now() - press.strokeAt >= 800) { press.strokeAt = now(); respond('pet'); }
+    return true;
   }
   function up(point) {
     pointers.delete(point.id);
     const current = press;
-    if (current?.id === point.id) release();
+    if (current?.id === point.id) {
+      clearHold(); press = null;
+      if (!current.held) feedback(point.hit ? 'release' : 'cancel', point);
+    }
     if (blocked) { if (!pointers.size) blocked = false; return; }
     if (!current || current.id !== point.id || current.moved || current.held || !point.hit) return;
     if (Math.hypot(point.x - current.x, point.y - current.y) > 9) { clearTap(); return; }
@@ -63,18 +72,34 @@ export function createCompanionGestures({ emit, getAction, now = () => performan
 }
 
 /** Binds gestures without suppressing browser scrolling or synthetic native clicks. */
-export function bindCompanionGestures(surface, { hitTest, emit, getAction, onPointer = () => {}, onLeave = () => {}, enabled = () => true }) {
-  const gestures = createCompanionGestures({ emit: action => { if (enabled()) emit(action); }, getAction });
+export function bindCompanionGestures(surface, { hitTest, emit, getAction, onPointer = () => {}, onLeave = () => {}, onFeedback, enabled = () => true }) {
+  const originalCursor = surface.style.cursor;
+  let lastPoint = null, disposed = false;
+  const feedback = value => {
+    if (value.phase === 'cancel') lastPoint = null;
+    else lastPoint = value;
+    const visible = onFeedback?.(value) === true;
+    surface.style.cursor = value.phase !== 'cancel' && value.hit && value.pointerType === 'mouse' ? visible ? 'none' : 'pointer' : 'default';
+  };
+  const gestures = createCompanionGestures({ emit: action => { if (enabled()) emit(action); }, getAction, onFeedback: feedback });
   const point = event => ({ id: event.pointerId, x: event.clientX, y: event.clientY, pointerType: event.pointerType, button: event.button, isPrimary: event.isPrimary, hit: enabled() && hitTest(event.clientX, event.clientY) });
   const down = event => { if (enabled()) gestures.down(point(event)); };
   const move = event => {
     if (!enabled()) return;
     onPointer(event.clientX, event.clientY);
-    const next = point(event); surface.style.cursor = next.hit ? 'pointer' : 'default'; gestures.move(next);
+    const next = point(event), active = gestures.move(next);
+    if (!active && next.pointerType === 'mouse') feedback({ ...next, phase: next.hit ? 'hover' : 'cancel' });
   };
   const up = event => { if (enabled()) gestures.up(point(event)); };
-  const cancel = () => { gestures.cancel(); onLeave(); surface.style.cursor = 'default'; };
-  const leave = () => { gestures.leave(); onLeave(); surface.style.cursor = 'default'; };
+  const cancel = () => { gestures.cancel(); feedback({ phase: 'cancel' }); onLeave(); };
+  const leave = event => {
+    // Touch/pen pointerleave follows pointerup even when contact ended over the
+    // character. Preserve that brief release fade; active gestures still cancel.
+    const releasedContact = lastPoint?.phase === 'release' && lastPoint.pointerType !== 'mouse' && lastPoint.id === event.pointerId && enabled();
+    gestures.leave();
+    if (!releasedContact) feedback({ phase: 'cancel' });
+    onLeave();
+  };
   const hidden = () => { if (document.hidden) cancel(); };
   const outsideDown = event => { if (enabled() && !surface.contains(event.target)) cancel(); };
   const keyDown = event => { if (enabled() && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); gestures.keyDown(event.key, event.repeat); } };
@@ -85,13 +110,24 @@ export function bindCompanionGestures(surface, { hitTest, emit, getAction, onPoi
   surface.addEventListener('keydown', keyDown); surface.addEventListener('keyup', keyUp); surface.addEventListener('click', click); surface.addEventListener('contextmenu', contextMenu); surface.addEventListener('blur', cancel);
   window.addEventListener('pointerdown', outsideDown); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', cancel); window.addEventListener('blur', cancel);
   document.addEventListener('visibilitychange', hidden);
-  return () => {
+  const unbind = () => {
+    if (disposed) return;
+    disposed = true;
     cancel();
     surface.removeEventListener('pointerdown', down); surface.removeEventListener('pointermove', move); surface.removeEventListener('pointerleave', leave);
     surface.removeEventListener('keydown', keyDown); surface.removeEventListener('keyup', keyUp); surface.removeEventListener('click', click); surface.removeEventListener('contextmenu', contextMenu); surface.removeEventListener('blur', cancel);
     window.removeEventListener('pointerdown', outsideDown); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', cancel); window.removeEventListener('blur', cancel);
     document.removeEventListener('visibilitychange', hidden);
+    surface.style.cursor = originalCursor;
   };
+  // Renderers call this after moving the character or swapping WebGL/fallback.
+  // A stationary mouse must not retain an invisible hand over empty stage space.
+  unbind.refresh = () => {
+    if (disposed || !lastPoint) return;
+    if (!enabled() || !hitTest(lastPoint.x, lastPoint.y)) cancel();
+    else if (lastPoint.pointerType === 'mouse') feedback(lastPoint);
+  };
+  return unbind;
 }
 
 /** Same portrait-space coordinates for the orthographic mesh and DOM fallback. */

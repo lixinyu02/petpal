@@ -4,10 +4,11 @@ import { createCompanionGestures, bindCompanionGestures, portraitCoordinates, po
 
 function fixture(initialAction = 'idle') {
   let time = 0, sequence = 0, action = initialAction;
-  const timers = new Map(), emitted = [];
+  const timers = new Map(), emitted = [], feedback = [];
   const gestures = createCompanionGestures({
     now: () => time, getAction: () => action,
     emit: next => { emitted.push(next); action = next === 'wake' ? 'idle' : next; },
+    onFeedback: next => feedback.push(next),
     schedule: (callback, delay) => { const id = ++sequence; timers.set(id, {callback,at:time+delay}); return id; },
     unschedule: id => timers.delete(id),
   });
@@ -21,7 +22,7 @@ function fixture(initialAction = 'idle') {
   };
   const point = (overrides = {}) => ({id:1,x:40,y:40,pointerType:'mouse',hit:true,button:0,isPrimary:true,...overrides});
   const tap = overrides => { gestures.down(point(overrides)); advance(30); gestures.up(point(overrides)); };
-  return {gestures,advance,point,tap,emitted,timers};
+  return {gestures,advance,point,tap,emitted,timers,feedback};
 }
 
 test('a single tap emits once, while a double tap produces only the greeting', () => {
@@ -103,4 +104,91 @@ test('DOM binding cleans up global listeners and disabled surfaces ignore assist
   click(); assert.deepEqual(emitted,[]); enabled = true; click(); assert.deepEqual(emitted,['pet']);
   unbind(); const cleaned = leaves; click(); win.dispatchEvent(new Event('blur')); doc.hidden=true;doc.dispatchEvent(new Event('visibilitychange'));
   assert.deepEqual(emitted,['pet']); assert.equal(leaves,cleaned);
+});
+
+test('contact feedback follows accepted gestures and never turns hover or keyboard into a hand press', () => {
+  const f = fixture();
+  assert.equal(f.gestures.move(f.point()), false); assert.deepEqual(f.feedback, []);
+  f.gestures.down(f.point()); f.gestures.move(f.point({x:44})); f.gestures.move(f.point({x:60})); f.gestures.up(f.point({x:60}));
+  assert.deepEqual(f.feedback.map(value => value.phase), ['press','press','stroke','release']);
+  assert.equal(f.feedback.at(-1).x, 60);
+  const keyboard = fixture(); keyboard.gestures.keyDown('Enter'); keyboard.gestures.keyUp('Enter'); keyboard.advance(400); keyboard.gestures.activate();
+  assert.deepEqual(keyboard.feedback, []); assert.deepEqual(keyboard.emitted, ['pet','pet']);
+});
+
+test('scroll, multi-touch, hold, off-character release and cancellation remove contact feedback', () => {
+  for (const mode of ['scroll','multi','hold','off','cancel','leave']) {
+    const f = fixture(); f.gestures.down(f.point({pointerType:'touch'}));
+    if (mode === 'scroll') f.gestures.move(f.point({pointerType:'touch',y:55}));
+    if (mode === 'multi') f.gestures.down(f.point({pointerType:'touch',id:2,isPrimary:false}));
+    if (mode === 'hold') f.advance(700);
+    if (mode === 'off') f.gestures.up(f.point({pointerType:'touch',hit:false}));
+    if (mode === 'cancel' || mode === 'leave') f.gestures[mode]();
+    assert.deepEqual(f.feedback.map(value => value.phase), ['press','cancel'], mode);
+    f.gestures.up(f.point({pointerType:'touch'})); f.advance(1000);
+    assert.equal(f.feedback.at(-1).phase, 'cancel', mode);
+    assert.deepEqual(f.emitted, mode === 'hold' ? ['sleep'] : [], mode);
+  }
+});
+
+function domFixture(t, options = {}) {
+  const prior = new Map(['window','document'].map(name => [name,Object.getOwnPropertyDescriptor(globalThis,name)]));
+  const win = new EventTarget(), doc = new EventTarget(); doc.hidden = false;
+  Object.defineProperty(globalThis,'window',{configurable:true,value:win}); Object.defineProperty(globalThis,'document',{configurable:true,value:doc});
+  const surface = new EventTarget(); surface.style = {cursor:'auto'}; surface.contains = target => target === surface;
+  const emitted = [], feedback = []; let available = true, enabled = true, hit = true;
+  const unbind = bindCompanionGestures(surface, {
+    hitTest:() => hit, emit:action => emitted.push(action), getAction:() => 'idle', enabled:() => enabled,
+    onFeedback:value => {feedback.push(value); return available;}, ...options,
+  });
+  t.after(() => {
+    unbind();
+    for (const [name,descriptor] of prior) { if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name]; }
+  });
+  const dispatch = (type, properties = {}, target = surface) => {
+    const event = new Event(type,{cancelable:true});
+    Object.assign(event,{pointerId:1,clientX:40,clientY:40,pointerType:'mouse',button:0,isPrimary:true,...properties});
+    target.dispatchEvent(event); return event;
+  };
+  return {surface,win,doc,emitted,feedback,unbind,dispatch,setAvailable:value=>available=value,setEnabled:value=>enabled=value,setHit:value=>hit=value};
+}
+
+test('mouse hover changes the cursor only over the character and only hides it with visible feedback', t => {
+  const f = domFixture(t); f.setHit(false); const emptyMove = f.dispatch('pointermove');
+  assert.equal(emptyMove.defaultPrevented,false); assert.equal(f.surface.style.cursor,'default'); assert.equal(f.feedback.at(-1).phase,'cancel');
+  f.setHit(true); f.dispatch('pointermove'); assert.equal(f.surface.style.cursor,'none'); assert.equal(f.feedback.at(-1).phase,'hover');
+  f.setAvailable(false); f.dispatch('pointermove'); assert.equal(f.surface.style.cursor,'pointer');
+  f.dispatch('pointerleave'); assert.equal(f.surface.style.cursor,'default'); assert.deepEqual(f.emitted,[]);
+  f.unbind(); assert.equal(f.surface.style.cursor,'auto');
+});
+
+test('animation refresh clears moved-away or inactive surfaces without starting another animation loop', t => {
+  const f = domFixture(t); f.dispatch('pointermove'); f.unbind.refresh(); assert.equal(f.feedback.at(-1).phase,'hover');
+  f.setHit(false); f.unbind.refresh(); assert.equal(f.feedback.at(-1).phase,'cancel'); assert.equal(f.surface.style.cursor,'default');
+  const count = f.feedback.length; f.unbind.refresh(); assert.equal(f.feedback.length,count);
+  f.setHit(true); f.dispatch('pointermove'); f.setEnabled(false); f.unbind.refresh();
+  assert.equal(f.feedback.at(-1).phase,'cancel'); assert.equal(f.surface.style.cursor,'default');
+  f.unbind(); const disposedCount=f.feedback.length; f.unbind.refresh(); assert.equal(f.feedback.length,disposedCount);
+});
+
+test('touch release survives the browser pointerleave but blur, hidden and pointercancel still clear it', t => {
+  const f = domFixture(t);
+  for (const type of ['blur','pointercancel','visibilitychange']) {
+    f.doc.hidden=false;
+    const down=f.dispatch('pointerdown',{pointerType:'touch'}), up=f.dispatch('pointerup',{pointerType:'touch'},f.win);
+    f.dispatch('pointerleave',{pointerType:'touch'});
+    assert.equal(f.feedback.at(-1).phase,'release',type); assert.equal(f.surface.style.cursor,'default');
+    assert.equal(down.defaultPrevented,false); assert.equal(up.defaultPrevented,false);
+    if (type === 'visibilitychange') {f.doc.hidden=true;f.dispatch(type,{},f.doc);} else f.dispatch(type,{},f.win);
+    assert.equal(f.feedback.at(-1).phase,'cancel',type);
+  }
+});
+
+test('vertical touch scrolling and blank-space presses do not trap input or leave a hand', t => {
+  const f = domFixture(t); f.dispatch('pointerdown',{pointerType:'touch'});
+  const move=f.dispatch('pointermove',{pointerType:'touch',clientY:60});
+  assert.equal(move.defaultPrevented,false); assert.equal(f.feedback.at(-1).phase,'cancel');
+  f.dispatch('pointerup',{pointerType:'touch'},f.win); assert.equal(f.feedback.at(-1).phase,'cancel');
+  f.setHit(false); f.dispatch('pointerdown',{pointerType:'touch'}); f.dispatch('pointerup',{pointerType:'touch'},f.win);
+  assert.equal(f.feedback.at(-1).phase,'cancel'); assert.deepEqual(f.emitted,[]);
 });
