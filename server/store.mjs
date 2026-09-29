@@ -5,6 +5,7 @@ import { defaultVoiceSettings } from './voice.mjs';
 import { normalizeReasoningEffort, normalizeSupportsImages } from './providers.mjs';
 import { validateStoredAttachments, normalizeAttachmentIds } from './attachments.mjs';
 import { restoreAgentState } from './agent-tasks.mjs';
+import { validateExecutionHosts } from './executors.mjs';
 
 export const isCompanionKind = value => value === 'anime' || value === 'cat';
 
@@ -76,8 +77,12 @@ export class JsonStore {
     if (!principal || principal.disabled || principal.role !== 'admin') throw new Error('本地主机 owner 无效，不能停用或降权。');
     if (state.sessions.some(session => !ids.has(session.userId) || !/^[a-f0-9]{64}$/.test(session.tokenHash) || !Number.isFinite(session.expiresAt))) throw new Error('本地登录会话数据无效。');
     if (validateStoredAttachments(state)) changed = true;
+    if (validateExecutionHosts(state)) changed = true;
     for (const conversation of this.state.conversations) {
       if (!ids.has(conversation.userId)) throw new Error('本地会话缺少有效用户归属，已停止加载。');
+      for (const hostId of [conversation.agentHostId, conversation.threadHostId, conversation.agent?.run?.hostId, ...(conversation.agent?.queue ?? []).map(entry => entry.hostId)]) {
+        if (hostId !== undefined && hostId !== 'central' && !state.executionHosts.some(host => host.id === hostId && host.userId === conversation.userId)) throw new Error('本地会话执行电脑归属无效。');
+      }
       if (restoreAgentState(conversation)) changed = true;
       for (const entry of conversation.agent?.queue ?? []) for (const id of normalizeAttachmentIds(entry.attachmentIds)) if (!state.attachments.some(item => item.id === id && item.userId === conversation.userId)) throw new Error('本地 Agent 图片归属无效。');
       for (const entry of conversation.agent?.submissions ?? []) for (const id of normalizeAttachmentIds(entry.attachmentIds)) if (!state.attachments.some(item => item.id === id && item.userId === conversation.userId)) throw new Error('本地 Agent 回执图片归属无效。');

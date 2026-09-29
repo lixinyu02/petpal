@@ -1,0 +1,361 @@
+import path from 'node:path';
+import { hostname } from 'node:os';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, open, readFile, unlink } from 'node:fs/promises';
+import { CodexBridge, resolveCodexCommand } from '../server/codex.mjs';
+import { createDesktopTools } from '../server/desktop-tools.mjs';
+import { normalizeAgentPermissions } from '../server/agent-permissions.mjs';
+import { inspectImage, IMAGE_LIMIT } from '../server/attachments.mjs';
+import { normalizeReasoningEffort } from '../server/providers.mjs';
+
+const object = value => value && typeof value === 'object' && !Array.isArray(value);
+const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value);
+const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+const hash = value => createHash('sha256').update(value).digest('hex');
+const stopped = () => Object.assign(new Error('执行电脑连接已结束。'), { name: 'AbortError' });
+const invalid = () => new Error('执行电脑协议数据无效。');
+const imageExtensions = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+const DELTA_CHARS = 8000; // Even all-control-character JSON stays under the central 64 KiB character bound.
+const delay = (ms, signal) => new Promise(resolve => {
+  const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); };
+  const timer = setTimeout(done, ms); timer.unref?.(); signal.addEventListener('abort', done, { once: true }); if (signal.aborted) done();
+});
+
+export function validateExecutorConnection(value) {
+  if (!object(value) || Object.keys(value).some(key => !['url', 'token', 'instanceId', 'userId'].includes(key)) ||
+      typeof value.url !== 'string' || value.url.length > 2048 || /[\x00-\x20\x7f\\?#]/.test(value.url) ||
+      typeof value.token !== 'string' || !value.token || value.token.length > 4096 || /[\x00-\x20\x7f]/.test(value.token) ||
+      !identifier(value.instanceId) || !identifier(value.userId)) throw new Error('执行电脑连接参数无效。');
+  let url;
+  try { url = new URL(value.url); } catch { throw new Error('执行电脑需要完整的服务地址。'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash ||
+      url.protocol === 'http:' && !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) throw new Error('执行电脑连接需要 HTTPS；本机回环地址除外。');
+  return { url: url.href.replace(/\/+$/, ''), token: value.token, instanceId: value.instanceId, userId: value.userId };
+}
+
+async function durableJson(file, value) {
+  const handle = await open(file, 'wx', 0o600);
+  try { await handle.writeFile(`${JSON.stringify(value)}\n`); await handle.sync(); }
+  finally { await handle.close(); }
+}
+
+export async function loadExecutorDeviceId(dataDir) {
+  await mkdir(dataDir, { recursive: true, mode: 0o700 });
+  const file = path.join(dataDir, 'device.json');
+  try { await durableJson(file, { version: 1, deviceId: randomUUID() }); }
+  catch (error) { if (error.code !== 'EEXIST') throw error; }
+  const value = JSON.parse(await readFile(file, 'utf8'));
+  if (value?.version !== 1 || !uuid(value.deviceId)) throw new Error('执行电脑标识文件无效，请保留文件并检查。');
+  return value.deviceId;
+}
+
+async function readBytes(response, limit, signal) {
+  if (!response.body) return Buffer.alloc(0);
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > limit) { await response.body.cancel(); throw invalid(); }
+  const reader = response.body.getReader(), chunks = []; let bytes = 0;
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    for (;;) {
+      if (signal?.aborted) throw stopped();
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength; if (bytes > limit) throw invalid(); chunks.push(Buffer.from(value));
+    }
+    if (signal?.aborted) throw stopped();
+    return Buffer.concat(chunks, bytes);
+  } finally { signal?.removeEventListener('abort', cancel); await reader.cancel().catch(() => {}); reader.releaseLock(); }
+}
+
+export function createExecutorHandlers(executor, isAllowed) {
+  return Object.fromEntries(['connect', 'disconnect', 'status'].map(action => [`petpal:executor:${action}`, (event, input) => {
+    if (!isAllowed(event)) throw new Error('执行电脑连接仅允许可信主窗口管理。');
+    return action === 'connect' ? executor.connect(input) : executor[action]();
+  }]));
+}
+
+/** One outbound executor belongs to a verified central login, never a renderer request. */
+export class DesktopExecutor {
+  constructor({ dataDir, fetchImpl = globalThis.fetch, bridgeFactory = options => new CodexBridge(options),
+    toolsFactory = options => createDesktopTools(options), resolveCommand = resolveCodexCommand,
+    name = hostname(), platform = process.platform, arch = process.arch } = {}) {
+    if (typeof dataDir !== 'string' || !path.isAbsolute(dataDir)) throw new Error('执行电脑数据目录必须是绝对路径。');
+    this.dataDir = dataDir; this.fetch = fetchImpl; this.bridgeFactory = bridgeFactory;
+    this.toolsFactory = toolsFactory; this.resolveCommand = resolveCommand;
+    this.metadata = { name: String(name).replace(/[\x00-\x1f\x7f]/g, '').slice(0, 120) || 'PetPal PC', platform, arch };
+    this.current = null; this.generation = 0; this.transition = Promise.resolve(); this.closed = false;
+    this.visible = { state: 'disconnected', ...this.metadata };
+  }
+
+  status() { return { ...this.visible }; }
+  _queue(work) { const result = this.transition.catch(() => {}).then(work); this.transition = result.catch(() => {}); return result; }
+  _assert(ctx) { if (this.closed || this.current !== ctx || ctx.generation !== this.generation || ctx.controller.signal.aborted) throw stopped(); }
+  _invalidate() {
+    const old = this.current;
+    if (old) { old.controller.abort(); old.run?.controller.abort(); void old.run?.bridge?.close().catch(() => {}); }
+    return old;
+  }
+
+  connect(input) {
+    let connection;
+    try { connection = validateExecutorConnection(input); } catch (error) { return Promise.reject(error); }
+    if (this.closed) return Promise.reject(stopped());
+    const current = this.current;
+    if (current && !current.controller.signal.aborted && Object.keys(connection).every(key => connection[key] === current.connection[key])) return current.ready;
+    const generation = ++this.generation, old = this._invalidate();
+    this.visible = { state: 'connecting', ...this.metadata };
+    const ctx = { generation, connection, controller: new AbortController(), run: null, loops: [], eventTail: Promise.resolve(), retired: false };
+    this.current = ctx;
+    ctx.ready = this._queue(async () => {
+      await this._retire(old); this._assert(ctx);
+      try {
+        const identity = await this._json(ctx, '/api/auth/me'); this._assert(ctx);
+        if (identity.instanceId !== connection.instanceId || identity.user?.id !== connection.userId || !identity.user?.canUseCodex) throw new Error('当前账号身份或 Agent 授权无效，请重新登录。');
+        ctx.account = identity.user;
+        ctx.deviceId = await loadExecutorDeviceId(this.dataDir); this._assert(ctx);
+        ctx.directory = path.join(this.dataDir, 'accounts', hash(`${connection.url}\n${connection.instanceId}\n${connection.userId}`));
+        await mkdir(path.join(ctx.directory, 'receipts'), { recursive: true, mode: 0o700 }); this._assert(ctx);
+        await this.resolveCommand(); this._assert(ctx);
+        await this._register(ctx); this._assert(ctx);
+        this.visible = { state: 'online', hostId: ctx.hostId, ...this.metadata };
+        this._start(ctx);
+        return this.status();
+      } catch (error) {
+        await this._retire(ctx);
+        if (this.current === ctx && generation === this.generation) { this.current = null; this.visible = { state: 'error', ...this.metadata, error: '执行电脑连接失败，请检查网络、Agent 权限与桌面安装。' }; }
+        throw ctx.controller.signal.aborted && generation !== this.generation ? stopped() : new Error('执行电脑连接失败，请检查网络、Agent 权限与桌面安装。');
+      }
+    });
+    return ctx.ready;
+  }
+
+  disconnect() {
+    ++this.generation; const old = this._invalidate(); this.current = null;
+    this.visible = { state: 'disconnected', ...this.metadata };
+    return this._queue(() => this._retire(old));
+  }
+  close() { this.closed = true; return this.disconnect(); }
+
+  async _json(ctx, route, body, { timeout = 15000, token = ctx.connection.token, signal = ctx.controller.signal, limit = 1024 * 1024, method = body === undefined ? 'GET' : 'POST' } = {}) {
+    const controller = new AbortController(), abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) controller.abort();
+    const timer = setTimeout(abort, timeout); timer.unref?.();
+    try {
+      const response = await this.fetch(`${ctx.connection.url}${route}`, { method,
+        headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: controller.signal, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer' });
+      const bytes = await readBytes(response, limit, controller.signal);
+      if (!response.ok) throw Object.assign(new Error('执行电脑服务请求失败。'), { status: response.status });
+      let value; try { value = JSON.parse(bytes.toString('utf8')); } catch { throw invalid(); }
+      if (!object(value)) throw invalid(); return value;
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
+  }
+
+  async _register(ctx) {
+    const registration = await this._json(ctx, '/api/agent/executors/register', { deviceId: ctx.deviceId, ...this.metadata });
+    if (!identifier(registration.hostId) || !identifier(registration.connectionId) ||
+        !Number.isSafeInteger(registration.leaseMs) || registration.leaseMs < 3000 || registration.leaseMs > 120000 ||
+        !Number.isSafeInteger(registration.pollMs) || registration.pollMs < 1000 || registration.pollMs > 60000) throw invalid();
+    ctx.hostId = registration.hostId; ctx.connectionId = registration.connectionId;
+    ctx.leaseMs = registration.leaseMs; ctx.pollMs = registration.pollMs;
+    ctx.route = `/api/agent/executors/${ctx.connectionId}`;
+  }
+  _unregister(ctx) { return this._json(ctx, ctx.route, undefined, { method: 'DELETE', signal: null, timeout: 3000 }); }
+
+  _start(ctx) {
+    const poll = (async () => {
+      while (!ctx.controller.signal.aborted) {
+        const response = await this._json(ctx, `${ctx.route}/poll`, undefined, { timeout: ctx.pollMs + 10000 }); this._assert(ctx);
+        if (!Array.isArray(response.commands) || response.commands.length > 1) throw invalid();
+        for (const command of response.commands) { this._assert(ctx); await this._command(ctx, command); }
+        if (!response.commands.length) await delay(100, ctx.controller.signal);
+      }
+    })();
+    const heartbeat = (async () => {
+      while (!ctx.controller.signal.aborted) {
+        await delay(Math.floor(ctx.leaseMs / 3), ctx.controller.signal); if (ctx.controller.signal.aborted) return;
+        const response = await this._json(ctx, `${ctx.route}/heartbeat`, {}, { timeout: Math.floor(ctx.leaseMs / 3) }); this._assert(ctx);
+        if (response.ok !== true) throw invalid();
+      }
+    })();
+    ctx.loops = [poll, heartbeat];
+    for (const loop of ctx.loops) void loop.catch(() => this._failed(ctx));
+  }
+
+  async _receipt(ctx, command) {
+    const fingerprint = hash(JSON.stringify(command)), file = path.join(ctx.directory, 'receipts', `${hash(`${ctx.connectionId}:${command.id}`)}.json`);
+    try { await durableJson(file, { version: 1, connectionId: ctx.connectionId, commandId: command.id, runId: command.runId, type: command.type, fingerprint }); return true; }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      const previous = JSON.parse(await readFile(file, 'utf8'));
+      if (previous.fingerprint !== fingerprint || previous.connectionId !== ctx.connectionId || previous.runId !== command.runId) throw invalid();
+      return false;
+    }
+  }
+
+  _validateCommand(command) {
+    if (!object(command) || !identifier(command.id) || !identifier(command.runId)) throw invalid();
+    const allowed = {
+      run: ['id', 'type', 'runId', 'conversationId', 'prompt', 'threadId', 'permissions', 'model', 'effort', 'codexRevision', 'relayToken', 'attachments'],
+      steer: ['id', 'type', 'runId', 'expectedTurnId', 'content', 'attachments'],
+      approve: ['id', 'type', 'runId', 'approvalId', 'decision'], stop: ['id', 'type', 'runId'],
+    }[command.type];
+    if (!allowed || Object.keys(command).some(key => !allowed.includes(key))) throw invalid();
+    if (command.type === 'run') {
+      if (!identifier(command.conversationId) || typeof command.prompt !== 'string' || command.prompt.length > 32000 ||
+          command.threadId !== undefined && !identifier(command.threadId) || !uuid(command.codexRevision) ||
+          typeof command.model !== 'string' || !command.model.trim() || command.model.length > 160 || /[\x00-\x1f\x7f]/.test(command.model) ||
+          typeof command.relayToken !== 'string' || !command.relayToken || command.relayToken.length > 4096 || /[\x00-\x20\x7f]/.test(command.relayToken)) throw invalid();
+      normalizeAgentPermissions(command.permissions); normalizeReasoningEffort(command.effort);
+    }
+    if (command.type === 'steer' && (!identifier(command.expectedTurnId) || typeof command.content !== 'string' || command.content.length > 32000)) throw invalid();
+    if (command.type === 'approve' && (!identifier(command.approvalId) || !['accept', 'decline'].includes(command.decision))) throw invalid();
+    if (['run', 'steer'].includes(command.type)) {
+      if (!Array.isArray(command.attachments) || command.attachments.length > 4) throw invalid();
+      for (const item of command.attachments) {
+        if (!object(item) || Object.keys(item).some(key => !['id', 'mimeType', 'size', 'sha256'].includes(key)) || !identifier(item.id) ||
+            !imageExtensions[item.mimeType] || !Number.isSafeInteger(item.size) || item.size < 1 || item.size > IMAGE_LIMIT || !/^[a-f0-9]{64}$/.test(item.sha256)) throw invalid();
+      }
+    }
+  }
+
+  async _command(ctx, command) {
+    this._validateCommand(command);
+    if (!await this._receipt(ctx, command)) return;
+    this._assert(ctx);
+    if (command.type === 'run') {
+      if (ctx.run) throw invalid();
+      const permissions = normalizeAgentPermissions(command.permissions);
+      if (permissions.access === 'full-access' && ctx.account.agentAccess !== 'full' && !ctx.account.isOwner) throw invalid();
+      const run = { id: command.runId, commandId: command.id, sequence: 0, pendingBytes: 0, outputBytes: 0, files: new Map(),
+        controller: new AbortController(), bridge: null, conversationId: command.conversationId, relayToken: command.relayToken, events: Promise.resolve(), stopping: false };
+      ctx.run = run;
+      run.done = this._run(ctx, run, command).catch(() => this._failed(ctx));
+      return;
+    }
+    const run = ctx.run;
+    if (!run || run.id !== command.runId) throw invalid();
+    if (command.type === 'stop') {
+      run.stopping = true; run.controller.abort(); await run.bridge?.close(); await run.done; return;
+    }
+    let result;
+    try {
+      if (!run.bridge || run.stopping || run.controller.signal.aborted) throw Object.assign(new Error('任务已停止。'), { code: 'turn_not_active' });
+      if (command.type === 'approve') result = await run.bridge.approve(command.approvalId, command.decision);
+      else {
+        const images = await this._images(ctx, run, command.attachments); this._assert(ctx); run.controller.signal.throwIfAborted();
+        result = await run.bridge.steer({ conversationId: run.conversationId, expectedTurnId: command.expectedTurnId, content: command.content, images });
+      }
+      await this._event(ctx, run, 'command-result', { commandId: command.id, ok: true, ...(result?.turnId ? { turnId: result.turnId } : {}) });
+    } catch (error) {
+      await this._event(ctx, run, 'command-result', { commandId: command.id, ok: false,
+        ...(error.code === 'turn_not_active' ? { code: 'turn_not_active' } : {}), message: error.code === 'turn_not_active' ? '当前运行已结束。' : '无法确认操作已送达，请检查任务；不会自动重试。' });
+    }
+  }
+
+  _event(ctx, run, event, data) {
+    this._assert(ctx);
+    const payload = { runId: run.id, sequence: run.sequence + 1, event, data }, encoded = JSON.stringify(payload), bytes = Buffer.byteLength(encoded);
+    if (encoded.length > 65536 || bytes > 120000 || run.pendingBytes + bytes > 4 * 1024 * 1024) throw invalid();
+    run.sequence = payload.sequence;
+    run.pendingBytes += bytes;
+    const send = run.events.then(async () => {
+      this._assert(ctx); const response = await this._json(ctx, `${ctx.route}/events`, payload);
+      if (response.ok !== true) throw invalid();
+    }).finally(() => { run.pendingBytes -= bytes; });
+    run.events = send; void send.catch(() => this._failed(ctx)); return send;
+  }
+
+  async _images(ctx, run, attachments) {
+    const images = [];
+    for (const item of attachments) {
+      this._assert(ctx); run.controller.signal.throwIfAborted();
+      const existing = run.files.get(item.id);
+      if (existing) { if (existing.sha256 !== item.sha256) throw invalid(); images.push({ path: existing.path }); continue; }
+      const route = `${ctx.route}/runs/${run.id}/attachments/${item.id}`;
+      const controller = new AbortController(), abort = () => controller.abort();
+      ctx.controller.signal.addEventListener('abort', abort, { once: true }); run.controller.signal.addEventListener('abort', abort, { once: true });
+      const timer = setTimeout(abort, 15000); timer.unref?.();
+      try {
+        const response = await this.fetch(`${ctx.connection.url}${route}`, { headers: { Authorization: `Bearer ${run.relayToken}` }, signal: controller.signal,
+          redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer' });
+        if (!response.ok || response.headers.get('content-type')?.split(';')[0].trim() !== item.mimeType) { await response.body?.cancel(); throw invalid(); }
+        const bytes = await readBytes(response, item.size, controller.signal);
+        if (bytes.length !== item.size || hash(bytes) !== item.sha256) throw invalid(); inspectImage(bytes, item.mimeType);
+        this._assert(ctx); run.controller.signal.throwIfAborted();
+        const folder = path.join(ctx.directory, 'attachments', hash(run.id)); await mkdir(folder, { recursive: true, mode: 0o700 });
+        const file = path.join(folder, `${hash(item.id)}.${imageExtensions[item.mimeType]}`), handle = await open(file, 'wx', 0o600);
+        try { await handle.writeFile(bytes); } finally { await handle.close(); }
+        run.files.set(item.id, { path: file, sha256: item.sha256 }); images.push({ path: file });
+      } finally { clearTimeout(timer); ctx.controller.signal.removeEventListener('abort', abort); run.controller.signal.removeEventListener('abort', abort); }
+    }
+    return images;
+  }
+
+  async _run(ctx, run, command) {
+    let result, failure;
+    try {
+      await this._event(ctx, run, 'started', {});
+      const images = await this._images(ctx, run, command.attachments); this._assert(ctx); run.controller.signal.throwIfAborted();
+      ctx.tools ??= this.toolsFactory({ dataDir: path.join(ctx.directory, 'tools') });
+      const config = { mode: 'api', revision: command.codexRevision, baseUrl: `${ctx.connection.url}${ctx.route}/runs/${run.id}/model`,
+        apiKey: run.relayToken, model: command.model, reasoningEffort: command.effort || '' };
+      run.bridge = this.bridgeFactory({ dataDir: ctx.directory, workspaceRoot: path.join(ctx.directory, 'workspace'), config, desktopTools: ctx.tools });
+      this._assert(ctx); run.controller.signal.throwIfAborted();
+      result = await run.bridge.run({ conversationId: command.conversationId, prompt: command.prompt, threadId: command.threadId,
+        model: command.model, effort: command.effort || '', permissions: command.permissions, images, signal: run.controller.signal,
+        onEvent: (event, data) => {
+          if (ctx.controller.signal.aborted || run.controller.signal.aborted) return;
+          if (!['thread', 'turn', 'status', 'delta', 'approval', 'approval-resolved'].includes(event)) throw invalid();
+          if (event === 'approval' && typeof data?.description === 'string' && data.description.length > 8000) {
+            // Never offer an approval card with its review details silently truncated.
+            void Promise.resolve(run.bridge.approve(data.id, 'decline')).catch(() => { run.controller.abort(); });
+            void this._event(ctx, run, 'status', { state: 'blocked', message: '操作详情超过远程审批长度，已拒绝本次操作；请拆分任务后重试。' }); return;
+          }
+          if (event === 'delta') {
+            if (typeof data?.text !== 'string') throw invalid();
+            run.outputBytes += Buffer.byteLength(data.text); if (run.outputBytes > 2 * 1024 * 1024) throw invalid();
+            for (let offset = 0; offset < data.text.length; offset += DELTA_CHARS) void this._event(ctx, run, event, { text: data.text.slice(offset, offset + DELTA_CHARS) });
+          } else void this._event(ctx, run, event, data);
+        } });
+    } catch (error) { failure = error; }
+    finally {
+      await run.bridge?.close();
+      await Promise.allSettled([...run.files.values()].map(file => unlink(file.path)));
+    }
+    if (ctx.controller.signal.aborted) { run.relayToken = ''; return; }
+    if (run.stopping || run.controller.signal.aborted) await this._event(ctx, run, 'stopped', {});
+    else if (failure) await this._event(ctx, run, 'error', { message: '执行电脑未能完成任务，请检查该电脑的 Codex 与网络状态。' });
+    else {
+      if (!identifier(result?.threadId)) throw invalid();
+      if (!run.outputBytes && result.text) {
+        if (typeof result.text !== 'string' || Buffer.byteLength(result.text) > 2 * 1024 * 1024) throw invalid();
+        for (let offset = 0; offset < result.text.length; offset += DELTA_CHARS) await this._event(ctx, run, 'delta', { text: result.text.slice(offset, offset + DELTA_CHARS) });
+      }
+      // Deltas already carry the answer; avoid a second multi-megabyte completion frame.
+      await this._event(ctx, run, 'complete', { threadId: result.threadId, text: '' });
+    }
+    run.relayToken = ''; if (ctx.run === run) ctx.run = null;
+  }
+
+  async _retire(ctx) {
+    if (!ctx) return;
+    if (ctx.retiring) return ctx.retiring;
+    ctx.retired = true; ctx.controller.abort(); ctx.run?.controller.abort();
+    ctx.retiring = (async () => {
+      await Promise.allSettled([ctx.run?.bridge?.close(), ctx.tools?.close()]);
+      await Promise.allSettled([ctx.run?.done, ...ctx.loops]);
+      if (ctx.connectionId) await this._unregister(ctx).catch(() => {});
+      ctx.connection.token = ''; ctx.run = null;
+    })();
+    return ctx.retiring;
+  }
+
+  _failed(ctx) {
+    if (this.current !== ctx || ctx.controller.signal.aborted) return;
+    ++this.generation; this.current = null;
+    this.visible = { state: 'error', ...this.metadata, error: '执行电脑已离线；运行状态需在工作台确认，任务不会自动重试。' };
+    void this._retire(ctx).catch(() => {});
+  }
+}

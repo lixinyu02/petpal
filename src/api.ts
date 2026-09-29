@@ -12,12 +12,13 @@ export type ReasoningEffort = '' | 'none' | 'minimal' | 'low' | 'medium' | 'high
 export type Provider = { id: string; name: string; protocol: 'chat-completions' | 'responses'; baseUrl: string; model: string; reasoningEffort?:ReasoningEffort; hasApiKey: boolean; editable?:boolean; testable?:boolean; supportsImages?:boolean };
 export type Attachment = {id:string;mimeType:string;name:string;size:number;width:number;height:number};
 export type Message = { id: string; role: 'user' | 'assistant'; content: string; model?: string; status?: string; createdAt?: string; attachments?:Attachment[]; steered?:boolean };
-export type AgentQueueEntry = { id:string; submissionId:string; revision:number; content:string; attachmentIds:string[]; permissions:AgentPermissions; providerId:string|null; model:string; effort:string; createdAt:string };
-export type AgentRun = { id:string; submissionId:string; status:'running'|'stopping'|'completed'|'cancelled'|'error'; turnId:string|null; permissions:AgentPermissions; providerId:string|null; model:string; effort:string; startedAt:string; finishedAt?:string; error?:string };
+export type AgentQueueEntry = { id:string; submissionId:string; revision:number; content:string; attachmentIds:string[]; permissions:AgentPermissions; providerId:string|null; model:string; effort:string; createdAt:string;hostId?:string;hostName?:string };
+export type AgentRun = { id:string; submissionId:string; status:'running'|'stopping'|'completed'|'cancelled'|'error'|'unknown'; turnId:string|null; permissions:AgentPermissions; providerId:string|null; model:string; effort:string; startedAt:string; finishedAt?:string; error?:string;hostId?:string;hostName?:string };
 export type AgentSubmission = {submissionId:string;entryId:string;status:'queued'|'running'|'completed'|'cancelled'|'error'|'steered'|'uncertain';content?:string;createdAt?:string};
 export type AgentState = { revision:number; paused:boolean; queue:AgentQueueEntry[]; run:AgentRun|null; approvals:{id:string;kind:string;description:string}[]; submissions?:AgentSubmission[] };
-export type Conversation = { id: string; title: string; mode: 'chat' | 'codex'; providerId?: string; messages: Message[]; createdAt: string; updatedAt: string; agent?:AgentState };
+export type Conversation = { id: string; title: string; mode: 'chat' | 'codex'; providerId?: string; messages: Message[]; createdAt: string; updatedAt: string; agent?:AgentState;agentHostId?:string;threadHostId?:string };
 export type CodexStatus = { available?: boolean; running?: boolean; version?: string; authenticated?: boolean; error?: string; message?: string; workspaceRoot?: string; mode?:'host'|'api'; configured?:boolean; apiVerified?:boolean; eligibleProviderIds?:string[]; model?:string; reasoningEffort?:string; [key: string]: unknown };
+export type AgentHost = {id:string;name:string;kind:'central'|'desktop';platform:string;online:boolean;codex?:CodexStatus;lastSeenAt?:string;arch?:string};
 export type CodexConfig = { mode:'host'|'api'; baseUrl:string; model:string; reasoningEffort?:ReasoningEffort; hasApiKey:boolean; revision:string; protocol:'responses'; configured:boolean };
 export type MusicAction = 'open'|'play'|'pause'|'next'|'previous';
 export type MusicPlayer = { id:'qqmusic'|'netease'; name:string; installed:boolean; session:boolean; state?:string; controls:string[]; message?:string };
@@ -36,8 +37,10 @@ export type CosyVoiceConfig = {configured:boolean;hasReference:boolean;reference
 type CredentialKind = 'pairing'|'session'|'none';
 export type StreamEvent = { type: string; data: Record<string, any> };
 export type Identity = {instanceId:string;userId:string};
+export type NativeExecutorStatus = {state:'disconnected'|'connecting'|'online'|'error';hostId?:string;name:string;platform:string;arch:string;error?:string};
+export type NativeExecutor = {connect(input:Connection & Identity):Promise<NativeExecutorStatus>;disconnect():Promise<void>;status():Promise<NativeExecutorStatus>};
 declare global {
-  interface Window { petpal?: { connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; remoteAck?(id:string,sequence:number):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; updates?:DesktopUpdates }; }
+  interface Window { petpal?: { connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; remoteAck?(id:string,sequence:number):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; updates?:DesktopUpdates; executor?:NativeExecutor }; }
 }
 const requests = createRequestScope();
 const listeners = new Set<()=>void>();
@@ -46,6 +49,7 @@ let initialization: Promise<Connection>|undefined;
 let nativeConnection:Connection|undefined;
 let executionTarget:'local'|'remote'='remote';
 let targetSwitchSequence=0;
+let executorScope:string|null=null;
 export const getExecutionTarget=()=>executionTarget;
 const notify = () => { for(const listener of listeners) listener(); };
 export const getConnection = requests.connection;
@@ -60,6 +64,8 @@ export function normalizeServerUrl(value:string) {
 }
 export function setConnection(next:Connection,credentialKind:CredentialKind=next.token?'pairing':'none',target?:'local'|'remote') {
   const connection={url:normalizeServerUrl(next.url),token:next.token.trim()};
+  executorScope=null;
+  void window.petpal?.executor?.disconnect().catch(()=>{});
   void window.petpal?.updates?.cancel().catch(()=>{});
   executionTarget=target || (nativeConnection && connection.url === nativeConnection.url ? 'local' : 'remote');
   identity=null;requests.replace(connection);
@@ -69,6 +75,16 @@ export function setConnection(next:Connection,credentialKind:CredentialKind=next
 }
 function acceptIdentity(value:{instanceId?:string;user?:User}) {
   if(!value.instanceId||!value.user?.id)return;
+  const executor=window.petpal?.executor;
+  const scope=`${getSessionEpoch()}:${value.instanceId}:${value.user.id}:${Boolean(value.user.canUseCodex)}`;
+  if(executor && executorScope!==scope){
+    executorScope=scope;
+    if(value.user.canUseCodex){
+      const connection=getConnection();
+      // Main verifies this identity independently. No registration happens before authentication.
+      void executor.connect({...connection,url:connection.url || location.origin,instanceId:value.instanceId,userId:value.user.id}).catch(()=>{});
+    }else void executor.disconnect().catch(()=>{});
+  }
   if(identity?.instanceId===value.instanceId&&identity.userId===value.user.id)return;
   identity={instanceId:value.instanceId,userId:value.user.id};notify();
 }
@@ -81,7 +97,7 @@ export function initConnection(defaultUrl = '') {
       const restored=restoreTargetConnection(parsed,native);
       if(restored){setConnection(restored.connection,restored.credentialKind,restored.target);return getConnection();}
     }}}catch{try{sessionStorage.removeItem('petpal.connection');}catch{}}
-    if(native)setConnection({url:native.url,token:''});
+    if(native)setConnection({url:defaultUrl || native.url,token:''});
     else if(defaultUrl)setConnection({url:defaultUrl,token:''});
     return getConnection();
   })();

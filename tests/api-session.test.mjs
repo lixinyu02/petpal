@@ -66,6 +66,28 @@ test('real API wrapper account-switch and native restore behavior',async t=>{
       const api=await freshApi();
       assert.deepEqual(await api.initConnection(),{url:'http://127.0.0.1:60002',token:''});
     });
+    await t.test('new desktop may default to the central service without transferring the local owner credential',async()=>{
+      disk.clear();window.petpal={connection:async()=>({url:'http://127.0.0.1:60002',token:'private-owner'})};
+      const api=await freshApi();
+      assert.deepEqual(await api.initConnection('https://central.example'),{url:'https://central.example',token:''});
+      assert.equal(api.getExecutionTarget(),'remote');disk.clear();
+    });
+    await t.test('desktop hosting starts only after verified identity, remains idempotent, and stops on permission loss or logout',async()=>{
+      const calls=[];
+      window.petpal={executor:{connect:async value=>{calls.push(['connect',value]);return{state:'online'};},disconnect:async()=>{calls.push(['disconnect']);}}};
+      const api=await freshApi();api.setConnection({url:'https://central.example',token:'member-token'},'session');
+      assert.deepEqual(calls,[['disconnect']]);
+      let user={id:'member',canUseCodex:true};
+      install('fetch',async()=>json({instanceId:'central-id',user}));
+      await api.api('/auth/me');await api.api('/state');
+      assert.deepEqual(calls,[['disconnect'],['connect',{url:'https://central.example',token:'member-token',instanceId:'central-id',userId:'member'}]]);
+      user={...user,canUseCodex:false};await api.api('/state');
+      assert.equal(calls.at(-1)[0],'disconnect');
+      user={...user,canUseCodex:true};await api.api('/auth/me');
+      assert.equal(calls.at(-1)[0],'connect');api.logout();
+      assert.equal(calls.at(-1)[0],'disconnect');assert.equal(api.getConnection().token,'');
+      delete window.petpal;disk.clear();
+    });
     await t.test('desktop restore refreshes local port but preserves member login and explicit logout',async()=>{
       window.petpal={connection:async()=>({url:'http://127.0.0.1:60002',token:'fresh-owner'})};
       for(const [kind,savedToken,expectedToken] of [['session','member','member'],['none','',''],['pairing','old-owner','fresh-owner']]){

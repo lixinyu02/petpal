@@ -17,7 +17,7 @@ function fixture(t, options = {}) {
     run(args) { const work = deferred(), call = { args, work }; calls.push(call); args.onEvent('turn', { turnId: `turn-${calls.length}` }); args.signal.addEventListener('abort', () => { if (!options.delayedAbort) work.reject(args.signal.reason); }, { once: true }); return work.promise; },
     steer: args => steer(args),
   };
-  const manager = createAgentTasks({ store, active, approvals, getBridge: () => bridge, resolveModel: () => ({ ...model }), authorize: entry => {
+  const manager = createAgentTasks({ store, active, approvals, getBridge: () => bridge, redact: options.redact, resolveModel: () => ({ ...model }), authorize: entry => {
     if (!valid.has(entry.auth.sessionHash)) throw Object.assign(new Error('Session expired'), { status: 401 });
     if (entry.model !== model.model || entry.codexRevision !== model.codexRevision) throw Object.assign(new Error('Model changed'), { status: 409 });
     return options.expiresAt;
@@ -40,6 +40,17 @@ test('concurrent duplicate submissions execute exactly once and receipts survive
   await assert.rejects(f.submit({ ...body, content: 'changed' }), { status: 409 });
   assert.equal(f.conversation.messages.filter(item => item.role === 'user').length, 1);
   assert.equal(f.saved().conversations[0].agent.submissions.length, 1);
+});
+
+test('aggregated remote text cannot persist a credential reconstructed across events', async t => {
+  const secret = ['synthetic', 'fragmented', 'credential'].join('-');
+  const f = fixture(t, { redact: value => typeof value === 'string' ? value.replaceAll(secret, '[hidden]') : value });
+  await f.submit(payload('credential-aggregation')); await until(() => f.calls.length === 1);
+  f.calls[0].args.onEvent('delta', { text: secret.slice(0, 10) });
+  f.calls[0].args.onEvent('delta', { text: secret.slice(10) });
+  await f.finish();
+  assert.equal(f.conversation.messages.at(-1).content, '[hidden]');
+  assert.equal(JSON.stringify(f.saved()).includes(secret), false);
 });
 
 test('FIFO queue caps five waiting tasks and rejects stale edits or permission changes', async t => {
@@ -170,4 +181,17 @@ test('nonempty image hooks and changing permissions mid-turn are rejected before
   await f.submit(payload('first')); await until(() => f.calls.length === 1);
   await assert.rejects(f.submit({ ...payload('elevated'), expectedTurnId: 'turn-1', permissions: { access: 'full-access', approval: 'auto' } }, 'steer'), { status: 409 });
   assert.equal(f.snapshot().submissions.length, 1);
+});
+
+test('remote restart records unknown, preserves messages and never resumes its queue', async t => {
+  const f = fixture(t); await f.submit({ ...payload('remote-first'), hostId: 'desktop-fixture' }); await until(() => f.calls.length === 1);
+  await f.submit({ ...payload('remote-queued'), hostId: 'desktop-fixture' });
+  const recovered = structuredClone(f.saved().conversations[0]), messages = structuredClone(recovered.messages);
+  assert.equal(restoreAgentState(recovered), true); assert.equal(recovered.agent.run.status, 'unknown');
+  assert.equal(recovered.agent.submissions[0].status, 'uncertain'); assert.equal(recovered.agent.queue.length, 1);
+  assert.deepEqual(recovered.messages, messages);
+  const restarted = fixture(t, { conversation: recovered });
+  await assert.rejects(restarted.manager.resume(recovered, restarted.auth), { status: 409 });
+  await assert.rejects(restarted.submit(payload('new-after-unknown')), { status: 409 });
+  restarted.manager.kick(recovered); await delay(10); assert.equal(restarted.calls.length, 0);
 });

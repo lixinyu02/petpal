@@ -43,7 +43,7 @@ async function fixture(t) {
     assert.equal(result.status, 201); return { user: result.data.user, token: await login(username) };
   };
   const create = async token => { const result = await request('/conversations', { token, method: 'POST', body: { mode: 'codex' } }); assert.equal(result.status, 201); return result.data; };
-  const submit = (chat, token, content = 'fixture task', extra = {}) => request(`/conversations/${chat.id}/agent/submit`, { token, method: 'POST', body: { submissionId: randomUUID(), content, ...extra } });
+  const submit = (chat, token, content = 'fixture task', extra = {}) => request(`/conversations/${chat.id}/agent/submit`, { token, method: 'POST', body: { submissionId: randomUUID(), content, ...(token !== bootstrap ? { providerId: providers.same.id } : {}), ...extra } });
   t.after(async () => { await app.close(); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-agent-access-'))); await rm(directory, { recursive: true, force: true }); });
   return { request, directory, member, create, submit, login, calls, approvals, providers, ownerId: store.state.ownerId,
     restart: async () => { await app.close(); app = await createPetServer({ dataDir: directory, token: bootstrap, codex }); await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve)); },
@@ -116,8 +116,17 @@ test('server restart preserves paused queue and session authorization until expl
   await f.restart();
   const polled = await f.request(`/conversations/${chat.id}`, { token: member.token }); assert.equal(polled.status, 200);
   assert.equal(polled.data.agent.queue.length, 1); assert.equal(polled.data.agent.paused, true); assert.equal(f.calls.length, 1);
-  const duplicate = await f.request(`/conversations/${chat.id}/agent/submit`, { token: member.token, method: 'POST', body: { submissionId: running.data.submission.submissionId, content: 'first task' } });
+  const duplicate = await f.request(`/conversations/${chat.id}/agent/submit`, { token: member.token, method: 'POST', body: { submissionId: running.data.submission.submissionId, content: 'first task', providerId: f.providers.same.id } });
   assert.equal(duplicate.status, 200); assert.equal(duplicate.data.submission.status, 'cancelled'); assert.equal(f.calls.length, 1);
   assert.equal((await f.request(`/conversations/${chat.id}/agent/queue/resume`, { token: member.token, method: 'POST', body: {} })).status, 200);
   await until(() => f.calls.length === 2); assert.equal(f.calls[1].args.prompt, 'retained task');
+});
+
+test('members cannot bypass assigned models with null/default provider or legacy messages', async t => {
+  const f = await fixture(t), member = await f.member('model-boundary', 'full'), chat = await f.create(member.token);
+  for (const extra of [{ providerId: null }, { providerId: undefined }]) assert.equal((await f.submit(chat, member.token, 'forbidden default', extra)).status, 403);
+  assert.equal((await f.request(`/conversations/${chat.id}/messages`, { token: member.token, method: 'POST', body: { content: 'legacy default bypass' } })).status, 403);
+  assert.equal(f.calls.length, 0);
+  assert.equal((await f.submit(chat, member.token, 'assigned model works')).status, 200);
+  await until(() => f.calls.length === 1); assert.equal(f.calls[0].args.model, 'member-model');
 });

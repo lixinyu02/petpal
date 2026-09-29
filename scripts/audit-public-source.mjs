@@ -4,6 +4,12 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 const syntheticSecrets = new Map([
+  ['tests/cosyvoice-stream.test.mjs', new Set(['fixture-private-key'])],
+  ['tests/desktop-executor.test.mjs', new Set(['central-session-secret', 'replacement-session'])],
+  ['tests/execution-hosts-integration.test.mjs', new Set(['integration-owner', 'integration-password'])],
+  ['tests/executor-relay-redactor.test.mjs', new Set(['synthetic-private-upstream-key'])],
+  ['tests/executor-relay.test.mjs', new Set(['fixture-central-private-key', 'fixture-owner-session'])],
+  ['tests/executors.test.mjs', new Set(['never-send-this-key'])],
   ['tests/agent-access.test.mjs', new Set(['private-agent-key', 'isolated-agent-password', 'replacement-agent-password'])],
   ['tests/attachments.test.mjs', new Set(['isolated-attachment-password'])],
   ['tests/auth-entry.test.mjs', new Set(['isolated-provider-key', 'isolated-voice-key', 'isolated-fixture-password'])],

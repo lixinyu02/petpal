@@ -22,7 +22,7 @@ export function ConnectionDialog({ close }: { close?(): void }) {
   }
   const formContent = <section className={close ? 'modal' : 'login-form'} aria-labelledby="connection-title">
     <div className="modal-heading"><span className="dialog-icon"><Link2 size={23}/></span>{close && <button className="icon-button" aria-label="关闭连接窗口" onClick={close}><X size={20}/></button>}</div>
-    <h2 id="connection-title">登录你的小伴</h2><p>聊天、语音与 Agent 工作，都从你的账号开始。</p>
+    <h2 id="connection-title">登录你的小伴</h2><p>聊天、语音与 Agent 工作，都从你的账号开始。{window.petpal?.executor && '登录后，此电脑会出现在同账号的 Agent 执行列表中。'}</p>
     <div className="auth-modes" role="group" aria-label="登录方式"><button aria-pressed={method === 'password'} className={method === 'password' ? 'active' : ''} onClick={() => setMethod('password')}>账号密码</button><button aria-pressed={method === 'token'} className={method === 'token' ? 'active' : ''} onClick={() => setMethod('token')}>管理员配对</button></div>
     <form onSubmit={submit}><fieldset disabled={busy} className="login-fields">
       <label>服务地址<input placeholder="同站点留空，或 https://pet.example.com" value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} autoComplete="url"/></label>

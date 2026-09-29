@@ -14,6 +14,7 @@ files:
   - desktop/media-permissions.cjs
   - desktop/service-settings.cjs
   - desktop/remote-http.cjs
+  - desktop/executor.mjs
   - desktop/assets/**
   - server/**
   - package.json

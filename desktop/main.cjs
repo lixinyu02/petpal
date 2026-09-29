@@ -10,7 +10,7 @@ const { createDesktopRemoteHttp, isPetPalReleaseUrl } = require('./remote-http.c
 const { spawn } = require('node:child_process');
 
 let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
-let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp;
+let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor;
 const root = path.resolve(__dirname, '..');
 const iconPath = path.join(__dirname, 'assets', 'icon.png');
 if (process.argv.includes('--smoke-test') && process.env.PETPAL_SMOKE_PROFILE) {
@@ -92,6 +92,8 @@ function createMain() {
     if (!quitting && tray) { event.preventDefault(); mainWindow.hide(); }
   });
   mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.webContents.on('render-process-gone', () => { void executor?.disconnect().catch(() => {}); });
+  mainWindow.webContents.on('destroyed', () => { void executor?.disconnect().catch(() => {}); });
   mainLoaded = mainWindow.loadURL(origin);
 }
 
@@ -392,6 +394,10 @@ async function boot() {
     backend.server.listen(0, '127.0.0.1', resolve);
   });
   origin = `http://127.0.0.1:${backend.server.address().port}`;
+  const executorModule = await import(pathToFileURL(path.join(__dirname, 'executor.mjs')).href);
+  executor = new executorModule.DesktopExecutor({ dataDir: path.join(app.getPath('userData'), 'executor') });
+  for (const [channel, handler] of Object.entries(executorModule.createExecutorHandlers(executor,
+    event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting))) ipcMain.handle(channel, handler);
   remoteHttp = createDesktopRemoteHttp({ isAllowed: event => isTrusted(event) && event.sender === mainWindow?.webContents });
   ipcMain.handle('petpal:remote:request', (event, request) => remoteHttp.request(event, request));
   ipcMain.handle('petpal:remote:abort', (event, id) => remoteHttp.abort(event, id));
@@ -437,6 +443,11 @@ async function boot() {
     const loginGate = await loginSmokeMain();
     const health = await fetch(`${origin}/api/health`).then(r => r.json());
     const bridge = await mainWindow.webContents.executeJavaScript('window.petpal.connection().then(c => ({url: c.url, hasToken: !!c.token}))');
+    const executorBridge = await mainWindow.webContents.executeJavaScript(`(async () => {
+      const value = window.petpal.executor;
+      if (!value || !['connect', 'disconnect', 'status'].every(key => typeof value[key] === 'function')) throw new Error('Executor preload facade is unavailable');
+      return { available: true, ...(await value.status()) };
+    })()`);
     const codex = await fetch(`${origin}/api/codex/status`, { headers: { Authorization: `Bearer ${backend.token}` } }).then(r => r.json());
     const desktopTools = await fetch(`${origin}/api/desktop-tools/status`, { headers: { Authorization: `Bearer ${backend.token}` } }).then(async response => {
       if (!response.ok) throw new Error('Desktop tools status is unavailable');
@@ -448,7 +459,7 @@ async function boot() {
       await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})));
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     })()`);
-    const result = { event: 'desktop-smoke', health, loginGate, bridge: { url: bridge.url, hasToken: bridge.hasToken }, uiReady: true,
+    const result = { event: 'desktop-smoke', health, loginGate, bridge: { url: bridge.url, hasToken: bridge.hasToken }, executor: executorBridge, uiReady: true,
       runtimeRoot: path.dirname(process.execPath), electronVersion: process.versions.electron,
       desktopTools: { toolVersion: desktopTools.toolVersion, music: desktopTools.music,
         opencli: { available: desktopTools.opencli.available, version: desktopTools.opencli.version,
@@ -517,7 +528,7 @@ async function boot() {
       const bytes = await fs.readFile(absolute);
       return [{ path: relative.split(path.sep).join('/'), bytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }];
     };
-    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
+    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
     if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'result.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
     if (!health.ok || !bridge.hasToken || !codex.available || !desktopTools.opencli.available || desktopTools.opencli.version !== '1.8.8') exitCode = 1;
@@ -541,7 +552,7 @@ else {
     event.preventDefault(); quitting = true;
     tray?.destroy(); tray = null;
     (async () => {
-      const outcomes = await Promise.allSettled([remoteHttp?.close(), updates?.close({ preserveHandoff: Boolean(pendingUpdate) }), backend?.close()]);
+      const outcomes = await Promise.allSettled([executor?.close(), remoteHttp?.close(), updates?.close({ preserveHandoff: Boolean(pendingUpdate) }), backend?.close()]);
       const failed = outcomes.find(outcome => outcome.status === 'rejected');
       if (failed) throw failed.reason;
       if (pendingUpdate) await launchPreparedUpdate(pendingUpdate);

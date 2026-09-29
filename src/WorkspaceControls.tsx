@@ -1,7 +1,8 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, Cloud, Cpu, Loader2, Monitor, Search, X } from 'lucide-react';
-import { getConnection, getExecutionTarget, getSessionEpoch, isSessionChanged, subscribeSession, switchExecutionTarget, type Provider } from './api';
+import { Check, ChevronDown, Cloud, Cpu, Loader2, Monitor, RefreshCw, Search, X } from 'lucide-react';
+import type { AgentHost, Provider } from './api';
+import { executionPlatform } from './execution-hosts.mjs';
 import './workspace-controls.css';
 
 export { AgentOnboarding } from './AgentOnboarding';
@@ -96,28 +97,25 @@ export function ModelPicker({ providers, value, onChange, disabled = false, labe
   </div>;
 }
 
-export function ExecutionTarget({ disabled = false, onError }: { disabled?: boolean; onError?(message: string): void }) {
-  useSyncExternalStore(subscribeSession, getSessionEpoch, getSessionEpoch);
-  const [busy, setBusy] = useState(false), [error, setError] = useState(''), busyRef = useRef(false), mounted = useRef(true);
-  const target = getExecutionTarget(), desktop = Boolean(window.petpal);
-  let hostname = '当前服务器';
-  try { hostname = new URL(getConnection().url || location.origin).hostname; } catch { /* Display no raw or malformed connection data. */ }
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  async function select(next: 'local'|'remote') {
-    if (busyRef.current || disabled || next === target) return;
-    busyRef.current = true; setBusy(true); setError('');
-    try { await switchExecutionTarget(next); }
-    catch (error) { if (!isSessionChanged(error) && mounted.current) { const message = error instanceof Error ? error.message : '无法切换执行位置，请重试。'; if (onError) onError(message); else setError(message); } }
-    finally { busyRef.current = false; if (mounted.current) setBusy(false); }
-  }
-  return <div className="workspace-execution-target" aria-busy={busy}>
-    {desktop ? <div className="workspace-target-segments" role="group" aria-label="执行位置">
-      <button type="button" aria-pressed={target === 'local'} disabled={disabled || busy} onClick={() => void select('local')}><Monitor size={14}/>此电脑</button>
-      <button type="button" aria-pressed={target === 'remote'} disabled={disabled || busy} onClick={() => void select('remote')}><Cloud size={14}/>远程主机</button>
-    </div> : <span className="workspace-target-label"><Cloud size={15}/>远程主机</span>}
-    <span className="workspace-target-host" title={target === 'local' ? '任务在当前电脑执行' : `任务在 ${hostname} 对应的主机执行`}>
-      {busy ? <Loader2 size={12} className="spin"/> : <span className="workspace-target-dot"/>}{target === 'local' ? '本机执行' : hostname}
-    </span>
+export function ExecutionTarget({ hosts, value, onChange, disabled = false, loading = false, error = '', localHostId = '', onRefresh }: {
+  hosts: AgentHost[]; value: string; onChange(hostId: string): void; disabled?: boolean; loading?: boolean; error?: string; localHostId?: string; onRefresh?(): void;
+}) {
+  const id = useId(), selected = hosts.find(host => host.id === value);
+  const hasDesktop = hosts.some(host => host.kind === 'desktop' && host.online);
+  const legacyDesktop = typeof window !== 'undefined' && window.petpal && !window.petpal.executor;
+  return <div className="workspace-execution-target" aria-busy={loading}>
+    <div className="workspace-host-control">
+      {selected?.kind === 'central' ? <Cloud size={17} aria-hidden="true"/> : <Monitor size={17} aria-hidden="true"/>}
+      <label htmlFor={id}><span>执行电脑</span><select id={id} aria-label="执行电脑" value={value} disabled={disabled || (loading && !hosts.length)} onChange={event => {
+        if (hosts.some(host => host.id === event.target.value && host.online)) onChange(event.target.value);
+      }}>
+        {!selected && <option value={value} disabled>{value ? '此前选择的电脑 · 未连接' : loading ? '正在寻找执行电脑…' : '选择执行电脑'}</option>}
+        {hosts.map(host => <option key={host.id} value={host.id} disabled={!host.online}>{host.name}{host.id === localHostId ? ' · 此电脑' : ''} · {host.kind === 'central' ? '服务器' : executionPlatform(host.platform)} · {host.online ? '在线' : '离线'}</option>)}
+      </select></label>
+      {onRefresh && <button type="button" className="workspace-host-refresh" disabled={loading} aria-label="刷新执行电脑" onClick={onRefresh}>{loading ? <Loader2 size={14} className="spin"/> : <RefreshCw size={14}/>}</button>}
+    </div>
+    <span className={`workspace-target-host${selected?.online ? '' : ' is-offline'}`} role="status"><span className="workspace-target-dot"/>{disabled ? '任务已固定执行电脑' : selected ? selected.online ? '账号与聊天记录保留在个人服务' : '电脑已离线，请登录客户端后再发送' : '等待选择执行电脑'}</span>
+    {legacyDesktop ? <span className="workspace-target-hint">此客户端还没有执行器，请从「下载客户端」更新后重新登录。</span> : !hasDesktop && !loading && <span className="workspace-target-hint">在电脑客户端登录同一账号，即可在这里选择它。</span>}
     {error && <span className="workspace-target-error" role="alert">{error}</span>}
   </div>;
 }

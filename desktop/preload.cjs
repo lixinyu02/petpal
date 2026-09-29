@@ -40,6 +40,11 @@ contextBridge.exposeInMainWorld('petpal', Object.freeze({
   remoteRequest,
   remoteAbort: id => ipcRenderer.invoke('petpal:remote:abort', id),
   remoteAck: (id, sequence) => ipcRenderer.invoke('petpal:remote:ack', id, sequence),
+  executor: Object.freeze({
+    connect: input => ipcRenderer.invoke('petpal:executor:connect', input),
+    disconnect: () => ipcRenderer.invoke('petpal:executor:disconnect'),
+    status: () => ipcRenderer.invoke('petpal:executor:status'),
+  }),
   updates: Object.freeze({
     status: () => updateCall('status'),
     check: () => updateCall('check'),
