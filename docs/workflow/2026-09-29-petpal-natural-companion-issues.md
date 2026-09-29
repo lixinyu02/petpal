@@ -3,7 +3,7 @@
 - Date: 2026-09-29
 - Complexity: L2
 - Related design: 2026-09-29-petpal-natural-companion-design.md
-- Current status: issue-30 in_progress
+- Current status: issue-27/28/29/30 done
 
 ## issue-27
 
@@ -45,6 +45,6 @@
 - 范围: 冻结构建、桌面随机端口兼容修复、线上备份部署、四端包、更新签名、GitHub 发布与说明
 - 依赖: issue-29
 - 验收标准: 保留线上账号与历史，网页验收通过；包与冻结源码一致、下载可用，明确未验收的实机边界
-- 状态: in_progress
-- 验证方式: 冻结前全量 563 项通过；端口兼容与原生 smoke 定向 9 项、TS 和隔离 Vite 0.9.0 构建通过。待原生 smoke、归档读回、Chrome 公网验收、GitHub 哈希及签名
-- commit: pending
+- 状态: done
+- 验证方式: 最终全量 569 项、TS/隔离构建、公开源码审计通过；受控部署保留完整状态、23 静态文件一致、匿名 401/test 登录通过。最终 Windows EXE 原生运行/1973 文件读回通过；Ubuntu 每架构 6970 文件完整读回、Android 同签名/code11/23资源通过。GitHub v0.9.0 最新公开版本的 9 个附件摘要和匿名签名复验通过；Chrome 下载中心已显示新版。Ubuntu/Android 实机仍未验收。详见 2026-09-29-petpal-090-acceptance.md
+- commit: c8a379a（运行时冻结）；1db28ce（测试端口夹具）；验收文档随本提交
