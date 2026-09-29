@@ -15,3 +15,5 @@
 - 状态: done
 - 验证方式: 75 项相关测试、TypeScript、隔离 Vite 构建；Chrome 五类实际 CosyVoice 流式朗读及 412×960 截图；DOM 回退、贴图缺失与减少动态；14 项公网资源哈希、6 项匿名 401 和完整生产状态保持。详见 acceptance 文档。
 - commit: 本 issue 对应的 `feat(issue-39): add expressive anime emotions synced with speech` 提交
+
+运行态补充：2026-09-30 03:45–03:51 +08:00 的用户恢复后复验中，网页服务退出导致的 502 已恢复；CosyVoice HTTP 处理仍间歇性重置/超时，三次实际朗读未得到音频。本 issue 的代码交付记录保留，当前语音服务可用性不能标为通过，详见 acceptance 文档的较新复验结果。
