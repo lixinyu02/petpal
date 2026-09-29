@@ -4,6 +4,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 const syntheticSecrets = new Map([
+  ['tests/asr-http.test.mjs', new Set(['asr-owner-fixture'])],
   ['tests/cosyvoice-stream.test.mjs', new Set(['fixture-private-key'])],
   ['tests/desktop-executor.test.mjs', new Set(['central-session-secret', 'replacement-session'])],
   ['tests/execution-hosts-integration.test.mjs', new Set(['integration-owner', 'integration-password'])],

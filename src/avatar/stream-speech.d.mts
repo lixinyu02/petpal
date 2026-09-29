@@ -8,6 +8,7 @@ export type StreamingSpeechHandlers = {
 };
 export const STREAM_SPEECH_TEXT_LIMIT: number;
 export function createStreamingSpeechController(options?: {
+  keepAlive?: boolean;
   requestStream?: (text: string, signal: AbortSignal, handlers: StreamingSpeechHandlers) => Promise<void>;
   createContext?: () => AudioContext;
   getSpeakerId?: () => string;

@@ -34,6 +34,7 @@ export type VoiceConfig = {
   runtime?:{tts:string;asr:string;remoteConfiguredOnly:boolean};
 };
 export type CosyVoiceConfig = {configured:boolean;hasReference:boolean;referenceName:string;referenceText:string;baseUrl:string;hasApiKey:boolean;editable:boolean;revision:string};
+export type AsrConfig = {configured:boolean;editable:boolean;baseUrl:string;hasApiKey:boolean;revision:string;busy:boolean;audio:{format:'pcm_f32le';sampleRate:number;channels:number;maxFrameBytes:number;maxSeconds:number}};
 type CredentialKind = 'pairing'|'session'|'none';
 export type StreamEvent = { type: string; data: Record<string, any> };
 export type Identity = {instanceId:string;userId:string};

@@ -118,7 +118,7 @@ async function readAudioEvent(response, signal) {
   } finally { signal.removeEventListener('abort', abort); void reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
 
-export async function createCosyVoiceService({ store, dataDir, fetchImpl = globalThis.fetch, now = Date.now, timeoutMs = 180000, maxConcurrent = 1, rateLimit = 6 } = {}) {
+export async function createCosyVoiceService({ store, dataDir, fetchImpl = globalThis.fetch, now = Date.now, timeoutMs = 180000, maxConcurrent = 1, rateLimit = 30 } = {}) {
   const state = store.state;
   state.cosyvoiceConfig ??= { baseUrl: '', apiKey: '', referenceText: '', reference: null, revision: randomUUID() };
   const initial = state.cosyvoiceConfig;

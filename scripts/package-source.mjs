@@ -112,20 +112,6 @@ if (!checkOnly && versionSeries === '0.5') {
   ]) if (!selected.has(file)) throw new Error(`Current desktop acceptance evidence missing: ${file}`);
 }
 
-// Fixed literals are allowed only in their reviewed fixture file, never by a broad test-name pattern.
-const syntheticSecrets = new Map([
-  ['tests/desktop-service-settings.test.mjs', new Set(['desktop-settings-fixture-token'])],
-  ['tests/updates.test.mjs', new Set(['updates-owner-token', 'test-passphrase-123', 'owner-passphrase-123'])],
-  ['tests/providers.test.mjs', new Set(['private-test-key'])],
-  ['tests/backend.test.mjs', new Set(['backend-test-secret', 'secret-not-in-state-response'])],
-  ['tests/codex.test.mjs', new Set(['supersecret'])],
-  ['tests/codex-config.test.mjs', new Set(['nonstandard-provider-secret', 'config-owner-token', 'test-password-123'])],
-  ['tests/codex-dynamic.test.mjs', new Set(['arbitrary-secret-value'])],
-  ['tests/codex-real.test.mjs', new Set(['isolated-test-key'])],
-  ['scripts/browser-fixture.mjs', new Set(['petpal-browser-acceptance-only-20260926'])],
-  ['tests/auth-race.test.mjs', new Set(['original-race-password', 'replacement-race-password'])],
-  ['tests/users.test.mjs', new Set(['isolated-test-owner-token', 'test-password-123', 'fixture-provider-private-key', 'new-desktop-bootstrap-token', 'alice-private-voice-key', 'alice-private-asr-key', 'replacement-password', 'owner-new-password', 'incorrect-password', 'replacement-local-owner-token'])],
-]);
 const textExtensions = new Set(['.mjs', '.cjs', '.js', '.ts', '.tsx', '.css', '.html', '.svg', '.json', '.md', '.txt', '.yml', '.yaml', '.xml', '.java', '.gradle', '.properties', '.pro', '.ps1', '.sh', '.bat']);
 const hash = contents => createHash('sha256').update(contents).digest('hex');
 function sanitizeString(value) {
@@ -141,19 +127,6 @@ function redact(value) {
     .filter(([key]) => !/^(?:token|access[_-]?token|refresh[_-]?token|api[_-]?key|password|authorization|cookie|credentials|threadId|sessionId|registeredDistributions)$/i.test(key))
     .map(([key, item]) => [key, redact(item)]));
   return typeof value === 'string' ? sanitizeString(value) : value;
-}
-function scanText(relative, text) {
-  const issues = [];
-  const allowedSynthetic = syntheticSecrets.get(relative) ?? new Set();
-  if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(text)) issues.push('private key material');
-  if (/\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{20,}\b/.test(text)) issues.push('API key shaped value');
-  if (/\beyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}/.test(text)) issues.push('JWT shaped value');
-  if (/[A-Za-z]:[\\/]+Users[\\/]+[^\s'"`]+|\/(?:home|Users)\/[A-Za-z0-9_.-]+\/(?:\.codex|\.config)/.test(text)) issues.push('absolute user configuration path');
-  for (const match of text.matchAll(/(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|token|secret)\s*[:=]\s*['"]([^'"\r\n]{16,})['"]/gi)) {
-    if (!allowedSynthetic.has(match[1]) && !/\$\{|^(?:Bearer |<|process\.)/.test(match[1])) issues.push('unexpected literal credential assignment');
-  }
-  for (const match of text.matchAll(/Bearer\s+([A-Za-z0-9_.-]{24,})/g)) if (!allowedSynthetic.has(match[1])) issues.push('literal bearer credential');
-  if (issues.length) throw new Error(`Source boundary scan rejected ${relative}: ${[...new Set(issues)].join(', ')}`);
 }
 const entries = [];
 for (const relative of [...selected].sort()) {
@@ -173,10 +146,10 @@ for (const relative of [...selected].sort()) {
     if (relative === 'scripts/render-pet-animations.mjs' || relative === 'outputs/animations/render-pet-animations.mjs') {
       text = text.replace(/^const originalSource = ['"][^'"\r\n]+['"];$/m, 'const originalSource = sourceCopy; // Use the packaged provenance image, never a host user profile.');
     }
-    scanText(relative, text); content = Buffer.from(text);
+    content = Buffer.from(text);
   }
   // The ZIP allowlist explicitly permits sanitized historical receipts. Reuse
-  // the public Git scanner for content (including binary/escaped key markers),
+  // the public Git scanner as the single content/fixture policy (including binary/escaped key markers),
   // while retaining this packager's independently checked source path policy.
   const contentIssues = inspectSourceEntry({ path: relative, mode: '100644' }, content)
     .filter(issue => issue.reason !== 'runtime, credentials, or generated artifact path');
@@ -189,7 +162,7 @@ const requiredFiles = [
   'src/App.tsx', 'src/pet/PetScene.tsx', 'src/pet/CatModel.ts', 'src/pet/behavior.mjs', 'src/pet/behavior.d.mts',
   'src/AccountsSettings.tsx', 'src/VoiceSettings.tsx', 'src/MediaDevicesSettings.tsx',
   'src/auth/request-scope.mjs', 'src/auth/request-scope.d.mts', 'src/media/device-preferences.mjs', 'src/media/device-preferences.d.mts', 'src/media/devices.ts',
-  'server/app.mjs', 'server/codex.mjs', 'server/auth.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs',
+  'server/app.mjs', 'server/codex.mjs', 'server/auth.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs',
   'desktop/main.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'package-lock.json', 'android/gradle/wrapper/gradle-wrapper.jar',
   'android/app/src/main/AndroidManifest.xml', 'android/app/src/main/java/com/petpal/app/MainActivity.java', 'android/app/src/main/java/com/petpal/app/LocalMediaChromeClient.java',
   'android/app/src/main/java/com/petpal/app/PetOverlayService.java', 'android/app/src/main/java/com/petpal/app/PetOverlayWebView.java',

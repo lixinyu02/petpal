@@ -80,6 +80,10 @@ export function createStreamingSpeechController(options = {}) {
   };
   const finish = job => {
     if (!valid(job)) return;
+    if (options.keepAlive && job.holder?.context.state === 'running') {
+      job.holder.gain.gain.value = 0;
+      warm = job.holder; job.holder = null;
+    }
     current = null; release(job);
     publish({ active: false, pending: false, ended: true, charIndex: job.text.length, progressBasis: 'estimated', audioLevel: 0, buffering: false, streaming: false });
   };

@@ -4,6 +4,7 @@ import { createDevicePreferences } from '../media/device-preferences.mjs';
 import { createSpeechController, selectSpeechVoice, type SpeechState } from './speech.mjs';
 import { createRemoteSpeechController } from './remote-speech.mjs';
 import { createStreamingSpeechController } from './stream-speech.mjs';
+import { createSpeechAwaiter } from '../voice/speech-flow.mjs';
 
 type PlaybackState = SpeechState & { audioLevel?:number; buffering?:boolean; streaming?:boolean };
 const initial: PlaybackState = { utteranceId: '', text: '', active: false, pending: false, charIndex: 0, ended: true, progressBasis: 'none', voiceName: '', error: '' };
@@ -18,6 +19,7 @@ export function useSpeech(allowed: boolean, scope = 'guest') {
   const [configError, setConfigError] = useState('');
   const enabledRef = useRef(false), allowedRef = useRef(allowed);
   const preparation = useRef(0);
+  const completion = useRef(createSpeechAwaiter());
   allowedRef.current = allowed;
   const controller = useRef<ReturnType<typeof createSpeechController> | ReturnType<typeof createRemoteSpeechController> | ReturnType<typeof createStreamingSpeechController> | null>(null);
   useEffect(() => {
@@ -28,7 +30,7 @@ export function useSpeech(allowed: boolean, scope = 'guest') {
     const systemAvailable = 'speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function';
     const synthesis = systemAvailable ? window.speechSynthesis : undefined;
     const refreshVoices = () => { if(current())try { setChineseVoice(Boolean(synthesis && selectSpeechVoice(synthesis.getVoices(), 'zh'))); } catch { setChineseVoice(false); } };
-    const onState = (next:PlaybackState) => { if (current()) setState(next); };
+    const onState = (next:PlaybackState) => { if (current()) { completion.current.observe(next); setState(next); } };
     function install(mode:VoiceConfig['tts']['mode'],speed:number) {
       controller.current?.dispose(); controller.current = null; setState(initial); setEngine(mode); setConfigError('');
       setStreaming(mode==='cosyvoice'&&speed===1);
@@ -41,7 +43,7 @@ export function useSpeech(allowed: boolean, scope = 'guest') {
           const preferences=createDevicePreferences(storage,scope);
           try{return preferences.read().speakerId;}finally{preferences.dispose();}
         };
-        if(available)controller.current = useStream ? createStreamingSpeechController({requestStream:apiSpeechStream,createContext:()=>new AudioContext({latencyHint:'interactive'}),getSpeakerId,onState}) : createRemoteSpeechController({
+        if(available)controller.current = useStream ? createStreamingSpeechController({keepAlive:true,requestStream:apiSpeechStream,createContext:()=>new AudioContext({latencyHint:'interactive'}),getSpeakerId,onState}) : createRemoteSpeechController({
             requestAudio:(text,signal)=>apiBlob('/voice/synthesize',{method:'POST',body:JSON.stringify({text}),signal}),
             createAudio:()=>new Audio(),createObjectURL:blob=>URL.createObjectURL(blob),revokeObjectURL:url=>URL.revokeObjectURL(url),getSpeakerId,onState,
           });
@@ -69,14 +71,14 @@ export function useSpeech(allowed: boolean, scope = 'guest') {
     window.addEventListener('petpal:session-change',sessionChanged);window.addEventListener('petpal:voice-settings-change',configChanged);
     navigator.mediaDevices?.addEventListener('devicechange',deviceChanged);window.addEventListener('petpal:audio-output-change',deviceChanged);
     return()=>{
-      live=false;loading?.abort();controller.current?.dispose();controller.current=null;
+      live=false;completion.current.cancel();loading?.abort();controller.current?.dispose();controller.current=null;
       synthesis?.removeEventListener('voiceschanged',refreshVoices);
       document.removeEventListener('visibilitychange',hidden);window.removeEventListener('pagehide',leaving);
       window.removeEventListener('petpal:session-change',sessionChanged);window.removeEventListener('petpal:voice-settings-change',configChanged);
       navigator.mediaDevices?.removeEventListener('devicechange',deviceChanged);window.removeEventListener('petpal:audio-output-change',deviceChanged);
     };
   },[scope]);
-  const stop=useCallback(()=>{preparation.current++;controller.current?.stop();},[]);
+  const stop=useCallback(()=>{preparation.current++;completion.current.cancel();controller.current?.stop();},[]);
   useEffect(()=>{if(!allowed)stop();},[allowed,stop]);
   const prepare=useCallback(()=>{
     const active=controller.current,revision=++preparation.current;
@@ -93,6 +95,17 @@ export function useSpeech(allowed: boolean, scope = 'guest') {
     return controller.current?.speak({text,utteranceId,language:navigator.language})??false;
   },[supported]);
   const speakIfEnabled=useCallback((text:string,utteranceId:string)=>enabledRef.current?speak(text,utteranceId):false,[speak]);
+  const unlock=useCallback(async()=>{
+    if(!allowedRef.current||document.hidden||!getConnection().token||!getIdentity()||!controller.current)return false;
+    const active=controller.current;
+    return 'unlock' in active ? active.unlock() : true;
+  },[]);
+  const speakAsync=useCallback((text:string,utteranceId:string,signal?:AbortSignal)=>{
+    if(signal?.aborted)return Promise.reject(signal.reason||new DOMException('语音已取消','AbortError'));
+    const done=completion.current.begin(utteranceId,signal,()=>controller.current?.stop());
+    if(!speak(text,utteranceId))completion.current.cancel(new Error(controller.current?.snapshot().error||'当前语音尚未就绪。'));
+    return done;
+  },[speak]);
   const feedback=state.error||configError||(engine==='loading'?'正在读取已保存的朗读设置…':engine==='remote'?'远程 TTS 仍为预备配置，请选择系统语音或 CosyVoice。':!supported?'此环境无法播放所选语音，请检查设备或浏览器。':engine==='cosyvoice'?(streaming?(state.buffering?'正在缓冲 CosyVoice 音频…':state.pending?'正在接收首段 CosyVoice 音频…':state.active?'CosyVoice 边生成边播放 · 口型跟随声音起伏':'CosyVoice 流式朗读已就绪 · 1.0 倍速，边生成边播放。'):(state.pending?'正在合成完整 CosyVoice 音频…':state.active?'CosyVoice 播放中 · 口型按播放时间近似同步':'当前语速使用完整合成；设为 1.0 倍可边生成边播放。')):!hasChineseVoice?'未检测到本地中文音色；可安装系统中文语音包或选择 CosyVoice。':state.pending?'正在准备本地语音…':state.active?`正在朗读 · ${state.voiceName}`:'使用本地系统音色，跟随系统默认输出。');
-  return{...state,enabled,supported,hasChineseVoice,engine,feedback,playing:state.active||state.pending,setEnabled,stop,speak,speakIfEnabled,prepare};
+  return{...state,enabled,supported,hasChineseVoice,engine,feedback,streamingEnabled:streaming,playing:state.active||state.pending,setEnabled,stop,speak,speakIfEnabled,prepare,unlock,speakAsync};
 }

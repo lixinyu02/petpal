@@ -172,6 +172,17 @@ test('pending unlock remains successful when speak takes the same context before
   h.controller.dispose(); assertReleased(h);
 });
 
+test('continuous voice mode retains the first unlocked context between sentences and closes it on explicit stop', async () => {
+  const h=harness({controller:{keepAlive:true}});
+  assert.equal(await h.controller.unlock(),true);
+  await h.start(request('first'));await h.audio(pcm(5760));await h.end();h.advance(400);
+  assert.equal(h.controller.snapshot().ended,true);assert.equal(h.contexts[0].closed,0);assert.equal(h.contexts[0].gains[0].gain.value,0);
+  await h.start(request('second'));assert.equal(h.contexts.length,1);assert.equal(h.contexts[0].resumed,1);
+  await h.audio(pcm(5760));await h.end();h.advance(400);
+  assert.equal(h.contexts[0].closed,0);assert.equal(h.timers.size,0);
+  h.controller.stop();assertReleased(h);
+});
+
 test('stop during routing and replacing a pending unlock discard late callbacks without damaging replacement', async () => {
   const routing = deferred(); const h = harness({ speaker: 'headset', context: { setSinkId() { return routing.promise; } } });
   h.controller.speak(request()); await flush(); h.controller.stop(); routing.resolve(); await flush(); assert.equal(h.requests.length, 0); assertReleased(h);

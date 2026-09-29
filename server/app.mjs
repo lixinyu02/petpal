@@ -12,6 +12,7 @@ import { defaultCodexConfig, publicCodexConfig, patchCodexConfig, validateStored
 import { createDesktopTools } from './desktop-tools.mjs';
 import { createUpdateService } from './updates.mjs';
 import { createCosyVoiceService, safeCosyVoiceError, REFERENCE_LIMIT } from './cosyvoice.mjs';
+import { createAsrService, safeAsrError, ASR_AUDIO } from './asr.mjs';
 import { createAgentTasks } from './agent-tasks.mjs';
 import { normalizeAgentPermissions } from './agent-permissions.mjs';
 import { createAttachmentService, normalizeAttachmentIds, IMAGE_LIMIT } from './attachments.mjs';
@@ -33,7 +34,7 @@ function safeCodexStatus(value) {
   return value && typeof value === 'object' ? value : { available: false, error: 'Codex 状态不可用。' };
 }
 
-export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, executorsOptions, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
+export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, asrOptions, executorsOptions, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
   const codexPolicy = { allowedHttpOrigins: parseCodexHttpOrigins(codexHttpOrigins) };
   const store = await new JsonStore(dataDir).init();
   const accessToken = await store.token(token ?? process.env.PETPAL_TOKEN);
@@ -49,6 +50,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const updates = createUpdateService({ ...updatesOptions, store });
   const downloads = createDownloadsCatalog(downloadsOptions);
   const cosyvoice = await createCosyVoiceService({ ...cosyvoiceOptions, store, dataDir });
+  const asr = createAsrService({ ...asrOptions, store, authorizeSession: auth => authorizeAsrIdentity(auth) });
   await store.save();
   const localTools = desktopTools ?? createDesktopTools({ dataDir });
   const createBridge = config => (codexFactory ?? (options => new CodexBridge(options)))({ workspaceRoot, dataDir, config, desktopTools: localTools });
@@ -153,6 +155,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const publicState = async user => ({ instanceId: state.instanceId, user: visibleUser(user), settings: settingsFor(user), providers: state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider => visibleProvider(provider, user)), conversations: state.conversations.filter(item => item.userId === user.id).map(visibleConversation), codex: await userCodexStatus(user) });
   const assertIdle = id => { if (active.has(id)) throw failure(409, '这个会话正在回复，请先停止。'); };
   const stopTasks = async predicate => {
+    asr.revoke(predicate);
     executors.revoke(predicate);
     const agentStopped = agentTasks.revoke(predicate);
     const stoppedProbes = [...probes].filter(predicate);
@@ -179,6 +182,13 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const bootstrap = auth.bootstrap && secureEqual(auth.sessionHash, ownerTokenHash) && isOwner(user ?? {});
     if (!user || user.disabled || (!bootstrap && !session)) throw failure(401, 'Agent 提交所属账号或登录已失效。');
     return { user, expiresAt: bootstrap ? undefined : session.expiresAt };
+  };
+  const authorizeAsrIdentity = auth => {
+    const user = state.users.find(item => item.id === auth.userId);
+    const session = state.sessions.find(item => item.userId === auth.userId && item.tokenHash === auth.sessionHash && item.expiresAt > Date.now());
+    const bootstrap = auth.bootstrap && secureEqual(auth.sessionHash, ownerTokenHash) && isOwner(user ?? {});
+    if (!user || user.disabled || (!bootstrap && !session)) throw failure(401, '识别所属登录已失效。');
+    return { expiresAt: bootstrap ? undefined : session.expiresAt };
   };
   const authorizeAgentEntry = entry => {
       const { user, expiresAt } = authorizeAgentIdentity(entry.auth);
@@ -321,6 +331,37 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     req.user.voice = updated; await store.save(); res.json(publicVoiceSettings(updated));
   });
   app.get('/api/voice/cosyvoice', (req, res) => res.json(cosyvoice.publicConfig(isOwner(req.user))));
+  const asrRoute = handler => async (req, res) => {
+    try { await handler(req, res); }
+    catch (error) {
+      const safe = safeAsrError(error);
+      if (!res.headersSent && !res.destroyed) res.status(error?.status === 401 ? 401 : safe.status).json({ error: error?.status === 401 ? '识别所属登录已失效。' : safe.message, code: error?.status === 401 ? 'auth_expired' : safe.code });
+      else if (!res.destroyed) res.destroy();
+    }
+  };
+  const emptyAsrBody = req => { if (Object.keys(req.body).length) throw failure(400, '此识别操作不接受附加字段。'); };
+  app.get('/api/voice/asr', (req, res) => res.json(asr.publicConfig(isOwner(req.user))));
+  app.patch('/api/voice/asr', (req, res, next) => { requireAdmin(req.user); next(); }, asrRoute(async (req, res) => {
+    const config = await asr.configure(req.body, { authorize: () => requireCurrentAuth(req) });
+    requireCurrentAuth(req); res.json(config);
+  }));
+  app.post('/api/voice/asr/test', (req, res, next) => { emptyAsrBody(req); next(); }, asrRoute(async (req, res) => {
+    const controller = new AbortController();
+    const closed = () => { if (!res.writableEnded) controller.abort(); }; res.once('close', closed);
+    try { const result = await asr.test(executorAuth(req), controller.signal); requireCurrentAuth(req); if (!res.destroyed) res.json(result); }
+    finally { res.off('close', closed); }
+  }));
+  app.post('/api/voice/asr/sessions', (req, res, next) => { emptyAsrBody(req); next(); }, asrRoute((req, res) => res.status(201).json(asr.create(executorAuth(req)))));
+  app.get('/api/voice/asr/sessions/:id/events', asrRoute((req, res) => asr.attach(req.params.id, executorAuth(req), res)));
+  app.post('/api/voice/asr/sessions/:id/audio', (req, res, next) => {
+    if (req.headers['content-type']?.toLowerCase() !== 'application/octet-stream') throw failure(415, '音频块只接受 application/octet-stream。');
+    if (Number(req.headers['content-length']) > ASR_AUDIO.maxFrameBytes) throw failure(413, '音频块最多为 96000 字节。');
+    try { req.asrAudio = asr.claimAudio(req.params.id, executorAuth(req), req.query.sequence); }
+    catch (error) { const safe = safeAsrError(error); return res.status(safe.status).json({ error: safe.message, code: safe.code }); }
+    res.once('close', req.asrAudio.abort); next();
+  }, express.raw({ type: 'application/octet-stream', limit: ASR_AUDIO.maxFrameBytes, inflate: false }), asrRoute((req, res) => res.json(req.asrAudio.commit(req.body))), (error, req, res, next) => { req.asrAudio?.abort(); next(error); });
+  app.post('/api/voice/asr/sessions/:id/end', (req, res, next) => { emptyAsrBody(req); next(); }, asrRoute((req, res) => res.json(asr.end(req.params.id, executorAuth(req)))));
+  app.delete('/api/voice/asr/sessions/:id', asrRoute((req, res) => res.json(asr.cancel(req.params.id, executorAuth(req)))));
   app.patch('/api/voice/cosyvoice', async (req, res) => {
     requireAdmin(req.user);
     try { const value = await cosyvoice.configure(req.body, { authorize: () => requireCurrentAuth(req) }); requireCurrentAuth(req); res.json(value); }
@@ -715,7 +756,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     for (const probe of probes) probe.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     for (const task of active.values()) task.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     if (configSwap) await configSwap.catch(() => {});
-    const results = await Promise.allSettled([executors.close(), agentTasks.close(), bridge.close(), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), ...[...active.values(), ...probes].map(task => task.done)]);
+    const results = await Promise.allSettled([executors.close(), agentTasks.close(), bridge.close(), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
     let saveError;
     try { await store.queue; } catch (error) { saveError = error; }
     finally { server.closeAllConnections(); await httpClosed; }

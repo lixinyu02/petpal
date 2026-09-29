@@ -3,6 +3,7 @@ import { Check, Loader2, Mic, Play, RefreshCw, Square, Upload, Volume2 } from 'l
 import { api, getSessionEpoch, isSessionChanged, type CosyVoiceConfig, type VoiceConfig, type VoiceConnectionFields } from './api';
 import { useSpeech } from './avatar/useSpeech';
 import MediaDevicesSettings from './MediaDevicesSettings';
+import AsrSettings from './AsrSettings';
 import './voice-settings.css';
 
 type CosyDraft = {baseUrl:string;referenceText:string;apiKey:string;clearApiKey:boolean};
@@ -46,7 +47,7 @@ export default function VoiceSettings({connected,scope='guest'}:{connected:boole
     event.preventDefault();if(!config)return;
     const fields=({hasApiKey:_saved,...value}:VoiceConnectionFields)=>value;
     await run(signal=>api<VoiceConfig>('/voice',{method:'PATCH',body:JSON.stringify({tts:fields(config.tts),asr:fields(config.asr)}),signal}),result=>{
-      setConfig(clean(result));setVoiceDirty(false);changed();setMessage(result.tts.mode==='cosyvoice'?'已保存到当前账号。点击试听可调用 CosyVoice；自动朗读仍由你手动开启。':result.tts.mode==='system'?'已保存，使用设备本地语音。':'已保存预备配置；通用远程 TTS 和 ASR 尚未接入。');
+      setConfig(clean(result));setVoiceDirty(false);changed();setMessage(result.tts.mode==='cosyvoice'?'已保存到当前账号。点击试听可调用 CosyVoice；自动朗读仍由你手动开启。':result.tts.mode==='system'?'已保存，使用设备本地语音。':'已保存预备配置；通用远程 TTS 仅保存配置；语音聊天请使用 CosyVoice。');
     });
   }
   async function saveShared(event:FormEvent){
@@ -76,22 +77,23 @@ export default function VoiceSettings({connected,scope='guest'}:{connected:boole
   };
   return <section className="settings-section voice-settings" aria-label="语音服务配置">
     <div className="section-title"><div><h2>声音与倾听</h2><p>为当前账号选择声音，在需要时听小伴朗读。</p></div><button type="button" className="secondary-button" disabled={busy||!connected} onClick={()=>void load()}><RefreshCw size={14}/>重新读取</button></div>
-    <div className="voice-runtime-note"><strong>系统语音与 CosyVoice 可用于朗读</strong><p>CosyVoice 会在你点击试听、朗读，或主动开启自动朗读后，将相应文字发送到管理员配置的语音服务。正常语速支持边生成边播放，口型跟随声音起伏。ASR 仍为预备配置，不会自动录音。</p></div>
+    <div className="voice-runtime-note"><strong>和伙伴说话，也听她回应</strong><p>在伙伴页主动开启语音聊天，即可连续倾听、回复和朗读。CosyVoice 在正常语速下边生成边播放，口型跟随声音起伏；播放期间暂停识别，也可以随时打断继续说。</p></div>
     {error&&<div className="form-error" role="alert">{error}</div>}
     {message&&<p className="voice-saved" role="status"><Check size={16}/>{message}</p>}
     {connected&&!config&&!error&&<p role="status"><Loader2 size={16} className="spin"/>正在读取语音配置…</p>}
     <MediaDevicesSettings key={scope} scope={scope}/>
+    <AsrSettings key={`asr-${scope}`} connected={connected} scope={scope}/>
     {config&&<form onSubmit={save}>
       <fieldset disabled={busy||!connected} className="voice-config-block"><legend><Volume2 size={19}/>TTS · 让小伴说话</legend>
         <label>朗读引擎<select aria-label="朗读引擎" value={config.tts.mode} onChange={event=>update('tts',{mode:event.target.value,...(event.target.value==='cosyvoice'?{speed:Math.min(2,Math.max(.5,config.tts.speed))}:{})})}><option value="system">设备本地语音</option><option value="cosyvoice">CosyVoice 参考声音</option><option value="remote">通用远程 TTS（预备配置）</option></select></label>
         {config.tts.mode==='system'?<p className="field-help">可用音色由设备提供，使用系统默认扬声器。保存后在首页开启「语音朗读」，或在聊天页开启「自动朗读回复」。</p>:config.tts.mode==='cosyvoice'?<><label>CosyVoice 语速<input aria-label="CosyVoice 语速" type="number" min="0.5" max="2" step="0.05" required value={config.tts.speed} onChange={event=>update('tts',{speed:Number(event.target.value)})}/></label><p className="field-help">1.0 倍速支持流式播放，收到首段就开始朗读；其他语速使用完整合成。每次最多 1000 个字符。音频使用本账号选择的扬声器，不依赖本地中文语音包。</p></>:<>{remoteFields('tts')}<div className="voice-fields-pair"><label>音色 ID<input maxLength={160} value={config.tts.voice} placeholder="服务商音色 ID，可留空" onChange={event=>update('tts',{voice:event.target.value})}/></label><label>语速<input type="number" min="0.25" max="4" step="0.05" required value={config.tts.speed} onChange={event=>update('tts',{speed:Number(event.target.value)})}/></label></div></>}
       </fieldset>
-      <fieldset disabled={busy||!connected} className="voice-config-block"><legend><Mic size={19}/>ASR · 语音识别预备</legend>
+      <details className="voice-legacy-asr"><summary>其他识别引擎的预备配置</summary><fieldset disabled={busy||!connected} className="voice-config-block"><legend><Mic size={19}/>其他 ASR</legend>
         <label>计划使用的识别引擎<select value={config.asr.mode} onChange={event=>update('asr',{mode:event.target.value})}><option value="disabled">暂不配置语音识别</option><option value="browser">浏览器识别（预备配置）</option><option value="remote">远程 ASR（预备配置）</option></select></label>
         {config.asr.mode!=='disabled'&&<label>识别语言<input maxLength={35} value={config.asr.language} placeholder="例如 zh-CN，留空由服务检测" onChange={event=>update('asr',{language:event.target.value})}/></label>}
         {config.asr.mode==='remote'&&remoteFields('asr')}
-        <p className="field-help">语音识别尚未接入；此处保存选择不会申请麦克风权限。</p>
-      </fieldset>
+        <p className="field-help">这些引擎暂未接入。伙伴语音聊天使用上方管理员配置的 VibeVoice 服务，不受此处影响。</p>
+      </fieldset></details>
       <p className="field-help">朗读引擎和语速只影响当前账号。自动朗读默认关闭。</p>
       <button className="primary-button" disabled={busy||!connected}>{busy?<Loader2 size={16} className="spin"/>:<Check size={16}/>}保存语音配置</button>
     </form>}
