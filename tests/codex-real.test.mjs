@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -48,7 +49,7 @@ test('real bundled Codex 0.143 performs Responses dynamic-tool approval and resu
       res.end();
     } catch (error) { errors.push(error); res.writeHead(500); res.end('{}'); }
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(server);
   const config = patchCodexConfig(defaultCodexConfig(), { mode: 'api', baseUrl: `http://127.0.0.1:${server.address().port}/v1`, model: 'gpt-5.4', apiKey: 'isolated-test-key' });
   const binary = await resolveBundledCodex(); assert.ok(binary?.file);
   const bridge = new CodexBridge({ dataDir: directory, config, command: binary.file, desktopTools: {
@@ -101,7 +102,7 @@ test('real bundled Codex sends gpt-6-luna reasoning max unchanged on initial and
         frame({ type: 'response.completed', response: { id, object: 'response', model: body.model, status: 'completed', output: [item] } }));
     } catch (error) { errors.push(error); res.writeHead(500); res.end('{}'); }
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(server);
   const config = patchCodexConfig(defaultCodexConfig(), { mode: 'api', baseUrl: `http://127.0.0.1:${server.address().port}/v1`, model: 'gpt-6-luna', reasoningEffort: 'max', apiKey: 'isolated-test-key' });
   const binary = await resolveBundledCodex(); assert.ok(binary?.file);
   const bridge = new CodexBridge({ dataDir: directory, config, command: binary.file });
@@ -186,7 +187,7 @@ child.once('exit', code => process.exit(code ?? 1));
       res.end();
     } catch (error) { errors.push(error); if (!res.headersSent) res.writeHead(500); res.end(); }
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(server);
   const config = patchCodexConfig(defaultCodexConfig(), { mode: 'api', baseUrl: `http://127.0.0.1:${server.address().port}/v1`, model: 'gpt-5.4', apiKey: upstreamKey });
   const bridge = new CodexBridge({ dataDir: directory, config, command: [process.execPath, wrapper], desktopTools: {
     specs: [{ type: 'function', name: 'petpal_local_probe', description: 'Local test-only tool without external effects.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } }],

@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -37,7 +38,7 @@ async function fixture(t, { seededSessions = 0, approval = false } = {}) {
     async close() { release?.(); },
   };
   const app = await createPetServer({ dataDir: directory, token: bootstrap, codex });
-  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(app.server);
   const base = `http://127.0.0.1:${app.server.address().port}/api`;
   const request = (route, { token = bootstrap, method = 'GET', body } = {}) => fetch(`${base}${route}`, {
     method,

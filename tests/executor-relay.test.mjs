@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -14,7 +15,7 @@ test('HTTP relay keeps central key private, enforces run/model credentials and e
   const upstream=[],output='event: response.completed\ndata: {"type":"response.completed","response":{"id":"response-fixture","status":"completed","output":[]}}\n\n';
   let upstreamOutput=output;
   const server=await createPetServer({dataDir:directory,token:'fixture-owner-session',codex:{async status(){return {available:true,authenticated:true};},async close(){},run(){throw new Error('central must not execute');}},executorsOptions:{pollMs:5,stopMs:20,fetchImpl:async(url,init)=>{upstream.push({url,init});return new Response(upstreamOutput,{headers:{'Content-Type':'text/event-stream'}});}}});
-  await new Promise(resolve=>server.server.listen(0,'127.0.0.1',resolve));const origin=`http://127.0.0.1:${server.server.address().port}`;
+  await listenFixture(server.server);const origin=`http://127.0.0.1:${server.server.address().port}`;
   t.after(async()=>{await server.close();assert.ok(directory.startsWith(path.join(tmpdir(),'petpal-executor-relay-')));await rm(directory,{recursive:true,force:true});});
   const request=async(route,{method='GET',body,token='fixture-owner-session'}={})=>{const response=await fetch(origin+'/api'+route,{method,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});return {status:response.status,body:await response.json()};};
   const registration=await request('/agent/executors/register',{method:'POST',body:{deviceId:randomUUID(),name:'Relay PC',platform:'win32',arch:'x64'}});assert.equal(registration.status,200);

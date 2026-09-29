@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -21,16 +22,7 @@ const picture = png();
 const webp = Buffer.from('UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA', 'base64');
 const jpeg = Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQgJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDi6KKK+UP38//Z', 'base64');
 async function until(check) { for (let i = 0; i < 250; i++) { const result = await check(); if (result) return result; await delay(5); } assert.fail('Attachment state did not settle'); }
-async function listen(server) {
-  // Windows may allocate browser-blocked ephemeral ports such as 6667.
-  const blocked = new Set([1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080]);
-  for (let attempt = 0; attempt < 20; attempt++) {
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    if (!blocked.has(server.address().port)) return;
-    await new Promise(resolve => server.close(resolve));
-  }
-  throw new Error('Could not allocate a browser-safe fixture port');
-}
+
 
 async function fixture(t, { bridge } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-attachments-')), received = [];
@@ -40,11 +32,11 @@ async function fixture(t, { bridge } = {}) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(req.url.endsWith('/responses') ? { status: 'completed', output_text: 'image fixture reply' } : { choices: [{ message: { content: 'image fixture reply' }, finish_reason: 'stop' }] }));
   });
-  await listen(upstream);
+  await listenFixture(upstream);
   const calls = [], steers = [];
   const codex = bridge ?? { async status() { return { available: true }; }, run(args) { return new Promise((resolve, reject) => { calls.push({ args, resolve, reject }); args.onEvent('turn', { turnId: `image-turn-${calls.length}` }); args.signal.addEventListener('abort', () => reject(args.signal.reason), { once: true }); }); }, async steer(args) { steers.push(args); return { turnId: args.expectedTurnId }; }, async close() { for (const call of calls) call.reject(new Error('Fixture close')); } };
   let app = await createPetServer({ dataDir: directory, token: bootstrap, codex });
-  await listen(app.server);
+  await listenFixture(app.server);
   const base = () => `http://127.0.0.1:${app.server.address().port}`;
   const request = (route, { token = bootstrap, method = 'GET', body, raw, mimeType = 'image/png' } = {}) => fetch(base() + '/api' + route, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': raw !== undefined ? mimeType : 'application/json' }, ...(raw !== undefined ? { body: raw } : body === undefined ? {} : { body: JSON.stringify(body) }) });
   const json = async (route, options) => { const response = await request(route, options); return { status: response.status, data: await response.json() }; };
@@ -54,7 +46,7 @@ async function fixture(t, { bridge } = {}) {
   const member = async name => { const created = await json('/admin/users', { method: 'POST', body: { username: name, password: 'isolated-attachment-password', agentAccess: 'full' } }); assert.equal(created.status, 201); const login = await json('/auth/login', { method: 'POST', token: '', body: { username: name, password: 'isolated-attachment-password' } }); assert.equal(login.status, 200); return { user: created.data.user, token: login.data.token }; };
   t.after(async () => { await app.close(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve)); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-attachments-'))); await rm(directory, { recursive: true, force: true }); });
   return { directory, base, request, json, upload, provider, create, member, received, calls, steers,
-    restart: async () => { await app.close(); app = await createPetServer({ dataDir: directory, token: bootstrap, codex }); await listen(app.server); },
+    restart: async () => { await app.close(); app = await createPetServer({ dataDir: directory, token: bootstrap, codex }); await listenFixture(app.server); },
   };
 }
 

@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -14,7 +15,7 @@ async function setup(t, overrides = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-codex-config-'));
   const bridges = [];
   const app = await createPetServer({ dataDir: directory, token: 'config-owner-token', desktopTools: stubTools(), codexFactory: () => { const bridge = stubBridge(); bridges.push(bridge); return bridge; }, codexHttpOrigins: '', ...overrides });
-  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(app.server);
   const request = (route, { method = 'GET', body, token = app.token, signal } = {}) => fetch(`http://127.0.0.1:${app.server.address().port}/api${route}`, { method, signal, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   t.after(async () => { await app.close(); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-codex-config-'))); await rm(directory, { recursive: true, force: true }); });
   return { request, directory, app, bridges };

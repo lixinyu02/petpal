@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -73,7 +74,7 @@ test('persisted desktop HTTP configuration reloads from file, but explicit empty
     desktopTools: { async close() {} }, codexFactory: () => ({ async close() {} }) };
   let app = await createPetServer({ ...options, ...await readDesktopServiceSettings(f.directory, { env: {} }) });
   t.after(() => app.close());
-  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(app.server);
   const response = await fetch(`http://127.0.0.1:${app.server.address().port}/api/codex/config`, {
     method: 'PATCH', headers: { Authorization: `Bearer ${app.token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode: 'api', baseUrl: `${example}/v1`, model: 'fixture-model', apiKey: '' }),

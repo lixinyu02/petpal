@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -5,6 +6,8 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createPetServer } from '../server/app.mjs';
+
+
 
 const ownerToken = 'isolated-test-owner-token';
 const password = 'test-password-123';
@@ -14,7 +17,7 @@ async function setup(t, options = {}) {
   if (options.legacy) await writeFile(path.join(directory, 'state.json'), options.legacy);
   const codex = options.codex ?? stubCodex();
   const app = await createPetServer({ dataDir: directory, token: ownerToken, codex });
-  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(app.server);
   const url = `http://127.0.0.1:${app.server.address().port}`;
   const request = (route, { token = ownerToken, method = 'GET', body } = {}) => fetch(`${url}/api${route}`, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const readState = async token => (await request('/state', { token })).json();
@@ -43,7 +46,7 @@ async function hangingUpstream(t) {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     res.write('data: {"choices":[{"delta":{"content":"still working"}}]}\n\n');
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(server);
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   return `http://127.0.0.1:${server.address().port}/v1`;
 }
@@ -56,7 +59,7 @@ test('members switch an existing chat to another assigned model while retaining 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ choices: [{ message: { content: `reply from ${body.model}` }, finish_reason: 'stop' }] }));
   });
-  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  await listenFixture(upstream);
   t.after(async () => { upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve)); });
   const { request, member, provider, conversation, directory } = await setup(t);
   const baseUrl = `http://127.0.0.1:${upstream.address().port}/v1`;
@@ -173,7 +176,7 @@ for (const unavailable of ['deleted', 'revoked']) test(`legacy chat can leave a 
   await writeFile(file, JSON.stringify(disk));
   const restored = await createPetServer({ dataDir: directory, token: ownerToken, codex: stubCodex() });
   try {
-    await new Promise(resolve => restored.server.listen(0, '127.0.0.1', resolve));
+    await listenFixture(restored.server);
     const response = await fetch(`http://127.0.0.1:${restored.server.address().port}/api/conversations/${chat.id}`, {
       method: 'PATCH', headers: { Authorization: `Bearer ${alice.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ providerId: next.id }),
     });
@@ -329,7 +332,7 @@ test('login is limited, passwords and bearer sessions are absent from persisted 
   disk.sessions.forEach(session => { session.expiresAt = 0; }); await writeFile(file, JSON.stringify(disk));
   const restarted = await createPetServer({ dataDir: directory, token: ownerToken, codex: stubCodex() });
   try {
-    await new Promise(resolve => restarted.server.listen(0, '127.0.0.1', resolve));
+    await listenFixture(restarted.server);
     const response = await fetch(`http://127.0.0.1:${restarted.server.address().port}/api/state`, { headers: { Authorization: `Bearer ${a.token}` } });
     assert.equal(response.status, 401);
   } finally { await restarted.close(); }
@@ -376,7 +379,7 @@ test('member login session, default model, profile, voice and owned history surv
   const before = await readState(a.token); await app.close();
   const restarted = await createPetServer({ dataDir: directory, token: 'replacement-local-owner-token', codex: stubCodex() });
   try {
-    await new Promise(resolve => restarted.server.listen(0, '127.0.0.1', resolve));
+    await listenFixture(restarted.server);
     const base = `http://127.0.0.1:${restarted.server.address().port}/api`;
     const state = await (await fetch(`${base}/state`, { headers: { Authorization: `Bearer ${a.token}` } })).json();
     assert.deepEqual(state, before); assert.equal(state.conversations[0].id, chat.id); assert.equal(state.settings.defaultProviderId, p.id);

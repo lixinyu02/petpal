@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -32,7 +33,7 @@ async function fixture(t) {
     async close() { for (const call of calls) call.reject(new Error('Fixture closed')); },
   };
   let app = await createPetServer({ dataDir: directory, token: bootstrap, codex });
-  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(app.server);
   const request = async (route, { token = bootstrap, method = 'GET', body } = {}) => {
     const response = await fetch(`http://127.0.0.1:${app.server.address().port}/api${route}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return { status: response.status, data: await response.json() };
@@ -46,7 +47,7 @@ async function fixture(t) {
   const submit = (chat, token, content = 'fixture task', extra = {}) => request(`/conversations/${chat.id}/agent/submit`, { token, method: 'POST', body: { submissionId: randomUUID(), content, ...(token !== bootstrap ? { providerId: providers.same.id } : {}), ...extra } });
   t.after(async () => { await app.close(); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-agent-access-'))); await rm(directory, { recursive: true, force: true }); });
   return { request, directory, member, create, submit, login, calls, approvals, providers, ownerId: store.state.ownerId,
-    restart: async mutate => { await app.close(); if (mutate) { const saved = await new JsonStore(directory).init(); mutate(saved.state); await saved.save(); } app = await createPetServer({ dataDir: directory, token: bootstrap, codex }); await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve)); },
+    restart: async mutate => { await app.close(); if (mutate) { const saved = await new JsonStore(directory).init(); mutate(saved.state); await saved.save(); } app = await createPetServer({ dataDir: directory, token: bootstrap, codex }); await listenFixture(app.server); },
   };
 }
 

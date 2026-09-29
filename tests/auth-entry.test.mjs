@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -42,7 +43,7 @@ async function fixture(t, credential) {
       await rm(directory, { recursive: true, force: true });
     }
   });
-  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  await listenFixture(upstream);
   const baseUrl = `http://127.0.0.1:${upstream.address().port}/v1`;
   const store = await new JsonStore(directory).init(), ownerId = store.state.ownerId;
   const disabledId = randomUUID(), providerId = randomUUID(), chatId = randomUUID(), codexId = randomUUID();
@@ -79,7 +80,7 @@ async function fixture(t, credential) {
     updatesOptions: { fetchImpl: async () => { calls.updates++; throw new Error('Unexpected update upstream request'); } },
     downloadsOptions: { fetchImpl: async () => { calls.downloads++; throw new Error('Unexpected download catalog request'); } },
   });
-  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(app.server);
   const base = `http://127.0.0.1:${app.server.address().port}/api`;
   const request = (route, { method = 'GET', token = credential === 'anonymous' ? '' : session.token, body, raw, authorization } = {}) => fetch(base + route, {
     method, signal: AbortSignal.timeout(5000),

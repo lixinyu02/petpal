@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -153,7 +154,7 @@ check('configuration, reference, timeout and service shutdown abort a blocked st
 async function apiFixture(t, { factory = () => pcm().response, ...options } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-stream-test-')), upstream = transport(factory);
   const app = await createPetServer({ dataDir: directory, token: 'owner-test', codex: { async status() { return { available: false }; }, async close() {} }, cosyvoiceOptions: { ...options, fetchImpl: upstream.fetchImpl } });
-  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(app.server);
   t.after(async () => { await app.close(); await removeTemporary(directory); });
   const request = (route, { token = 'owner-test', method = 'GET', body, raw, signal } = {}) => fetch(`http://127.0.0.1:${app.server.address().port}/api${route}`, { method, signal, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(raw ? { 'Content-Type': 'audio/wav' } : body ? { 'Content-Type': 'application/json' } : {}) }, body: raw ?? (body ? JSON.stringify(body) : undefined) });
   assert.equal((await request('/voice/cosyvoice', { method: 'PATCH', body: { baseUrl, apiKey: 'fixture-private-key', referenceText: '参考音色。' } })).status, 200);

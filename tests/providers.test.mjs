@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -5,7 +6,7 @@ import { streamProvider, normalizeBaseUrl, normalizeReasoningEffort, REASONING_E
 
 async function fixture(t, handler) {
   const server = http.createServer(handler);
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(server);
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   return `http://127.0.0.1:${server.address().port}/v1`;
 }

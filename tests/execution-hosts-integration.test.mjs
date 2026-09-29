@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -26,7 +27,7 @@ async function fixture(t) {
   const centralCalls = [], calls = [], workers = [];
   const centralBridge = { async status() { return { available: true, authenticated: true }; }, async close() {}, async run(args) { centralCalls.push(args); return { text: 'central', threadId: 'central-thread' }; } };
   const app = await createPetServer({ dataDir: path.join(directory, 'central'), token: 'integration-owner', codex: centralBridge, desktopTools: tools() });
-  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(app.server);
   const url = `http://127.0.0.1:${app.server.address().port}`;
   const request = async (route, { method = 'GET', body, token = app.token } = {}) => {
     const response = await fetch(`${url}/api${route}`, { method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });

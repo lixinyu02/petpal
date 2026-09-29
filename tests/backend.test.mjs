@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -14,7 +15,7 @@ const mockCodex = () => ({
 async function setup(t, options = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-backend-'));
   const app = await createPetServer({ dataDir: directory, token: 'backend-test-secret', codex: mockCodex(), ...options });
-  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(app.server);
   const url = `http://127.0.0.1:${app.server.address().port}`;
   const request = (route, { body, auth = true, headers = {}, method = 'GET', signal } = {}) => fetch(`${url}${route}`, { method, headers: { ...(auth ? { Authorization: `Bearer ${app.token}` } : {}), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body), signal });
   t.after(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
@@ -27,7 +28,7 @@ async function upstream(t, mode = 'success') {
     if (mode === 'success') res.end('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
     if (mode === 'truncated') res.end();
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(server);
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   return `http://127.0.0.1:${server.address().port}/v1`;
 }
@@ -111,7 +112,7 @@ test('real provider SSE persists user and complete assistant history across rest
   assert.equal(stream.at(-1).data.conversation.messages[1].status, 'complete');
   await app.close();
   const second = await createPetServer({ dataDir: directory, token: 'backend-test-secret', codex: mockCodex() });
-  await new Promise(resolve => second.server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(second.server);
   try {
     const restored = await (await fetch(`http://127.0.0.1:${second.server.address().port}/api/state`, { headers: { Authorization: 'Bearer backend-test-secret' } })).json();
     assert.equal(restored.conversations[0].messages[1].status, 'complete'); assert.equal(restored.conversations[0].title, 'my prompt');
@@ -223,7 +224,7 @@ test('companion defaults to anime and switches persist without replacing shared 
   await app.close();
   const restored = await createPetServer({ dataDir: directory, token: 'backend-test-secret', codex: mockCodex() });
   try {
-    await new Promise(resolve => restored.server.listen(0, '127.0.0.1', resolve));
+    await listenFixture(restored.server);
     const state = await (await fetch(`http://127.0.0.1:${restored.server.address().port}/api/state`, { headers: { Authorization: 'Bearer backend-test-secret' } })).json();
     assert.equal(state.settings.companionKind, 'cat');
     assert.deepEqual(state.conversations, before.conversations);

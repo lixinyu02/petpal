@@ -1,3 +1,4 @@
+import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign, createHash } from 'node:crypto';
@@ -190,7 +191,7 @@ test('request cancellation and timeout cancel a pending response body without wr
 async function apiSetup(t, options = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-updates-'));
   const app = await createPetServer({ dataDir: directory, token: 'updates-owner-token', codex: { async status() { return { available: false }; }, async close() {} }, desktopTools: { async close() {} }, updatesOptions: { now: () => epoch, fetchImpl: async () => new Response(signed()), ...options } });
-  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  await listenFixture(app.server);
   const request = (route, { method = 'GET', body, token = app.token } = {}) => fetch(`http://127.0.0.1:${app.server.address().port}/api${route}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   t.after(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
   const member = async () => {
