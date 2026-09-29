@@ -4,6 +4,7 @@ import type { PetCommand } from '../pet/PetScene';
 import type { PetAction, PetBehaviorState, PetInteraction } from '../pet/behavior';
 import { createAvatarPerformance, type PerformanceInput } from './performance.mjs';
 import { loadAvatarImage, loadAvatarImages, type AvatarImageName } from './anime-resources.mjs';
+import { sampleAnimeHairWeights, createAnimeHairMotion } from './anime-rig.mjs';
 import { bindCompanionGestures, portraitCoordinates, portraitContains } from '../pet/interaction.mjs';
 import { createCompanionFeedback } from '../pet/gesture-feedback.mjs';
 import '../pet/gesture-feedback.css';
@@ -12,29 +13,32 @@ import './anime-scene.css';
 type Props = { command?: PetCommand; compact?: boolean; onState?: (state: PetBehaviorState) => void; onReady?: () => void; onInteract?: (action: PetInteraction) => void; interactive?: boolean; className?: string; speaking?: boolean; performanceInput?: PerformanceInput };
 const vertexShader = `
 varying vec2 vUv;
+attribute vec2 hairWeights;
+uniform vec2 hairLeft, hairRight;
 uniform float clockTime, motion, gazeX, gazeY, affection, resting, headTilt, headNod;
 void main() {
   vUv = uv;
   vec3 p = position;
   float head = smoothstep(.51, .68, uv.y);
-  float breathe = sin(clockTime * 1.6) * .004 * motion;
+  float awake = 1.0 - resting;
+  float breathe = sin(clockTime * mix(1.6, 1.05, resting)) * .004 * motion * mix(1.0, .28, resting);
   p.y += breathe * smoothstep(.08, .55, uv.y);
   p.x *= 1.0 + breathe * (1.0 - head) * .45;
-  float tilt = (sin(clockTime * .65) * .007 + gazeX * .014 + affection * .018 - resting * .035 + headTilt * .055) * motion;
+  // Local strands move before the shared head transform; their roots follow the head.
+  p.xy += hairLeft * hairWeights.x + hairRight * hairWeights.y;
+  float tilt = ((sin(clockTime * .65) * .007 + gazeX * .014 + affection * .018 + headTilt * .055) * awake - resting * .035) * motion;
   vec2 pivot = vec2(0.0, .25);
   vec2 h = p.xy - pivot;
   p.xy += (mat2(cos(tilt), sin(tilt), -sin(tilt), cos(tilt)) * h - h) * head;
   p.x += gazeX * .014 * head * motion;
-  p.y += (gazeY * .012 - resting * .025 + headNod * .014) * head * motion;
-  float hair = smoothstep(.12, .29, abs(uv.x - .5)) * smoothstep(.48, .65, uv.y);
-  p.x += sin(clockTime * 1.8 + uv.y * 5.0) * .006 * hair * motion;
+  p.y += (gazeY * .012 - resting * .025 + headNod * .014 * awake) * head * motion;
   p.y += sin(clockTime * 2.0) * affection * .008 * motion;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
 }`;
 const fragmentShader = `
 varying vec2 vUv;
 uniform sampler2D baseMap, blinkMap, talkMap, roundMap, curiousMap, warmMap;
-uniform float blinkLeft, blinkRight, mouth, mouthRound, mouthWide, warm, curious, surprised, browRaise, blush;
+uniform float blinkLeft, blinkRight, mouth, mouthRound, mouthWide, warm, curious, surprised, browRaise, browTilt, blush, smile;
 uniform float gazeX, gazeY, affection;
 float regionAt(vec2 point, vec2 center, vec2 radius) {
   float d = length((point - center) / radius);
@@ -51,6 +55,7 @@ void main() {
   samplePoint.y = mix(point.y, eyeCenter.y + (point.y-eyeCenter.y)/(1.0+surprised*.14), eyeMask);
   float brows = max(region(vec2(.410,.207),vec2(.061,.018)),region(vec2(.576,.190),vec2(.063,.018)));
   samplePoint.y += browRaise*.0035*brows;
+  samplePoint.y += (point.x-eyeCenter.x)*(point.x < .495 ? 1.0 : -1.0)*browTilt*.16*brows;
   float iris = max(region(vec2(.414,.251),vec2(.027,.024)),region(vec2(.578,.244),vec2(.027,.024)));
   samplePoint += vec2(-gazeX*.003, gazeY*.002)*iris;
   vec2 sampleUv = vec2(samplePoint.x,1.0-samplePoint.y);
@@ -61,6 +66,8 @@ void main() {
   color.rgb = mix(color.rgb, texture2D(curiousMap,sampleUv).rgb, upperFace*curious);
   color.rgb = mix(color.rgb, texture2D(blinkMap,vUv).rgb, max(left*blinkLeft,right*blinkRight));
   float lips = region(vec2(.503,.321),vec2(.065,.031));
+  // A closed smile can warm the face, but articulation always owns the final lips.
+  color.rgb = mix(color.rgb,texture2D(blinkMap,vUv).rgb,lips*smile);
   vec2 mouthCenter = vec2(.503,.321);
   vec2 mouthScale = vec2(mix(1.0,1.12,mouthWide),mix(.46,1.0,mouth));
   vec2 mouthPoint = mouthCenter + (point-mouthCenter)/mouthScale;
@@ -98,6 +105,11 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     fallback.style.touchAction = 'pan-y pinch-zoom';
     fallback.dataset.renderer = 'dom'; fallback.dataset.avatarRenderer = 'layered-image'; fallback.dataset.petCount = '1'; fallback.dataset.renderFrames = '0';
     const layers: Partial<Record<AvatarImageName, HTMLImageElement>> = {};
+    let blinkRightLayer: HTMLImageElement | undefined, smileLayer: HTMLImageElement | undefined;
+    const browLayers: HTMLImageElement[] = [];
+    const browMasks: HTMLDivElement[] = [];
+    const browVariants: { warm: HTMLImageElement[]; curious: HTMLImageElement[] } = { warm: [], curious: [] };
+    const cheeks = document.createElement('div'); cheeks.className = 'anime-cheeks'; fallbackModel.appendChild(cheeks);
     const textures: THREE.Texture[] = [];
     let canvas: HTMLCanvasElement | undefined;
     let hitMask: ImageData | undefined;
@@ -123,13 +135,20 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     } catch { useFallback('此设备未能开启网格动画，正在使用轻量角色。'); }
     const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1.5, -1.5, .1, 10); camera.position.z = 4;
     const geometry = new THREE.PlaneGeometry(2, 3, 40, 60);
+    const uv = geometry.getAttribute('uv'), hairWeights = new Float32Array(uv.count * 2);
+    for (let index = 0; index < uv.count; index++) {
+      const weight = sampleAnimeHairWeights(uv.getX(index), 1-uv.getY(index));
+      hairWeights[index*2] = weight.left; hairWeights[index*2+1] = weight.right;
+    }
+    geometry.setAttribute('hairWeights', new THREE.BufferAttribute(hairWeights, 2));
+    const hairMotion = createAnimeHairMotion();
     let pointerX = 0, pointerY = 0, gazeX = 0, gazeY = 0, interactionSequence = 0;
     const performance = createAvatarPerformance();
     let localInput: PerformanceInput = { utteranceId: 'idle', text: '', phase: 'idle' };
     const media = matchMedia('(prefers-reduced-motion: reduce)');
     const uniforms = {
       baseMap: { value: null as THREE.Texture | null }, blinkMap: { value: null as THREE.Texture | null }, talkMap: { value: null as THREE.Texture | null }, roundMap: { value: null as THREE.Texture | null }, curiousMap: { value: null as THREE.Texture | null }, warmMap: { value: null as THREE.Texture | null },
-      clockTime: { value: 0 }, motion: { value: 1 }, gazeX: { value: 0 }, gazeY: { value: 0 }, affection: { value: 0 }, resting: { value: 0 }, blinkLeft: { value: 0 }, blinkRight: { value: 0 }, mouth: { value: 0 }, mouthRound: { value: 0 }, mouthWide: { value: 0 }, warm: { value: 0 }, curious: { value: 0 }, surprised: { value: 0 }, browRaise: { value: 0 }, blush: { value: 0 }, headTilt: { value: 0 }, headNod: { value: 0 },
+      clockTime: { value: 0 }, motion: { value: 1 }, gazeX: { value: 0 }, gazeY: { value: 0 }, affection: { value: 0 }, resting: { value: 0 }, blinkLeft: { value: 0 }, blinkRight: { value: 0 }, mouth: { value: 0 }, mouthRound: { value: 0 }, mouthWide: { value: 0 }, warm: { value: 0 }, curious: { value: 0 }, surprised: { value: 0 }, browRaise: { value: 0 }, browTilt: { value: 0 }, blush: { value: 0 }, smile: { value: 0 }, headTilt: { value: 0 }, headNod: { value: 0 }, hairLeft: { value: new THREE.Vector2() }, hairRight: { value: new THREE.Vector2() },
     };
     const material = new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader, transparent: true, premultipliedAlpha: true, depthWrite: false });
     const model = new THREE.Mesh(geometry, material); scene.add(model);
@@ -144,6 +163,10 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       load: name => loadAvatarImage(name, { signal: abort.signal }), isStopped: () => disposed,
       onBase: (image, name) => {
         image.alt = ''; image.draggable = false; fallbackModel.appendChild(image); loaded = true; setLoading(false);
+        for (const side of ['left','right']) {
+          const mask = document.createElement('div'); mask.className = `anime-brow anime-brow-${side}`;
+          const brow = image.cloneNode() as HTMLImageElement; mask.appendChild(brow); fallbackModel.appendChild(mask); browLayers.push(brow); browMasks.push(mask);
+        }
         try { const mask = document.createElement('canvas'); mask.width = 96; mask.height = 144; const context = mask.getContext('2d'); if (context) { context.drawImage(image,0,0,96,144); hitMask = context.getImageData(0,0,96,144); } } catch { /* A silhouette remains available when pixel reads are unsupported. */ }
         // Every sampler initially uses the valid base, so optional expressions cannot blank the portrait.
         if (!gpuFailed) { const texture = textureFor(image); Object.values(maps).forEach(map => { map.value = texture; }); }
@@ -154,6 +177,17 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
         // Expressions go below eyelids and lips; loading order must not change compositing order.
         image.style.zIndex = name === 'warm' || name === 'curious' ? '1' : name === 'blink' ? '2' : '3';
         fallbackModel.appendChild(image); layers[name] = image;
+        if (name === 'warm' || name === 'curious') {
+          for (const mask of browMasks) {
+            const brow = image.cloneNode() as HTMLImageElement; brow.className = ''; brow.style.zIndex = name === 'warm' ? '1' : '2';
+            brow.style.opacity = '0'; mask.appendChild(brow); browVariants[name].push(brow);
+          }
+        }
+        if (name === 'blink') {
+          image.classList.add('anime-layer-blink-left');
+          blinkRightLayer = image.cloneNode() as HTMLImageElement; blinkRightLayer.className = 'anime-layer anime-layer-blink-right'; fallbackModel.appendChild(blinkRightLayer);
+          smileLayer = image.cloneNode() as HTMLImageElement; smileLayer.className = 'anime-layer anime-layer-smile'; fallbackModel.appendChild(smileLayer);
+        }
         if (!gpuFailed) maps[name].value = textureFor(image);
       },
       onIssue: () => useFallback('部分角色图片未能加载，正在使用已加载的轻量角色；请检查连接后重试。'),
@@ -178,6 +212,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       // Touch changes the expression, never invents speech or competes with playback.
       localInput = { utteranceId: `interaction-${++interactionSequence}`, text: '', phase: 'idle' };
       if(action === 'sleep') performance.reset();
+      else if (next === 'pet' || next === 'jump' || (next === 'wake' && userGesture)) performance.react({ id: String(interactionSequence), kind: next === 'pet' ? 'pet' : next === 'jump' ? 'greet' : 'wake' });
       emitState();
       if (userGesture) callbacks.current.onInteract?.(next);
     };
@@ -216,9 +251,13 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       performance.setInput(input);
       const pose = performance.step(dt,{reducedMotion:media.matches,hidden:false});
       const affection = action === 'pet' || action === 'jump' ? Math.sin(Math.min(1,(time-actionStart)/2.7)*Math.PI) : 0;
-      const blinkLeft = action === 'sleep' ? 1 : Math.max(pose.blinkLeft,affection*.12);
-      const blinkRight = action === 'sleep' ? 1 : Math.max(pose.blinkRight,affection*.12);
-      gazeX += (pointerX-gazeX)*Math.min(1,dt*6); gazeY += (pointerY-gazeY)*Math.min(1,dt*6);
+      const asleep = action === 'sleep';
+      const blinkLeft = asleep ? 1 : pose.blinkLeft;
+      const blinkRight = asleep ? 1 : pose.blinkRight;
+      const targetX = asleep || media.matches ? 0 : THREE.MathUtils.clamp(pointerX + pose.gazeOffsetX,-1,1);
+      const targetY = asleep || media.matches ? 0 : THREE.MathUtils.clamp(pointerY + pose.gazeOffsetY,-1,1);
+      gazeX += (targetX-gazeX)*Math.min(1,dt*6); gazeY += (targetY-gazeY)*Math.min(1,dt*6);
+      if (media.matches) gazeX = gazeY = 0;
       uniforms.clockTime.value = time; uniforms.motion.value = media.matches ? 0 : 1;
       uniforms.gazeX.value = gazeX; uniforms.gazeY.value = gazeY;
       uniforms.affection.value += (affection-uniforms.affection.value)*(1-Math.exp(-dt*8));
@@ -227,10 +266,11 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       approach(uniforms.blinkLeft,blinkLeft,35); approach(uniforms.blinkRight,blinkRight,35);
       uniforms.mouth.value = action === 'sleep' ? 0 : pose.mouthOpen;
       approach(uniforms.mouthRound,pose.mouthShape === 'O' ? 1 : 0,32); approach(uniforms.mouthWide,pose.mouthShape === 'E' ? 1 : 0,24);
-      approach(uniforms.warm,Math.max(pose.expression === 'warm' || pose.expression === 'shy' ? pose.expressionAmount : 0,affection*.45),7);
-      approach(uniforms.curious,pose.expression === 'curious' ? pose.expressionAmount : pose.expression === 'thoughtful' ? pose.expressionAmount*.45 : 0,7);
-      approach(uniforms.surprised,pose.expression === 'surprised' ? pose.expressionAmount : 0,9);
-      uniforms.browRaise.value=pose.browRaise; uniforms.blush.value=pose.blush; uniforms.headTilt.value=pose.headTilt; uniforms.headNod.value=pose.headNod;
+      uniforms.warm.value = pose.warmAmount; uniforms.curious.value = pose.curiousAmount; uniforms.surprised.value = pose.surpriseAmount;
+      uniforms.smile.value = pose.smileAmount; uniforms.browTilt.value = pose.browTilt;
+      uniforms.browRaise.value=pose.browRaise; uniforms.blush.value=pose.blush; uniforms.headTilt.value=asleep ? 0 : pose.headTilt; uniforms.headNod.value=asleep ? 0 : pose.headNod;
+      const hair = hairMotion.step(dt,{reducedMotion:media.matches,resting:asleep ? 1 : 0,gazeX,headTilt:uniforms.headTilt.value});
+      uniforms.hairLeft.value.set(hair.leftX,hair.leftY); uniforms.hairRight.value.set(hair.rightX,hair.rightY);
       if (renderer && !gpuFailed && canvas) {
         try {
           renderer.render(scene,camera);
@@ -243,11 +283,20 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       if (gpuFailed) {
         // Same performance controller drives the fallback; speech cancellation and reduced motion still apply.
         const amount = (name: AvatarImageName, value: number) => { if (layers[name]) layers[name]!.style.opacity = String(value); };
-        amount('blink', Math.max(uniforms.blinkLeft.value, uniforms.blinkRight.value));
+        amount('blink', uniforms.blinkLeft.value);
+        if (blinkRightLayer) blinkRightLayer.style.opacity = String(uniforms.blinkRight.value);
+        if (smileLayer) smileLayer.style.opacity = String(uniforms.smile.value);
         const mouth = THREE.MathUtils.smoothstep(uniforms.mouth.value, .025, .16);
         amount('talk', mouth * (1-uniforms.mouthRound.value)); amount('round', mouth * uniforms.mouthRound.value);
         amount('warm', uniforms.warm.value); amount('curious', uniforms.curious.value);
-        fallbackModel.style.transform = media.matches ? 'none' : `translate(${gazeX*1.2}px,${Math.sin(time*1.6)*.8+pose.headNod*2}px) rotate(${pose.headTilt*1.2+gazeX*.3}deg)`;
+        browLayers.forEach((brow,index) => {
+          const transform = `translateY(${-pose.browRaise*.35}%) rotate(${pose.browTilt*(index ? 1 : -1)*2.6}deg)`;
+          brow.style.transform = transform;
+          for (const name of ['warm','curious'] as const) if (browVariants[name][index]) { browVariants[name][index].style.transform = transform; browVariants[name][index].style.opacity = String(uniforms[name].value); }
+        });
+        cheeks.style.opacity = String(Math.min(1,pose.blush + uniforms.affection.value*.2));
+        const rest = uniforms.resting.value, awake = 1-rest;
+        fallbackModel.style.transform = media.matches ? 'none' : `translate(${gazeX*1.2}px,${Math.sin(time*(1.6-.55*rest))*.8*(1-.72*rest)+pose.headNod*2*awake}px) rotate(${(pose.headTilt*1.2+gazeX*.3)*awake-rest*.6}deg)`;
         fallback.dataset.renderFrames = String(++fallbackFrames);
       }
       const visible = gpuFailed ? fallback : canvas;
@@ -255,6 +304,8 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       if (visible) {
         visible.dataset.petAction = action; visible.dataset.blink = Math.max(uniforms.blinkLeft.value,uniforms.blinkRight.value).toFixed(2); visible.dataset.speaking = String(pose.speaking); visible.dataset.gazeX = gazeX.toFixed(2);
         visible.dataset.expression=pose.expression; visible.dataset.mouthShape=pose.mouthShape; visible.dataset.mouthOpen=uniforms.mouth.value.toFixed(3); visible.dataset.speechSource=input.speech ? 'playback-progress' : 'text'; visible.dataset.phase=input.phase;
+        visible.dataset.blinkLeft=uniforms.blinkLeft.value.toFixed(3); visible.dataset.blinkRight=uniforms.blinkRight.value.toFixed(3);
+        visible.dataset.hairLeft=(gpuFailed ? 0 : hair.leftX).toFixed(5); visible.dataset.hairRight=(gpuFailed ? 0 : hair.rightX).toFixed(5); visible.dataset.smile=pose.smileAmount.toFixed(3);
       }
       // A shader failure never counts as a successful WebGL frame. DOM readiness requires its loaded image.
       if (!ready && (frames > 0 || fallbackFrames > 0)) { ready = true; callbacks.current.onReady?.(); emitState(); }

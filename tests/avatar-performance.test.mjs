@@ -178,14 +178,14 @@ test('reduced motion stops autonomous blinking and head motion while keeping exp
 });
 
 test('micro expressions remain finite and bounded; snapshots are isolated and invalid time never fast-forwards', () => {
-  const samples = [['谢谢你的陪伴', 'warm'], ['为什么呢？', 'curious'], ['让我想一想', 'thoughtful'], ['哇！好惊喜', 'surprised'], ['有点害羞，不好意思', 'shy']];
+  const samples = [['谢谢你的陪伴', 'warm'], ['为什么呢？', 'curious'], ['让我想一想', 'thoughtful'], ['哇！好惊喜', 'surprised'], ['有点害羞，不好意思', 'shy'], ['太好了', 'happy'], ['开个玩笑', 'playful'], ['别着急，我陪你', 'concerned']];
   for (const [text, expected] of samples) {
     const controller = createAvatarPerformance(); controller.setInput(input(text));
     const frames = run(controller, 1);
     assert.equal(frames.at(-1).expression, expected);
     for (const frame of frames) {
-      for (const key of ['expressionAmount', 'mouthOpen', 'blinkLeft', 'blinkRight', 'blush']) assert.ok(Number.isFinite(frame[key]) && frame[key] >= 0 && frame[key] <= 1, key);
-      for (const key of ['browRaise', 'headTilt', 'headNod']) assert.ok(Number.isFinite(frame[key]) && Math.abs(frame[key]) <= 1, key);
+      for (const key of ['expressionAmount', 'warmAmount', 'curiousAmount', 'surpriseAmount', 'concernAmount', 'smileAmount', 'mouthOpen', 'blinkLeft', 'blinkRight', 'blush']) assert.ok(Number.isFinite(frame[key]) && frame[key] >= 0 && frame[key] <= 1, key);
+      for (const key of ['browRaise', 'browTilt', 'headTilt', 'headNod', 'gazeOffsetX', 'gazeOffsetY']) assert.ok(Number.isFinite(frame[key]) && Math.abs(frame[key]) <= 1, key);
     }
     frames.at(-1).mouthOpen = 100;
     assert.ok(controller.step(0).mouthOpen <= 1);
@@ -197,4 +197,112 @@ test('micro expressions remain finite and bounded; snapshots are isolated and in
   assert.throws(() => a.setInput(input('ok', { phase: 'unknown' })), /Invalid/);
   a.setInput(input('ok', { speech: { active: true, charIndex: NaN } }));
   assert.equal(a.step(.025).mouthOpen, 0);
+});
+
+const faceChannels = ['expressionAmount','warmAmount','curiousAmount','surpriseAmount','concernAmount','smileAmount','browRaise','browTilt','blush','headTilt','headNod','gazeOffsetX','gazeOffsetY'];
+const facial = pose => Object.fromEntries(faceChannels.map(name => [name,pose[name]]));
+const mouth = pose => ({open:pose.mouthOpen,shape:pose.mouthShape,speaking:pose.speaking});
+
+test('new utterances and changing expressions crossfade independent channels without flashing neutral', () => {
+  const controller=createAvatarPerformance(); controller.setInput(input('谢谢你的陪伴'));
+  const before=run(controller,.8).at(-1); assert.ok(before.warmAmount>.8);
+  controller.setInput(input('为什么呢？',{utteranceId:'new-reply'}));
+  assert.deepEqual(facial(controller.step(0)),facial(before),'setInput must not reset the face');
+  const after=controller.step(.025); assert.equal(after.expression,'curious');
+  assert.ok(after.warmAmount>.65 && after.curiousAmount>0); assert.ok(after.expressionAmount>.8);
+  for(const key of faceChannels)assert.ok(Math.abs(after[key]-before[key])<.2,key);
+  const curious=run(controller,.6).at(-1); assert.ok(curious.curiousAmount>.8); assert.ok(curious.warmAmount<.1);
+  controller.setInput(input('为什么呢？',{utteranceId:'new-reply',phase:'idle'}));
+  const settling=controller.step(.025); assert.equal(settling.expression,'neutral'); assert.ok(settling.curiousAmount>.65);
+  assert.ok(run(controller,2).at(-1).curiousAmount<.001);
+});
+
+test('error expresses concern while new happy and playful cues have distinct facial channels', () => {
+  const controller=createAvatarPerformance(); controller.setInput(input('',{phase:'error'}));
+  const concern=run(controller,.7).at(-1);
+  assert.equal(concern.expression,'concerned'); assert.ok(concern.concernAmount>.35); assert.equal(concern.surpriseAmount,0);
+  assert.ok(concern.warmAmount>0 && concern.curiousAmount>0 && concern.browTilt>0); assert.deepEqual(mouth(concern),{open:0,shape:'rest',speaking:false});
+  const happy=createAvatarPerformance(); happy.setInput(input('太好了'));
+  const joy=run(happy,.5).at(-1); assert.equal(joy.expression,'happy'); assert.ok(joy.smileAmount>.7);
+  const playful=createAvatarPerformance(); playful.setInput(input('开个玩笑'));
+  const tease=run(playful,.5).at(-1); assert.equal(tease.expression,'playful'); assert.ok(tease.smileAmount>.6); assert.ok(tease.browTilt<0);
+  assert.equal(tease.blinkRight,0,'text does not loop a greeting wink');
+});
+
+test('frequent idle input ids do not restart the natural blink clock', () => {
+  const updated=createAvatarPerformance(), control=createAvatarPerformance(); let blinked=false;
+  for(let frame=0;frame<160;frame++){
+    updated.setInput(input('',{phase:'idle',utteranceId:`local-${frame}`}));
+    const actual=updated.step(.025), expected=control.step(.025);
+    assert.equal(actual.blinkLeft,expected.blinkLeft);assert.equal(actual.blinkRight,expected.blinkRight);
+    if(actual.blinkLeft>.1)blinked=true;
+  }
+  assert.equal(blinked,true);
+});
+
+test('reactions survive local input ids and never inject speech into an idle companion', () => {
+  for(const [kind,expression] of [['pet','happy'],['greet','playful'],['wake','warm']]){
+    const controller=createAvatarPerformance(); assert.equal(controller.react({id:'touch-1',kind}),true);
+    controller.setInput(input('',{phase:'idle',utteranceId:'interaction-1'}));
+    const frames=run(controller,.45); assert.ok(frames.some(frame=>frame.expression===expression && frame.smileAmount>.04),kind);
+    for(const frame of frames)assert.deepEqual(mouth(frame),{open:0,shape:'rest',speaking:false},kind);
+    assert.equal(controller.react({id:'touch-1',kind}),false);
+    const end=run(controller,4).at(-1); assert.equal(end.expression,'neutral'); assert.ok(end.smileAmount<.001);
+  }
+});
+
+test('pet and greet reactions do not change text queues or PCM mouth timing, pauses or buffering', () => {
+  for(const external of [false,true]){
+    const withReaction=createAvatarPerformance(), control=createAvatarPerformance();
+    for(let frame=0;frame<90;frame++){
+      const speaking=frame<60;
+      const active=frame<35 || frame>=45;
+      const next=input('a。ome你好，继续。',{phase:speaking?'speaking':'idle',...(external?{speech:{active,charIndex:Math.min(10,Math.floor(frame/8)),audioLevel:active?.6:0}}:{})});
+      withReaction.setInput(next);control.setInput(next);
+      if(frame===5)withReaction.react({id:'pet-during-reply',kind:'pet'});
+      if(frame===20)withReaction.react({id:'greet-during-reply',kind:'greet'});
+      if(frame===50)withReaction.react({id:'wake-during-reply',kind:'wake'});
+      assert.deepEqual(mouth(withReaction.step(.025)),mouth(control.step(.025)),`external=${external}, frame=${frame}`);
+    }
+  }
+});
+
+test('a greeting winks once and repeated ids or rapid greetings cannot spam another wink', () => {
+  const controller=createAvatarPerformance();controller.react({id:'hello-1',kind:'greet'});
+  const first=run(controller,.6); assert.ok(first.some(frame=>frame.blinkRight>.8 && frame.blinkLeft===0));
+  let segments=0,active=false;
+  for(const frame of first){const current=frame.blinkRight-frame.blinkLeft>.05;if(current&&!active)segments++;active=current;}
+  assert.equal(segments,1);assert.equal(controller.react({id:'hello-1',kind:'greet'}),false);
+  controller.react({id:'hello-2',kind:'greet'});
+  assert.ok(run(controller,1).every(frame=>frame.blinkRight===frame.blinkLeft));
+  run(controller,1);controller.react({id:'hello-3',kind:'greet'});
+  assert.ok(run(controller,.6).some(frame=>frame.blinkRight-frame.blinkLeft>.8));
+});
+
+test('hidden state discards active and newly arriving reactions without replay on return', () => {
+  const controller=createAvatarPerformance();controller.react({id:'before-hidden',kind:'greet'});run(controller,.15);
+  const hidden=controller.step(0,{hidden:true}); assert.equal(hidden.expression,'neutral'); assert.ok(Object.values(facial(hidden)).every(value=>value===0));
+  assert.equal(controller.react({id:'while-hidden',kind:'greet'}),false);
+  const restored=run(controller,1); assert.ok(restored.every(frame=>frame.smileAmount===0 && frame.blinkRight===frame.blinkLeft));
+  assert.equal(controller.react({id:'before-hidden',kind:'greet'}),false); assert.equal(controller.react({id:'while-hidden',kind:'greet'}),false);
+});
+
+test('reduced motion cancels an active wink and gaze immediately while keeping static reactions and articulation', () => {
+  const controller=createAvatarPerformance();controller.setInput(input('为什么呢？'));
+  controller.react({id:'greet',kind:'greet'}); const moving=run(controller,.2).at(-1);
+  assert.ok(moving.blinkRight>.8);assert.notEqual(moving.gazeOffsetX,0);
+  const stopped=controller.step(0,{reducedMotion:true});
+  for(const key of ['blinkLeft','blinkRight','headTilt','headNod','gazeOffsetX','gazeOffsetY'])assert.equal(stopped[key],0,key);
+  assert.equal(stopped.smileAmount,moving.smileAmount);
+  controller.react({id:'static-greet',kind:'greet'});
+  const staticFrames=run(controller,.6,{reducedMotion:true}); assert.ok(staticFrames.some(frame=>frame.smileAmount>.2));assert.equal(mouthActive(staticFrames),true);
+  for(const frame of staticFrames)for(const key of ['blinkLeft','blinkRight','headTilt','headNod','gazeOffsetX','gazeOffsetY'])assert.equal(frame[key],0,key);
+  assert.ok(run(controller,.5).every(frame=>frame.blinkRight===frame.blinkLeft),'preference change never replays the cancelled wink');
+});
+
+test('reset clears every facial channel and reaction but retains recent event replay protection', () => {
+  const controller=createAvatarPerformance();controller.react({id:'one-shot',kind:'greet'});run(controller,.2);controller.reset();
+  const cleared=controller.step(0);assert.equal(cleared.expression,'neutral');assert.ok(Object.values(facial(cleared)).every(value=>value===0));assert.deepEqual(mouth(cleared),{open:0,shape:'rest',speaking:false});
+  assert.equal(controller.react({id:'one-shot',kind:'greet'}),false);
+  for(const event of [{id:'',kind:'pet'},{id:'x',kind:'invalid'},null])assert.throws(()=>controller.react(event),/Invalid avatar reaction/);
 });
