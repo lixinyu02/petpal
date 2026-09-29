@@ -1,5 +1,5 @@
 export type PerformancePhase = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
-export type AvatarExpression = 'neutral' | 'warm' | 'curious' | 'thoughtful' | 'surprised' | 'shy' | 'happy' | 'playful' | 'concerned';
+export type AvatarExpression = 'neutral' | 'warm' | 'curious' | 'thoughtful' | 'surprised' | 'shy' | 'happy' | 'playful' | 'concerned' | 'sad' | 'downcast' | 'excited';
 export interface AvatarReaction { id: string; kind: 'pet' | 'greet' | 'wake' }
 export type MouthShape = 'rest' | 'A' | 'E' | 'O' | 'M';
 export interface PerformanceInput {
@@ -18,6 +18,14 @@ export interface AvatarPerformanceSnapshot {
   surpriseAmount: number;
   concernAmount: number;
   smileAmount: number;
+  sadAmount: number;
+  downcastAmount: number;
+  excitedAmount: number;
+  shyAmount: number;
+  eyeSmile: number;
+  tearAmount: number;
+  /** Smoothed actual PCM energy for subtle body motion; zero when silent/reduced. */
+  voiceEnergy: number;
   mouthOpen: number;
   mouthShape: MouthShape;
   /** 0 = open eyes; 1 = fully closed. */

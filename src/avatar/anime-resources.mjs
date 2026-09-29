@@ -16,8 +16,9 @@ export async function loadAvatarImages({ load, onBase, onVariant, onIssue, isSto
     }
   }
   if (!baseName) return;
-  // Serial decoding also avoids six large PNGs entering the decode queue together.
-  for (const name of ['blink', 'talk', 'round', 'curious', 'warm']) {
+  // Serial decoding keeps the extra emotion texture from competing with the
+  // body/eyes/lips needed for the first visible frame and ordinary conversation.
+  for (const name of ['blink', 'talk', 'round', 'curious', 'warm', 'sad']) {
     if (isStopped()) return;
     if (name === baseName) continue;
     try {

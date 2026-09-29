@@ -306,3 +306,72 @@ test('reset clears every facial channel and reaction but retains recent event re
   assert.equal(controller.react({id:'one-shot',kind:'greet'}),false);
   for(const event of [{id:'',kind:'pet'},{id:'x',kind:'invalid'},null])assert.throws(()=>controller.react(event),/Invalid avatar reaction/);
 });
+
+const expandedChannels=['sadAmount','downcastAmount','excitedAmount','shyAmount','eyeSmile','tearAmount','voiceEnergy'];
+test('sad/downcast/excited/happy/shy have distinct strong but bounded facial channels',()=>{
+  const snapshots={};
+  for(const [kind,text]of [['sad','我很伤心。'],['downcast','我有点难过。'],['excited','我好兴奋。'],['happy','今天好开心。'],['shy','我有点害羞。']]){
+    const controller=createAvatarPerformance();controller.setInput(input(text));const pose=run(controller,.8).at(-1);snapshots[kind]=pose;
+    assert.equal(pose.expression,kind);
+    for(const key of expandedChannels)assert.ok(Number.isFinite(pose[key])&&pose[key]>=0&&pose[key]<=1,`${kind}.${key}`);
+  }
+  assert.ok(snapshots.sad.sadAmount>.85&&snapshots.sad.tearAmount>.7&&snapshots.sad.smileAmount===0);
+  assert.ok(snapshots.downcast.downcastAmount>.85&&snapshots.downcast.tearAmount<.2&&snapshots.downcast.gazeOffsetY<-.2);
+  assert.ok(snapshots.excited.excitedAmount>.85&&snapshots.excited.eyeSmile<.35&&snapshots.excited.browRaise>.4);
+  assert.ok(snapshots.happy.eyeSmile>.85&&snapshots.happy.smileAmount>.85);
+  assert.ok(snapshots.shy.shyAmount>.85&&snapshots.shy.blush>.85&&snapshots.shy.gazeOffsetX<-.25);
+});
+
+test('PCM energy adjusts motion strength but never selects an emotion or changes mouth timing',()=>{
+  for(const text of ['我很伤心。','今天很开心。','我好兴奋。','一般的说明文字。']){
+    const soft=createAvatarPerformance(),loud=createAvatarPerformance();
+    for(const [controller,audioLevel]of [[soft,.08],[loud,.8]])controller.setInput(input(text,{speech:{active:true,charIndex:0,ended:false,audioLevel}}));
+    const low=run(soft,.5).at(-1),high=run(loud,.5).at(-1);
+    assert.equal(low.expression,high.expression);assert.ok(high.voiceEnergy>low.voiceEnergy+.6);
+    if(text.includes('伤心'))assert.equal(high.excitedAmount,0);
+    assert.ok(low.mouthOpen>0&&high.mouthOpen>low.mouthOpen);
+  }
+});
+
+test('silence/buffering/stop/hidden/reduced motion clear voice emphasis and keep mouth independent',()=>{
+  const text='真的好兴奋。',controller=createAvatarPerformance(),speech={active:true,charIndex:0,ended:false,audioLevel:.8};
+  controller.setInput(input(text,{speech}));const active=run(controller,.4).at(-1);assert.ok(active.voiceEnergy>.7);
+  controller.setInput(input(text,{speech:{...speech,audioLevel:0}}));assert.equal(controller.step(.025).voiceEnergy,0);assert.equal(controller.step(.025).mouthOpen,0);
+  controller.setInput(input(text,{speech}));run(controller,.2);controller.setInput(input(text,{speech:{...speech,active:false}}));assert.equal(controller.step(0).voiceEnergy,0);assert.equal(controller.step(0).mouthOpen,0);
+  controller.setInput(input(text,{speech}));run(controller,.2);const reduced=controller.step(.025,{reducedMotion:true});assert.equal(reduced.voiceEnergy,0);assert.equal(reduced.headNod,0);assert.ok(reduced.mouthOpen>0);assert.ok(reduced.excitedAmount>0);
+  const hidden=controller.step(0,{hidden:true});for(const key of expandedChannels)assert.equal(hidden[key],0,key);
+  controller.setInput(input(text,{phase:'idle',speech:{...speech,ended:true}}));assert.equal(controller.step(.025).voiceEnergy,0);
+  controller.reset();for(const key of expandedChannels)assert.equal(controller.step(0)[key],0,key);
+});
+
+test('pet/greet never force a smile or wink over a sad/downcast/concerned spoken sentence',()=>{
+  for(const text of ['我很伤心。','我有点难过。','别难过，我在这里。']){
+    const controller=createAvatarPerformance(),control=createAvatarPerformance();const speech={active:true,charIndex:0,ended:false,audioLevel:.5};
+    controller.setInput(input(text,{speech}));control.setInput(input(text,{speech}));run(controller,.2);run(control,.2);
+    controller.react({id:'pet',kind:'pet'});controller.react({id:'greet',kind:'greet'});
+    for(let frame=0;frame<20;frame++){
+      const actual=controller.step(.025),expected=control.step(.025);
+      assert.equal(actual.expression,expected.expression);assert.equal(actual.smileAmount,expected.smileAmount);assert.equal(actual.eyeSmile,expected.eyeSmile);assert.equal(actual.blinkRight,expected.blinkRight);assert.deepEqual(mouth(actual),mouth(expected));
+    }
+  }
+});
+
+test('new emotional channels crossfade on new sentences and reset without stale tear replay',()=>{
+  const controller=createAvatarPerformance();controller.setInput(input('我很伤心。'));const sad=run(controller,.7).at(-1);
+  controller.setInput(input('太好了！',{utteranceId:'happy'}));assert.equal(controller.step(0).tearAmount,sad.tearAmount);
+  const first=controller.step(.025);assert.ok(first.tearAmount>0&&first.eyeSmile>0);assert.equal(first.expression,'happy');
+  const happy=run(controller,1.5).at(-1);assert.ok(happy.tearAmount<.005&&happy.eyeSmile>.85);
+  controller.reset();for(const key of expandedChannels)assert.equal(controller.step(0)[key],0,key);
+});
+
+test('spoken continuation keeps tears/shyness until a real new cue or sentence boundary',()=>{
+  const controller=createAvatarPerformance(),text='我很伤心，眼泪快要掉下来了。不过现在已经不伤心了。';
+  const set=index=>controller.setInput(input(text,{speech:{active:true,charIndex:index,ended:false,audioLevel:.5}}));
+  set(0);run(controller,.6);set(text.indexOf('眼泪'));const continued=run(controller,.4).at(-1);
+  assert.equal(continued.expression,'sad');assert.ok(continued.tearAmount>.7);
+  set(text.indexOf('不过'));const neutral=run(controller,.9).at(-1);assert.notEqual(neutral.expression,'sad');assert.ok(neutral.tearAmount<.02);
+  const shy='被你这样夸奖，我有点害羞，脸都红了。';
+  controller.setInput(input(shy,{utteranceId:'shy',speech:{active:true,charIndex:0,ended:false,audioLevel:.5}}));assert.notEqual(controller.step(.025).expression,'shy');
+  controller.setInput(input(shy,{utteranceId:'shy',speech:{active:true,charIndex:shy.indexOf('我有点'),ended:false,audioLevel:.5}}));run(controller,.5);
+  controller.setInput(input(shy,{utteranceId:'shy',speech:{active:true,charIndex:shy.indexOf('脸都'),ended:false,audioLevel:.5}}));assert.equal(controller.step(.025).expression,'shy');
+});

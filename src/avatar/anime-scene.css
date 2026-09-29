@@ -10,12 +10,16 @@
 .anime-layer-talk,.anime-layer-round,.anime-layer-smile{mask-image:radial-gradient(ellipse 6.5% 3.1% at 50.3% 32.1%,#000 78%,transparent 100%)}
 .anime-layer-warm{mask-image:radial-gradient(ellipse 16.6% 10.6% at 49.6% 27%,#000 78%,transparent 100%)}
 .anime-layer-curious{mask-image:radial-gradient(ellipse 15% 6.6% at 49.5% 23%,#000 78%,transparent 100%)}
+.anime-layer-sad{mask-image:radial-gradient(ellipse 6.7% 3.9% at 40.6% 24.7%,#000 78%,transparent 100%),radial-gradient(ellipse 6.9% 3.9% at 58.1% 23.9%,#000 78%,transparent 100%),radial-gradient(ellipse 6.1% 1.8% at 41% 20.7%,#000 78%,transparent 100%),radial-gradient(ellipse 6.3% 1.8% at 57.6% 19%,#000 78%,transparent 100%),radial-gradient(ellipse 6.5% 3.1% at 50.3% 32.1%,#000 78%,transparent 100%)}
 .anime-brow,.anime-cheeks{position:absolute;inset:0;z-index:2;pointer-events:none}
 .anime-brow-left{mask-image:radial-gradient(ellipse 6.1% 1.8% at 41% 20.7%,#000 65%,transparent 100%)}
 .anime-brow-right{mask-image:radial-gradient(ellipse 6.3% 1.8% at 57.6% 19%,#000 65%,transparent 100%)}
 .anime-brow-left img{transform-origin:41% 20.7%}
 .anime-brow-right img{transform-origin:57.6% 19%}
-.anime-cheeks{opacity:0;background:radial-gradient(ellipse 4% 2.3% at 38.2% 28.8%,#ff5c4f35,transparent),radial-gradient(ellipse 3.9% 2.3% at 60% 28.1%,#ff5c4f35,transparent)}
+.anime-cheeks{opacity:0;background:radial-gradient(ellipse 4% 2.3% at 38.2% 28.8%,#ff5c4f55,transparent),radial-gradient(ellipse 3.9% 2.3% at 60% 28.1%,#ff5c4f55,transparent)}
+.anime-tears,.anime-eye-sparkles{position:absolute;inset:0;z-index:3;opacity:0;pointer-events:none}
+.anime-tears{background:radial-gradient(ellipse 2.3% .4% at 41.6% 26.8%,#c0e8ff60,transparent),radial-gradient(ellipse 2.3% .4% at 58% 26%,#c0e8ff60,transparent),radial-gradient(ellipse .4% .7% at 43.6% 27.6%,#d0eeff35,transparent),radial-gradient(ellipse .4% .7% at 60% 26.8%,#d0eeff35,transparent)}
+.anime-eye-sparkles{background:radial-gradient(ellipse .25% .8% at 42% 24.6%,#fff9dbd0,transparent),radial-gradient(ellipse .9% .2% at 42% 24.6%,#fff9dbd0,transparent),radial-gradient(ellipse .25% .8% at 58.3% 23.8%,#fff9dbd0,transparent),radial-gradient(ellipse .9% .2% at 58.3% 23.8%,#fff9dbd0,transparent)}
 .anime-scene-status{position:absolute;z-index:2;bottom:6px;left:8%;right:8%;display:flex;justify-content:center;align-items:center;gap:9px;padding:8px 12px;border-radius:12px;background:#faf8f0ed;color:#65735d;text-align:center;font-size:11px;line-height:1.5}
 .anime-scene-status button{flex-shrink:0;border:1px solid #bdcbb7;border-radius:12px;padding:5px 9px;background:#fffdf7;color:#415c3d;font:inherit;cursor:pointer}
 .anime-scene-status button:focus-visible{outline:2px solid #607950;outline-offset:2px}

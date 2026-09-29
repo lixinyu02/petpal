@@ -1,4 +1,4 @@
-export type AvatarImageName = 'idle' | 'blink' | 'talk' | 'round' | 'curious' | 'warm';
+export type AvatarImageName = 'idle' | 'blink' | 'talk' | 'round' | 'curious' | 'warm' | 'sad';
 export function avatarImageUrl(name: AvatarImageName): string;
 export function loadAvatarImage(name: AvatarImageName, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<HTMLImageElement>;
 export function loadAvatarImages(options: {

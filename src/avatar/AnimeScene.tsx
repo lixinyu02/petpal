@@ -4,6 +4,7 @@ import type { PetCommand } from '../pet/PetScene';
 import type { PetAction, PetBehaviorState, PetInteraction } from '../pet/behavior';
 import { createAvatarPerformance, type PerformanceInput } from './performance.mjs';
 import { loadAvatarImage, loadAvatarImages, type AvatarImageName } from './anime-resources.mjs';
+import { animeEmotionMix } from './anime-emotion-render.mjs';
 import { sampleAnimeHairWeights, createAnimeHairMotion } from './anime-rig.mjs';
 import { bindCompanionGestures, portraitCoordinates, portraitContains } from '../pet/interaction.mjs';
 import { createCompanionFeedback } from '../pet/gesture-feedback.mjs';
@@ -37,8 +38,9 @@ void main() {
 }`;
 const fragmentShader = `
 varying vec2 vUv;
-uniform sampler2D baseMap, blinkMap, talkMap, roundMap, curiousMap, warmMap;
+uniform sampler2D baseMap, blinkMap, talkMap, roundMap, curiousMap, warmMap, sadMap;
 uniform float blinkLeft, blinkRight, mouth, mouthRound, mouthWide, warm, curious, surprised, browRaise, browTilt, blush, smile;
+uniform float sadness, downcast, tears, sparkle, shy;
 uniform float gazeX, gazeY, affection;
 float regionAt(vec2 point, vec2 center, vec2 radius) {
   float d = length((point - center) / radius);
@@ -52,7 +54,7 @@ void main() {
   vec2 eyeCenter = point.x < .495 ? vec2(.406,.247) : vec2(.581,.239);
   float eyeMask = max(left,right);
   vec2 samplePoint = point;
-  samplePoint.y = mix(point.y, eyeCenter.y + (point.y-eyeCenter.y)/(1.0+surprised*.14), eyeMask);
+  samplePoint.y = mix(point.y, eyeCenter.y + (point.y-eyeCenter.y)/(1.0+surprised*.14-downcast*.13), eyeMask);
   float brows = max(region(vec2(.410,.207),vec2(.061,.018)),region(vec2(.576,.190),vec2(.063,.018)));
   samplePoint.y += browRaise*.0035*brows;
   samplePoint.y += (point.x-eyeCenter.x)*(point.x < .495 ? 1.0 : -1.0)*browTilt*.16*brows;
@@ -64,8 +66,12 @@ void main() {
   color.rgb = mix(color.rgb, texture2D(warmMap,sampleUv).rgb, face*warm);
   float upperFace = max(eyeMask,brows);
   color.rgb = mix(color.rgb, texture2D(curiousMap,sampleUv).rgb, upperFace*curious);
+  // The seventh expression sampler changes only eyes/brows and the closed lips.
+  // Hair roots, nose, jaw, costume and alpha always come from the base portrait.
+  color.rgb = mix(color.rgb, texture2D(sadMap,sampleUv).rgb, upperFace*sadness);
   color.rgb = mix(color.rgb, texture2D(blinkMap,vUv).rgb, max(left*blinkLeft,right*blinkRight));
   float lips = region(vec2(.503,.321),vec2(.065,.031));
+  color.rgb = mix(color.rgb,texture2D(sadMap,sampleUv).rgb,lips*sadness);
   // A closed smile can warm the face, but articulation always owns the final lips.
   color.rgb = mix(color.rgb,texture2D(blinkMap,vUv).rgb,lips*smile);
   vec2 mouthCenter = vec2(.503,.321);
@@ -73,9 +79,17 @@ void main() {
   vec2 mouthPoint = mouthCenter + (point-mouthCenter)/mouthScale;
   vec2 mouthUv = vec2(mouthPoint.x,1.0-mouthPoint.y);
   vec3 speechColor = mix(texture2D(talkMap,mouthUv).rgb,texture2D(roundMap,mouthUv).rgb,mouthRound);
-  color.rgb = mix(color.rgb,speechColor,lips*smoothstep(.025,.16,mouth));
   float cheeks = max(region(vec2(.382,.288),vec2(.04,.023)),region(vec2(.600,.281),vec2(.039,.023)));
-  color.rgb = mix(color.rgb, vec3(1.0,.36,.31),cheeks*(blush*.12+affection*.025));
+  color.rgb = mix(color.rgb, vec3(1.0,.36,.31),cheeks*(blush*.12+shy*.11+affection*.025));
+  // Stationary, local glints: neither tears nor excitement move the whole face.
+  float water = max(region(vec2(.416,.268),vec2(.023,.004)),region(vec2(.580,.260),vec2(.023,.004)));
+  float drop = max(region(vec2(.436,.276),vec2(.004,.007)),region(vec2(.600,.268),vec2(.004,.007)));
+  color.rgb = mix(color.rgb,vec3(.75,.91,1.0),max(water*.30,drop*.15)*tears);
+  float shine = max(region(vec2(.420,.246),vec2(.0025,.008)),region(vec2(.583,.238),vec2(.0025,.008)));
+  shine = max(shine,max(region(vec2(.420,.246),vec2(.009,.002)),region(vec2(.583,.238),vec2(.009,.002))));
+  color.rgb = mix(color.rgb,vec3(1.0,.97,.86),shine*sparkle*.78);
+  // Articulation is the final color layer, including over the downturned mouth.
+  color.rgb = mix(color.rgb,speechColor,lips*smoothstep(.025,.16,mouth));
   // Reject nearly transparent texels before the 8-bit desktop compositor unpremultiplies them.
   color.a *= smoothstep(.035, .15, color.a);
   if (color.a < .02) discard;
@@ -97,7 +111,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     let renderer: THREE.WebGLRenderer | undefined;
     let disposed = false, gpuFailed = false, raf = 0, inView = true, loaded = false, last = 0, time = 0, frames = 0, ready = false, action: PetAction = 'idle', actionStart = 0, lastId = -1;
     const abort = new AbortController();
-    setFailure(''); setLoading(true); container.dataset.avatarMode = 'loading';
+    setFailure(''); setLoading(true); container.dataset.avatarMode = 'loading'; delete container.dataset.optionalEmotionUnavailable;
     const fallback = document.createElement('div'), fallbackModel = document.createElement('div');
     fallback.className = 'anime-fallback'; fallbackModel.className = 'anime-fallback-model'; fallback.appendChild(fallbackModel); container.appendChild(fallback);
     const label = interactive ? '二次元伙伴小伴。轻触回应，双击打招呼，长按休息；Enter 或空格也可操作。' : '二次元伙伴小伴';
@@ -108,8 +122,10 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     let blinkRightLayer: HTMLImageElement | undefined, smileLayer: HTMLImageElement | undefined;
     const browLayers: HTMLImageElement[] = [];
     const browMasks: HTMLDivElement[] = [];
-    const browVariants: { warm: HTMLImageElement[]; curious: HTMLImageElement[] } = { warm: [], curious: [] };
+    const browVariants: { warm: HTMLImageElement[]; curious: HTMLImageElement[]; sad: HTMLImageElement[] } = { warm: [], curious: [], sad: [] };
     const cheeks = document.createElement('div'); cheeks.className = 'anime-cheeks'; fallbackModel.appendChild(cheeks);
+    const tears = document.createElement('div'); tears.className = 'anime-tears'; fallbackModel.appendChild(tears);
+    const sparkle = document.createElement('div'); sparkle.className = 'anime-eye-sparkles'; fallbackModel.appendChild(sparkle);
     const textures: THREE.Texture[] = [];
     let canvas: HTMLCanvasElement | undefined;
     let hitMask: ImageData | undefined;
@@ -147,15 +163,16 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     let localInput: PerformanceInput = { utteranceId: 'idle', text: '', phase: 'idle' };
     const media = matchMedia('(prefers-reduced-motion: reduce)');
     const uniforms = {
-      baseMap: { value: null as THREE.Texture | null }, blinkMap: { value: null as THREE.Texture | null }, talkMap: { value: null as THREE.Texture | null }, roundMap: { value: null as THREE.Texture | null }, curiousMap: { value: null as THREE.Texture | null }, warmMap: { value: null as THREE.Texture | null },
+      baseMap: { value: null as THREE.Texture | null }, blinkMap: { value: null as THREE.Texture | null }, talkMap: { value: null as THREE.Texture | null }, roundMap: { value: null as THREE.Texture | null }, curiousMap: { value: null as THREE.Texture | null }, warmMap: { value: null as THREE.Texture | null }, sadMap: { value: null as THREE.Texture | null },
       clockTime: { value: 0 }, motion: { value: 1 }, gazeX: { value: 0 }, gazeY: { value: 0 }, affection: { value: 0 }, resting: { value: 0 }, blinkLeft: { value: 0 }, blinkRight: { value: 0 }, mouth: { value: 0 }, mouthRound: { value: 0 }, mouthWide: { value: 0 }, warm: { value: 0 }, curious: { value: 0 }, surprised: { value: 0 }, browRaise: { value: 0 }, browTilt: { value: 0 }, blush: { value: 0 }, smile: { value: 0 }, headTilt: { value: 0 }, headNod: { value: 0 }, hairLeft: { value: new THREE.Vector2() }, hairRight: { value: new THREE.Vector2() },
+      sadness: { value: 0 }, downcast: { value: 0 }, tears: { value: 0 }, sparkle: { value: 0 }, shy: { value: 0 },
     };
     const material = new THREE.ShaderMaterial({ uniforms, vertexShader, fragmentShader, transparent: true, premultipliedAlpha: true, depthWrite: false });
     const model = new THREE.Mesh(geometry, material); scene.add(model);
-    const maps = { idle: uniforms.baseMap, blink: uniforms.blinkMap, talk: uniforms.talkMap, round: uniforms.roundMap, curious: uniforms.curiousMap, warm: uniforms.warmMap };
+    const maps = { idle: uniforms.baseMap, blink: uniforms.blinkMap, talk: uniforms.talkMap, round: uniforms.roundMap, curious: uniforms.curiousMap, warm: uniforms.warmMap, sad: uniforms.sadMap };
     const textureFor = (image: HTMLImageElement) => {
       const texture = new THREE.Texture(image); texture.colorSpace = THREE.SRGBColorSpace;
-      // The portrait is displayed small; mip pyramids add 12 MiB for the six source images.
+      // Seven samplers fit the WebGL minimum budget of eight; omit mip pyramids.
       texture.generateMipmaps = false; texture.minFilter = THREE.LinearFilter; texture.needsUpdate = true;
       textures.push(texture); return texture;
     };
@@ -175,11 +192,11 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       onVariant: (image, name) => {
         image.alt = ''; image.draggable = false; image.className = `anime-layer anime-layer-${name}`;
         // Expressions go below eyelids and lips; loading order must not change compositing order.
-        image.style.zIndex = name === 'warm' || name === 'curious' ? '1' : name === 'blink' ? '2' : '3';
+        image.style.zIndex = name === 'warm' || name === 'curious' || name === 'sad' ? '1' : name === 'blink' ? '2' : '4';
         fallbackModel.appendChild(image); layers[name] = image;
-        if (name === 'warm' || name === 'curious') {
+        if (name === 'warm' || name === 'curious' || name === 'sad') {
           for (const mask of browMasks) {
-            const brow = image.cloneNode() as HTMLImageElement; brow.className = ''; brow.style.zIndex = name === 'warm' ? '1' : '2';
+            const brow = image.cloneNode() as HTMLImageElement; brow.className = ''; brow.style.zIndex = name === 'warm' ? '1' : name === 'curious' ? '2' : '3';
             brow.style.opacity = '0'; mask.appendChild(brow); browVariants[name].push(brow);
           }
         }
@@ -190,7 +207,12 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
         }
         if (!gpuFailed) maps[name].value = textureFor(image);
       },
-      onIssue: () => useFallback('部分角色图片未能加载，正在使用已加载的轻量角色；请检查连接后重试。'),
+      onIssue: name => {
+        // Extra emotional artwork is optional. Its fallback sampler already uses
+        // the body; retain normal animation and local brow/tear cues if it fails.
+        if (name === 'sad') { container.dataset.optionalEmotionUnavailable = 'sad'; return; }
+        useFallback('部分角色图片未能加载，正在使用已加载的轻量角色；请检查连接后重试。');
+      },
     }).then(() => {
       if (!disposed && !loaded) { setLoading(false); container.dataset.avatarMode = 'unavailable'; setFailure('角色图片暂时无法获取，请检查连接后重新加载。'); }
     });
@@ -252,8 +274,9 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       const pose = performance.step(dt,{reducedMotion:media.matches,hidden:false});
       const affection = action === 'pet' || action === 'jump' ? Math.sin(Math.min(1,(time-actionStart)/2.7)*Math.PI) : 0;
       const asleep = action === 'sleep';
-      const blinkLeft = asleep ? 1 : pose.blinkLeft;
-      const blinkRight = asleep ? 1 : pose.blinkRight;
+      const emotion = animeEmotionMix(pose,{sleeping:asleep});
+      const blinkLeft = emotion.blinkLeft;
+      const blinkRight = emotion.blinkRight;
       const targetX = asleep || media.matches ? 0 : THREE.MathUtils.clamp(pointerX + pose.gazeOffsetX,-1,1);
       const targetY = asleep || media.matches ? 0 : THREE.MathUtils.clamp(pointerY + pose.gazeOffsetY,-1,1);
       gazeX += (targetX-gazeX)*Math.min(1,dt*6); gazeY += (targetY-gazeY)*Math.min(1,dt*6);
@@ -267,8 +290,9 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       uniforms.mouth.value = action === 'sleep' ? 0 : pose.mouthOpen;
       approach(uniforms.mouthRound,pose.mouthShape === 'O' ? 1 : 0,32); approach(uniforms.mouthWide,pose.mouthShape === 'E' ? 1 : 0,24);
       uniforms.warm.value = pose.warmAmount; uniforms.curious.value = pose.curiousAmount; uniforms.surprised.value = pose.surpriseAmount;
-      uniforms.smile.value = pose.smileAmount; uniforms.browTilt.value = pose.browTilt;
-      uniforms.browRaise.value=pose.browRaise; uniforms.blush.value=pose.blush; uniforms.headTilt.value=asleep ? 0 : pose.headTilt; uniforms.headNod.value=asleep ? 0 : pose.headNod;
+      uniforms.smile.value = emotion.smile; uniforms.browTilt.value = pose.browTilt;
+      uniforms.browRaise.value=pose.browRaise; uniforms.blush.value=emotion.blush; uniforms.headTilt.value=asleep ? 0 : pose.headTilt; uniforms.headNod.value=asleep ? 0 : pose.headNod;
+      uniforms.sadness.value=emotion.sadness; uniforms.downcast.value=emotion.downcast; uniforms.tears.value=emotion.tears; uniforms.sparkle.value=emotion.sparkle; uniforms.shy.value=emotion.shy;
       const hair = hairMotion.step(dt,{reducedMotion:media.matches,resting:asleep ? 1 : 0,gazeX,headTilt:uniforms.headTilt.value});
       uniforms.hairLeft.value.set(hair.leftX,hair.leftY); uniforms.hairRight.value.set(hair.rightX,hair.rightY);
       if (renderer && !gpuFailed && canvas) {
@@ -288,13 +312,14 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
         if (smileLayer) smileLayer.style.opacity = String(uniforms.smile.value);
         const mouth = THREE.MathUtils.smoothstep(uniforms.mouth.value, .025, .16);
         amount('talk', mouth * (1-uniforms.mouthRound.value)); amount('round', mouth * uniforms.mouthRound.value);
-        amount('warm', uniforms.warm.value); amount('curious', uniforms.curious.value);
+        amount('warm', uniforms.warm.value); amount('curious', uniforms.curious.value); amount('sad',emotion.sadness);
         browLayers.forEach((brow,index) => {
           const transform = `translateY(${-pose.browRaise*.35}%) rotate(${pose.browTilt*(index ? 1 : -1)*2.6}deg)`;
           brow.style.transform = transform;
-          for (const name of ['warm','curious'] as const) if (browVariants[name][index]) { browVariants[name][index].style.transform = transform; browVariants[name][index].style.opacity = String(uniforms[name].value); }
+          for (const name of ['warm','curious','sad'] as const) if (browVariants[name][index]) { browVariants[name][index].style.transform = transform; browVariants[name][index].style.opacity = String(name==='sad'?emotion.sadness:uniforms[name].value); }
         });
-        cheeks.style.opacity = String(Math.min(1,pose.blush + uniforms.affection.value*.2));
+        cheeks.style.opacity = String(Math.min(1,emotion.blush + emotion.shy*.25 + uniforms.affection.value*.2));
+        tears.style.opacity=String(emotion.tears); sparkle.style.opacity=String(emotion.sparkle);
         const rest = uniforms.resting.value, awake = 1-rest;
         fallbackModel.style.transform = media.matches ? 'none' : `translate(${gazeX*1.2}px,${Math.sin(time*(1.6-.55*rest))*.8*(1-.72*rest)+pose.headNod*2*awake}px) rotate(${(pose.headTilt*1.2+gazeX*.3)*awake-rest*.6}deg)`;
         fallback.dataset.renderFrames = String(++fallbackFrames);
@@ -306,6 +331,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
         visible.dataset.expression=pose.expression; visible.dataset.mouthShape=pose.mouthShape; visible.dataset.mouthOpen=uniforms.mouth.value.toFixed(3); visible.dataset.speechSource=input.speech ? 'playback-progress' : 'text'; visible.dataset.phase=input.phase;
         visible.dataset.blinkLeft=uniforms.blinkLeft.value.toFixed(3); visible.dataset.blinkRight=uniforms.blinkRight.value.toFixed(3);
         visible.dataset.hairLeft=(gpuFailed ? 0 : hair.leftX).toFixed(5); visible.dataset.hairRight=(gpuFailed ? 0 : hair.rightX).toFixed(5); visible.dataset.smile=pose.smileAmount.toFixed(3);
+        visible.dataset.sadness=emotion.sadness.toFixed(3); visible.dataset.tears=emotion.tears.toFixed(3); visible.dataset.eyeSparkle=emotion.sparkle.toFixed(3); visible.dataset.eyeSmile=Math.max(emotion.blinkLeft-pose.blinkLeft,emotion.blinkRight-pose.blinkRight).toFixed(3);
       }
       // A shader failure never counts as a successful WebGL frame. DOM readiness requires its loaded image.
       if (!ready && (frames > 0 || fallbackFrames > 0)) { ready = true; callbacks.current.onReady?.(); emitState(); }
