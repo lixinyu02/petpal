@@ -5,6 +5,7 @@ import { createSpeechController, selectSpeechVoice, type SpeechState } from './s
 import { createRemoteSpeechController } from './remote-speech.mjs';
 import { createStreamingSpeechController } from './stream-speech.mjs';
 import { createSpeechAwaiter } from '../voice/speech-flow.mjs';
+import { markdownSpeechText } from '../voice/markdown-speech.mjs';
 
 type PlaybackState = SpeechState & { audioLevel?:number; buffering?:boolean; streaming?:boolean };
 const initial: PlaybackState = { utteranceId: '', text: '', active: false, pending: false, charIndex: 0, ended: true, progressBasis: 'none', voiceName: '', error: '' };
@@ -90,9 +91,9 @@ export function useSpeech(allowed: boolean, scope = 'guest') {
     if(value&&(!allowedRef.current||!getConnection().token||!getIdentity()))return;
     enabledRef.current=value;updateEnabled(value);if(!value)stop();else prepare();
   },[stop,prepare]);
-  const speak=useCallback((text:string,utteranceId:string)=>{
+  const speak=useCallback((text:string,utteranceId:string,plainText=false)=>{
     if(!allowedRef.current||document.hidden||!supported||!getConnection().token||!getIdentity())return false;
-    return controller.current?.speak({text,utteranceId,language:navigator.language})??false;
+    return controller.current?.speak({text:plainText?text:markdownSpeechText(text),utteranceId,language:navigator.language})??false;
   },[supported]);
   const speakIfEnabled=useCallback((text:string,utteranceId:string)=>enabledRef.current?speak(text,utteranceId):false,[speak]);
   const unlock=useCallback(async()=>{
@@ -103,7 +104,9 @@ export function useSpeech(allowed: boolean, scope = 'guest') {
   const speakAsync=useCallback((text:string,utteranceId:string,signal?:AbortSignal)=>{
     if(signal?.aborted)return Promise.reject(signal.reason||new DOMException('语音已取消','AbortError'));
     const done=completion.current.begin(utteranceId,signal,()=>controller.current?.stop());
-    if(!speak(text,utteranceId))completion.current.cancel(new Error(controller.current?.snapshot().error||'当前语音尚未就绪。'));
+    // The voice sentence splitter has already extracted plain text. Re-parsing
+    // inline-code contents here would turn literal **/[] into fresh Markdown.
+    if(!speak(text,utteranceId,true))completion.current.cancel(new Error(controller.current?.snapshot().error||'当前语音尚未就绪。'));
     return done;
   },[speak]);
   const feedback=state.error||configError||(engine==='loading'?'正在读取已保存的朗读设置…':engine==='remote'?'远程 TTS 仍为预备配置，请选择系统语音或 CosyVoice。':!supported?'此环境无法播放所选语音，请检查设备或浏览器。':engine==='cosyvoice'?(streaming?(state.buffering?'正在缓冲 CosyVoice 音频…':state.pending?'正在接收首段 CosyVoice 音频…':state.active?'CosyVoice 边生成边播放 · 口型跟随声音起伏':'CosyVoice 流式朗读已就绪 · 1.0 倍速，边生成边播放。'):(state.pending?'正在合成完整 CosyVoice 音频…':state.active?'CosyVoice 播放中 · 口型按播放时间近似同步':'当前语速使用完整合成；设为 1.0 倍可边生成边播放。')):!hasChineseVoice?'未检测到本地中文音色；可安装系统中文语音包或选择 CosyVoice。':state.pending?'正在准备本地语音…':state.active?`正在朗读 · ${state.voiceName}`:'使用本地系统音色，跟随系统默认输出。');

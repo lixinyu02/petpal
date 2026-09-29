@@ -69,3 +69,61 @@ test('readiness and final-result deadlines cancel upstream sessions and release 
   const final=harness({request:()=>({nextSequence:1})});await flush();final.event('ready',{});const session=await final.session;await session.send(new Float32Array([.1]));
   const finishing=session.finish();await flush();context.mock.timers.tick(60000);await assert.rejects(finishing,/完整识别结果超时/);assert.equal(final.closes,1);assert.deepEqual(final.removed,['one']);
 });
+
+test('250ms capture remains sustainable at 650–677ms HTTP RTT through bounded adaptive batching',async context=>{
+  context.mock.timers.enable({apis:['setTimeout']});
+  for (const rtt of [650,677]) {
+    let concurrent=0,acknowledgedSamples=0,sequence=0;
+    const uploaded=[],expected=[],sends=[];
+    const h=harness({request:(path,options)=>{
+      if (!path.includes('/audio')) return {};
+      assert.equal(++concurrent,1,'only one HTTP upload may be in flight');
+      assert.match(path,new RegExp(`sequence=${sequence}$`));
+      assert.ok(options.body.byteLength<=96000);
+      uploaded.push(Buffer.from(options.body));
+      return new Promise(resolve=>setTimeout(()=>{concurrent--;acknowledgedSamples+=options.body.byteLength/4;resolve({nextSequence:++sequence});},rtt));
+    }});
+    await flush();h.event('ready',{});const session=await h.session;
+    for(let i=0;i<180;i++) {
+      const samples=new Float32Array(6000).fill(i/200);expected.push(Buffer.from(samples.buffer));
+      sends.push(session.send(samples).then(()=>assert.ok(acknowledgedSamples>=(i+1)*6000,'each send resolves only when all its samples are acknowledged')));
+      for(let step=0;step<5;step++){context.mock.timers.tick(50);await flush();}
+    }
+    const finished=session.finish();
+    for(let step=0;step<40;step++){context.mock.timers.tick(50);await flush();}
+    await Promise.all(sends);
+    assert.deepEqual(Buffer.concat(uploaded),Buffer.concat(expected),'all PCM samples retain exact order and values');
+    assert.equal(uploaded[0].length,24000,'first capture frame starts immediately');
+    assert.ok(uploaded.some(frame=>frame.length>=72000),'later requests merge accumulated frames');
+    assert.ok(uploaded.length<80,'RTT does not force one request for every 250ms callback');
+    assert.equal(h.requests.at(-1).path,'/voice/asr/sessions/one/end');
+    h.event('done',{text:'公网延迟验收'});assert.equal(await finished,'公网延迟验收');assert.deepEqual(h.removed,[]);
+  }
+});
+
+test('batch boundaries may split capture frames without resolving promises early or ending before their ack',async()=>{
+  const acknowledgements=[];
+  const h=harness({request:path=>{if(!path.includes('/audio'))return{};const ack=deferred();acknowledgements.push(ack);return ack.promise;}});
+  await flush();h.event('ready',{});const session=await h.session;
+  const settled=[],first=session.send(new Float32Array([.1]));
+  const second=session.send(new Float32Array(18000).fill(.2)).then(()=>settled.push('second'));
+  const third=session.send(new Float32Array(18000).fill(.3)).then(()=>settled.push('third'));
+  const final=session.finish();await flush();assert.equal(acknowledgements.length,1);
+  acknowledgements[0].resolve({nextSequence:1});await first;await flush();
+  assert.equal(h.requests[2].options.body.byteLength,96000);assert.deepEqual(settled,[]);
+  acknowledgements[1].resolve({nextSequence:2});await second;await flush();assert.deepEqual(settled,['second']);
+  assert.equal(h.requests[3].options.body.byteLength,48000);assert.equal(h.requests.some(request=>request.path.endsWith('/end')),false);
+  acknowledgements[2].resolve({nextSequence:3});await third;await flush();assert.deepEqual(settled,['second','third']);
+  h.event('done',{text:'完整'});assert.equal(await final,'完整');
+  const frames=h.requests.filter(request=>request.path.includes('/audio')).map(request=>Buffer.from(request.options.body));
+  assert.deepEqual(Buffer.concat(frames),Buffer.concat([Buffer.from(new Float32Array([.1]).buffer),Buffer.from(new Float32Array(18000).fill(.2).buffer),Buffer.from(new Float32Array(18000).fill(.3).buffer)]));
+});
+
+test('cancel rejects every batched send immediately and late acknowledgements cannot upload the remainder',async()=>{
+  const ack=deferred(),h=harness({request:()=>ack.promise});await flush();h.event('ready',{});const session=await h.session;
+  const sends=[session.send(new Float32Array(6000)),session.send(new Float32Array(6000)),session.send(new Float32Array(6000))];
+  const final=session.finish();session.cancel();
+  for(const sent of sends)await assert.rejects(sent,{name:'AbortError'});
+  await assert.rejects(final,{name:'AbortError'});ack.resolve({nextSequence:1});await flush();
+  assert.equal(h.requests.filter(request=>request.path.includes('/audio')).length,1);assert.equal(h.requests.some(request=>request.path.endsWith('/end')),false);assert.deepEqual(h.removed,['one']);
+});

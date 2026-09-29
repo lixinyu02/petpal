@@ -28,7 +28,11 @@
     "lucide-react": "^0.468.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
+    "remark-parse": "11.0.0",
     "three": "0.180.0",
+    "unified": "11.0.5",
     "ws": "8.22.0"
   },
   "devDependencies": {

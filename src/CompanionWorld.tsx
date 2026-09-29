@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, AudioLines, Check, Loader2, MessageCircle, Mic, Monitor, PawPrint, Settings2, Square, Terminal, X } from 'lucide-react';
 import CompanionScene from './avatar/CompanionScene';
+import MessageMarkdown from './MessageMarkdown';
 import { useCompanion, chooseCompanion, hydrateCompanion } from './avatar/preference';
 import { type CompanionKind, type State, type User } from './api';
 import type { PetAction } from './pet/behavior';
@@ -59,7 +60,7 @@ export default function CompanionWorld() {
         <label className="voice-conversation-model">聊天模型<select aria-label="语音聊天模型" value={providerId} disabled={voice.active} onChange={event => setProviderId(event.target.value)}>{session?.providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
         <div ref={captions} className="voice-conversation-captions" aria-label="语音对话字幕">
           {voice.transcript && <p className="voice-caption-user"><span>你</span>{voice.transcript}</p>}
-          {voice.reply && <p className="voice-caption-reply"><span>{name}</span>{voice.reply}</p>}
+          {voice.reply && <div className="voice-caption-reply"><span className="voice-caption-author">{name}</span><MessageMarkdown content={voice.reply} compact/></div>}
           {!voice.transcript && !voice.reply && <p className="voice-caption-empty">自然说话，停顿后会自动发送。回应时可打断继续说。</p>}
         </div>
         {voice.listening && <meter className="voice-input-level" aria-label="语音聊天麦克风电平" min={0} max={1} value={voice.level}/>}

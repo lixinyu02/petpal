@@ -1,4 +1,5 @@
 import DownloadsView from './DownloadsView';
+import MessageMarkdown from './MessageMarkdown';
 import { ModelPicker, ExecutionTarget, AgentOnboarding } from './WorkspaceControls';
 import AgentPermissions, { defaultAgentPermissions } from './AgentPermissions';
 import AgentQueue from './AgentQueue';
@@ -445,7 +446,7 @@ export default function App() {
                 <span className={`message-avatar ${message.role === 'assistant' ? 'pet-avatar' : ''}`}>{message.role === 'assistant' ? <PawPrint size={16}/> : '我'}</span>
                 <div className="message-content">
                   <div className="message-author">{message.role === 'assistant' ? state.settings.petName : '我'}{message.role === 'assistant' && <span>{currentMode === 'codex' ? 'Codex' : message.model || ''}</span>}</div>
-                  <MessageImages items={message.attachments}/>{message.steered&&<small className="steered-label"><CornerDownRight size={12}/>已追加到当前任务</small>}<div className="message-text">{message.content || (working && message.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : <span className="muted">{message.attachments?.length?'图片消息':message.status === 'cancelled' ? '已停止回复' : '未收到回复'}</span>)}</div>
+                  <MessageImages items={message.attachments}/>{message.steered&&<small className="steered-label"><CornerDownRight size={12}/>已追加到当前任务</small>}<div className="message-text">{(message.content ? message.role === 'assistant' ? <MessageMarkdown content={message.content}/> : message.content : null) || (working && message.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : <span className="muted">{message.attachments?.length?'图片消息':message.status === 'cancelled' ? '已停止回复' : '未收到回复'}</span>)}</div>
                   {message.status === 'error' && <small className="message-error">回复未完成</small>}
                   {message.status === 'cancelled' && message.content && <small className="muted">已停止</small>}
                   {message.role === 'assistant' && message.content && <div className="message-actions">

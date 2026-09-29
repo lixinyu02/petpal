@@ -8,6 +8,8 @@
 .voice-conversation-captions p { margin:0 0 8px;font-size:13px;line-height:1.7;white-space:pre-wrap; }
 .voice-conversation-captions p>span { display:inline-block;margin-right:9px;font-size:10px;color:#8a987c; }
 .voice-conversation-captions .voice-caption-user { color:#7d886f; }
+.voice-caption-reply { font-size:13px;line-height:1.7;margin-bottom:8px; }
+.voice-caption-author { display:block;margin-bottom:2px;font-size:10px;color:#8a987c; }
 .voice-conversation-captions .voice-caption-empty { color:#89967d;font-size:12px; }
 .voice-input-level { display:block;width:100%;height:7px;accent-color:#779965;margin:4px 0 10px; }
 .voice-conversation-actions { display:flex;align-items:center;justify-content:center;gap:12px;margin:8px 0 2px; }

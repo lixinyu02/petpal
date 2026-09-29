@@ -1,3 +1,4 @@
+import { markdownSafeCuts, markdownSpeechText } from './markdown-speech.mjs';
 const abortError = () => Object.assign(new Error('语音回复已取消。'), { name: 'AbortError' });
 
 export function createSpeechAwaiter() {
@@ -32,11 +33,14 @@ export function createSentenceSplitter(maxChars=180) {
   function drain(final) {
     const result=[];
     while(pending.length) {
-      let end=-1;
-      for(let i=0;i<Math.min(pending.length,maxChars);i++)if(/[。！？!?；;\n]/u.test(pending[i])&&(i>=7||final)){end=i+1;break;}
-      if(end<0&&pending.length>=maxChars){end=maxChars;if(/^[\uDC00-\uDFFF]$/u.test(pending[end]||''))end--;}
+      const cuts=markdownSafeCuts(pending);let end=-1;
+      for(const cut of cuts)if(cut<=maxChars&&/[。！？!?；;\n]/u.test(pending[cut-1])&&(cut>=8||final)){end=cut;break;}
+      if(end<0&&pending.length>=maxChars)end=cuts.findLast(cut=>cut<=maxChars)??cuts[0]??-1;
       if(end<0){if(!final)break;end=pending.length;}
-      const piece=pending.slice(0,end).trim();pending=pending.slice(end);if(piece)result.push(piece);
+      let piece=markdownSpeechText(pending.slice(0,end));pending=pending.slice(end);
+      // One protected link/code construct can exceed the raw character bound.
+      // Split only its extracted spoken text, never its Markdown syntax.
+      while(piece.length){let take=Math.min(maxChars,piece.length);if(/^[\uDC00-\uDFFF]$/u.test(piece[take]||''))take--;const value=piece.slice(0,take).trim();if(value)result.push(value);piece=piece.slice(take);}
     }
     return result;
   }
