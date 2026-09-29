@@ -37,7 +37,7 @@ export type CosyVoiceConfig = {configured:boolean;hasReference:boolean;reference
 type CredentialKind = 'pairing'|'session'|'none';
 export type StreamEvent = { type: string; data: Record<string, any> };
 export type Identity = {instanceId:string;userId:string};
-export type NativeExecutorStatus = {state:'disconnected'|'connecting'|'online'|'error';hostId?:string;name:string;platform:string;arch:string;error?:string};
+export type NativeExecutorStatus = {state:'disconnected'|'connecting'|'reconnecting'|'online'|'error';hostId?:string;name:string;platform:string;arch:string;error?:string;retryable?:boolean;retryAt?:number};
 export type NativeExecutor = {connect(input:Connection & Identity):Promise<NativeExecutorStatus>;disconnect():Promise<void>;status():Promise<NativeExecutorStatus>};
 declare global {
   interface Window { petpal?: { connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; remoteAck?(id:string,sequence:number):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; updates?:DesktopUpdates; executor?:NativeExecutor }; }
@@ -50,6 +50,8 @@ let nativeConnection:Connection|undefined;
 let executionTarget:'local'|'remote'='remote';
 let targetSwitchSequence=0;
 let executorScope:string|null=null;
+let executorPendingScope:string|null=null;
+let executorRevision=0;
 export const getExecutionTarget=()=>executionTarget;
 const notify = () => { for(const listener of listeners) listener(); };
 export const getConnection = requests.connection;
@@ -65,6 +67,7 @@ export function normalizeServerUrl(value:string) {
 export function setConnection(next:Connection,credentialKind:CredentialKind=next.token?'pairing':'none',target?:'local'|'remote') {
   const connection={url:normalizeServerUrl(next.url),token:next.token.trim()};
   executorScope=null;
+  executorPendingScope=null;executorRevision++;
   void window.petpal?.executor?.disconnect().catch(()=>{});
   void window.petpal?.updates?.cancel().catch(()=>{});
   executionTarget=target || (nativeConnection && connection.url === nativeConnection.url ? 'local' : 'remote');
@@ -77,13 +80,22 @@ function acceptIdentity(value:{instanceId?:string;user?:User}) {
   if(!value.instanceId||!value.user?.id)return;
   const executor=window.petpal?.executor;
   const scope=`${getSessionEpoch()}:${value.instanceId}:${value.user.id}:${Boolean(value.user.canUseCodex)}`;
-  if(executor && executorScope!==scope){
-    executorScope=scope;
-    if(value.user.canUseCodex){
-      const connection=getConnection();
-      // Main verifies this identity independently. No registration happens before authentication.
-      void executor.connect({...connection,url:connection.url || location.origin,instanceId:value.instanceId,userId:value.user.id}).catch(()=>{});
-    }else void executor.disconnect().catch(()=>{});
+  if(executor && executorScope!==scope && executorPendingScope!==scope){
+    const revision=++executorRevision;executorPendingScope=scope;executorScope=null;
+    const connection=getConnection(), canHost=value.user.canUseCodex;
+    // Main verifies identity independently. Pending calls are deduplicated, but
+    // a failed connection never permanently suppresses a later identity refresh.
+    void Promise.resolve().then(async ():Promise<NativeExecutorStatus|void>=>{
+      if(revision!==executorRevision)return;
+      return canHost ? executor.connect({...connection,url:connection.url || location.origin,instanceId:value.instanceId!,userId:value.user!.id}) : executor.disconnect();
+    }).then(status=>{
+      if(revision!==executorRevision)return;
+      if(!canHost || status && (status.state==='online'||status.state==='connecting'||status.state==='reconnecting'||status.retryable===false))executorScope=scope;
+    }).catch(()=>{
+      if(revision===executorRevision)executorScope=null;
+    }).finally(()=>{
+      if(revision===executorRevision)executorPendingScope=null;
+    });
   }
   if(identity?.instanceId===value.instanceId&&identity.userId===value.user.id)return;
   identity={instanceId:value.instanceId,userId:value.user.id};notify();

@@ -52,6 +52,7 @@
 .app-shell .composer textarea{font-size:14px;line-height:1.7}
 .app-shell .composer-footnote{color:#71806b}
 .app-shell .message-body{font-size:14px;line-height:1.85}
+.execution-reconnect{display:flex;align-items:center;gap:7px;color:#716344;font-size:12px;margin-top:10px;line-height:1.6}
 @media(max-width:650px){
  .companion-world .companion-header{padding:15px 18px;gap:12px}
  .companion-world .companion-header nav{gap:9px}

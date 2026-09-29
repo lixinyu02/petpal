@@ -1,0 +1,122 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import vm from 'node:vm';
+import ts from 'typescript';
+import { createCompanionGestures } from '../src/pet/interaction.mjs';
+
+const source = await readFile(new URL('../desktop/main.cjs', import.meta.url), 'utf8');
+const parsed = ts.createSourceFile('main.cjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+function smokeFunction(name, environment) {
+  const declaration = parsed.statements.find(item => ts.isFunctionDeclaration(item) && item.name?.text === name);
+  assert.ok(declaration, `Missing ${name}`);
+  const context = vm.createContext(environment);
+  vm.runInContext(declaration.getText(parsed), context);
+  return context[name];
+}
+
+function gestureHarness() {
+  let time = 0, action = 'idle', sequence = 0;
+  const timers = new Map(), emitted = [], inputs = [], pauses = [];
+  const gestures = createCompanionGestures({
+    emit(next) { emitted.push(next); action = next === 'wake' ? 'idle' : next; },
+    getAction: () => action, now: () => time,
+    schedule(callback, delay) { const id = ++sequence; timers.set(id, { callback, at: time + delay }); return id; },
+    unschedule: id => timers.delete(id),
+  });
+  function advance(duration) {
+    const end = time + duration;
+    while (true) {
+      const entry = [...timers].filter(([,value]) => value.at <= end).sort((a,b) => a[1].at - b[1].at)[0];
+      if (!entry) break;
+      time = entry[1].at; timers.delete(entry[0]); entry[1].callback();
+    }
+    time = end;
+  }
+  const canvas = { getAttribute: () => null, getBoundingClientRect: () => ({ left: 100, top: 50, width: 200, height: 300 }) };
+  const document = { querySelectorAll: () => [canvas] };
+  const mainWindow = { show() {}, focus() {}, webContents: {
+    executeJavaScript: script => vm.runInNewContext(script, { document, innerWidth: 1180, innerHeight: 800 }),
+    sendInputEvent(event) {
+      inputs.push(event);
+      const point = { id: 1, x: event.x, y: event.y, button: 0, pointerType: 'mouse', isPrimary: true, hit: true };
+      if (event.type === 'mouseDown') gestures.down(point);
+      if (event.type === 'mouseUp') gestures.up(point);
+      if (event.type === 'mouseMove') gestures.move(point);
+    },
+  } };
+  const gesture = smokeFunction('gestureSmokeCharacter', {
+    mainWindow,
+    setTimeout(callback, duration) { pauses.push(duration); advance(duration); callback(); },
+  });
+  return { gesture, advance, emitted, inputs, pauses, document };
+}
+
+test('native smoke pointer sequence reaches real tap, double-tap, rest and wake behavior', async () => {
+  const f = gestureHarness();
+  await f.gesture('tap'); f.advance(301); assert.deepEqual(f.emitted, ['pet']);
+  await f.gesture('double-tap'); f.advance(301); assert.deepEqual(f.emitted, ['pet','jump']);
+  await f.gesture('hold'); f.advance(301); assert.deepEqual(f.emitted, ['pet','jump','sleep']);
+  await f.gesture('tap'); f.advance(301); assert.deepEqual(f.emitted, ['pet','jump','sleep','wake']);
+  assert.equal(f.inputs.filter(event => event.type === 'mouseDown').length, 5);
+  assert.equal(f.inputs.filter(event => event.type === 'mouseUp').length, 5);
+  assert.ok(f.pauses.includes(800));
+  for (const event of f.inputs) assert.deepEqual({x:event.x,y:event.y}, {x:200,y:236});
+});
+
+test('native smoke fails clearly when the interactive character is missing', async () => {
+  const f = gestureHarness();
+  f.document.querySelectorAll = () => [];
+  await assert.rejects(f.gesture('tap'), /Interactive companion is unavailable/);
+  await assert.rejects(f.gesture('unknown'), /Unknown smoke gesture/);
+  assert.equal(f.inputs.length, 0);
+});
+
+test('native app smoke feeds real SSE records through Chat and restores instrumentation on failure', async () => {
+  const origin = 'http://127.0.0.1:4318';
+  const state = { conversations: [] };
+  const nativeFetch = async url => {
+    assert.equal(url, `${origin}/api/state`);
+    return Response.json(state);
+  };
+  const originalSpeak = () => {};
+  const window = { fetch: nativeFetch, speechSynthesis: { speak: originalSpeak }, petpal: { connection: async () => ({url:origin,token:'fixture'}) } };
+  const document = { querySelector: () => null };
+  const renderer = vm.createContext({ window, document, speechSynthesis: window.speechSynthesis, location: { href: `${origin}/?chat=1`, origin }, URL, Response, ReadableStream, TextEncoder });
+  let calls = 0, fixture, delayedSpeechEvent;
+  const mainWindow = { loadURL: async () => {}, show() {}, focus() {}, webContents: {
+    async executeJavaScript(script) {
+      calls++;
+      if (calls === 2) throw new Error('intentional failure after instrumentation');
+      const result = await vm.runInContext(script, renderer);
+      if (calls === 1) {
+        fixture = window.__appFixture;
+        await window.fetch(`${origin}/api/conversations`, { method: 'POST', body: JSON.stringify({providerId:'isolated-model'}) });
+        fixture.nextReply = '谢谢你。';
+        const response = await window.fetch(`${origin}/api/conversations/app-fixture/messages`, { method: 'POST', body: JSON.stringify({content:'原生验收'}) });
+        const chunks = []; for await (const bytes of response.body) chunks.push(bytes);
+        assert.equal(chunks.length, 1);
+        const payload = new TextDecoder().decode(chunks[0]);
+        const records = payload.trim().split('\n\n').map(record => {
+          const [event, data] = record.split('\n');
+          return { event: event.slice(7), data: JSON.parse(data.slice(6)) };
+        });
+        assert.deepEqual(records.map(record => record.event), ['meta','delta','done']);
+        assert.equal(records[1].data.text, '谢谢你。');
+        assert.equal(records[2].data.conversation.messages[0].content, '原生验收');
+        window.speechSynthesis.speak({ addEventListener(type, callback) { if(type === 'end')delayedSpeechEvent = callback; } });
+      }
+      return result;
+    },
+  } };
+  const inspect = smokeFunction('inspectAppFixture', {
+    origin, backend:{token:'fixture'}, fetch: async () => ({ok:true}), mainWindow,
+    inspectAvatarWindow: async () => ({}), process: {env:{}},
+  });
+  await assert.rejects(inspect(), /intentional failure after instrumentation/);
+  assert.equal(window.fetch, nativeFetch);
+  assert.equal(window.speechSynthesis.speak, originalSpeak);
+  assert.equal(window.__appFixture, undefined);
+  assert.doesNotThrow(() => delayedSpeechEvent({charIndex:3}));
+  assert.equal(fixture.speechEvents.at(-1).type, 'end');
+});

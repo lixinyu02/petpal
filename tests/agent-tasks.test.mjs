@@ -11,20 +11,25 @@ function fixture(t, options = {}) {
   const auth = { userId: conversation.userId, sessionHash: 'session-fixture', bootstrap: false };
   const calls = [], active = new Map(), approvals = new Map(), valid = new Set([auth.sessionHash]);
   const model = { model: 'fixture-model', effort: 'high', codexRevision: 'revision-fixture' };
-  let saved, saving, steer = async () => ({ turnId: 'turn-fixture' });
+  let saved, saving, online = true, steer = async () => ({ turnId: 'turn-fixture' });
   const store = { state: { conversations: [conversation] }, async save() { saved = structuredClone(this.state); await saving?.(); } };
   const bridge = {
     run(args) { const work = deferred(), call = { args, work }; calls.push(call); args.onEvent('turn', { turnId: `turn-${calls.length}` }); args.signal.addEventListener('abort', () => { if (!options.delayedAbort) work.reject(args.signal.reason); }, { once: true }); return work.promise; },
     steer: args => steer(args),
   };
-  const manager = createAgentTasks({ store, active, approvals, getBridge: () => bridge, redact: options.redact, resolveModel: () => ({ ...model }), authorize: entry => {
+  const authorizeIdentity = entry => {
     if (!valid.has(entry.auth.sessionHash)) throw Object.assign(new Error('Session expired'), { status: 401 });
+    return options.expiresAt;
+  };
+  const manager = createAgentTasks({ store, active, approvals, getBridge: () => bridge, redact: options.redact, resolveModel: () => ({ ...model }), authorizeRemoval: authorizeIdentity, authorize: entry => {
+    authorizeIdentity(entry);
+    if (!online) throw Object.assign(new Error('Executor offline'), { status: 409, code: 'executor_offline' });
     if (entry.model !== model.model || entry.codexRevision !== model.codexRevision) throw Object.assign(new Error('Model changed'), { status: 409 });
     return options.expiresAt;
   } });
   t.after(async () => { saving = undefined; for (const call of calls) call.work.resolve({ text: 'cleanup' }); await manager.stop(conversation); await manager.close(); });
   return { conversation, auth, calls, active, approvals, valid, model, store, manager, saved: () => saved,
-    saveWith: callback => { saving = callback; }, steerWith: callback => { steer = callback; },
+    saveWith: callback => { saving = callback; }, steerWith: callback => { steer = callback; }, setOnline: value => { online = value; },
     submit: (body, kind = 'submit') => manager.submit(conversation, body, auth, kind),
     snapshot: () => manager.snapshot(conversation),
     finish: async (index = calls.length - 1) => { calls[index].work.resolve({ text: 'done' }); await until(() => !active.has(conversation.id) || calls.length > index + 1); },
@@ -79,6 +84,31 @@ test('stop pauses pending tasks until explicit resume and retains their permissi
   await delay(20); assert.equal(f.calls.length, 1);
   await f.manager.resume(f.conversation, f.auth); await until(() => f.calls.length === 2);
   assert.deepEqual(f.calls[1].args.permissions, permissions);
+});
+
+for (const unavailable of ['offline', 'model-changed']) test(`queued work can be removed when ${unavailable} without resuming it`, async t => {
+  const f = fixture(t); await f.manager.stop(f.conversation); await f.submit(payload('remove-unavailable'));
+  const entry = f.snapshot().queue[0], beforeRevision = f.snapshot().revision;
+  if (unavailable === 'offline') f.setOnline(false); else f.model.model = 'replacement-model';
+  await assert.rejects(f.manager.resume(f.conversation, f.auth), { status: 409 });
+  await assert.rejects(f.manager.edit(f.conversation, entry.id, { revision: entry.revision, content: 'still cannot edit' }, f.auth), { status: 409 });
+  await f.manager.edit(f.conversation, entry.id, { revision: entry.revision }, f.auth, true);
+  assert.equal(f.snapshot().queue.length, 0); assert.equal(f.snapshot().submissions[0].status, 'cancelled');
+  assert.equal(f.snapshot().paused, true); assert.equal(f.snapshot().revision, beforeRevision + 1);
+  assert.equal(f.saved().conversations[0].agent.queue.length, 0); assert.equal(f.calls.length, 0);
+});
+
+test('queue removal keeps current-session ownership and revision checks even when execution is unavailable', async t => {
+  const f = fixture(t); await f.manager.stop(f.conversation); await f.submit(payload('remove-authenticated'));
+  const entry = f.snapshot().queue[0]; f.setOnline(false);
+  await assert.rejects(f.manager.edit(f.conversation, entry.id, { revision: entry.revision + 1 }, f.auth, true), { status: 409 });
+  await assert.rejects(f.manager.edit(f.conversation, entry.id, { revision: entry.revision }, { ...f.auth, userId: 'other-user' }, true), { status: 404 });
+  f.valid.delete(f.auth.sessionHash);
+  await assert.rejects(f.manager.edit(f.conversation, entry.id, { revision: entry.revision }, f.auth, true), { status: 401 });
+  assert.equal(f.snapshot().queue.length, 1); assert.equal(f.snapshot().submissions[0].status, 'queued');
+  const current = { ...f.auth, sessionHash: 'replacement-session' }; f.valid.add(current.sessionHash);
+  await f.manager.edit(f.conversation, entry.id, { revision: entry.revision }, current, true);
+  assert.equal(f.snapshot().queue.length, 0); assert.equal(f.calls.length, 0);
 });
 
 test('steer receipts stay idempotent after inherited permissions and active turn disappear', async t => {

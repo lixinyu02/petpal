@@ -50,7 +50,7 @@ export function restoreAgentState(conversation) {
 }
 
 /** Persistent receipts and short per-conversation locks own task lifetime, not HTTP. */
-export function createAgentTasks({ store, active, approvals, getBridge, authorize, resolveModel, resolveHost = (_userId, hostId) => ({ hostId, hostName: '中央服务器' }), resolveImages = async () => [], redact = value => value }) {
+export function createAgentTasks({ store, active, approvals, getBridge, authorize, authorizeRemoval = authorize, resolveModel, resolveHost = (_userId, hostId) => ({ hostId, hostName: '中央服务器' }), resolveImages = async () => [], redact = value => value }) {
   const locks = new Map(), generations = new Map(), removed = new Set();
   let closed = false;
   const data = conversation => conversation.agent ??= empty();
@@ -63,11 +63,11 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     return result;
   };
   const epoch = auth => generations.get(auth.sessionHash) ?? 0;
-  const check = entry => {
+  const check = (entry, authorizeEntry = authorize) => {
     if (closed) throw failure(503, 'Agent 服务正在退出。');
     if (removed.has(entry.conversationId) || !store.state.conversations.some(item => item.id === entry.conversationId && item.userId === entry.auth.userId)) throw failure(404, 'Agent 会话已删除。');
     if (entry.auth.generation !== epoch(entry.auth)) throw failure(401, '这次提交所属登录已结束。');
-    return authorize(entry);
+    return authorizeEntry(entry);
   };
   const save = async conversation => {
     try { await store.save(); }
@@ -248,7 +248,9 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
       const agent = data(conversation), entry = agent.queue.find(item => item.id === id);
       if (!entry) throw failure(404, '待执行任务不存在。');
       if (!Number.isSafeInteger(body.revision) || body.revision !== entry.revision) throw failure(409, '队列内容已变化，请刷新后重试。');
-      check({ ...entry, auth: { ...auth, generation: epoch(auth) } });
+      // Removing unstarted work must remain possible when its computer or model
+      // is unavailable. Ownership, the current session and revision still apply.
+      check({ ...entry, auth: { ...auth, generation: epoch(auth) } }, remove ? authorizeRemoval : authorize);
       if (remove) { agent.queue = agent.queue.filter(item => item !== entry); agent.submissions.find(item => item.entryId === id).status = 'cancelled'; }
       else { const images = attachments(body.attachmentIds), next = content(body.content, images); check({ ...entry, content: next, attachmentIds: images, auth: { ...auth, generation: epoch(auth) } }); entry.content = next; entry.attachmentIds = images; entry.revision++; }
       bump(conversation); await save(conversation);

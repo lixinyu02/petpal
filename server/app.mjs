@@ -173,11 +173,15 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (!eligibleProviders(user).includes(provider.id)) throw failure(400, 'Agent 模型必须来自当前同一 Responses 服务；其他连接仍可用于 Chat。');
     return { model: provider.model, effort: provider.reasoningEffort || '', codexRevision: config.revision };
   };
+  const authorizeAgentIdentity = auth => {
+    const user = state.users.find(item => item.id === auth.userId);
+    const session = state.sessions.find(item => item.userId === user?.id && item.tokenHash === auth.sessionHash && item.expiresAt > Date.now());
+    const bootstrap = auth.bootstrap && secureEqual(auth.sessionHash, ownerTokenHash) && isOwner(user ?? {});
+    if (!user || user.disabled || (!bootstrap && !session)) throw failure(401, 'Agent 提交所属账号或登录已失效。');
+    return { user, expiresAt: bootstrap ? undefined : session.expiresAt };
+  };
   const authorizeAgentEntry = entry => {
-      const user = state.users.find(item => item.id === entry.auth.userId);
-      const session = state.sessions.find(item => item.userId === user?.id && item.tokenHash === entry.auth.sessionHash && item.expiresAt > Date.now());
-      const bootstrap = entry.auth.bootstrap && secureEqual(entry.auth.sessionHash, ownerTokenHash) && isOwner(user ?? {});
-      if (!user || user.disabled || (!bootstrap && !session)) throw failure(401, 'Agent 提交所属账号或登录已失效。');
+      const { user, expiresAt } = authorizeAgentIdentity(entry.auth);
       requirePermissions(user, entry.permissions);
       const conversation = state.conversations.find(item => item.id === entry.conversationId && item.userId === user.id);
       if (!conversation || conversation.mode !== 'codex' || conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Agent 会话已删除或配置已变化，请新建会话。');
@@ -185,7 +189,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       assertImageSupport(entry.providerId ? providerById(entry.providerId, user) : state.codexConfig, [...conversation.messages, entry]);
       const current = resolveAgentModel(user.id, entry.providerId);
       if (entry.codexRevision !== current.codexRevision || entry.model !== current.model || entry.effort !== current.effort) throw failure(409, 'Agent 模型配置已变化，请重新提交。');
-      return bootstrap ? undefined : session.expiresAt;
+      return expiresAt;
   };
   const authorizeExecutorSession = auth => {
     const user = state.users.find(item => item.id === auth.userId);
@@ -197,6 +201,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const executors = createExecutors({ ...executorsOptions, store, authorizeSession: authorizeExecutorSession, authorizeEntry: authorizeAgentEntry, readAttachment: imageAttachments.read, getConfig: () => state.codexConfig, redact: redactCodex });
   const agentTasks = createAgentTasks({ store, active, approvals, getBridge: entry => entry?.hostId && entry.hostId !== 'central' ? new RemoteCodexBridge(executors, entry) : bridge, redact: redactCodex, resolveModel: resolveAgentModel, resolveImages: imageAttachments.images, resolveHost: executors.target,
     authorize: entry => { const expiresAt = authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId ?? 'central'); return expiresAt; },
+    authorizeRemoval: entry => authorizeAgentIdentity(entry.auth).expiresAt,
   });
   const providerIds = value => {
     if (!Array.isArray(value) || value.length > 32 || value.some(id => typeof id !== 'string' || !state.providers.some(provider => provider.id === id))) throw failure(400, '模型授权列表无效。');
@@ -570,11 +575,11 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     catch (error) { throw failure(409, error.message); }
   });
 
-  const agentConversation = req => {
-    requireCurrentAuth(req); requireCodex(req.user);
+  const agentConversation = (req, removing = false) => {
+    requireCurrentAuth(req); if (!removing) requireCodex(req.user);
     const conversation = conversationById(req.params.id, req.user);
     if (conversation.mode !== 'codex') throw failure(400, '只有 Agent 会话可使用任务队列。');
-    if (conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Agent 配置已变化，请新建会话。');
+    if (!removing && conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Agent 配置已变化，请新建会话。');
     return conversation;
   };
   const agentAuth = req => ({ userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap });
@@ -586,7 +591,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     res.status(200).json({ conversation: visibleConversation(conversation), submission });
   });
   for (const method of ['patch', 'delete']) app[method]('/api/conversations/:id/agent/queue/:entryId', async (req, res) => {
-    const conversation = agentConversation(req);
+    const conversation = agentConversation(req, method === 'delete');
     await agentTasks.edit(conversation, req.params.entryId, req.body, agentAuth(req), method === 'delete');
     requireCurrentAuth(req); res.json({ conversation: visibleConversation(conversation) });
   });

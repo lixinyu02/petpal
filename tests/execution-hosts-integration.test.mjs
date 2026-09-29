@@ -40,7 +40,7 @@ async function fixture(t) {
     const result = await request('/admin/users', { method: 'POST', body: { username, password: 'integration-password', agentAccess: 'full', providerIds: [provider.id] } });
     assert.equal(result.status, 201); return { user: result.data.user, token: await login(username) };
   };
-  const addWorker = async (name, member, token = member.token) => {
+  const addWorker = async (name, member, token = member.token, options = {}) => {
     const worker = new DesktopExecutor({ dataDir: path.join(directory, name), name, resolveCommand: async () => ({ file: 'fixture-codex', args: [] }), toolsFactory: tools,
       bridgeFactory(options) {
         assert.notEqual(options.config.apiKey, centralKey); assert.notEqual(options.config.apiKey, provider.apiKey);
@@ -62,7 +62,7 @@ async function fixture(t) {
           async approve(...args) { active.approvals.push(args); return { ok: true }; },
           async close() { active?.reject?.(new Error('fixture stopped')); },
         };
-      },
+      }, ...options,
     });
     workers.push(worker);
     const status = await worker.connect({ url, token, instanceId: store.state.instanceId, userId: member.user.id });
@@ -106,6 +106,34 @@ test('two logged-in desktops execute selected tasks while central conversation a
   const otherChat = (await f.request('/conversations', { token: other.token, method: 'POST', body: { mode: 'codex' } })).data;
   const foreign = await f.request(`/conversations/${otherChat.id}/agent/submit`, { token: other.token, method: 'POST', body: { submissionId: randomUUID(), content: 'forbidden', providerId: f.provider.id, hostId: b.status().hostId } });
   assert.ok(foreign.status >= 400); assert.equal(f.calls.length, 3);
+});
+
+test('a recovered desktop comes online while its interrupted run stays unknown and queued work stays paused', {timeout:25000}, async t => {
+  const f=await fixture(t),user=await f.member('recoveryuser');let triggerFailure=false,releaseRetry;
+  const worker=await f.addWorker('Recover-PC',user,user.token,{
+    fetchImpl:async(url,options)=>{
+      if(triggerFailure && url.endsWith('/events')){triggerFailure=false;throw new TypeError('simulated connection reset');}
+      return fetch(url,options);
+    },
+    retryWait:(_ms,signal)=>new Promise(resolve=>{releaseRetry=resolve;signal.addEventListener('abort',resolve,{once:true});}),
+  });
+  const original=worker.current,hostId=worker.status().hostId;
+  const chat=(await f.request('/conversations',{token:user.token,method:'POST',body:{mode:'codex'}})).data;
+  const route=`/conversations/${chat.id}`, request=(suffix,body)=>f.request(route+suffix,{token:user.token,method:'POST',body});
+  const body=content=>({submissionId:randomUUID(),content,providerId:f.provider.id,hostId});
+  await request('/agent/submit',body('HOLD for disconnection'));
+  await until(()=>f.calls[0]?.finish);
+  assert.equal((await request('/agent/submit',body('must remain queued'))).status,200);
+  triggerFailure=true;f.calls[0].args.onEvent('delta',{text:'delivery cannot be confirmed'});
+  await until(()=>worker.status().state==='reconnecting' && releaseRetry);
+  const interrupted=await until(async()=>{const result=await f.request(route,{token:user.token});return result.data.agent.run?.status==='unknown'?result.data:null;});
+  assert.equal(interrupted.agent.paused,true);assert.equal(interrupted.agent.queue.length,1);
+  releaseRetry();await until(()=>worker.status().state==='online');
+  assert.equal(worker.status().hostId,hostId);assert.notEqual(worker.current.connectionId,original.connectionId);
+  const restored=(await f.request(route,{token:user.token})).data;
+  assert.equal(restored.agent.run.status,'unknown');assert.equal(restored.agent.paused,true);assert.equal(restored.agent.queue.length,1);
+  assert.equal(f.calls.length,1);assert.equal(f.centralCalls.length,0);
+  assert.ok((await request('/agent/queue/resume',{})).status>=400);assert.equal(f.calls.length,1);
 });
 
 test('remote approvals, steer and stop stay on the captured desktop and leave its queue paused', { timeout: 25000 }, async t => {

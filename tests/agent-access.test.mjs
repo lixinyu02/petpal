@@ -46,7 +46,7 @@ async function fixture(t) {
   const submit = (chat, token, content = 'fixture task', extra = {}) => request(`/conversations/${chat.id}/agent/submit`, { token, method: 'POST', body: { submissionId: randomUUID(), content, ...(token !== bootstrap ? { providerId: providers.same.id } : {}), ...extra } });
   t.after(async () => { await app.close(); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-agent-access-'))); await rm(directory, { recursive: true, force: true }); });
   return { request, directory, member, create, submit, login, calls, approvals, providers, ownerId: store.state.ownerId,
-    restart: async () => { await app.close(); app = await createPetServer({ dataDir: directory, token: bootstrap, codex }); await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve)); },
+    restart: async mutate => { await app.close(); if (mutate) { const saved = await new JsonStore(directory).init(); mutate(saved.state); await saved.save(); } app = await createPetServer({ dataDir: directory, token: bootstrap, codex }); await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve)); },
   };
 }
 
@@ -129,4 +129,26 @@ test('members cannot bypass assigned models with null/default provider or legacy
   assert.equal(f.calls.length, 0);
   assert.equal((await f.submit(chat, member.token, 'assigned model works')).status, 200);
   await until(() => f.calls.length === 1); assert.equal(f.calls[0].args.model, 'member-model');
+});
+
+test('HTTP queue deletion remains authorized when its host is offline or saved model configuration changed', async t => {
+  const f = await fixture(t), alice = await f.member('queue-alice', 'workspace'), bob = await f.member('queue-bob', 'workspace');
+  const chat = await f.create(alice.token);
+  assert.equal((await f.request(`/conversations/${chat.id}/stop`, { token: alice.token, method: 'POST', body: {} })).status, 200);
+  const registration = await f.request('/agent/executors/register', { token: alice.token, method: 'POST', body: { deviceId: randomUUID(), name: 'Queue PC', platform: 'win32', arch: 'x64' } });
+  assert.equal(registration.status, 200);
+  for (const content of ['offline removal', 'obsolete model removal']) assert.equal((await f.submit(chat, alice.token, content, { hostId: registration.data.hostId })).status, 200);
+  const before = (await f.request(`/conversations/${chat.id}`, { token: alice.token })).data;
+  const [first, second] = before.agent.queue;
+  assert.equal((await f.request(`/agent/executors/${registration.data.connectionId}`, { token: alice.token, method: 'DELETE' })).status, 200);
+  const remove = (entry, token = alice.token, revision = entry.revision) => f.request(`/conversations/${chat.id}/agent/queue/${entry.id}`, { token, method: 'DELETE', body: { revision } });
+  assert.equal((await remove(first, bob.token)).status, 404);
+  assert.equal((await remove(first, '')).status, 401);
+  assert.equal((await remove(first, alice.token, first.revision + 1)).status, 409);
+  assert.equal((await remove(first)).status, 200);
+  await f.restart(state => { state.codexConfig.revision = randomUUID(); state.providers.find(provider => provider.id === f.providers.same.id).model = 'replacement-model'; });
+  assert.equal((await f.request(`/conversations/${chat.id}/agent/queue/resume`, { token: alice.token, method: 'POST', body: {} })).status, 409);
+  const removed = await remove(second); assert.equal(removed.status, 200);
+  assert.equal(removed.data.conversation.agent.queue.length, 0); assert.equal(removed.data.conversation.agent.paused, true);
+  assert.deepEqual(removed.data.conversation.messages, before.messages); assert.equal(f.calls.length, 0);
 });

@@ -216,8 +216,103 @@ test('outbound polling really dispatches; an unacknowledged event closes the own
   });
   t.after(() => manager.close()); await manager.connect(input()); const ctx = manager.current;
   await started.promise; await closed.promise; await ctx.retiring;
-  assert.equal(runs, 1); assert.equal(manager.status().state, 'error'); assert.equal(ctx.connection.token, ''); assert.equal(stoppedEvents, 0);
-  assert.match(manager.status().error, /状态需在工作台确认/); assert.doesNotMatch(JSON.stringify(manager.status()), /secret diagnostics|central-session-secret/);
+  assert.equal(runs, 1); assert.equal(manager.status().state, 'reconnecting'); assert.equal(ctx.connection.token, ''); assert.equal(stoppedEvents, 0);
+  assert.match(manager.status().error, /原任务保持暂停/); assert.doesNotMatch(JSON.stringify(manager.status()), /secret diagnostics|central-session-secret/);
+});
+
+async function eventually(predicate) {
+  const deadline = Date.now() + 4000;
+  while(Date.now() < deadline) { const value = predicate(); if(value)return value; await new Promise(resolve=>setImmediate(resolve)); }
+  assert.fail('Executor did not reach expected state');
+}
+function controlledRetries() {
+  const waits=[];
+  return { waits, retryWait(ms,signal) { const gate=deferred(); waits.push({ms,signal,release:gate.resolve}); signal.addEventListener('abort',gate.resolve,{once:true}); return gate.promise; } };
+}
+const pendingPoll = init => new Promise((_resolve,reject)=>{if(init.signal.aborted)reject(new Error('aborted'));else init.signal.addEventListener('abort',()=>reject(new Error('aborted')),{once:true});});
+
+test('failed initial identity transport reconnects with backoff and repeated connect does not bypass it', async t => {
+  const retries=controlledRetries(); let identities=0;
+  const manager=await fixture(t,{...retries,fetchImpl:async()=>{if(++identities===1)throw new TypeError('fetch failed');return Response.json({instanceId:'instance-one',user:{id:'user-one',canUseCodex:true}});}});
+  await assert.rejects(manager.connect(input()));await eventually(()=>retries.waits.length===1);
+  assert.equal(manager.status().state,'reconnecting'); assert.equal(retries.waits[0].ms,1000);
+  assert.equal((await manager.connect(input())).state,'reconnecting');assert.equal(identities,1);
+  retries.waits[0].release();await eventually(()=>manager.status().state==='online');
+  assert.equal(identities,2);assert.equal(manager.registrations.length,1);
+});
+
+test('poll failure rotates connection epochs with bounded backoff and never duplicates the worker', async t => {
+  const retries=controlledRetries(),dataDir=await directory(t);let registrations=0,healthy=false;
+  const manager=new DesktopExecutor({dataDir,...retries,resolveCommand:async()=>({}),fetchImpl:async(url,init)=>{
+    if(url.endsWith('/auth/me'))return Response.json({instanceId:'instance-one',user:{id:'user-one',canUseCodex:true}});
+    if(url.endsWith('/register'))return Response.json({hostId:'host-one',connectionId:`connection-${++registrations}`,leaseMs:30000,pollMs:20000});
+    if(url.endsWith('/poll'))return healthy?pendingPoll(init):new Response('unavailable',{status:503});
+    return Response.json({ok:true});
+  }});t.after(()=>manager.close());await manager.connect(input());
+  for(let i=0;i<8;i++){
+    await eventually(()=>retries.waits.length===i+1);assert.equal(manager.status().state,'reconnecting');
+    assert.equal(retries.waits[i].ms,[1000,2000,4000,8000,15000,30000,30000,30000][i]);
+    if(i===7)healthy=true;retries.waits[i].release();
+  }
+  await eventually(()=>manager.status().state==='online');assert.equal(registrations,9);assert.equal(manager.current.connectionId,'connection-9');
+});
+
+test('401 and 403 are terminal until an explicit new login, without a reconnect loop', async t => {
+  for(const status of [401,403]){
+    const retries=controlledRetries();let requests=0;
+    const manager=await fixture(t,{...retries,fetchImpl:async()=>{requests++;return new Response('denied',{status});}});
+    await assert.rejects(manager.connect(input()));assert.equal(manager.status().state,'error');assert.equal(manager.status().retryable,false);
+    for(let i=0;i<4;i++)assert.equal((await manager.connect(input())).state,'error');
+    assert.equal(requests,1);assert.equal(retries.waits.length,0);
+    await manager.disconnect();await assert.rejects(manager.connect(input()));assert.equal(requests,2);
+  }
+});
+
+test('a failed heartbeat retires the pending poll and reconnects with a fresh epoch', async t => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  const retries=controlledRetries(),dataDir=await directory(t);let registrations=0,heartbeats=0,pollAborted=0;
+  const manager=new DesktopExecutor({dataDir,...retries,resolveCommand:async()=>({}),fetchImpl:async(url,init)=>{
+    if(url.endsWith('/auth/me'))return Response.json({instanceId:'instance-one',user:{id:'user-one',canUseCodex:true}});
+    if(url.endsWith('/register'))return Response.json({hostId:'host-one',connectionId:`connection-${++registrations}`,leaseMs:3000,pollMs:20000});
+    if(url.endsWith('/poll')){init.signal.addEventListener('abort',()=>pollAborted++,{once:true});return pendingPoll(init);}
+    if(url.endsWith('/heartbeat')){heartbeats++;return new Response('unavailable',{status:502});}
+    return Response.json({ok:true});
+  }});t.after(()=>manager.close());await manager.connect(input());t.mock.timers.tick(1000);
+  await eventually(()=>retries.waits.length===1);assert.equal(heartbeats,1);assert.equal(pollAborted,1);
+  retries.waits[0].release();await eventually(()=>manager.status().state==='online');assert.equal(registrations,2);
+});
+
+test('logout and account changes abort retry waits and cannot resurrect the previous identity', async t => {
+  for(const interrupt of ['logout','account']){
+    const retries=controlledRetries();let identities=0;
+    const manager=await fixture(t,{...retries,fetchImpl:async(_url,init)=>{
+      identities++;if(init.headers.Authorization.endsWith('central-session-secret'))throw new TypeError('offline');
+      return Response.json({instanceId:'instance-one',user:{id:'user-two',canUseCodex:true}});
+    }});
+    await assert.rejects(manager.connect(input()));await eventually(()=>retries.waits.length===1);
+    const previous=manager.desired;
+    if(interrupt==='logout')await manager.disconnect();else await manager.connect(input({token:'another-session',userId:'user-two'}));
+    assert.equal(retries.waits[0].signal.aborted,true);assert.equal(previous.connection.token,'');
+    retries.waits[0].release();await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(identities,interrupt==='logout'?1:2);assert.equal(manager.status().state,interrupt==='logout'?'disconnected':'online');
+    if(interrupt==='account')assert.equal(manager.current.connection.userId,'user-two');
+  }
+});
+
+test('reconnection waits for the previous owned process to close and does not resend its task', async t => {
+  const retries=controlledRetries(),dataDir=await directory(t),started=deferred(),closeRequested=deferred(),exit=deferred();
+  let registrations=0,runs=0,polls=0;const events=[];
+  const manager=new DesktopExecutor({dataDir,...retries,resolveCommand:async()=>({}),toolsFactory:()=>({async close(){}}),fetchImpl:async(url,init)=>{
+    if(url.endsWith('/auth/me'))return Response.json({instanceId:'instance-one',user:{id:'user-one',canUseCodex:true}});
+    if(url.endsWith('/register'))return Response.json({hostId:'host-one',connectionId:`connection-${++registrations}`,leaseMs:30000,pollMs:20000});
+    if(url.endsWith('/poll')){if(++polls===1)return Response.json({commands:[runCommand()]});return pendingPoll(init);}
+    if(url.endsWith('/events')){const event=JSON.parse(init.body);events.push(event.event);if(event.event==='delta')throw new TypeError('connection reset');}
+    return Response.json({ok:true});
+  },bridgeFactory:()=>({run({signal,onEvent}){runs++;started.resolve();onEvent('delta',{text:'partial'});return new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('stopped')),{once:true}));},close(){closeRequested.resolve();return exit.promise;}})});
+  t.after(()=>{exit.resolve();return manager.close();});await manager.connect(input());await started.promise;await closeRequested.promise;
+  assert.equal(registrations,1);assert.equal(retries.waits.length,0);exit.resolve();await eventually(()=>retries.waits.length===1);
+  retries.waits[0].release();await eventually(()=>manager.status().state==='online');assert.equal(registrations,2);assert.equal(runs,1);
+  assert.equal(events.includes('stopped'),false);assert.equal(events.includes('complete'),false);
 });
 
 test('a registration that finishes after account change is retired before the next identity starts', async t => {

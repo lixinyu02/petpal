@@ -13,7 +13,9 @@ const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$
 const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
 const hash = value => createHash('sha256').update(value).digest('hex');
 const stopped = () => Object.assign(new Error('执行电脑连接已结束。'), { name: 'AbortError' });
-const invalid = () => new Error('执行电脑协议数据无效。');
+const invalid = () => Object.assign(new Error('执行电脑协议数据无效。'), { code: 'executor_protocol_invalid' });
+const retryable = (error, registered) => error?.retryable === true || [408, 425, 429].includes(error?.status) || error?.status >= 500 && error?.status <= 599 || registered && [404, 409].includes(error?.status);
+const RETRY_DELAYS = [1000, 2000, 4000, 8000, 15000, 30000];
 const imageExtensions = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 const DELTA_CHARS = 8000; // Even all-control-character JSON stays under the central 64 KiB character bound.
 const delay = (ms, signal) => new Promise(resolve => {
@@ -79,12 +81,13 @@ export function createExecutorHandlers(executor, isAllowed) {
 export class DesktopExecutor {
   constructor({ dataDir, fetchImpl = globalThis.fetch, bridgeFactory = options => new CodexBridge(options),
     toolsFactory = options => createDesktopTools(options), resolveCommand = resolveCodexCommand,
-    name = hostname(), platform = process.platform, arch = process.arch } = {}) {
+    name = hostname(), platform = process.platform, arch = process.arch, retryWait = delay } = {}) {
     if (typeof dataDir !== 'string' || !path.isAbsolute(dataDir)) throw new Error('执行电脑数据目录必须是绝对路径。');
     this.dataDir = dataDir; this.fetch = fetchImpl; this.bridgeFactory = bridgeFactory;
     this.toolsFactory = toolsFactory; this.resolveCommand = resolveCommand;
     this.metadata = { name: String(name).replace(/[\x00-\x1f\x7f]/g, '').slice(0, 120) || 'PetPal PC', platform, arch };
     this.current = null; this.generation = 0; this.transition = Promise.resolve(); this.closed = false;
+    this.desired = null; this.recovery = null; this.blocked = null; this.retryWait = retryWait;
     this.visible = { state: 'disconnected', ...this.metadata };
   }
 
@@ -92,7 +95,8 @@ export class DesktopExecutor {
   _queue(work) { const result = this.transition.catch(() => {}).then(work); this.transition = result.catch(() => {}); return result; }
   _assert(ctx) { if (this.closed || this.current !== ctx || ctx.generation !== this.generation || ctx.controller.signal.aborted) throw stopped(); }
   _invalidate() {
-    const old = this.current;
+    const old = this.current || this.recovery?.ctx;
+    this.recovery?.controller.abort(); this.recovery = null;
     if (old) { old.controller.abort(); old.run?.controller.abort(); void old.run?.bridge?.close().catch(() => {}); }
     return old;
   }
@@ -101,11 +105,23 @@ export class DesktopExecutor {
     let connection;
     try { connection = validateExecutorConnection(input); } catch (error) { return Promise.reject(error); }
     if (this.closed) return Promise.reject(stopped());
-    const current = this.current;
-    if (current && !current.controller.signal.aborted && Object.keys(connection).every(key => connection[key] === current.connection[key])) return current.ready;
+    const same = other => other && Object.keys(connection).every(key => connection[key] === other[key]);
+    if (same(this.desired?.connection)) return this.current?.ready ?? Promise.resolve(this.status());
+    // A rejected credential/permission or invalid installation needs an explicit
+    // new login. Repeated renderer identity refreshes must not retry it forever.
+    if (same(this.blocked)) return Promise.resolve(this.status());
     const generation = ++this.generation, old = this._invalidate();
+    if (this.desired) this.desired.connection.token = '';
+    if (this.blocked) this.blocked.token = '';
+    this.blocked = null;
+    const desired = { generation, connection, failures: 0 }; this.desired = desired;
+    return this._begin(desired, old);
+  }
+
+  _begin(desired, old) {
+    const { generation } = desired, connection = { ...desired.connection };
     this.visible = { state: 'connecting', ...this.metadata };
-    const ctx = { generation, connection, controller: new AbortController(), run: null, loops: [], eventTail: Promise.resolve(), retired: false };
+    const ctx = { generation, connection, desired, controller: new AbortController(), run: null, loops: [], eventTail: Promise.resolve(), retired: false };
     this.current = ctx;
     ctx.ready = this._queue(async () => {
       await this._retire(old); this._assert(ctx);
@@ -118,12 +134,13 @@ export class DesktopExecutor {
         await mkdir(path.join(ctx.directory, 'receipts'), { recursive: true, mode: 0o700 }); this._assert(ctx);
         await this.resolveCommand(); this._assert(ctx);
         await this._register(ctx); this._assert(ctx);
+        ctx.onlineAt = Date.now();
         this.visible = { state: 'online', hostId: ctx.hostId, ...this.metadata };
         this._start(ctx);
         return this.status();
       } catch (error) {
+        this._failed(ctx, error);
         await this._retire(ctx);
-        if (this.current === ctx && generation === this.generation) { this.current = null; this.visible = { state: 'error', ...this.metadata, error: '执行电脑连接失败，请检查网络、Agent 权限与桌面安装。' }; }
         throw ctx.controller.signal.aborted && generation !== this.generation ? stopped() : new Error('执行电脑连接失败，请检查网络、Agent 权限与桌面安装。');
       }
     });
@@ -132,6 +149,9 @@ export class DesktopExecutor {
 
   disconnect() {
     ++this.generation; const old = this._invalidate(); this.current = null;
+    if (this.desired) this.desired.connection.token = '';
+    if (this.blocked) this.blocked.token = '';
+    this.desired = this.blocked = null;
     this.visible = { state: 'disconnected', ...this.metadata };
     return this._queue(() => this._retire(old));
   }
@@ -142,10 +162,17 @@ export class DesktopExecutor {
     signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) controller.abort();
     const timer = setTimeout(abort, timeout); timer.unref?.();
     try {
-      const response = await this.fetch(`${ctx.connection.url}${route}`, { method,
-        headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: controller.signal, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer' });
-      const bytes = await readBytes(response, limit, controller.signal);
+      let response, bytes;
+      try {
+        response = await this.fetch(`${ctx.connection.url}${route}`, { method,
+          headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: controller.signal, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer' });
+        bytes = await readBytes(response, limit, controller.signal);
+      } catch (error) {
+        if (signal?.aborted) throw stopped();
+        if (error.code === 'executor_protocol_invalid') throw error;
+        throw Object.assign(new Error('执行电脑网络暂时不可用。'), { retryable: true });
+      }
       if (!response.ok) throw Object.assign(new Error('执行电脑服务请求失败。'), { status: response.status });
       let value; try { value = JSON.parse(bytes.toString('utf8')); } catch { throw invalid(); }
       if (!object(value)) throw invalid(); return value;
@@ -180,7 +207,7 @@ export class DesktopExecutor {
       }
     })();
     ctx.loops = [poll, heartbeat];
-    for (const loop of ctx.loops) void loop.catch(() => this._failed(ctx));
+    for (const loop of ctx.loops) void loop.catch(error => this._failed(ctx, error));
   }
 
   async _receipt(ctx, command) {
@@ -231,7 +258,7 @@ export class DesktopExecutor {
       const run = { id: command.runId, commandId: command.id, sequence: 0, pendingBytes: 0, outputBytes: 0, files: new Map(),
         controller: new AbortController(), bridge: null, conversationId: command.conversationId, relayToken: command.relayToken, events: Promise.resolve(), stopping: false };
       ctx.run = run;
-      run.done = this._run(ctx, run, command).catch(() => this._failed(ctx));
+      run.done = this._run(ctx, run, command).catch(error => this._failed(ctx, error));
       return;
     }
     const run = ctx.run;
@@ -264,7 +291,7 @@ export class DesktopExecutor {
       this._assert(ctx); const response = await this._json(ctx, `${ctx.route}/events`, payload);
       if (response.ok !== true) throw invalid();
     }).finally(() => { run.pendingBytes -= bytes; });
-    run.events = send; void send.catch(() => this._failed(ctx)); return send;
+    run.events = send; void send.catch(error => this._failed(ctx, error)); return send;
   }
 
   async _images(ctx, run, attachments) {
@@ -352,10 +379,33 @@ export class DesktopExecutor {
     return ctx.retiring;
   }
 
-  _failed(ctx) {
+  _failed(ctx, error) {
     if (this.current !== ctx || ctx.controller.signal.aborted) return;
-    ++this.generation; this.current = null;
-    this.visible = { state: 'error', ...this.metadata, error: '执行电脑已离线；运行状态需在工作台确认，任务不会自动重试。' };
-    void this._retire(ctx).catch(() => {});
+    this.current = null;
+    const desired = this.desired;
+    if (!desired || !retryable(error, Boolean(ctx.connectionId))) {
+      this.blocked = desired ? { ...desired.connection } : null;
+      if (desired) desired.connection.token = '';
+      this.desired = null;
+      this.visible = { state: 'error', retryable: false, ...this.metadata, error: '执行电脑已离线，请检查账号权限与桌面安装后重新登录；原任务不会重试。' };
+      const retirement = { ctx, controller: new AbortController() }; this.recovery = retirement;
+      void this._retire(ctx).catch(() => {}).finally(() => { if (this.recovery === retirement) this.recovery = null; }); return;
+    }
+    if (ctx.onlineAt && Date.now() - ctx.onlineAt >= 30000) desired.failures = 0;
+    const pause = RETRY_DELAYS[Math.min(desired.failures++, RETRY_DELAYS.length - 1)];
+    const recovery = { ctx, desired, controller: new AbortController() }; this.recovery = recovery;
+    this.visible = { state: 'reconnecting', retryable: true, ...this.metadata,
+      error: '网络中断，正在重新连接执行电脑；原任务保持暂停，不会自动重试。' };
+    // Keep retry scheduling outside run/loop promises: retirement waits for them.
+    // A new connection only starts after the previous owned process has closed.
+    void (async () => {
+      await this._retire(ctx);
+      if (recovery.controller.signal.aborted || this.recovery !== recovery) return;
+      this.visible = { ...this.visible, retryAt: Date.now() + pause };
+      await this.retryWait(pause, recovery.controller.signal);
+      if (recovery.controller.signal.aborted || this.closed || this.recovery !== recovery || this.desired !== desired || desired.generation !== this.generation) return;
+      this.recovery = null;
+      await this._begin(desired, null).catch(() => {});
+    })().catch(() => {});
   }
 }

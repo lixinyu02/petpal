@@ -56,7 +56,7 @@ test('real bundled Codex 0.143 performs Responses dynamic-tool approval and resu
     describe(name, args) { assert.equal(name, 'petpal_music_command'); assert.deepEqual(args, { player: 'qqmusic', action: 'pause' }); return { description: 'Approve simulated pause (no real software)', approvalRequired: true }; },
     async execute(name, args, { signal }) { signal.throwIfAborted(); executes++; return { ok: true, source: 'isolated-mock', simulated: true }; },
   } });
-  t.after(async () => { await bridge.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-codex-real-'))); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => { await bridge.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-codex-real-'))); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const status = await bridge.status();
   assert.equal(status.available, true, status.error); assert.equal(status.apiVerified, false);
   assert.equal(requests.length, 0, 'status must not invoke the model');
@@ -107,7 +107,7 @@ test('real bundled Codex sends gpt-6-luna reasoning max unchanged on initial and
   const bridge = new CodexBridge({ dataDir: directory, config, command: binary.file });
   t.after(async () => {
     await bridge.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-    assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-codex-effort-real-'))); await rm(directory, { recursive: true, force: true });
+    assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-codex-effort-real-'))); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   try {
     const first = await bridge.run({ prompt: 'Return the local fixture text.', signal: AbortSignal.timeout(10_000) });
@@ -196,7 +196,7 @@ child.once('exit', code => process.exit(code ?? 1));
   t.after(async () => {
     await bridge.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
     assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-codex-transport-real-')));
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   const status = await bridge.status();
   assert.equal(status.available, true, status.error); assert.equal(status.baseUrl, config.baseUrl);
@@ -276,7 +276,7 @@ for (const failure of ['runtime-write', 'child-initialize']) test(`API startup $
   bridge._disposeTransport = transport => { transports.add(transport); return dispose(transport); };
   t.after(async () => {
     await bridge.close(); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-codex-startup-')));
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   const status = await bridge.status();
   assert.equal(status.available, false); assert.equal(bridge.child, null); assert.equal(bridge.transport, null);

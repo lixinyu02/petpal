@@ -88,6 +88,40 @@ test('real API wrapper account-switch and native restore behavior',async t=>{
       assert.equal(calls.at(-1)[0],'disconnect');assert.equal(api.getConnection().token,'');
       delete window.petpal;disk.clear();
     });
+    await t.test('failed executor connect releases its scope and later identity retries once while pending',async()=>{
+      disk.clear();let calls=0;const online=deferred();
+      window.petpal={executor:{connect:async()=>{if(++calls===1)throw new Error('offline');return online.promise;},disconnect:async()=>{}}};
+      const api=await freshApi();api.setConnection({url:'https://central.example',token:'member-token'},'session');
+      install('fetch',async()=>json({instanceId:'central-id',user:{id:'member',canUseCodex:true}}));
+      await api.api('/auth/me');await new Promise(resolve=>setImmediate(resolve));assert.equal(calls,1);
+      await Promise.all([api.api('/state'),api.api('/auth/me')]);assert.equal(calls,2);
+      online.resolve({state:'online'});await new Promise(resolve=>setImmediate(resolve));
+      await api.api('/state');assert.equal(calls,2);api.logout();delete window.petpal;disk.clear();
+    });
+    await t.test('late failed executor attempt cannot clear a newer account scope or reconnect after logout',async()=>{
+      disk.clear();const calls=[];let rejectOld;
+      const old=new Promise((_resolve,reject)=>{rejectOld=reject;});
+      window.petpal={executor:{connect:async value=>{calls.push(value.userId);return value.userId==='old-user'?old:{state:'online'};},disconnect:async()=>{}}};
+      const api=await freshApi();api.setConnection({url:'https://central.example',token:'old'},'session');
+      install('fetch',async(_url,options)=>json({instanceId:'central-id',user:{id:options.headers.get('Authorization')==='Bearer old'?'old-user':'new-user',canUseCodex:true}}));
+      await api.api('/auth/me');assert.deepEqual(calls,['old-user']);
+      api.setConnection({url:'https://central.example',token:'new'},'session');await api.api('/auth/me');
+      rejectOld(new Error('late offline'));await new Promise(resolve=>setImmediate(resolve));
+      await api.api('/state');assert.deepEqual(calls,['old-user','new-user']);api.logout();
+      await new Promise(resolve=>setImmediate(resolve));assert.equal(api.getConnection().token,'');assert.equal(calls.length,2);
+      delete window.petpal;disk.clear();
+    });
+    await t.test('native retry and terminal permission states are retained without renderer reconnect storms',async()=>{
+      for(const state of [{state:'reconnecting',retryable:true},{state:'error',retryable:false}]){
+        disk.clear();let calls=0;
+        window.petpal={executor:{connect:async()=>{calls++;return state;},disconnect:async()=>{}}};
+        const api=await freshApi();api.setConnection({url:'https://central.example',token:'member-token'},'session');
+        install('fetch',async()=>json({instanceId:'central-id',user:{id:'member',canUseCodex:true}}));
+        await api.api('/auth/me');await new Promise(resolve=>setImmediate(resolve));await api.api('/state');await api.api('/auth/me');
+        assert.equal(calls,1);api.logout();
+      }
+      delete window.petpal;disk.clear();
+    });
     await t.test('desktop restore refreshes local port but preserves member login and explicit logout',async()=>{
       window.petpal={connection:async()=>({url:'http://127.0.0.1:60002',token:'fresh-owner'})};
       for(const [kind,savedToken,expectedToken] of [['session','member','member'],['none','',''],['pairing','old-owner','fresh-owner']]){

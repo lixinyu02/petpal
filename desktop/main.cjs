@@ -196,7 +196,30 @@ async function clickSmokeButton(container, label) {
   })()`);
 }
 
-async function waitForPose(action) {
+async function gestureSmokeCharacter(gesture) {
+  if (!['tap', 'double-tap', 'hold'].includes(gesture)) throw new Error('Unknown smoke gesture');
+  mainWindow.show(); mainWindow.focus();
+  const point = await mainWindow.webContents.executeJavaScript(`(() => {
+    const canvas = [...document.querySelectorAll('canvas[data-pet-count="1"]')].find(item => item.getAttribute('aria-hidden') !== 'true' && item.getBoundingClientRect().width > 0);
+    if (!canvas) throw new Error('Interactive companion is unavailable');
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.round(rect.left + rect.width * .5), y = Math.round(rect.top + rect.height * .62);
+    if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) throw new Error('Companion gesture would be outside the window');
+    return { x, y };
+  })()`);
+  const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+  const count = gesture === 'double-tap' ? 2 : 1;
+  mainWindow.webContents.sendInputEvent({ type: 'mouseMove', ...point });
+  for (let index = 0; index < count; index++) {
+    mainWindow.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: index + 1, ...point });
+    try { await pause(gesture === 'hold' ? 800 : 60); }
+    finally { mainWindow.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: index + 1, ...point }); }
+    if (index + 1 < count) await pause(100);
+  }
+  return { gesture, ...point, trustedInput: true };
+}
+
+async function waitForPose(action, stableMilliseconds = 120) {
   return mainWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
     const deadline = Date.now() + 25000;
     let since = 0;
@@ -204,13 +227,23 @@ async function waitForPose(action) {
       const canvas = document.querySelector('canvas[data-renderer="webgl"]');
       if (canvas?.dataset.petAction === ${JSON.stringify(action)}) {
         since ||= Date.now();
-        if (Date.now() - since >= 700) return resolve({ action: canvas.dataset.petAction, renderFrames: Number(canvas.dataset.renderFrames), x: canvas.dataset.petX, blink: canvas.dataset.blink, speaking: canvas.dataset.speaking });
+        if (Date.now() - since >= ${JSON.stringify(stableMilliseconds)}) return resolve({ action: canvas.dataset.petAction, renderFrames: Number(canvas.dataset.renderFrames), x: canvas.dataset.petX, blink: canvas.dataset.blink, speaking: canvas.dataset.speaking });
       } else since = 0;
       if (Date.now() >= deadline) reject(new Error('Expected review pose did not appear'));
       else setTimeout(check, 40);
     };
     check();
   })`);
+}
+
+async function inspectNaturalGestures(kind) {
+  await gestureSmokeCharacter('tap'); const touch = await waitForPose('pet');
+  await gestureSmokeCharacter('double-tap'); const greeting = await waitForPose('jump');
+  await gestureSmokeCharacter('hold'); const sleep = await waitForPose('sleep', 700);
+  if (kind === 'anime' && Number(sleep.blink) < .9) throw new Error('Resting anime eyes did not close');
+  if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, `${kind}-sleep.png`), (await mainWindow.webContents.capturePage()).toPNG());
+  await gestureSmokeCharacter('tap'); const awake = await waitForPose('idle');
+  return { trustedInput: true, touch, greeting, sleep, awake };
 }
 
 async function inspectSystemSpeech(win) {
@@ -242,85 +275,7 @@ async function inspectSystemSpeech(win) {
   })()`, true);
 }
 
-async function inspectResponse(expression) {
-  mainWindow.show(); mainWindow.focus();
-  await mainWindow.webContents.executeJavaScript(`(() => {
-    const select = document.querySelector('select[aria-label="回应心情"]');
-    if (!select) throw new Error('Response select missing');
-    select.value = ${JSON.stringify(expression)}; select.dispatchEvent(new Event('change', {bubbles:true}));
-  })()`);
-  await clickSmokeButton('.companion-response-row', '说句话');
-  const rendered = await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject) => {
-    const started = performance.now(), frames = [];
-    const check = () => {
-      const canvas = document.querySelector('canvas[data-avatar-renderer="mesh2d"]');
-      if (canvas) frames.push({ time: Math.round(performance.now()-started), expression: canvas.dataset.expression, shape: canvas.dataset.mouthShape, open: Number(canvas.dataset.mouthOpen), phase: canvas.dataset.phase, source: canvas.dataset.speechSource });
-      if (performance.now()-started > 700 && canvas?.dataset.expression === ${JSON.stringify(expression)} && Number(canvas.dataset.mouthOpen) > .25) return resolve({ expression: ${JSON.stringify(expression)}, frames });
-      if (performance.now()-started > 6000) return reject(new Error('Response expression/mouth was not rendered: ${expression}: '+JSON.stringify({hidden:document.hidden,frames:frames.slice(-3)})));
-      setTimeout(check, 25);
-    }; check();
-  })`);
-  if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, `anime-${expression}.png`), (await mainWindow.webContents.capturePage()).toPNG());
-  await mainWindow.webContents.executeJavaScript(`document.querySelector('button[aria-label="停止说话"]').click()`);
-  rendered.stopped = await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject) => {
-    const start = performance.now(); const check = () => {
-      const c = document.querySelector('canvas[data-avatar-renderer="mesh2d"]');
-      if (c?.dataset.phase === 'idle' && Number(c.dataset.mouthOpen) === 0) return resolve({phase:c.dataset.phase,open:Number(c.dataset.mouthOpen),milliseconds:Math.round(performance.now()-start)});
-      if (performance.now()-start > 1500) return reject(new Error('Stop did not close mouth'));
-      setTimeout(check, 20);
-    }; check();
-  })`);
-  return rendered;
-}
-
-async function inspectSpeechUi() {
-  const initial = await mainWindow.webContents.executeJavaScript(`(() => {
-    const toggle = document.querySelector('.voice-toggle input');
-    if (!toggle || toggle.disabled) return {available:false,caption:document.querySelector('.voice-caption')?.textContent};
-    const result = {available:true,defaultOff:!toggle.checked};
-    window.__petpalSmokeSpeech = {events:[],utterances:0};
-    window.__petpalOriginalSpeak = speechSynthesis.speak;
-    speechSynthesis.speak = function(utterance) {
-      const index = ++window.__petpalSmokeSpeech.utterances;
-      for(const type of ['start','boundary','end','error']) utterance.addEventListener(type,event => window.__petpalSmokeSpeech.events.push({type,index,charIndex:event.charIndex,error:event.error,time:Math.round(performance.now())}));
-      return window.__petpalOriginalSpeak.call(this,utterance);
-    };
-    if(!toggle.checked) toggle.click();
-    const select = document.querySelector('select[aria-label="回应心情"]');select.value='warm';select.dispatchEvent(new Event('change',{bubbles:true}));
-    return result;
-  })()`, true);
-  if (!initial.available) return initial;
-  if (!initial.defaultOff) throw new Error('Speech should be off by default');
-  try {
-    await clickSmokeButton('.companion-response-row', '说句话');
-    const live = await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{
-      const start=performance.now(),frames=[];
-      const check=()=>{const c=document.querySelector('canvas[data-avatar-renderer="mesh2d"]');frames.push({phase:c?.dataset.phase,source:c?.dataset.speechSource,shape:c?.dataset.mouthShape,open:Number(c?.dataset.mouthOpen)});
-      if(c?.dataset.speechSource==='playback-progress'&&Number(c.dataset.mouthOpen)>.25&&window.__petpalSmokeSpeech.events.some(e=>e.type==='boundary'&&e.charIndex>0)) return resolve({frames,caption:document.querySelector('.voice-caption')?.textContent});
-      if(performance.now()-start>12000)return reject(new Error('Actual UI playback did not drive boundary mouth'));setTimeout(check,25);};check();})`);
-    if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'anime-system-speech.png'), (await mainWindow.webContents.capturePage()).toPNG());
-    const completed = await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{
-      const start=performance.now();const check=()=>{const c=document.querySelector('canvas[data-avatar-renderer="mesh2d"]');const log=window.__petpalSmokeSpeech;
-      if(log.events.filter(e=>e.type==='end').length>=2&&!speechSynthesis.speaking&&!speechSynthesis.pending&&c?.dataset.phase==='idle'&&Number(c.dataset.mouthOpen)===0)return resolve({events:log.events.slice(),utterances:log.utterances,phase:c.dataset.phase,open:Number(c.dataset.mouthOpen)});
-      if(log.events.some(e=>e.type==='error'))return reject(new Error('System speech UI emitted an error'));if(performance.now()-start>20000)return reject(new Error('System speech UI did not finish'));setTimeout(check,50);};check();})`);
-    const stopped = await inspectResponse('warm');
-    await mainWindow.webContents.executeJavaScript('new Promise(resolve=>setTimeout(resolve,1000))');
-    stopped.after = await mainWindow.webContents.executeJavaScript(`({speaking:speechSynthesis.speaking,pending:speechSynthesis.pending,events:window.__petpalSmokeSpeech.events.slice(),phase:document.querySelector('canvas[data-avatar-renderer="mesh2d"]').dataset.phase,open:Number(document.querySelector('canvas[data-avatar-renderer="mesh2d"]').dataset.mouthOpen)})`);
-    if (stopped.after.speaking || stopped.after.pending || stopped.after.open !== 0 || stopped.after.phase !== 'idle') throw new Error('Stopped speech resumed');
-    await clickSmokeButton('.companion-response-row', '说句话');
-    await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const start=performance.now();const check=()=>{if(speechSynthesis.speaking)return resolve();if(performance.now()-start>12000)return reject(new Error('Visibility speech did not begin'));setTimeout(check,50);};check();})`);
-    mainWindow.hide();
-    const hidden = await mainWindow.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(()=>resolve({hidden:document.hidden,speaking:speechSynthesis.speaking,pending:speechSynthesis.pending}),500))`);
-    mainWindow.show(); mainWindow.focus();
-    if (!hidden.hidden || hidden.speaking || hidden.pending) throw new Error('Hidden window did not cancel system speech');
-    return { ...initial, live, completed, stopped, hidden, audioAudibilityVerified:false };
-  } finally {
-    mainWindow.show();
-    await mainWindow.webContents.executeJavaScript(`(()=>{document.querySelector('button[aria-label="停止说话"]')?.click();const toggle=document.querySelector('.voice-toggle input');if(toggle?.checked)toggle.click();speechSynthesis.speak=window.__petpalOriginalSpeak;delete window.__petpalOriginalSpeak;})()`);
-  }
-}
-
-async function inspectAppFixture() {
+async function inspectAppFixture({ expressions = false } = {}) {
   // Isolated renderer fixture: a single SSE read deliberately contains delta + done.
   // This does not call a model and is not evidence of a live upstream provider.
   await fetch(`${origin}/api/providers`, { method:'POST', headers:{Authorization:`Bearer ${backend.token}`,'Content-Type':'application/json'},body:JSON.stringify({name:'Isolated UI fixture',protocol:'chat-completions',baseUrl:'http://127.0.0.1:1/v1',model:'fixture',apiKey:''}) }).then(async response=>{if(!response.ok)throw new Error(await response.text());});
@@ -329,7 +284,7 @@ async function inspectAppFixture() {
   await mainWindow.webContents.executeJavaScript(`(async()=>{
     const nativeFetch=window.fetch.bind(window), connection=await window.petpal.connection();
     const state=await nativeFetch(connection.url+'/api/state',{headers:{Authorization:'Bearer '+connection.token}}).then(r=>r.json());
-    window.__appFixture={state,chunks:[],speechEvents:[],utterances:0};
+    window.__appFixture={state,chunks:[],speechEvents:[],utterances:0,nextReply:'谢谢你。',nativeFetch:window.fetch,originalSpeak:window.speechSynthesis?.speak};
     const json=value=>new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json'}});
     window.fetch=async(input,options={})=>{
       const url=new URL(typeof input==='string'?input:input.url,location.href), fixture=window.__appFixture;
@@ -340,7 +295,7 @@ async function inspectAppFixture() {
       }
       if(url.pathname==='/api/conversations/app-fixture/messages'){
         const values=JSON.parse(options.body),conversation=fixture.state.conversations[0],index=conversation.messages.length;
-        const reply={id:'fixture-assistant-'+index,role:'assistant',content:'谢谢你。',status:'complete'};
+        const reply={id:'fixture-assistant-'+index,role:'assistant',content:fixture.nextReply,status:'complete'};
         conversation.messages.push({id:'fixture-user-'+index,role:'user',content:values.content,status:'complete'},reply);
         const payload='event: meta\\ndata: {}\\n\\nevent: delta\\ndata: '+JSON.stringify({text:reply.content})+'\\n\\nevent: done\\ndata: '+JSON.stringify({conversation})+'\\n\\n';
         const stream=new ReadableStream({start(controller){fixture.chunks.push({request:values.content,chunks:1,events:['meta','delta','done']});controller.enqueue(new TextEncoder().encode(payload));controller.close();}});
@@ -348,32 +303,75 @@ async function inspectAppFixture() {
       }
       return nativeFetch(input,options);
     };
-    if('speechSynthesis' in window){const original=speechSynthesis.speak;speechSynthesis.speak=function(utterance){const index=++window.__appFixture.utterances;for(const type of ['start','boundary','end','error'])utterance.addEventListener(type,event=>window.__appFixture.speechEvents.push({type,index,charIndex:event.charIndex,error:event.error}));return original.call(this,utterance);};}
+    if('speechSynthesis' in window){const original=speechSynthesis.speak,fixture=window.__appFixture;speechSynthesis.speak=function(utterance){const index=++fixture.utterances;for(const type of ['start','boundary','end','error'])utterance.addEventListener(type,event=>fixture.speechEvents.push({type,index,charIndex:event.charIndex,error:event.error}));return original.call(this,utterance);};}
   })()`);
-  const send = async text => {
-    await mainWindow.webContents.executeJavaScript(`(()=>{const field=document.querySelector('textarea[aria-label="消息"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(field,${JSON.stringify(text)});field.dispatchEvent(new Event('input',{bubbles:true}));})()`);
-    await mainWindow.webContents.executeJavaScript(`document.querySelector('button[aria-label="发送消息"]').click()`);
+  const send = async (text, reply = '谢谢你。') => {
+    await mainWindow.webContents.executeJavaScript(`(()=>{window.__appFixture.nextReply=${JSON.stringify(reply)};const field=document.querySelector('textarea[aria-label="消息"]');if(!field||field.disabled)throw new Error('Chat composer unavailable');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(field,${JSON.stringify(text)});field.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await mainWindow.webContents.executeJavaScript(`(()=>{const button=document.querySelector('button[aria-label="发送消息"]');if(!button||button.disabled)throw new Error('Chat send unavailable');button.click();})()`);
   };
-  const observe = expression => mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const started=performance.now();const check=()=>{const canvas=document.querySelector('canvas[data-avatar-renderer="mesh2d"]');const fixture=window.__appFixture;if(${expression})return resolve({phase:canvas?.dataset.phase,action:canvas?.dataset.petAction,expression:canvas?.dataset.expression,mouthOpen:Number(canvas?.dataset.mouthOpen),speaking:window.speechSynthesis?.speaking,utterances:fixture.utterances,events:fixture.speechEvents.slice(),chunks:fixture.chunks.slice(),hidden:document.hidden});if(performance.now()-started>12000)return reject(new Error('App fixture condition timed out: '+JSON.stringify({hidden:document.hidden,phase:canvas?.dataset.phase,mouthOpen:canvas?.dataset.mouthOpen,body:document.body.innerText.slice(-900)})));setTimeout(check,20);};check();})`);
-  await send('单块完成测试');
-  const singleChunk = await observe(`fixture.chunks.length===1&&!document.querySelector('button[aria-label="停止生成"]')&&Number(canvas?.dataset.mouthOpen)>.15&&canvas?.dataset.expression==='warm'`);
-  if(singleChunk.utterances!==0)throw new Error('Default-off app spoke automatically');
-  if(process.env.PETPAL_SMOKE_DIR)await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR,'app-singlechunk-response.png'),(await mainWindow.webContents.capturePage()).toPNG());
-  const settled = await observe(`fixture.chunks.length===1&&canvas?.dataset.phase==='idle'&&Number(canvas?.dataset.mouthOpen)===0`);
-  const localVoice=await mainWindow.webContents.executeJavaScript(`'speechSynthesis' in window&&speechSynthesis.getVoices().some(v=>v.localService&&/^zh(?:-|_)/i.test(v.lang))`);
-  if(!localVoice)return{fixture:true,upstreamModelCalled:false,singleChunk,settled,sleepSpeech:'no-local-voice'};
-  await clickSmokeButton('.speech-controls','朗读上一条');
-  const manual=await observe(`fixture.speechEvents.some(event=>event.type==='start')&&speechSynthesis.speaking`);
-  await clickSmokeButton('.pet-actions','歇一会');
-  const sleepCancelled=await observe(`canvas?.dataset.petAction==='sleep'&&Number(canvas?.dataset.mouthOpen)===0&&!speechSynthesis.speaking&&!speechSynthesis.pending`);
-  await mainWindow.webContents.executeJavaScript(`document.querySelector('.speech-toggle input').click()`);
-  await send('睡眠期间完成测试');
-  await observe(`fixture.chunks.length===2&&!document.querySelector('button[aria-label="停止生成"]')`);
-  await mainWindow.webContents.executeJavaScript('new Promise(resolve=>setTimeout(resolve,1200))');
-  const sleepingReply=await observe(`canvas?.dataset.petAction==='sleep'&&Number(canvas?.dataset.mouthOpen)===0&&!speechSynthesis.speaking&&!speechSynthesis.pending`);
-  if(sleepingReply.utterances!==manual.utterances)throw new Error('Sleeping app auto-read a completed reply');
-  if(process.env.PETPAL_SMOKE_DIR)await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR,'app-sleep-quiet.png'),(await mainWindow.webContents.capturePage()).toPNG());
-  return{fixture:true,upstreamModelCalled:false,singleChunk,settled,manual,sleepCancelled,sleepingReply};
+  const observe = expression => mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const started=performance.now();const check=()=>{const canvas=document.querySelector('canvas[data-avatar-renderer="mesh2d"]');const fixture=window.__appFixture;if(${expression})return resolve({phase:canvas?.dataset.phase,action:canvas?.dataset.petAction,expression:canvas?.dataset.expression,mouthShape:canvas?.dataset.mouthShape,mouthOpen:Number(canvas?.dataset.mouthOpen),source:canvas?.dataset.speechSource,speaking:window.speechSynthesis?.speaking,utterances:fixture.utterances,events:fixture.speechEvents.slice(),chunks:fixture.chunks.slice(),hidden:document.hidden});if(performance.now()-started>25000)return reject(new Error('App fixture condition timed out: '+JSON.stringify({hidden:document.hidden,phase:canvas?.dataset.phase,mouthOpen:canvas?.dataset.mouthOpen,body:document.body.innerText.slice(-900)})));setTimeout(check,20);};check();})`);
+  const capture = async name => {
+    if(process.env.PETPAL_SMOKE_DIR)await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR,name),(await mainWindow.webContents.capturePage()).toPNG());
+  };
+  try {
+    const defaultOff = await mainWindow.webContents.executeJavaScript(`document.querySelector('.speech-toggle input')?.checked===false`);
+    if(!defaultOff)throw new Error('Chat speech must be off by default');
+    await send('单块完成测试');
+    const singleChunk = await observe(`fixture.chunks.length===1&&!document.querySelector('button[aria-label="停止生成"]')&&Number(canvas?.dataset.mouthOpen)>.15&&canvas?.dataset.expression==='warm'`);
+    if(singleChunk.utterances!==0)throw new Error('Default-off app spoke automatically');
+    await capture('app-singlechunk-response.png');
+    const settled = await observe(`fixture.chunks.length===1&&canvas?.dataset.phase==='idle'&&Number(canvas?.dataset.mouthOpen)===0`);
+    const responses = [];
+    if(expressions) {
+      const replies = { warm:'谢谢你，今天有你陪着很开心。', curious:'为什么天空会这样变化呢？', thoughtful:'让我想一想，也许可以慢慢整理。', surprised:'哇，没想到有这样的惊喜！', shy:'不好意思，这样说有点害羞呢。' };
+      for(const [expression,text] of Object.entries(replies)) {
+        const before = await mainWindow.webContents.executeJavaScript('window.__appFixture.chunks.length');
+        await send(`对话表情验收 ${expression}`,text);
+        const rendered = await observe(`fixture.chunks.length===${before+1}&&canvas?.dataset.expression===${JSON.stringify(expression)}&&Number(canvas?.dataset.mouthOpen)>.15`);
+        await capture(`anime-${expression}.png`);
+        const ended = await observe(`canvas?.dataset.phase==='idle'&&Number(canvas?.dataset.mouthOpen)===0`);
+        responses.push({expression,transportFixture:true,rendered,settled:ended});
+      }
+    }
+    const localVoice=await mainWindow.webContents.executeJavaScript(`'speechSynthesis' in window&&speechSynthesis.getVoices().some(v=>v.localService&&/^zh(?:-|_)/i.test(v.lang))`);
+    if(!localVoice)return{fixture:true,upstreamModelCalled:false,singleChunk,settled,responses,speechUi:{available:false,defaultOff,reason:'no-local-chinese-voice',audioAudibilityVerified:false}};
+    await mainWindow.webContents.executeJavaScript(`(()=>{const toggle=document.querySelector('.speech-toggle input');if(!toggle||toggle.disabled)throw new Error('Chat speech toggle unavailable');if(!toggle.checked)toggle.click();})()`,true);
+    const longReply='谢谢你，今天也一起慢慢度过。想到开心的事情，可以随时告诉我。我们还有很多时间。';
+    await send('真实语音与口型验收',longReply);
+    const live=await observe(`canvas?.dataset.speechSource==='playback-progress'&&Number(canvas?.dataset.mouthOpen)>.15&&fixture.speechEvents.some(event=>event.type==='boundary'&&event.charIndex>0)`);
+    await capture('anime-system-speech.png');
+    const completed=await observe(`fixture.speechEvents.some(event=>event.type==='end')&&!speechSynthesis.speaking&&!speechSynthesis.pending&&canvas?.dataset.phase==='idle'&&Number(canvas?.dataset.mouthOpen)===0`);
+    if(completed.events.some(event=>event.type==='error'))throw new Error('System speech emitted an error');
+    await clickSmokeButton('.speech-controls','朗读上一条');
+    const manual=await observe(`fixture.utterances>${completed.utterances}&&speechSynthesis.speaking&&fixture.speechEvents.some(event=>event.type==='start'&&event.index>${completed.utterances})`);
+    await gestureSmokeCharacter('hold');
+    const sleepCancelled=await observe(`canvas?.dataset.petAction==='sleep'&&Number(canvas?.dataset.mouthOpen)===0&&!speechSynthesis.speaking&&!speechSynthesis.pending`);
+    const beforeSleepReply=manual.chunks.length;
+    await send('睡眠期间完成测试',longReply);
+    await observe(`fixture.chunks.length===${beforeSleepReply+1}&&!document.querySelector('button[aria-label="停止生成"]')`);
+    await mainWindow.webContents.executeJavaScript('new Promise(resolve=>setTimeout(resolve,1200))');
+    const sleepingReply=await observe(`canvas?.dataset.petAction==='sleep'&&Number(canvas?.dataset.mouthOpen)===0&&!speechSynthesis.speaking&&!speechSynthesis.pending`);
+    if(sleepingReply.utterances!==manual.utterances)throw new Error('Sleeping app auto-read a completed reply');
+    await capture('app-sleep-quiet.png');
+    await gestureSmokeCharacter('tap'); await waitForPose('idle');
+    await clickSmokeButton('.speech-controls','朗读上一条');
+    const resumed=await observe(`fixture.utterances>${sleepingReply.utterances}&&speechSynthesis.speaking`);
+    await clickSmokeButton('.speech-controls','停止朗读');
+    await mainWindow.webContents.executeJavaScript('new Promise(resolve=>setTimeout(resolve,600))');
+    const stopped=await observe(`!speechSynthesis.speaking&&!speechSynthesis.pending&&canvas?.dataset.phase==='idle'&&Number(canvas?.dataset.mouthOpen)===0`);
+    if(stopped.utterances!==resumed.utterances)throw new Error('Stopped speech restarted');
+    await clickSmokeButton('.speech-controls','朗读上一条');
+    await observe(`fixture.utterances>${stopped.utterances}&&speechSynthesis.speaking`);
+    mainWindow.hide();
+    const hidden=await mainWindow.webContents.executeJavaScript(`new Promise(resolve=>setTimeout(()=>resolve({hidden:document.hidden,speaking:speechSynthesis.speaking,pending:speechSynthesis.pending}),700))`);
+    mainWindow.show();mainWindow.focus();
+    if(!hidden.hidden||hidden.speaking||hidden.pending)throw new Error('Hidden window did not cancel system speech');
+    await observe(`canvas?.dataset.phase==='idle'&&Number(canvas?.dataset.mouthOpen)===0`);
+    return{fixture:true,upstreamModelCalled:false,singleChunk,settled,responses,manual,sleepCancelled,sleepingReply,speechUi:{available:true,defaultOff,live,completed,stopped,hidden,audioAudibilityVerified:false}};
+  } finally {
+    mainWindow.show();mainWindow.focus();
+    await mainWindow.webContents.executeJavaScript(`(()=>{document.querySelector('.speech-stop')?.click();const toggle=document.querySelector('.speech-toggle input');if(toggle?.checked)toggle.click();const fixture=window.__appFixture;if(fixture){window.fetch=fixture.nativeFetch;if(fixture.originalSpeak)speechSynthesis.speak=fixture.originalSpeak;delete window.__appFixture;}})()`);
+  }
 }
 
 async function boot() {
@@ -499,20 +497,10 @@ async function boot() {
         mainWindow.setBounds(desktopBounds);
         mainWindow.setMinimumSize(760, 540);
         await mainWindow.webContents.executeJavaScript('new Promise(resolve => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(resolve)), 250))');
-        await clickSmokeButton('.companion-controls', '分享点心');
-        const talk = await waitForPose('eat');
-        await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'anime-talk.png'), (await mainWindow.webContents.capturePage()).toPNG());
-        const responses = [];
-        for (const expression of ['warm', 'curious', 'thoughtful', 'surprised', 'shy']) responses.push(await inspectResponse(expression));
-        result.responsePerformance = responses;
-        result.speechUi = await inspectSpeechUi();
-        await clickSmokeButton('.companion-controls', '睡一会');
-        const sleep = await waitForPose('sleep');
-        if (Number(sleep.blink) < 0.9) throw new Error('Anime sleep eyes are not closed');
-        await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'anime-sleep.png'), (await mainWindow.webContents.capturePage()).toPNG());
-        result.poses = { mobile, talk, sleep };
+        result.poses = { mobile };
       }
     }
+    result.gestures = { anime: await inspectNaturalGestures('anime') };
     await clickSmokeButton('.companion-switch', '3D 小猫');
     const [catMain, catPet] = await Promise.all([inspectAvatarWindow(mainWindow, true, 'cat'), inspectAvatarWindow(petWindow, false, 'cat')]);
     if (catMain.storedKind !== 'cat' || catPet.storedKind !== 'cat') throw new Error('Avatar storage selection did not synchronize');
@@ -525,11 +513,16 @@ async function boot() {
         await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'cat-walk.png'), (await mainWindow.webContents.capturePage()).toPNG());
       }
     }
+    result.gestures.cat = await inspectNaturalGestures('cat');
     await clickSmokeButton('.companion-switch', '二次元伙伴');
     const [returnMain, returnPet] = await Promise.all([inspectAvatarWindow(mainWindow, true, 'anime'), inspectAvatarWindow(petWindow, false, 'anime')]);
     result.switchSynced = returnMain.storedKind === 'anime' && returnPet.storedKind === 'anime';
     if (!result.switchSynced) throw new Error('Avatar storage return transition did not synchronize');
-    if (process.env.PETPAL_SMOKE_APP === '1') result.appFixture = await inspectAppFixture();
+    if (process.env.PETPAL_SMOKE_APP === '1' || process.env.PETPAL_SMOKE_POSES === '1') {
+      result.appFixture = await inspectAppFixture({ expressions: process.env.PETPAL_SMOKE_POSES === '1' });
+      result.responsePerformance = result.appFixture.responses;
+      result.speechUi = result.appFixture.speechUi;
+    }
     const hashBundle = async relative => {
       const absolute = path.join(root, relative);
       if ((await fs.stat(absolute)).isDirectory()) {
