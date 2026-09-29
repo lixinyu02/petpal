@@ -8,8 +8,13 @@ const emotions={
   pout:/鼓腮|气鼓鼓|撅嘴|闹别扭|有点生气|不理你了|哼(?=[，,！!。])|\bpout(?:ing)?\b/giu,
   relieved:/松了(?:一口)?气|松(?:一口|口)气|安心|放心了|如释重负|\brelieved\b|\bwhat a relief\b/giu,
   determined:/认真|下定决心|我会努力|交给我吧|打起精神|一定要(?:努力|做好|完成)|\bdetermined\b|\bfocused\b/giu,
+  hesitant:/犹豫|拿不定主意|还没想好|有点迟疑|\bhesitant\b|\bundecided\b/giu,
+  sleepy:/困了|困倦|犯困|打瞌睡|想睡|眼皮[^，,。.!?！？]{0,8}(?:沉|睁不开|合上)|\bsleepy\b|\bdrowsy\b/giu,
+  expectant:/期待|盼着|翘首以盼|\bexpectant\b|\blooking forward\b/giu,
+  aggrieved:/委屈|被误会|冤枉|\baggrieved\b|\bwronged\b/giu,
+  tender:/温柔|轻轻陪着|轻声陪你|\btender\b|\bgently here for you\b/giu,
 };
-const negated=prefix=>/(?:(?:不是不|并非不|不|不是|并非|没(?:有)?|从未|无须|别|勿|莫)(?:再|太|很|怎么|那么|这么|会|想|觉得|感到|特别|真的|有点){0,3}|not(?:\s+(?:really|very|feeling)){0,3}|never|no\s+longer|(?:don|doesn|didn|isn|wasn|weren|aren)['’]t(?:\s+feel(?:ing)?)?)\s*$/iu.test(prefix);
+const negated=prefix=>/(?:(?:不是不|并非不|不(?:要|用|必)?|不是|并非|没(?:有)?|从未|无须|别|勿|莫)(?:再|太|很|怎么|那么|这么|会|想|觉得|感到|特别|真的|有点){0,3}|not(?:\s+(?:really|very|feeling)){0,3}|never|no\s+longer|(?:don|doesn|didn|isn|wasn|weren|aren)['’]t(?:\s+feel(?:ing)?)?)\s*$/iu.test(prefix);
 function affirmed(text,expression) {
   const matcher=new RegExp(expression.source,expression.flags.includes('g')?expression.flags:`${expression.flags}g`);
   for(const match of text.matchAll(matcher))if(!negated(text.slice(Math.max(0,match.index-24),match.index)))return true;
@@ -31,12 +36,17 @@ export function detectAvatarEmotion(value) {
   if(typeof value!=='string'||!value.trim())return null;
   const text=value.slice(-512);
   if(enumeratesEmotions(text))return null;
-  if(/(?:别|不要|不用|不必)(?:再|太|那么|这么)?(?:难过|伤心|担心|紧张|着急|害怕|自责)|没关系|辛苦了|抱歉|\bsorry\b|don['’]t (?:be |feel )?(?:sad|worry)|it['’]s okay/iu.test(text))return 'concerned';
+  if(/(?:别|不要|不用|不必)(?:再|太|那么|这么)?(?:难过|伤心|委屈|担心|紧张|着急|害怕|自责)|没关系|辛苦了|抱歉|\bsorry\b|don['’]t (?:be |feel )?(?:sad|worry)|it['’]s okay/iu.test(text))return 'concerned';
   if(/(?:不是|并非|没有)不(?:开心|高兴|快乐|happy)/iu.test(text))return null;
   if(/(?:不(?:太|怎么)?|不是很|没(?:有)?(?:那么|这么)?)(?:开心|高兴|快乐)|\b(?:not(?: really| very| feeling)? happy|unhappy)\b/iu.test(text))return 'downcast';
   if(affirmed(text,emotions.sad))return 'sad';
   if(affirmed(text,emotions.downcast))return 'downcast';
   if(affirmed(text,/担心|着急|自责|害怕|\bworr(?:y|ied)\b/giu))return 'concerned';
+  if(affirmed(text,emotions.aggrieved))return 'aggrieved';
+  if(affirmed(text,emotions.hesitant))return 'hesitant';
+  if(affirmed(text,emotions.sleepy))return 'sleepy';
+  if(affirmed(text,emotions.expectant))return 'expectant';
+  if(affirmed(text,emotions.tender))return 'tender';
   if(affirmed(text,emotions.pout))return 'pout';
   if(affirmed(text,emotions.relieved))return 'relieved';
   if(affirmed(text,emotions.determined))return 'determined';

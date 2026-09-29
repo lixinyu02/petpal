@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { animeHeadNodOffset, animePoseTransform } from '../src/avatar/anime-pose-render.mjs';
+import { animeHeadNodOffset, animePoseTransform, sampleAnimeShoulderWeight } from '../src/avatar/anime-pose-render.mjs';
 
-const identity={gesture:'none',progress:0,xPercent:0,yPercent:0,rotationDegrees:0,scale:1};
+const identity={gesture:'none',progress:0,xPercent:0,yPercent:0,rotationDegrees:0,scale:1,shoulderYPercent:0};
 const near=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-10,`${actual} ≈ ${expected}`);
 
 test('body directions are screen-relative and forward lean keeps the entire portrait together',()=>{
@@ -28,6 +28,34 @@ test('single nods are visible at phone size while ordinary voice motion keeps it
   near(animeHeadNodOffset(100),animeHeadNodOffset(1));
 });
 
+test('new gesture names stay observable and shoulder lifts are bounded, upward and quiet when sleeping',()=>{
+  for(const gesture of ['leanIn','shrug','bow','peek','sway','doze'])assert.equal(animePoseTransform({gesture}).gesture,gesture);
+  const lift=animePoseTransform({shoulderLift:.65});
+  assert.ok(lift.shoulderYPercent<0,'mesh shoulders rise in screen coordinates');
+  assert.ok(lift.shoulderYPercent*.45<0,'the smaller rigid DOM fallback rises in the same direction');
+  assert.ok(Math.abs(lift.shoulderYPercent)*480/100<3,'a normal shrug moves phone shoulders fewer than 3px');
+  near(animePoseTransform({shoulderLift:100}).shoulderYPercent,-.9);
+  assert.equal(animePoseTransform({shoulderLift:-1}).shoulderYPercent,0);
+  for(const option of ['sleeping','reducedMotion','hidden'])assert.deepEqual(animePoseTransform({gesture:'shrug',shoulderLift:1},{[option]:true}),identity);
+});
+
+test('shoulder weights protect face, neck and hands while deforming one connected sleeve mesh without folds',()=>{
+  for(const [x,y] of [[.4,.25],[.58,.24],[.5,.39],[.43,.43],[.60,.45],[.5,.5],[.4,.87],[.62,.85]])assert.equal(sampleAnimeShoulderWeight(x,y),0,`protected point ${x},${y}`);
+  assert.ok(sampleAnimeShoulderWeight(.24,.48)>.9);assert.ok(sampleAnimeShoulderWeight(.78,.485)>.9);
+  for(let column=0;column<=40;column++){
+    const x=column/40;
+    let previous=-Infinity;
+    for(let row=0;row<=100;row++){
+      const y=row/100,weight=sampleAnimeShoulderWeight(x,y);
+      assert.ok(Number.isFinite(weight)&&weight>=0&&weight<=1);
+      const warpedY=y-.009*weight;
+      assert.ok(warpedY>previous,'maximum legal shoulder displacement must not invert adjacent mesh rows');
+      previous=warpedY;
+    }
+  }
+  for(const [x,y] of [[NaN,.5],[.5,Infinity],[-.1,.4],[.2,2]])assert.equal(sampleAnimeShoulderWeight(x,y),0);
+});
+
 test('untrusted body channels cannot exceed the rigid pose limits or introduce non-finite transforms',()=>{
   const maximum=animePoseTransform({gesture:'bounce',gestureProgress:100,bodyTurn:100,headShake:100,bodyLift:-100,bodyLean:100});
   near(maximum.xPercent,3.45);near(maximum.yPercent,3.05);near(maximum.rotationDegrees,2.25);near(maximum.scale,1.028);
@@ -43,7 +71,7 @@ test('untrusted body channels cannot exceed the rigid pose limits or introduce n
 });
 
 test('sleep, reduced motion and hidden state clear gestures and rigid motion without mutating mouth input',()=>{
-  const pose={gesture:'nod',gestureProgress:.5,bodyTurn:.3,headShake:.2,bodyLift:.2,bodyLean:.3,mouthOpen:.7,mouthShape:'O'};
+  const pose={gesture:'nod',gestureProgress:.5,bodyTurn:.3,headShake:.2,bodyLift:.2,bodyLean:.3,shoulderLift:.5,mouthOpen:.7,mouthShape:'O'};
   const original=structuredClone(pose);
   for(const option of ['sleeping','reducedMotion','hidden'])assert.deepEqual(animePoseTransform(pose,{[option]:true}),identity);
   assert.deepEqual(pose,original);

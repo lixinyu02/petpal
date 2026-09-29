@@ -66,6 +66,22 @@ test('negative expressions suppress incompatible smug and relieved layers during
   assert.ok(focused.smug<.16&&focused.relief<.16);
 });
 
+test('five new expressions use distinct eyes and brows, with opaque drowsiness instead of a ghosted blink',()=>{
+  const hesitant=animeEmotionMix({hesitantAmount:.9});
+  const sleepy=animeEmotionMix({sleepyAmount:.9,eyeSmile:.06});
+  const expectant=animeEmotionMix({expectantAmount:.9});
+  const aggrieved=animeEmotionMix({aggrievedAmount:.9,smileAmount:1});
+  const tender=animeEmotionMix({tenderAmount:.9,eyeSmile:.22});
+  assert.ok(hesitant.browLeftLift>hesitant.browRightLift&&hesitant.eyeScaleLeft<hesitant.eyeScaleRight);
+  assert.ok(sleepy.eyeScaleLeft>.5&&sleepy.eyeScaleLeft<.7);assert.equal(sleepy.eyeScaleLeft,sleepy.eyeScaleRight);
+  assert.equal(sleepy.blinkLeft,0);assert.equal(sleepy.blinkRight,0,'sustained drowsiness must not blend in a translucent closed eye');
+  assert.ok(expectant.eyeScaleLeft>1&&expectant.browLeftLift>0&&expectant.sparkle>.3);
+  assert.ok(aggrieved.sadness>.5&&aggrieved.sadness<.75&&aggrieved.tears>.2&&aggrieved.smile<.11);
+  assert.ok(tender.upperWarmth>.4&&tender.smile>0&&tender.eyeScaleLeft>sleepy.eyeScaleLeft);
+  assert.equal(tender.blinkLeft,0);assert.equal(tender.blinkRight,0);
+  assert.equal(new Set([hesitant,sleepy,expectant,aggrieved,tender].map(value=>JSON.stringify(value))).size,5);
+});
+
 test('emotion visual mapping leaves PCM mouth articulation inputs untouched and never drives it', () => {
   const pose={sadAmount:.9,tearAmount:.8,mouthOpen:.6,mouthShape:'O',voiceEnergy:.7};
   const original=structuredClone(pose),result=animeEmotionMix(pose);
@@ -88,14 +104,15 @@ test('DOM speech shapes crossfade without leaking the closed expression beneath 
 });
 
 test('sleep is quiet and every externally supplied channel remains finite and bounded', () => {
-  const loud={sadAmount:1,downcastAmount:1,excitedAmount:1,shyAmount:1,eyeSmile:1,tearAmount:1,voiceEnergy:1,blinkLeft:0,blinkRight:0,smileAmount:1,blush:1,smugAmount:1,poutAmount:1,reliefAmount:1,determinedAmount:1};
+  const loud={sadAmount:1,downcastAmount:1,excitedAmount:1,shyAmount:1,eyeSmile:1,tearAmount:1,voiceEnergy:1,blinkLeft:0,blinkRight:0,smileAmount:1,blush:1,smugAmount:1,poutAmount:1,reliefAmount:1,determinedAmount:1,hesitantAmount:1,sleepyAmount:1,expectantAmount:1,aggrievedAmount:1,tenderAmount:1,surpriseAmount:1};
   const asleep=animeEmotionMix(loud,{sleeping:true});
-  for(const [key,value] of Object.entries(asleep))assert.equal(value,key==='blinkLeft'||key==='blinkRight'?1:0,`sleep clears ${key}`);
+  for(const [key,value] of Object.entries(asleep))assert.equal(value,['blinkLeft','blinkRight','eyeScaleLeft','eyeScaleRight'].includes(key)?1:0,`sleep clears ${key}`);
   for(const value of [undefined,NaN,Infinity,-100,100]){
     const result=animeEmotionMix(Object.fromEntries(Object.keys(loud).map(key=>[key,value])));
     for(const [key,output] of Object.entries(result)){
-      const lower=key==='browLeftLift'||key==='browRightLift'?-1:0;
-      assert.ok(Number.isFinite(output)&&output>=lower&&output<=1,`${key} stays bounded`);
+      const lower=['browLeftLift','browRightLift','browFocus'].includes(key)?-1:0;
+      const isScale=key==='eyeScaleLeft'||key==='eyeScaleRight';
+      assert.ok(Number.isFinite(output)&&output>=(isScale?.42:lower)&&output<=(isScale?1.18:1),`${key} stays bounded`);
     }
   }
 });

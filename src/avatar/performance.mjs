@@ -1,13 +1,14 @@
 // Text boundary shapes plus optional PCM energy envelope; not phoneme recognition.
 import { detectAvatarEmotion as emotion, emotionAtSpeechBoundary as emotionAtBoundary } from './emotion.mjs';
 import { createAvatarGestures, gestureAtSpeechBoundary } from './gestures.mjs';
+import { createAvatarMicroacting } from './microacting.mjs';
 const PHASES = new Set(['idle', 'listening', 'thinking', 'speaking', 'error']);
 const REACTIONS = new Set(['pet', 'greet', 'wake']);
 const MAX_STEP = .1, MAX_BACKLOG_SECONDS = 4.8, MAX_BACKLOG_UNITS = 64, MAX_INCREMENT_CHARS = 192;
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 const ease = (value, target, dt, rate = 12) => value + (target - value) * (1 - Math.exp(-dt * rate));
-const FACE_CHANNELS = ['warmAmount', 'curiousAmount', 'surpriseAmount', 'concernAmount', 'smileAmount', 'sadAmount', 'downcastAmount', 'excitedAmount', 'shyAmount', 'smugAmount', 'poutAmount', 'reliefAmount', 'determinedAmount', 'eyeSmile', 'tearAmount'];
-const NEGATIVE_EXPRESSIONS = new Set(['sad','downcast','concerned','pout','determined']);
+const FACE_CHANNELS = ['warmAmount', 'curiousAmount', 'surpriseAmount', 'concernAmount', 'smileAmount', 'sadAmount', 'downcastAmount', 'excitedAmount', 'shyAmount', 'smugAmount', 'poutAmount', 'reliefAmount', 'determinedAmount', 'hesitantAmount', 'sleepyAmount', 'expectantAmount', 'aggrievedAmount', 'tenderAmount', 'eyeSmile', 'tearAmount'];
+const NEGATIVE_EXPRESSIONS = new Set(['sad','downcast','concerned','pout','determined','hesitant','aggrieved']);
 // Facial targets are independent of articulation. Renderers must continue to
 // composite mouth movement after expression layers, including a smiling face.
 const expressions = {
@@ -25,11 +26,16 @@ const expressions = {
   pout: { poutAmount: 1, browRaise: -.2, browTilt: -.4, blush: .5, gazeOffsetX: -.16, headTilt: -.12 },
   relieved: { reliefAmount: 1, warmAmount: .65, smileAmount: .5, eyeSmile: .72, browRaise: -.12, blush: .24, gazeOffsetY: -.08 },
   determined: { determinedAmount: 1, browRaise: -.16, browTilt: -.25, gazeOffsetY: .08, headTilt: .02 },
+  hesitant: { hesitantAmount: 1, curiousAmount: .3, smileAmount: .02, browRaise: -.1, browTilt: .28, gazeOffsetX: -.25, gazeOffsetY: .05, headTilt: -.14 },
+  sleepy: { sleepyAmount: 1, warmAmount: .12, smileAmount: .08, eyeSmile: .06, browRaise: -.28, gazeOffsetY: -.25, headTilt: -.08 },
+  expectant: { expectantAmount: 1, curiousAmount: .25, excitedAmount: .18, browRaise: .48, gazeOffsetY: .12, smileAmount: .34, eyeSmile: .08, blush: .26, headTilt: .08 },
+  aggrieved: { aggrievedAmount: 1, sadAmount: .28, downcastAmount: .32, concernAmount: .2, browRaise: .2, browTilt: .55, gazeOffsetY: -.2, tearAmount: .32 },
+  tender: { tenderAmount: 1, warmAmount: .65, smileAmount: .35, eyeSmile: .18, blush: .25, gazeOffsetY: -.05, headTilt: .1 },
   playful: { warmAmount: .6, curiousAmount: .12, smileAmount: .8, browRaise: .25, browTilt: -.12, blush: .2, gazeOffsetX: .12, headTilt: -.12 },
   concerned: { warmAmount: .18, curiousAmount: .18, concernAmount: 1, smileAmount: .05, browRaise: .14, browTilt: .42, gazeOffsetX: -.05, gazeOffsetY: -.1, headTilt: -.07 },
 };
 const reactions = { pet: { expression: 'happy', duration: 1.65, amount: .62 }, greet: { expression: 'playful', duration: 1.55, amount: .72 }, wake: { expression: 'warm', duration: 1.2, amount: .38 } };
-const neutral = () => ({ expression: 'neutral', expressionAmount: 0, warmAmount: 0, curiousAmount: 0, surpriseAmount: 0, concernAmount: 0, smileAmount: 0, sadAmount: 0, downcastAmount: 0, excitedAmount: 0, shyAmount: 0, smugAmount: 0, poutAmount: 0, reliefAmount: 0, determinedAmount: 0, eyeSmile: 0, tearAmount: 0, voiceEnergy: 0, mouthOpen: 0, mouthShape: 'rest', blinkLeft: 0, blinkRight: 0, browRaise: 0, browTilt: 0, blush: 0, headTilt: 0, headNod: 0, gazeOffsetX: 0, gazeOffsetY: 0, gesture: 'none', gestureProgress: 0, bodyLean: 0, bodyLift: 0, bodyTurn: 0, headShake: 0, speaking: false });
+const neutral = () => ({ expression: 'neutral', expressionAmount: 0, warmAmount: 0, curiousAmount: 0, surpriseAmount: 0, concernAmount: 0, smileAmount: 0, sadAmount: 0, downcastAmount: 0, excitedAmount: 0, shyAmount: 0, smugAmount: 0, poutAmount: 0, reliefAmount: 0, determinedAmount: 0, hesitantAmount: 0, sleepyAmount: 0, expectantAmount: 0, aggrievedAmount: 0, tenderAmount: 0, eyeSmile: 0, tearAmount: 0, voiceEnergy: 0, mouthOpen: 0, mouthShape: 'rest', blinkLeft: 0, blinkRight: 0, browRaise: 0, browTilt: 0, blush: 0, headTilt: 0, headNod: 0, gazeOffsetX: 0, gazeOffsetY: 0, gesture: 'none', gestureProgress: 0, bodyLean: 0, bodyLift: 0, bodyTurn: 0, headShake: 0, shoulderLift: 0, microExpression: 'none', microProgress: 0, speaking: false });
 
 function cue(character) {
   if (!character) return { shape: 'rest', open: 0, duration: .06 };
@@ -53,15 +59,21 @@ export function createAvatarPerformance() {
   let output = neutral(), input = { utteranceId: '', text: '', phase: 'idle' };
   let queue = [], current = null, hidden = false, external = false, externalActive = false, externalIndex = -1, externalAudio = null;
   let emotionKind = null, emotionRemaining = 0, motionTime = 0, blinkAt = 3.1, blinkRemaining = 0, blinkNumber = 0;
-  let reaction = null, winkAge = null, winkCooldown = 0, motionReduced = false;
+  let reaction = null, winkAge = null, winkCooldown = 0, motionReduced = false, sleeping = false;
   const gestures=createAvatarGestures();
+  const microacting=createAvatarMicroacting();
+  let microBase=null,petNumber=0;
   let gestureFromSpeech=false;
   // Remember consumed lengths, not old message bodies. Reset/cancel must not replay a visited reply.
   const consumed = new Map();
   const reacted = new Set();
   const clearMouth = () => { queue = []; current = null; output.mouthOpen = 0; output.mouthShape = 'rest'; output.speaking = false; };
-  const clearGestures = (clearHead=true) => { gestures.cancel(); gestureFromSpeech=false; output.gesture='none'; output.gestureProgress=output.bodyLean=output.bodyLift=output.bodyTurn=output.headShake=0; if(clearHead)output.headTilt=output.headNod=0; };
-  const resetPose = () => { clearMouth(); gestures.reset(); gestureFromSpeech=false; output = neutral(); emotionKind = null; emotionRemaining = 0; reaction = null; winkAge = null; winkCooldown = 0; motionTime = 0; blinkAt = 3.1; blinkRemaining = 0; blinkNumber = 0; };
+  const clearGestures = (clearHead=true) => { gestures.cancel(); gestureFromSpeech=false; output.gesture='none'; output.gestureProgress=output.bodyLean=output.bodyLift=output.bodyTurn=output.headShake=output.shoulderLift=0; if(clearHead)output.headTilt=output.headNod=0; };
+  // Idle overlays never become part of the underlying facial smoothing state.
+  // Removing one restores the exact pose before it, even on a zero-time input.
+  const removeMicro = () => { if(microBase){Object.assign(output,microBase);microBase=null;} output.microExpression='none';output.microProgress=0; };
+  const clearMicro = () => { removeMicro();microacting.cancel(); };
+  const resetPose = () => { clearMouth(); gestures.reset(); microacting.reset();microBase=null;petNumber=0;gestureFromSpeech=false; output = neutral(); emotionKind = null; emotionRemaining = 0; reaction = null; winkAge = null; winkCooldown = 0; motionTime = 0; blinkAt = 3.1; blinkRemaining = 0; blinkNumber = 0; };
   const rememberLength = (id, length) => {
     const previous = consumed.get(id) ?? 0;
     consumed.delete(id); consumed.set(id, Math.max(length, previous));
@@ -78,6 +90,8 @@ export function createAvatarPerformance() {
   function setInput(next) {
     if (!next || typeof next.utteranceId !== 'string' || typeof next.text !== 'string' || !PHASES.has(next.phase)) throw new TypeError('Invalid avatar performance input.');
     if (next.speech !== undefined && (!next.speech || typeof next.speech.active !== 'boolean' || typeof next.speech.charIndex !== 'number')) throw new TypeError('Invalid speech boundary input.');
+    removeMicro();
+    if(next.phase!=='idle'||next.speech?.active&&!next.speech.ended)clearMicro();
     const changed = next.utteranceId !== input.utteranceId;
     const rewritten = !changed && !next.text.startsWith(input.text);
     const previousLength = Math.max(changed ? 0 : input.text.length, consumed.get(next.utteranceId) ?? 0);
@@ -95,9 +109,9 @@ export function createAvatarPerformance() {
     if(next.phase!=='speaking'||!externalActive||externalAudio===null||externalAudio<=.025)output.voiceEnergy=0;
     externalIndex = external && Number.isFinite(next.speech.charIndex) ? clamp(Math.floor(next.speech.charIndex), 0, next.text.length) : -1;
     if(gestureFromSpeech&&(changed||rewritten))clearGestures(false);
-    if(hidden||motionReduced||(wasSpeaking&&next.phase!=='speaking')||(next.phase==='speaking'&&external&&(!externalActive||externalIndex<0||externalIndex>=next.text.length)))clearGestures();
+    if(hidden||sleeping||motionReduced||(wasSpeaking&&next.phase!=='speaking')||(next.phase==='speaking'&&external&&(!externalActive||externalIndex<0||externalIndex>=next.text.length)))clearGestures();
     let boundaryAdvanced = false;
-    if (next.phase !== 'speaking' || hidden) { clearMouth(); emotionKind = null; emotionRemaining = 0; }
+    if (next.phase !== 'speaking' || hidden || sleeping) { clearMouth(); emotionKind = null; emotionRemaining = 0; }
     else if (external) {
       queue = [];
       if (!externalActive || next.speech.ended || externalIndex < 0 || externalIndex >= next.text.length) {
@@ -113,7 +127,7 @@ export function createAvatarPerformance() {
       if (priorExternal) clearMouth();
       if (appended) enqueue(appended);
     }
-    if (!hidden && next.phase === 'speaking' && (external ? boundaryAdvanced : appended)) {
+    if (!hidden && !sleeping && next.phase === 'speaking' && (external ? boundaryAdvanced : appended)) {
       const value = external ? emotionAtBoundary(next.text, externalIndex) : emotion(next.text.slice(-160));
       if (value) { emotionKind = value; emotionRemaining = 2.1; }
       else if (external) { emotionKind = null; emotionRemaining = 0; }
@@ -124,7 +138,7 @@ export function createAvatarPerformance() {
     const cueAdvanced=external?externalActive&&(changed||!priorExternal||!priorActive||!wasSpeaking||externalIndex>priorIndex):Boolean(appended);
     if(next.phase==='speaking'&&cueAdvanced){
       const cue=gestureAtSpeechBoundary(next.text,external?externalIndex:next.text.length-1);
-      if(cue&&gestures.trigger(`speech:${next.utteranceId}:${cue.sentenceStart}`,cue.gesture,!hidden&&!motionReduced))gestureFromSpeech=true;
+      if(cue&&gestures.trigger(`speech:${next.utteranceId}:${cue.sentenceStart}`,cue.gesture,!hidden&&!sleeping&&!motionReduced))gestureFromSpeech=true;
     }
   }
 
@@ -133,13 +147,17 @@ export function createAvatarPerformance() {
     if (reacted.has(event.id)) return false;
     reacted.add(event.id);
     while (reacted.size > 64) reacted.delete(reacted.values().next().value);
+    clearMicro();
     // Hidden reactions are consumed, not deferred until the page is visible.
-    if (hidden) return false;
-    reaction = { ...reactions[event.kind], age: 0 };
+    if (hidden || sleeping&&event.kind!=='wake') return false;
+    if(event.kind==='wake')sleeping=false;
     // During a sad/serious line a touch remains gentle instead of forcing joy.
     const negative=NEGATIVE_EXPRESSIONS.has(emotionKind??output.expression);
-    const gesture=negative?'settle':event.kind==='pet'?'tilt':event.kind==='greet'?'nod':'settle';
-    if(gestures.trigger(`reaction:${event.id}`,gesture,!motionReduced&&!(input.phase==='speaking'&&external&&!externalActive)))gestureFromSpeech=false;
+    const tenderPet=event.kind==='pet'&&!negative&&petNumber%2===1;
+    const gesture=negative?'settle':event.kind==='pet'?(tenderPet?'sway':'tilt'):event.kind==='greet'?'nod':'settle';
+    const started=gestures.trigger(`reaction:${event.id}`,gesture,!motionReduced&&!(input.phase==='speaking'&&external&&!externalActive));
+    if(started){gestureFromSpeech=false;if(event.kind==='pet'&&!negative)petNumber++;}
+    reaction = { ...reactions[event.kind], ...(started&&tenderPet?{expression:'tender',duration:2.2,amount:.7}:{}), age: 0 };
     if (event.kind === 'greet' && winkCooldown <= 0) {
       winkCooldown = 2.4;
       if (!motionReduced) winkAge = 0;
@@ -147,14 +165,17 @@ export function createAvatarPerformance() {
     return true;
   }
 
-  function step(deltaSeconds, { reducedMotion = false, hidden: nowHidden = false } = {}) {
+  function step(deltaSeconds, { reducedMotion = false, hidden: nowHidden = false, sleeping: nowSleeping = false } = {}) {
+    removeMicro();
     const elapsed = Number.isFinite(deltaSeconds) && deltaSeconds > 0 ? deltaSeconds : 0;
     // Keep approximate articulation and autonomous motion bounded after a
     // stalled frame, but expire semantic reactions against real wall time.
     const dt = Math.min(elapsed, MAX_STEP);
     hidden = Boolean(nowHidden);
+    sleeping = Boolean(nowSleeping);
     motionReduced = Boolean(reducedMotion);
-    if (hidden) {
+    if (hidden || sleeping) {
+      clearMicro();
       externalAudio = null;
       clearGestures();
       clearMouth(); emotionKind = null; emotionRemaining = 0; blinkRemaining = 0; reaction = null; winkAge = null;
@@ -162,6 +183,7 @@ export function createAvatarPerformance() {
       return { ...output };
     }
     if (motionReduced) {
+      clearMicro();
       clearGestures();
       blinkRemaining = 0; winkAge = null;
       output.voiceEnergy=0;
@@ -169,7 +191,7 @@ export function createAvatarPerformance() {
     }
     if (dt > 0) {
       const gesture=gestures.step(elapsed,{blocked:motionReduced||(input.phase==='speaking'&&external&&!externalActive)});
-      for(const channel of ['gesture','gestureProgress','bodyLean','bodyLift','bodyTurn','headShake'])output[channel]=gesture[channel];
+      for(const channel of ['gesture','gestureProgress','bodyLean','bodyLift','bodyTurn','headShake','shoulderLift'])output[channel]=gesture[channel];
       if (input.phase === 'speaking') {
         let remainingDt = dt;
         while (remainingDt > 0) {
@@ -191,7 +213,7 @@ export function createAvatarPerformance() {
       if (reaction) { reaction.age += elapsed; if (reaction.age >= reaction.duration) reaction = null; }
       const base = input.phase === 'thinking' ? 'thoughtful' : input.phase === 'listening' ? 'curious' : input.phase === 'error' ? 'concerned' : output.speaking ? 'warm' : 'neutral';
       const selected = emotionRemaining > 0 ? emotionKind : base;
-      const vivid=['happy','shy','sad','downcast','excited','smug','pout','relieved','determined'].includes(selected);
+      const vivid=['happy','shy','sad','downcast','excited','smug','pout','relieved','determined','hesitant','sleepy','expectant','aggrieved','tender'].includes(selected);
       const amount = selected === 'neutral' ? 0 : emotionRemaining > 0 ? (vivid ? (externalAudio!==null ? .86+.1*output.voiceEnergy : .9) : .85) : .4;
       const negative=NEGATIVE_EXPRESSIONS.has(selected);
       const reactionAmount = reaction&&!negative ? reaction.amount * clamp((reaction.duration - reaction.age) / .55) : 0;
@@ -221,8 +243,16 @@ export function createAvatarPerformance() {
         output.gazeOffsetY = ease(output.gazeOffsetY, poseTarget('gazeOffsetY'), elapsed, 5);
       }
     }
+    const micro=microacting.step(elapsed,{enabled:!motionReduced&&input.phase==='idle'&&!externalActive&&!reaction&&output.gesture==='none'&&emotionRemaining<=0});
+    if(micro.microExpression!=='none'){
+      microBase={gazeOffsetX:output.gazeOffsetX,blinkLeft:output.blinkLeft,blinkRight:output.blinkRight,smileAmount:output.smileAmount,warmAmount:output.warmAmount};
+      output.gazeOffsetX=clamp(output.gazeOffsetX+micro.gazeOffsetX,-1,1);
+      output.blinkLeft=Math.max(output.blinkLeft,micro.blink);output.blinkRight=Math.max(output.blinkRight,micro.blink);
+      output.smileAmount=Math.max(output.smileAmount,micro.smileAmount);output.warmAmount=Math.max(output.warmAmount,micro.warmAmount);
+      output.microExpression=micro.microExpression;output.microProgress=micro.microProgress;
+    }
     return { ...output };
   }
-  function reset() { resetPose(); input = { utteranceId: '', text: '', phase: 'idle' }; external = externalActive = false; externalIndex = -1; externalAudio = null; hidden = false; }
+  function reset() { resetPose(); input = { utteranceId: '', text: '', phase: 'idle' }; external = externalActive = false; externalIndex = -1; externalAudio = null; hidden = sleeping = false; }
   return { setInput, react, step, reset };
 }

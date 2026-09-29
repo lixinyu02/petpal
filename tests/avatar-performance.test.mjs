@@ -494,3 +494,84 @@ test('audible PCM retains current emotion across slow frames while buffering can
   controller.setInput(input(text,{speech:{...speech,charIndex:2}}));
   assert.equal(controller.step(1).gesture,'none');
 });
+
+test('new microacting faces have distinct strong channels and keep sleepy eyelids opaque-friendly',()=>{
+  for(const [text,kind,gesture]of [['我有一点犹豫。','hesitant','shrug'],['我有点困了。','sleepy','doze'],['我很期待听你讲下去。','expectant','leanIn'],['我也会觉得委屈。','aggrieved','shrug'],['我会温柔地陪着你。','tender','sway']]){
+    const controller=createAvatarPerformance();controller.setInput(input(text));const pose=run(controller,.7).at(-1);
+    assert.equal(pose.expression,kind);assert.equal(pose.gesture,gesture);assert.ok(pose[`${kind}Amount`]>.85);
+    assert.ok(pose.eyeSmile<.2,'new faces do not keep half-transparent closed-eye textures');
+    if(kind==='aggrieved')assert.equal(pose.smileAmount,0);
+  }
+});
+
+test('each new streamed intent triggers once, including listening after an incomplete determination phrase',()=>{
+  for(const [text,gesture]of [['我在认真听你说。','leanIn'],['我有一点犹豫，还没想好呢。','shrug'],['真的很感谢你一直陪着我。','bow'],['让我偷偷看一眼。','peek'],['我会温柔地陪着你。','sway'],['我有点犯困了。','doze']]){
+    const controller=createAvatarPerformance(),seen=[];let previous='none';
+    for(let index=1;index<=text.length;index++){
+      controller.setInput(input(text.slice(0,index)));const pose=controller.step(.15);
+      if(pose.gesture!=='none'&&previous==='none')seen.push(pose.gesture);
+      previous=pose.gesture;
+    }
+    assert.deepEqual(seen,[gesture],text);assert.equal(controller.step(4).gesture,'none');
+  }
+});
+
+test('idle microacting is low priority and cancellation restores the exact underlying channels',()=>{
+  for(const phase of ['listening','thinking','speaking','error']){
+    const controller=createAvatarPerformance();run(controller,9);
+    const glance=controller.step(0);assert.equal(glance.microExpression,'glance');assert.ok(glance.gazeOffsetX>.2);
+    controller.setInput(input(phase==='speaking'?'你好':'',{phase}));const interrupted=controller.step(0);
+    assert.equal(interrupted.microExpression,'none');assert.equal(interrupted.microProgress,0);assert.equal(interrupted.gazeOffsetX,0);
+    run(controller,12);assert.equal(controller.step(0).microExpression,'none');
+    controller.setInput(input('',{phase:'idle'}));assert.ok(run(controller,8).every(pose=>pose.microExpression==='none'));
+  }
+  const touch=createAvatarPerformance();run(touch,9);touch.react({id:'pet-idle',kind:'pet'});
+  assert.equal(touch.step(0).microExpression,'none');assert.equal(touch.step(.1).gesture,'tilt');
+});
+
+test('idle soft smile never contaminates the next reply or changes text and PCM mouth timing',()=>{
+  for(const external of [false,true]){
+    const idle=createAvatarPerformance(),fresh=createAvatarPerformance();
+    let smile=null;
+    for(let frame=0;frame<2400;frame++){
+      const pose=idle.step(.025);
+      if(pose.microExpression==='softSmile'&&pose.smileAmount>.18){smile=pose;break;}
+    }
+    assert.ok(smile);
+    const next=input('a你好，继续。',external?{speech:{active:true,charIndex:0,audioLevel:.5}}:{});
+    idle.setInput(next);fresh.setInput(next);
+    assert.equal(idle.step(0).smileAmount,fresh.step(0).smileAmount,'the idle overlay is removed, not eased into the next reply');
+    for(let frame=0;frame<60;frame++)assert.deepEqual(mouth(idle.step(.025)),mouth(fresh.step(.025)));
+  }
+});
+
+test('hidden, reduced motion and real sleep suppress microacting without catch-up on return',()=>{
+  for(const option of ['hidden','reducedMotion','sleeping']){
+    const controller=createAvatarPerformance();run(controller,9);
+    assert.equal(controller.step(0,{[option]:true}).microExpression,'none');
+    assert.ok(run(controller,30,{[option]:true}).every(pose=>pose.microExpression==='none'));
+    assert.ok(run(controller,8).every(pose=>pose.microExpression==='none'));
+    assert.notEqual(run(controller,.7).at(-1).microExpression,'none');
+  }
+});
+
+test('sleep clears all active motion and articulation, consumes sleeping input and does not replay after wake',()=>{
+  const controller=createAvatarPerformance();controller.setInput(input('我有一点犹豫。'));run(controller,.4);
+  const sleeping=controller.step(0,{sleeping:true});assert.equal(sleeping.gesture,'none');assert.equal(sleeping.shoulderLift,0);assert.equal(sleeping.microExpression,'none');assert.deepEqual(mouth(sleeping),{open:0,shape:'rest',speaking:false});
+  controller.setInput(input('我有一点犹豫。后来很开心。'));
+  assert.equal(controller.react({id:'asleep-pet',kind:'pet'}),false);
+  controller.step(3,{sleeping:true});controller.step(.1);controller.setInput(input('我有一点犹豫。后来很开心。'));
+  const awake=controller.step(.1);assert.equal(awake.gesture,'none');assert.equal(awake.mouthOpen,0);
+  assert.equal(controller.react({id:'asleep-pet',kind:'pet'}),false);
+});
+
+test('independent head pets alternate gently after cooldown while the first and negative response stay unchanged',()=>{
+  const controller=createAvatarPerformance();controller.react({id:'first',kind:'pet'});
+  const first=run(controller,.4).at(-1);assert.equal(first.expression,'happy');assert.equal(first.gesture,'tilt');
+  run(controller,3);controller.react({id:'second',kind:'pet'});
+  const second=run(controller,.6).at(-1);assert.equal(second.expression,'tender');assert.equal(second.gesture,'sway');assert.ok(second.tenderAmount>.6);
+  assert.equal(controller.react({id:'second',kind:'pet'}),false);
+  run(controller,3);controller.setInput(input('我也会觉得委屈。'));run(controller,3);
+  controller.setInput(input('我也会觉得委屈。',{utteranceId:'fresh-hurt'}));run(controller,.2);controller.react({id:'gentle',kind:'pet'});
+  assert.equal(controller.step(.1).expression,'aggrieved');assert.ok(controller.step(.1).smileAmount<.00001,'the old smile only has a negligible smoothing remainder');
+});

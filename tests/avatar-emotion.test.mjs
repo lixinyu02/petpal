@@ -52,3 +52,12 @@ test('Galgame cues distinguish small pride, pouting, relief and determination wi
   const text='先看看情况，现在安心了，终于可以休息。接下来是普通说明。';
   assert.equal(at(text,0),null);assert.equal(at(text,text.indexOf('现在')),'relieved');assert.equal(at(text,text.indexOf('终于')),'relieved');assert.equal(at(text,text.indexOf('接下来')),null);
 });
+
+test('hesitation, sleepiness, expectation, hurt feelings and tenderness stay distinct and conservative',()=>{
+  for(const [text,kind]of [['嗯，我有一点犹豫。','hesitant'],['我还没想好呢。','hesitant'],['我有点困了。','sleepy'],['我有点犯困了。','sleepy'],['我很期待听你讲下去。','expectant'],['我也会觉得委屈。','aggrieved'],['我会温柔地陪着你。','tender'],['I feel hesitant.','hesitant'],['I feel drowsy.','sleepy'],['I am looking forward to it.','expectant'],['I feel wronged.','aggrieved'],['I feel tender.','tender']])assert.equal(emotion(text),kind,text);
+  for(const [text,kind]of [['我没有犹豫。','hesitant'],['不要犹豫。','hesitant'],['我不困了。','sleepy'],['我不期待。','expectant'],['我没有觉得委屈。','aggrieved'],['我并不温柔。','tender'],['I am not sleepy.','sleepy'],['I am not hesitant.','hesitant']])assert.notEqual(emotion(text),kind,text);
+  assert.equal(emotion('别委屈，我会听你说。'),'concerned');
+  for(const text of ['犹豫、困倦、期待、委屈、温柔。','“犹豫”这个词是什么意思？','支持期待和温柔两种表情。'])assert.equal(emotion(text),null,text);
+  const text='先听我说，现在有一点犹豫，还没想好呢。但是接下来说普通内容。';
+  assert.equal(at(text,0),null);assert.equal(at(text,text.indexOf('现在')),'hesitant');assert.equal(at(text,text.indexOf('还没')),'hesitant');assert.equal(at(text,text.indexOf('但是')),null);
+});

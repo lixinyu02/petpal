@@ -71,3 +71,28 @@ test('a covered window at one frame per second cannot stretch motion or cooldown
   assert.equal(stalled.step(10).gesture,'none','long gaps discard the finished motion');
   assert.equal(stalled.trigger('stalled','shy'),false,'discarding is not permission to replay');
 });
+
+test('six new intentions use natural clauses and do not perform denied or descriptive actions',()=>{
+  for(const [text,gesture]of [['我在认真听你说。','leanIn'],['我有一点犹豫，还没想好呢。','shrug'],['真的很感谢你一直陪着我。','bow'],['让我偷偷看一眼。','peek'],['我会温柔地陪着你。','sway'],['我有点犯困了。','doze']])assert.equal(cue(text,text.length-1)?.gesture,gesture,text);
+  for(const text of ['我不想偷偷看。','我不会看一眼。','别鞠躬。','列举鞠躬动作。','表情有期待、温柔、犹豫。'])assert.equal(cue(text,text.length-1),null,text);
+  const text='这是普通内容，我会温柔地陪着你。';assert.equal(cue(text,0),null);assert.equal(cue(text,text.indexOf('我会'))?.gesture,'sway');
+});
+
+test('new motions remain distinguishable, phone-readable, bounded and wall-clock limited',()=>{
+  const poses={};
+  for(const gesture of ['leanIn','shrug','bow','peek','sway','doze']){
+    const controller=createAvatarGestures();controller.trigger(gesture,gesture);poses[gesture]=controller.step(.6);
+    const frames=run(controller,3);
+    assert.equal(frames.at(-1).gesture,'none');
+    for(const pose of [poses[gesture],...frames]){
+      for(const key of [...channels,'shoulderLift'])assert.ok(Number.isFinite(pose[key])&&Math.abs(pose[key])<=1,`${gesture}.${key}`);
+      assert.ok(pose.shoulderLift>=0);
+    }
+    assert.equal(controller.trigger(gesture,gesture),false);
+    controller.trigger(`${gesture}-next`,gesture);assert.equal(controller.step(3).gesture,'none');
+  }
+  assert.ok(poses.leanIn.bodyLean>.6);assert.ok(poses.shrug.shoulderLift>.65);
+  assert.ok(poses.bow.headNod>.6);assert.ok(poses.peek.bodyTurn>.5);
+  assert.ok(Math.abs(poses.sway.bodyTurn)>.4);assert.ok(poses.doze.headNod>.6);
+  const old=createAvatarGestures();old.trigger('old','nod');assert.equal(old.step(.3).shoulderLift,0);
+});

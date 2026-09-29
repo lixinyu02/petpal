@@ -8,6 +8,7 @@ export interface AvatarGesturePose {
   headShake:number;
   headTilt:number;
   headNod:number;
+  shoulderLift:number;
 }
 export function gestureAtSpeechBoundary(text:string,index:number):{gesture:Exclude<AvatarGesture,'none'>;sentenceStart:number}|null;
 export function createAvatarGestures():{

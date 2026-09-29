@@ -1,6 +1,7 @@
 export type PerformancePhase = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
-export type AvatarExpression = 'neutral' | 'warm' | 'curious' | 'thoughtful' | 'surprised' | 'shy' | 'happy' | 'playful' | 'concerned' | 'sad' | 'downcast' | 'excited' | 'smug' | 'pout' | 'relieved' | 'determined';
-export type AvatarGesture = 'none' | 'nod' | 'shake' | 'tilt' | 'shy' | 'bounce' | 'recoil' | 'settle';
+export type AvatarExpression = 'neutral' | 'warm' | 'curious' | 'thoughtful' | 'surprised' | 'shy' | 'happy' | 'playful' | 'concerned' | 'sad' | 'downcast' | 'excited' | 'smug' | 'pout' | 'relieved' | 'determined' | 'hesitant' | 'sleepy' | 'expectant' | 'aggrieved' | 'tender';
+export type AvatarGesture = 'none' | 'nod' | 'shake' | 'tilt' | 'shy' | 'bounce' | 'recoil' | 'settle' | 'leanIn' | 'shrug' | 'bow' | 'peek' | 'sway' | 'doze';
+export type AvatarMicroExpression = 'none' | 'glance' | 'softBlink' | 'softSmile';
 export interface AvatarReaction { id: string; kind: 'pet' | 'greet' | 'wake' }
 export type MouthShape = 'rest' | 'A' | 'E' | 'O' | 'M';
 export interface PerformanceInput {
@@ -27,6 +28,11 @@ export interface AvatarPerformanceSnapshot {
   poutAmount: number;
   reliefAmount: number;
   determinedAmount: number;
+  hesitantAmount: number;
+  sleepyAmount: number;
+  expectantAmount: number;
+  aggrievedAmount: number;
+  tenderAmount: number;
   eyeSmile: number;
   tearAmount: number;
   /** Smoothed actual PCM energy for subtle body motion; zero when silent/reduced. */
@@ -51,6 +57,11 @@ export interface AvatarPerformanceSnapshot {
   bodyLift:number;
   bodyTurn:number;
   headShake:number;
+  /** 0..1 controlled shoulder elevation; never moves the neck or face. */
+  shoulderLift:number;
+  /** Low-priority idle overlay; poses are already included in gaze, blink and smile channels. */
+  microExpression:AvatarMicroExpression;
+  microProgress:number;
   /** Signed -1..1 expression gaze offset; zero during reduced motion. */
   gazeOffsetX: number;
   gazeOffsetY: number;
@@ -61,7 +72,7 @@ export interface AvatarPerformance {
   /** React once per id without changing speech/input; false for duplicate or hidden events. */
   react(event: AvatarReaction): boolean;
   /** Pass actual elapsed seconds, including throttled RAF gaps; local motion integration is capped internally. */
-  step(dt: number, options?: { reducedMotion?: boolean; hidden?: boolean }): AvatarPerformanceSnapshot;
+  step(dt: number, options?: { reducedMotion?: boolean; hidden?: boolean; sleeping?: boolean }): AvatarPerformanceSnapshot;
   /** Clear pose/reactions/queued speech, retaining bounded message and reaction replay protection. */
   reset(): void;
 }
