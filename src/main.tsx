@@ -2,6 +2,7 @@ import React, { lazy, Suspense, useEffect, useState, useSyncExternalStore } from
 import ReactDOM from 'react-dom/client';
 import './styles.css';
 import './companion.css';
+import './natural-companion.css';
 import { getSessionEpoch, initConnection, subscribeSession } from './api';
 import { Capacitor } from '@capacitor/core';
 import { PetOverlay as NativeOverlay } from './platform/overlay';

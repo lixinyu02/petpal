@@ -1,0 +1,66 @@
+/* Keep the existing Scene reachable when the full companion sidebar no longer fits. */
+@media (max-width: 960px) {
+  .app-shell:has(.workspace) .topbar {
+    height: calc(76px + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-right: max(18px, env(safe-area-inset-right, 0px));
+    gap: 12px;
+  }
+
+  .app-shell:has(.workspace) .topbar-title {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .app-shell:has(.workspace) .topbar-title strong {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .app-shell:has(.workspace) .topbar-actions {
+    flex-shrink: 0;
+    gap: 12px;
+    padding-right: 72px;
+  }
+
+  .app-shell:has(.workspace) .topbar-actions .today {
+    display: none;
+  }
+
+  .app-shell .pet-panel {
+    display: block;
+    position: fixed;
+    z-index: 8;
+    top: calc(3px + env(safe-area-inset-top, 0px));
+    right: max(18px, env(safe-area-inset-right, 0px));
+    width: 60px;
+    height: 70px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    overflow: hidden;
+  }
+
+  .app-shell .pet-panel > :not(.pet-scene),
+  .app-shell .pet-panel .scene-circle,
+  .app-shell .pet-panel .scene-leaf,
+  .app-shell .pet-panel .scene-floor {
+    display: none;
+  }
+
+  .app-shell .pet-panel .pet-scene {
+    display: block;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+  }
+
+  .app-shell .pet-panel .pet-touch {
+    width: 100%;
+    height: 100%;
+    transform: none;
+  }
+}

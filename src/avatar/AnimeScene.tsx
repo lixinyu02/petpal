@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type { PetCommand } from '../pet/PetScene';
-import type { PetAction, PetBehaviorState } from '../pet/behavior';
+import type { PetAction, PetBehaviorState, PetInteraction } from '../pet/behavior';
 import { createAvatarPerformance, type PerformanceInput } from './performance.mjs';
 import { loadAvatarImage, loadAvatarImages, type AvatarImageName } from './anime-resources.mjs';
+import { bindCompanionGestures, portraitCoordinates, portraitContains } from '../pet/interaction.mjs';
 import './anime-scene.css';
 
-type Props = { command?: PetCommand; compact?: boolean; onState?: (state: PetBehaviorState) => void; onReady?: () => void; className?: string; speaking?: boolean; performanceInput?: PerformanceInput };
+type Props = { command?: PetCommand; compact?: boolean; onState?: (state: PetBehaviorState) => void; onReady?: () => void; onInteract?: (action: PetInteraction) => void; interactive?: boolean; className?: string; speaking?: boolean; performanceInput?: PerformanceInput };
 const vertexShader = `
 varying vec2 vUv;
 uniform float clockTime, motion, gazeX, gazeY, affection, resting, headTilt, headNod;
@@ -14,24 +15,25 @@ void main() {
   vUv = uv;
   vec3 p = position;
   float head = smoothstep(.51, .68, uv.y);
-  float breathe = sin(clockTime * 1.6) * .007 * motion;
+  float breathe = sin(clockTime * 1.6) * .004 * motion;
   p.y += breathe * smoothstep(.08, .55, uv.y);
   p.x *= 1.0 + breathe * (1.0 - head) * .45;
-  float tilt = (sin(clockTime * .65) * .013 + gazeX * .027 + affection * .035 - resting * .05 + headTilt * .09) * motion;
+  float tilt = (sin(clockTime * .65) * .007 + gazeX * .014 + affection * .018 - resting * .035 + headTilt * .055) * motion;
   vec2 pivot = vec2(0.0, .25);
   vec2 h = p.xy - pivot;
   p.xy += (mat2(cos(tilt), sin(tilt), -sin(tilt), cos(tilt)) * h - h) * head;
-  p.x += gazeX * .025 * head * motion;
-  p.y += (gazeY * .018 - resting * .035 + headNod * .028) * head * motion;
+  p.x += gazeX * .014 * head * motion;
+  p.y += (gazeY * .012 - resting * .025 + headNod * .014) * head * motion;
   float hair = smoothstep(.12, .29, abs(uv.x - .5)) * smoothstep(.48, .65, uv.y);
-  p.x += sin(clockTime * 1.8 + uv.y * 5.0) * .012 * hair * motion;
-  p.y += sin(clockTime * 2.0) * affection * .014 * motion;
+  p.x += sin(clockTime * 1.8 + uv.y * 5.0) * .006 * hair * motion;
+  p.y += sin(clockTime * 2.0) * affection * .008 * motion;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
 }`;
 const fragmentShader = `
 varying vec2 vUv;
 uniform sampler2D baseMap, blinkMap, talkMap, roundMap, curiousMap, warmMap;
 uniform float blinkLeft, blinkRight, mouth, mouthRound, mouthWide, warm, curious, surprised, browRaise, blush;
+uniform float gazeX, gazeY, affection;
 float regionAt(vec2 point, vec2 center, vec2 radius) {
   float d = length((point - center) / radius);
   return 1.0 - smoothstep(.78, 1.0, d);
@@ -47,6 +49,8 @@ void main() {
   samplePoint.y = mix(point.y, eyeCenter.y + (point.y-eyeCenter.y)/(1.0+surprised*.14), eyeMask);
   float brows = max(region(vec2(.410,.207),vec2(.061,.018)),region(vec2(.576,.190),vec2(.063,.018)));
   samplePoint.y += browRaise*.0035*brows;
+  float iris = max(region(vec2(.414,.251),vec2(.027,.024)),region(vec2(.578,.244),vec2(.027,.024)));
+  samplePoint += vec2(-gazeX*.003, gazeY*.002)*iris;
   vec2 sampleUv = vec2(samplePoint.x,1.0-samplePoint.y);
   vec4 color = texture2D(baseMap, sampleUv);
   float face = region(vec2(.496,.270),vec2(.166,.106));
@@ -62,7 +66,7 @@ void main() {
   vec3 speechColor = mix(texture2D(talkMap,mouthUv).rgb,texture2D(roundMap,mouthUv).rgb,mouthRound);
   color.rgb = mix(color.rgb,speechColor,lips*smoothstep(.025,.16,mouth));
   float cheeks = max(region(vec2(.382,.288),vec2(.04,.023)),region(vec2(.600,.281),vec2(.039,.023)));
-  color.rgb = mix(color.rgb, vec3(1.0,.36,.31),cheeks*blush*.12);
+  color.rgb = mix(color.rgb, vec3(1.0,.36,.31),cheeks*(blush*.12+affection*.025));
   // Reject nearly transparent texels before the 8-bit desktop compositor unpremultiplies them.
   color.a *= smoothstep(.035, .15, color.a);
   if (color.a < .02) discard;
@@ -71,9 +75,9 @@ void main() {
   #include <premultiplied_alpha_fragment>
 }`;
 
-export default function AnimeScene({ command, compact = false, onState, onReady, className = '', speaking = false, performanceInput }: Props) {
+export default function AnimeScene({ command, compact = false, onState, onReady, onInteract, interactive = true, className = '', speaking = false, performanceInput }: Props) {
   const host = useRef<HTMLDivElement>(null);
-  const callbacks = useRef({ onState, onReady, speaking, performanceInput }); callbacks.current = { onState, onReady, speaking, performanceInput };
+  const callbacks = useRef({ onState, onReady, onInteract, speaking, performanceInput }); callbacks.current = { onState, onReady, onInteract, speaking, performanceInput };
   const requested = useRef(command); requested.current = command;
   const [failure, setFailure] = useState('');
   const [loading, setLoading] = useState(true);
@@ -87,16 +91,19 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     setFailure(''); setLoading(true); container.dataset.avatarMode = 'loading';
     const fallback = document.createElement('div'), fallbackModel = document.createElement('div');
     fallback.className = 'anime-fallback'; fallbackModel.className = 'anime-fallback-model'; fallback.appendChild(fallbackModel); container.appendChild(fallback);
-    fallback.setAttribute('role', 'img'); fallback.setAttribute('aria-label', '可互动的二次元少女小伴'); fallback.tabIndex = 0;
+    const label = interactive ? '二次元伙伴小伴。轻触回应，双击打招呼，长按休息；Enter 或空格也可操作。' : '二次元伙伴小伴';
+    fallback.setAttribute('role', interactive ? 'button' : 'img'); fallback.setAttribute('aria-label', label); fallback.tabIndex = interactive ? 0 : -1;
+    fallback.style.touchAction = 'pan-y pinch-zoom';
     fallback.dataset.renderer = 'dom'; fallback.dataset.avatarRenderer = 'layered-image'; fallback.dataset.petCount = '1'; fallback.dataset.renderFrames = '0';
     const layers: Partial<Record<AvatarImageName, HTMLImageElement>> = {};
     const textures: THREE.Texture[] = [];
     let canvas: HTMLCanvasElement | undefined;
+    let hitMask: ImageData | undefined;
     const useFallback = (message: string) => {
       if (disposed) return;
       gpuFailed = true; container.dataset.avatarMode = 'fallback';
       if (canvas) { canvas.style.visibility = 'hidden'; canvas.setAttribute('aria-hidden', 'true'); canvas.tabIndex = -1; }
-      fallback.style.visibility = 'visible'; fallback.removeAttribute('aria-hidden'); fallback.tabIndex = 0;
+      fallback.style.visibility = 'visible'; fallback.removeAttribute('aria-hidden'); fallback.tabIndex = interactive ? 0 : -1;
       setFailure(message);
     };
     const smallScreen = matchMedia('(pointer: coarse)').matches || compact;
@@ -109,7 +116,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       canvas = renderer.domElement;
       canvas.style.visibility = 'hidden'; canvas.tabIndex = -1; canvas.setAttribute('aria-hidden', 'true');
       canvas.dataset.renderer = 'webgl'; canvas.dataset.avatarRenderer = 'mesh2d'; canvas.dataset.petCount = '1'; canvas.dataset.renderFrames = '0';
-      canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', '可互动的二次元少女小伴');
+      canvas.setAttribute('role', interactive ? 'button' : 'img'); canvas.setAttribute('aria-label', label); canvas.style.touchAction = 'pan-y pinch-zoom';
       container.appendChild(canvas);
     } catch { useFallback('此设备未能开启网格动画，正在使用轻量角色。'); }
     const scene = new THREE.Scene(), camera = new THREE.OrthographicCamera(-1, 1, 1.5, -1.5, .1, 10); camera.position.z = 4;
@@ -135,6 +142,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       load: name => loadAvatarImage(name, { signal: abort.signal }), isStopped: () => disposed,
       onBase: (image, name) => {
         image.alt = ''; image.draggable = false; fallbackModel.appendChild(image); loaded = true; setLoading(false);
+        try { const mask = document.createElement('canvas'); mask.width = 96; mask.height = 144; const context = mask.getContext('2d'); if (context) { context.drawImage(image,0,0,96,144); hitMask = context.getImageData(0,0,96,144); } } catch { /* A silhouette remains available when pixel reads are unsupported. */ }
         // Every sampler initially uses the valid base, so optional expressions cannot blank the portrait.
         if (!gpuFailed) { const texture = textureFor(image); Object.values(maps).forEach(map => { map.value = texture; }); }
         if (name !== 'idle') useFallback('基础图片加载失败，已使用同角色备用图片；可以重试恢复完整表情。');
@@ -162,21 +170,23 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     const observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => { inView = entries[0]?.isIntersecting !== false; last = 0; if(!inView) performance.step(0,{hidden:true}); }) : undefined; observer?.observe(container);
     const visibility = () => { last = 0; if(document.hidden) performance.step(0,{hidden:true}); }; document.addEventListener('visibilitychange', visibility);
     const emitState = () => callbacks.current.onState?.({ action, x: 0, facing: 1, lookX: gazeX, lookY: gazeY, actionTime: time-actionStart, actionProgress: 0, jumpHeight: 0, speed: 0, autonomous: false, paused: false, autonomyPaused: media.matches });
-    const interact = (next: string) => {
+    const interact = (next: PetInteraction, userGesture = false) => {
       if (action === 'sleep' && next !== 'wake' && next !== 'sleep') return;
       action = next === 'wake' ? 'idle' : next as PetAction; actionStart = time;
-      const phrase = action === 'pet' ? '谢谢你，有点不好意思，脸红了。' : action === 'eat' ? '谢谢你的点心，今天也很开心！' : action === 'jump' ? '哇！见到你真是惊喜！' : '';
-      localInput = { utteranceId: `interaction-${++interactionSequence}`, text: phrase, phase: phrase ? 'speaking' : 'idle' };
+      // Touch changes the expression, never invents speech or competes with playback.
+      localInput = { utteranceId: `interaction-${++interactionSequence}`, text: '', phase: 'idle' };
       if(action === 'sleep') performance.reset();
       emitState();
+      if (userGesture) callbacks.current.onInteract?.(next);
     };
-    const move = (event: PointerEvent) => { const rect = container.getBoundingClientRect(); pointerX = THREE.MathUtils.clamp((event.clientX-rect.left)/Math.max(1,rect.width)*2-1,-1,1); pointerY = THREE.MathUtils.clamp(1-(event.clientY-rect.top)/Math.max(1,rect.height)*2,-1,1); };
+    const move = (x: number, y: number) => { const rect = container.getBoundingClientRect(); pointerX = THREE.MathUtils.clamp((x-rect.left)/Math.max(1,rect.width)*2-1,-1,1); pointerY = THREE.MathUtils.clamp(1-(y-rect.top)/Math.max(1,rect.height)*2,-1,1); };
     const leave = () => { pointerX = pointerY = 0; };
-    const click = () => interact(action === 'sleep' ? 'wake' : 'pet');
-    const double = () => interact('jump');
-    const key = (event: KeyboardEvent) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); click(); } };
     const surfaces: HTMLElement[] = canvas ? [canvas, fallback] : [fallback];
-    for (const surface of surfaces) { surface.addEventListener('pointermove', move); surface.addEventListener('pointerleave', leave); surface.addEventListener('click', click); surface.addEventListener('dblclick', double); surface.addEventListener('keydown', key); }
+    const unbindGestures = surfaces.map(surface => bindCompanionGestures(surface, {
+      enabled: () => interactive && loaded && !disposed && surface.getAttribute('aria-hidden') !== 'true',
+      hitTest: (x,y) => portraitContains(portraitCoordinates(container.getBoundingClientRect(),x,y),hitMask),
+      getAction: () => action, emit: next => interact(next,true), onPointer: move, onLeave: leave,
+    }));
     const lost = (event: Event) => { event.preventDefault(); useFallback('网格绘图连接已暂停，已切换轻量角色；可以重试恢复。'); }; canvas?.addEventListener('webglcontextlost', lost);
     const releaseGpu = () => {
       if (!renderer) return;
@@ -201,18 +211,19 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       const input = action === 'sleep' ? { utteranceId: 'sleep', text: '', phase: 'idle' as const } : supplied && (supplied.phase !== 'idle' || action === 'idle') ? supplied : localInput;
       performance.setInput(input);
       const pose = performance.step(dt,{reducedMotion:media.matches,hidden:false});
-      const blinkLeft = action === 'sleep' ? 1 : pose.blinkLeft;
-      const blinkRight = action === 'sleep' ? 1 : pose.blinkRight;
+      const affection = action === 'pet' || action === 'jump' ? Math.sin(Math.min(1,(time-actionStart)/2.7)*Math.PI) : 0;
+      const blinkLeft = action === 'sleep' ? 1 : Math.max(pose.blinkLeft,affection*.12);
+      const blinkRight = action === 'sleep' ? 1 : Math.max(pose.blinkRight,affection*.12);
       gazeX += (pointerX-gazeX)*Math.min(1,dt*6); gazeY += (pointerY-gazeY)*Math.min(1,dt*6);
       uniforms.clockTime.value = time; uniforms.motion.value = media.matches ? 0 : 1;
       uniforms.gazeX.value = gazeX; uniforms.gazeY.value = gazeY;
-      uniforms.affection.value = action === 'pet' || action === 'jump' ? Math.sin(Math.min(1,(time-actionStart)/2.7)*Math.PI) : 0;
+      uniforms.affection.value += (affection-uniforms.affection.value)*(1-Math.exp(-dt*8));
       uniforms.resting.value += ((action === 'sleep' ? 1 : 0)-uniforms.resting.value)*Math.min(1,dt*5);
       const approach = (uniform: {value:number},value:number,rate=10) => { uniform.value += (value-uniform.value)*(1-Math.exp(-dt*rate)); };
       approach(uniforms.blinkLeft,blinkLeft,35); approach(uniforms.blinkRight,blinkRight,35);
       uniforms.mouth.value = action === 'sleep' ? 0 : pose.mouthOpen;
       approach(uniforms.mouthRound,pose.mouthShape === 'O' ? 1 : 0,32); approach(uniforms.mouthWide,pose.mouthShape === 'E' ? 1 : 0,24);
-      approach(uniforms.warm,pose.expression === 'warm' || pose.expression === 'shy' ? pose.expressionAmount : 0,7);
+      approach(uniforms.warm,Math.max(pose.expression === 'warm' || pose.expression === 'shy' ? pose.expressionAmount : 0,affection*.45),7);
       approach(uniforms.curious,pose.expression === 'curious' ? pose.expressionAmount : pose.expression === 'thoughtful' ? pose.expressionAmount*.45 : 0,7);
       approach(uniforms.surprised,pose.expression === 'surprised' ? pose.expressionAmount : 0,9);
       uniforms.browRaise.value=pose.browRaise; uniforms.blush.value=pose.blush; uniforms.headTilt.value=pose.headTilt; uniforms.headNod.value=pose.headNod;
@@ -220,7 +231,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
         try {
           renderer.render(scene,camera);
           if (!gpuFailed && !renderer.getContext().isContextLost()) {
-            canvas.dataset.renderFrames = String(++frames); canvas.style.visibility = 'visible'; canvas.removeAttribute('aria-hidden'); canvas.tabIndex = 0;
+            canvas.dataset.renderFrames = String(++frames); canvas.style.visibility = 'visible'; canvas.removeAttribute('aria-hidden'); canvas.tabIndex = interactive ? 0 : -1;
             fallback.style.visibility = 'hidden'; fallback.setAttribute('aria-hidden', 'true'); fallback.tabIndex = -1; container.dataset.avatarMode = 'webgl';
           } else if (!gpuFailed) useFallback('网格绘图连接已暂停，已切换轻量角色。');
         } catch { useFallback('网格动画未能完成绘制，已切换轻量角色。'); }
@@ -232,7 +243,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
         const mouth = THREE.MathUtils.smoothstep(uniforms.mouth.value, .025, .16);
         amount('talk', mouth * (1-uniforms.mouthRound.value)); amount('round', mouth * uniforms.mouthRound.value);
         amount('warm', uniforms.warm.value); amount('curious', uniforms.curious.value);
-        fallbackModel.style.transform = media.matches ? 'none' : `translate(${gazeX*2}px,${Math.sin(time*1.6)*1.3+pose.headNod*3}px) rotate(${pose.headTilt*2+gazeX*.6}deg)`;
+        fallbackModel.style.transform = media.matches ? 'none' : `translate(${gazeX*1.2}px,${Math.sin(time*1.6)*.8+pose.headNod*2}px) rotate(${pose.headTilt*1.2+gazeX*.3}deg)`;
         fallback.dataset.renderFrames = String(++fallbackFrames);
       }
       const visible = gpuFailed ? fallback : canvas;
@@ -245,9 +256,9 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     }; raf = requestAnimationFrame(frame);
     return () => {
       disposed = true; abort.abort(); performance.reset(); cancelAnimationFrame(raf); resizeObserver?.disconnect(); observer?.disconnect(); window.removeEventListener('resize', resize); document.removeEventListener('visibilitychange', visibility);
-      for (const surface of surfaces) { surface.removeEventListener('pointermove', move); surface.removeEventListener('pointerleave', leave); surface.removeEventListener('click', click); surface.removeEventListener('dblclick', double); surface.removeEventListener('keydown', key); }
+      unbindGestures.forEach(unbind => unbind());
       releaseGpu(); geometry.dispose(); material.dispose(); canvas?.remove(); fallback.remove();
     };
-  }, [compact, attempt]);
+  }, [compact, attempt, interactive]);
   return <div ref={host} className={`pet-three-scene anime-scene ${className}`}>{(failure || loading) && <div className="anime-scene-status" role={failure ? 'alert' : 'status'}><span>{failure || '正在加载角色…'}</span>{failure && <button onClick={() => setAttempt(n=>n+1)}>重新加载</button>}</div>}</div>;
 }

@@ -3,18 +3,19 @@ import * as THREE from 'three';
 import { createCatModel } from './CatModel';
 import { createPetBehavior } from './behavior';
 import type { PetAction, PetBehaviorState as PetSnapshot, PetInteraction } from './behavior';
+import { bindCompanionGestures } from './interaction.mjs';
 
 export type PetCommand = { action: PetInteraction; id: number };
-type Props = { command?: PetCommand; compact?: boolean; onState?: (state: PetSnapshot) => void; onReady?: () => void; className?: string };
+type Props = { command?: PetCommand; compact?: boolean; onState?: (state: PetSnapshot) => void; onReady?: () => void; onInteract?: (action: PetInteraction) => void; interactive?: boolean; className?: string };
 
-export default function PetScene({ command, compact = false, onState, onReady, className = '' }: Props) {
+export default function PetScene({ command, compact = false, onState, onReady, onInteract, interactive = true, className = '' }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const behavior = useRef<ReturnType<typeof createPetBehavior> | null>(null);
-  const callbacks = useRef({ onState, onReady });
-  callbacks.current = { onState, onReady };
+  const callbacks = useRef({ onState, onReady, onInteract });
+  callbacks.current = { onState, onReady, onInteract };
+  const requested = useRef(command); requested.current = command;
   const [failure, setFailure] = useState('');
   const [attempt, setAttempt] = useState(0);
-  useEffect(() => { if (command) behavior.current?.interact(command.action); }, [command]);
 
   useEffect(() => {
     const container = host.current;
@@ -25,8 +26,9 @@ export default function PetScene({ command, compact = false, onState, onReady, c
     setFailure('');
     const canvas = renderer.domElement;
     canvas.dataset.renderer = 'webgl'; canvas.dataset.petCount = '1'; canvas.dataset.renderFrames = '0';
-    canvas.setAttribute('aria-label', '一只可互动的橘白 3D 小猫');
-    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', interactive ? '橘白小猫。轻触回应，双击打招呼，长按休息；Enter 或空格也可操作。' : '橘白 3D 小猫');
+    canvas.setAttribute('role', interactive ? 'button' : 'img'); canvas.tabIndex = interactive ? 0 : -1;
+    canvas.style.touchAction = 'pan-y pinch-zoom';
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, compact ? 1.5 : 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -63,7 +65,7 @@ export default function PetScene({ command, compact = false, onState, onReady, c
     const media = matchMedia('(prefers-reduced-motion: reduce)');
     const controller = createPetBehavior({ bounds: compact ? [-0.15, 0.15] : [-0.35, 0.35], reducedMotion: media.matches, visible: !document.hidden });
     behavior.current = controller;
-    let inView = true, disposed = false, raf = 0, frames = 0, last = 0, time = 0, sentAt = -1, previousAction: PetAction | undefined;
+    let inView = true, disposed = false, raf = 0, frames = 0, last = 0, time = 0, sentAt = -1, previousAction: PetAction | undefined, lastId = -1;
     const resize = () => {
       const width = Math.max(container.clientWidth, 1), height = Math.max(container.clientHeight, 1);
       const aspect = width / height, halfHeight = Math.max(1.87, 1.62 / aspect);
@@ -75,14 +77,24 @@ export default function PetScene({ command, compact = false, onState, onReady, c
     const observer = new IntersectionObserver(entries => { inView = entries[0]?.isIntersecting !== false; visibility(); }); observer.observe(container);
     const reduced = () => controller.setReducedMotion(media.matches);
     media.addEventListener('change', reduced); document.addEventListener('visibilitychange', visibility);
-    const pointer = (event: PointerEvent) => { const rect = canvas.getBoundingClientRect(); controller.setPointer((event.clientX - rect.left) / rect.width * 2 - 1, 1 - (event.clientY - rect.top) / rect.height * 2); };
-    let touchedAt = 0;
-    const touch = (event: PointerEvent) => { pointer(event); controller.interact('pet'); touchedAt = performance.now(); };
-    const stroke = (event: PointerEvent) => { pointer(event); if (event.buttons === 1 && performance.now() - touchedAt > 800) { controller.interact('pet'); touchedAt = performance.now(); } };
-    const leave = () => controller.clearPointer();
-    const jump = () => controller.interact(controller.snapshot().action === 'sleep' ? 'wake' : 'jump');
-    canvas.addEventListener('pointermove', stroke); canvas.addEventListener('pointerdown', touch); canvas.addEventListener('pointerleave', leave); canvas.addEventListener('dblclick', jump);
-    const lost = (event: Event) => { event.preventDefault(); setFailure('3D 画面暂时中断，点击重试即可重新唤起小猫。'); cancelAnimationFrame(raf); };
+    const pointerPosition = (x: number, y: number) => { const rect = canvas.getBoundingClientRect(); return new THREE.Vector2((x - rect.left) / Math.max(1,rect.width) * 2 - 1, 1 - (y - rect.top) / Math.max(1,rect.height) * 2); };
+    const raycaster = new THREE.Raycaster();
+    const unbindGestures = bindCompanionGestures(canvas, {
+      enabled: () => interactive && !disposed,
+      hitTest: (x, y) => {
+        const point = pointerPosition(x, y); if (Math.abs(point.x) > 1 || Math.abs(point.y) > 1) return false;
+        cat.group.updateMatrixWorld(true); camera.updateMatrixWorld(true); raycaster.setFromCamera(point, camera);
+        return raycaster.intersectObject(cat.group, true).some(hit => { let current: THREE.Object3D | null = hit.object; while (current) { if (!current.visible) return false; current = current.parent; } return true; });
+      },
+      getAction: () => controller.snapshot().action,
+      emit: next => {
+        if (controller.snapshot().action === 'sleep' && next !== 'wake') return;
+        const state = controller.interact(next); callbacks.current.onState?.(state); callbacks.current.onInteract?.(next);
+      },
+      onPointer: (x,y) => { const point = pointerPosition(x,y); controller.setPointer(point.x,point.y); },
+      onLeave: () => controller.clearPointer(),
+    });
+    const lost = (event: Event) => { event.preventDefault(); unbindGestures(); setFailure('3D 画面暂时中断，点击重试即可重新唤起小猫。'); cancelAnimationFrame(raf); };
     canvas.addEventListener('webglcontextlost', lost);
     const tick = (now: number) => {
       if (disposed) return;
@@ -90,8 +102,10 @@ export default function PetScene({ command, compact = false, onState, onReady, c
       if (document.hidden || !inView) { last = 0; return; }
       if (last && now - last < 1000 / 30) return;
       const dt = last ? Math.min((now - last) / 1000, 0.1) : 1 / 30; last = now; time += dt;
+      const pending = requested.current;
+      if (pending && pending.id !== lastId) { lastId = pending.id; controller.interact(pending.action); }
       const state = controller.step(dt);
-      cat.update(time, { action: state.action, lookX: state.lookX, lookY: state.lookY, speed: state.speed, reducedMotion: media.matches });
+      cat.update(time, { action: state.action, actionProgress: state.actionProgress, jumpHeight: state.jumpHeight, lookX: state.lookX, lookY: state.lookY, speed: state.speed, reducedMotion: media.matches });
       cat.group.position.x = state.x;
       const yaw = state.action === 'walk' ? state.facing * 1.1 : state.lookX * 0.07;
       cat.group.rotation.y = THREE.MathUtils.damp(cat.group.rotation.y, yaw, 5, dt);
@@ -105,11 +119,11 @@ export default function PetScene({ command, compact = false, onState, onReady, c
     return () => {
       disposed = true; cancelAnimationFrame(raf); observer.disconnect(); resizeObserver.disconnect();
       document.removeEventListener('visibilitychange', visibility); media.removeEventListener('change', reduced);
-      canvas.removeEventListener('pointermove', stroke); canvas.removeEventListener('pointerdown', touch); canvas.removeEventListener('pointerleave', leave); canvas.removeEventListener('dblclick', jump); canvas.removeEventListener('webglcontextlost', lost);
+      unbindGestures(); canvas.removeEventListener('webglcontextlost', lost);
       cat.dispose(); floorGeometry.dispose(); floorMaterial.dispose(); bowlGeometry.dispose(); bowlMaterial.dispose(); foodGeometry.dispose(); foodMaterial.dispose(); key.shadow.map?.dispose();
       renderer.dispose(); renderer.forceContextLoss(); canvas.remove(); behavior.current = null;
     };
-  }, [compact, attempt]);
+  }, [compact, attempt, interactive]);
   return <div className={`pet-three-scene ${className}`} ref={host}>
     {failure && <div className="pet-render-error" role="alert"><span>{failure}</span><button onClick={() => setAttempt(value => value + 1)}>重试 3D 画面</button></div>}
   </div>;

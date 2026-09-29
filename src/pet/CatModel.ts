@@ -1,7 +1,16 @@
 import * as THREE from 'three';
 
 export type CatAction = 'idle' | 'walk' | 'pet' | 'eat' | 'sleep' | 'jump';
-export interface CatState { action: CatAction; lookX: number; lookY: number; speed: number; reducedMotion?: boolean }
+export interface CatState {
+  action: CatAction;
+  lookX: number;
+  lookY: number;
+  speed: number;
+  /** Normalized controller progress and height keep the animation on its actual action timeline. */
+  actionProgress?: number;
+  jumpHeight?: number;
+  reducedMotion?: boolean;
+}
 export interface CatModel {
   /** Feet rest at y=0; the face points toward +Z. The short ears reach approximately y=2.5. */
   group: THREE.Group;
@@ -21,6 +30,7 @@ export function createCatModel(): CatModel {
   const group = new THREE.Group();
   group.name = 'PetPal — companion kitten';
   const rig = new THREE.Group();
+  rig.name = 'character motion root';
   group.add(rig);
   const geometries = new Set<THREE.BufferGeometry>();
   const materials = new Set<THREE.Material>();
@@ -173,7 +183,7 @@ export function createCatModel(): CatModel {
     pivot.rotation.z = side * -0.3;
     head.add(pivot);
     mesh(pivot, outerEarGeometry, orange);
-    const inside = mesh(pivot, earInsideGeometry, innerEar, [0, 0.025, 0.112], [0.67, 0.7, 0.7]);
+    const inside = mesh(pivot, earInsideGeometry, innerEar, [0, 0.025, 0.112], [0.64, 0.67, 0.7]);
     inside.castShadow = false;
     oval(pivot, cream, [0, 0.005, 0.10], [0.17, 0.055, 0.045]);
     for (let i = 0; i < 3; i++) {
@@ -186,8 +196,8 @@ export function createCatModel(): CatModel {
     const size = 128, data = new Uint8Array(size * size * 4);
     for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
       const nx = x / (size - 1) * 2 - 1, ny = y / (size - 1) * 2 - 1;
-      const iris = [86, 48, 25];
-      const pupil = smooth(1.04, 0.89, Math.sqrt((nx / 0.61) ** 2 + ((ny - 0.045) / 0.76) ** 2));
+      const iris = [102, 64, 35];
+      const pupil = smooth(1.04, 0.89, Math.sqrt((nx / 0.58) ** 2 + ((ny - 0.045) / 0.76) ** 2));
       const rim = smooth(0.78, 1, Math.hypot(nx, ny));
       const light = 0.85 + (1 - ny) * 0.14;
       for (let c = 0; c < 3; c++) data[(y * size + x) * 4 + c] = mix(iris[c] * light, [15, 12, 10][c], Math.max(pupil, rim * 0.72));
@@ -221,6 +231,7 @@ export function createCatModel(): CatModel {
     const map = eyeTexture();
     const eyeMaterial = material(new THREE.MeshPhysicalMaterial({ map, roughness: 0.105, clearcoat: 1, clearcoatRoughness: 0.035 }));
     const open = new THREE.Group();
+    open.name = side < 0 ? 'left eye opening' : 'right eye opening';
     open.position.set(cx, cy, 0);
     head.add(open);
     const surface = mesh(open, eyeGeometry, eyeMaterial);
@@ -379,50 +390,59 @@ export function createCatModel(): CatModel {
   const weights: Record<CatAction, number> = { idle: 1, walk: 0, pet: 0, eat: 0, sleep: 0, jump: 0 };
   const footCenter = new THREE.Vector3(), footUp = new THREE.Vector3();
   const footOrientation = new THREE.Quaternion();
-  let lastTime: number | null = null, previousAction: CatAction = 'idle', actionStart = 0;
-  let gazeX = 0, gazeY = 0, walkClock = 0;
+  let lastTime: number | null = null, previousAction: CatAction = 'idle', actionStart = 0, animationTime = 0;
+  let gazeX = 0, gazeY = 0, walkClock = 0, breathClock = 0, tailClock = 0, jumpLift = 0;
 
   function update(tSeconds: number, state: CatState) {
     if (disposed) return;
-    const t = Number.isFinite(tSeconds) ? tSeconds : 0;
-    const dt = lastTime === null ? 1 / 60 : clamp(t - lastTime, 0, 0.1);
-    lastTime = t;
-    const action = state.action in weights ? state.action : 'idle';
+    const sampleTime = Number.isFinite(tSeconds) ? tSeconds : lastTime ?? 0;
+    const dt = lastTime === null ? 1 / 60 : clamp(sampleTime - lastTime, 0, 0.1);
+    lastTime = sampleTime;
+    // Animate with bounded deltas rather than multiplying an untrusted or resumed wall clock.
+    animationTime += dt;
+    const t = animationTime;
+    const action = Object.hasOwn(weights, state.action) ? state.action : 'idle';
     if (action !== previousAction) { actionStart = t; previousAction = action; }
     const blend = 1 - Math.exp(-dt * 8);
     for (const key of Object.keys(weights) as CatAction[]) weights[key] = mix(weights[key], key === action ? 1 : 0, blend);
     const { walk, pet, eat, sleep, jump } = weights;
     const ambientMotion = state.reducedMotion ? 0 : 1;
-    const interactionMotion = state.reducedMotion ? 0.25 : 1;
+    const interactionMotion = state.reducedMotion ? 0 : 1;
     const lookBlend = 1 - Math.exp(-dt * 6);
     gazeX = mix(gazeX, clamp(Number.isFinite(state.lookX) ? state.lookX : 0, -1, 1), lookBlend);
     gazeY = mix(gazeY, clamp(Number.isFinite(state.lookY) ? state.lookY : 0, -1, 1), lookBlend);
     const speed = clamp(Number.isFinite(state.speed) ? state.speed : 1, 0, 2.5);
     walkClock += dt * (3.5 + speed * 3.4);
-    const breath = Math.sin(t * (sleep > 0.5 ? 1.65 : 2.1)) * ambientMotion;
+    breathClock += dt * mix(2.1, 1.65, sleep);
+    tailClock += dt * (1.25 + pet * 0.45);
+    const breath = Math.sin(breathClock) * ambientMotion;
     const step = Math.sin(walkClock);
-    const jumpPhase = ((t - actionStart) % 1.35) / 1.35;
-    const flight = clamp((jumpPhase - 0.15) / 0.64, 0, 1);
-    const airborne = Math.pow(Math.max(0, Math.sin(flight * Math.PI)), 1.25);
-    const crouch = jumpPhase < 0.15 ? Math.sin(jumpPhase / 0.15 * Math.PI) : jumpPhase > 0.79 ? Math.sin((jumpPhase - 0.79) / 0.21 * Math.PI) * 0.55 : 0;
-    rig.position.y = (airborne * 0.54 * jump + Math.abs(step) * 0.009 * walk) * interactionMotion;
+    const jumpPhase = clamp(Number.isFinite(state.actionProgress) ? state.actionProgress! : (t - actionStart) / 0.85, 0, 1);
+    const controllerHeight = clamp(Number.isFinite(state.jumpHeight) ? state.jumpHeight! : 4 * jumpPhase * (1 - jumpPhase), 0, 1);
+    // Squaring the controller's arc gives soft takeoff/landing and zero endpoint slopes.
+    // An interrupted or restarted jump lands at a bounded speed instead of teleporting to the floor.
+    const targetLift = action === 'jump' ? controllerHeight * controllerHeight * 0.54 : 0;
+    jumpLift = state.reducedMotion ? 0 : jumpLift + clamp(targetLift - jumpLift, -dt * 2.1, dt * 2.1);
+    const airborne = jumpLift / 0.54;
+    const crouch = (jumpPhase < 0.15 ? Math.sin(jumpPhase / 0.15 * Math.PI) : jumpPhase > 0.79 ? Math.sin((jumpPhase - 0.79) / 0.21 * Math.PI) * 0.55 : 0) * interactionMotion;
+    rig.position.y = jumpLift + Math.abs(step) * 0.009 * walk * interactionMotion;
     rig.rotation.z = Math.sin(walkClock) * 0.009 * walk * interactionMotion;
 
     body.position.y = 0.7 + walk * 0.12 - sleep * 0.135 - eat * 0.04 - crouch * jump * 0.07 + breath * 0.006;
     body.scale.set(1 + sleep * 0.115 + crouch * jump * 0.075, 1 + walk * 0.28 - sleep * 0.23 + breath * 0.012 - crouch * jump * 0.095 + airborne * jump * 0.07, 1 + sleep * 0.12 - walk * 0.12);
     // Unfold the seated pear-shaped torso along the spine when walking.
     body.rotation.x = walk * 1.3;
-    head.position.set(sleep * 0.13, 1.55 + breath * 0.012 - sleep * 0.72 - eat * 0.69 - walk * 0.22 - crouch * jump * 0.08,
+    head.position.set(sleep * 0.13, 1.55 + breath * 0.012 + pet * 0.018 - sleep * 0.72 - eat * 0.69 - walk * 0.22 - crouch * jump * 0.08,
       0.19 + sleep * 0.19 + eat * 0.26 + walk * 0.45);
-    head.rotation.set(eat * (0.68 + Math.sin(t * 8.5) * 0.022) + sleep * 0.13 + walk * 0.035 - pet * 0.045 - gazeY * 0.105 * (1 - sleep),
-      gazeX * 0.19 * (1 - sleep) + pet * Math.sin(t * 1.5) * 0.045,
-      pet * Math.sin(t * 1.8) * 0.075 * interactionMotion + sleep * 0.15 + Math.sin(t * 0.83) * 0.012 * (1 - sleep) * ambientMotion);
+    head.rotation.set(eat * (0.68 + Math.sin(t * 8.5) * 0.022 * ambientMotion) + sleep * 0.13 + walk * 0.035 - pet * 0.045 - gazeY * 0.105 * (1 - sleep),
+      gazeX * 0.16 * (1 - sleep) + pet * Math.sin(t * 1.5) * 0.02 * interactionMotion,
+      pet * Math.sin(t * 1.8) * 0.035 * interactionMotion + sleep * 0.15 + Math.sin(t * 0.83) * 0.009 * (1 - sleep) * ambientMotion);
     head.scale.set(1 + crouch * jump * 0.015, 1 - crouch * jump * 0.026, 1);
 
     const blinkClock = t % 5.1;
     const blink = ambientMotion * (Math.exp(-Math.pow((blinkClock - 4.6) / 0.075, 2)) * 0.995
       + Math.exp(-Math.pow((blinkClock - 4.88) / 0.065, 2)) * 0.68);
-    const eyeClosure = clamp(Math.max(blink, sleep, pet * (0.91 + Math.sin(t * 1.7) * 0.07)), 0, 1);
+    const eyeClosure = clamp(Math.max(blink, sleep, pet * (0.86 + Math.sin(t * 1.7) * 0.035 * ambientMotion)), 0, 1);
     for (const eye of eyes) {
       eye.open.scale.y = Math.max(0.012, 1 - eyeClosure);
       eye.open.visible = eyeClosure < 0.992;
@@ -430,11 +450,11 @@ export function createCatModel(): CatModel {
       eye.map.offset.set(-gazeX * 0.032 * (1 - sleep), -gazeY * 0.032 * (1 - sleep));
       eye.closedMaterial.opacity = smooth(0.62, 0.98, eyeClosure);
     }
-    mouth.scale.y = 1 + Math.sin(t * 13) * eat * 0.055;
-    eatingMouth.scale.y = 0.002 + eat * (0.009 + Math.sin(t * 13) * 0.007);
+    mouth.scale.y = 1 + Math.sin(t * 13) * eat * 0.055 * ambientMotion;
+    eatingMouth.scale.y = 0.002 + eat * (0.009 + Math.sin(t * 13) * 0.007 * ambientMotion);
     for (const ear of ears) {
       const twitch = Math.pow(Math.max(0, Math.sin(t * 0.91 + ear.side * 1.7)), 18);
-      ear.pivot.rotation.z = ear.side * (-0.3 - pet * 0.025 + sleep * 0.045 + twitch * 0.04 * (1 - sleep) * ambientMotion);
+      ear.pivot.rotation.z = ear.side * (-0.3 - pet * 0.045 + sleep * 0.045 + twitch * 0.028 * (1 - sleep) * ambientMotion);
       ear.pivot.rotation.x = sleep * 0.1 + Math.sin(t * 1.13 + ear.side) * 0.015 * ambientMotion;
     }
     for (const whisker of whiskers) whisker.pivot.rotation.z = whisker.side * (Math.sin(t * 2.2) * 0.018 * ambientMotion + pet * 0.025 - eat * 0.014);
@@ -470,7 +490,7 @@ export function createCatModel(): CatModel {
       leg.ankle.rotation.x = ankle * walk + sleep * (leg.front ? 0.46 : -0.25);
       leg.paw.rotation.x = -(hip + ankle) * walk - restingHip * 0.27;
       leg.paw.rotation.z = -rig.rotation.z * walk;
-      leg.paw.position.y = mix(leg.pawY, -lowerY, walk) + pet * (leg.front ? Math.max(0, Math.sin(t * 4.2 + leg.side)) * 0.017 : 0);
+      leg.paw.position.y = mix(leg.pawY, -lowerY, walk) + pet * (leg.front ? Math.max(0, Math.sin(t * 4.2 + leg.side)) * 0.017 : 0) * interactionMotion;
       if (walk > 0) {
         // Joint interpolation can lengthen the leg while rising from the sitting pose.
         // Keep its rounded sole above the floor throughout that transition as well.
@@ -484,15 +504,15 @@ export function createCatModel(): CatModel {
     }
     collar.position.set(0, 0.99 - walk * 0.01 - sleep * 0.24 - eat * 0.13 + breath * 0.006 - crouch * jump * 0.05, walk * 0.44);
     collar.rotation.x = walk * 0.9;
-    collar.rotation.z = pet * Math.sin(t * 1.8) * 0.018;
+    collar.rotation.z = pet * Math.sin(t * 1.8) * 0.012 * interactionMotion;
     collar.scale.set(1 + sleep * 0.05, 1, 1);
     bell.rotation.x = Math.sin(t * 3.8) * 0.04 * ambientMotion + (step * walk * 0.19 + jump * Math.sin(t * 8) * 0.16) * interactionMotion;
-    bell.rotation.z = Math.sin(t * 2.7) * pet * 0.09;
+    bell.rotation.z = Math.sin(t * 2.7) * pet * 0.055 * interactionMotion;
     tail.position.set(0.37 - walk * 0.14, 0.49 + walk * 0.39 - sleep * 0.15, -0.315 - walk * 0.335);
     tail.rotation.y = sleep * 0.6 + Math.sin(t * 0.73) * 0.085 * (1 - sleep) * ambientMotion;
     for (let i = 0; i < bones.length; i++) {
       const influence = i / (bones.length - 1);
-      bones[i].rotation.z = -sleep * (i === 0 ? 0.45 : 0.085) + Math.sin(t * (1.25 + pet * 0.9) - i * 0.43) * (0.035 + influence * 0.028) * (1 - sleep * 0.88) * ambientMotion;
+      bones[i].rotation.z = -sleep * (i === 0 ? 0.45 : 0.085) + Math.sin(tailClock - i * 0.43) * (0.028 + influence * 0.034) * (1 - sleep * 0.88) * ambientMotion;
       bones[i].rotation.x = Math.sin(t * 1.05 - i * 0.4) * 0.027 * (1 - sleep) * ambientMotion + walk * step * 0.027 * interactionMotion;
       bones[i].rotation.y = sleep * influence * 0.055 + pet * Math.sin(t * 2.2 - i * 0.35) * 0.025 * interactionMotion;
     }
