@@ -34,6 +34,8 @@ Windows 便携版在本机存在较长的启动等待：首次隔离启动在解
 
 发布文件固定为 Windows x64 EXE、Ubuntu x64 / arm64 tar.gz、Android APK、Web ZIP，以及更新清单、公钥、发布清单、SHA256SUMS 共九项。更新清单 sequence 4，继续使用原发布公钥。源码随 v0.8.0 标签提供，私有数据、原始证据、账号凭据和签名私钥不进入发布包。
 
+`2026-09-29T03:36:12Z`：[v0.8.0](https://github.com/lixinyu02/petpal/releases/tag/v0.8.0) 已公开并设为 latest，标签指向 `5f350ab5a49b6d5a68b16334892830cf945c5c4c`。九个正式资产的 GitHub 官方 SHA-256 和大小全部匹配本地验收文件；匿名读取公钥、签名更新清单、SHA256SUMS 逐字节一致，五平台签名、sequence 4 和公开标签再次通过。临时差分和传输分支均清理。Chrome 的线上已登录下载中心显示 Android / Windows / Ubuntu 0.8.0，Ubuntu x64 与 arm64 下拉选择对应正确下载文件。
+
 旧 v0.7.0 桌面包需要手动或通过软件内更新升级，刷新网页不能改变旧客户端的执行器。新客户端登录相同服务和账号后自动登记，Web / Android 使用 Agent 的「执行电脑」选择。选择另一电脑保留中央历史，不能据此认为两台电脑上的本地文件已经同步。
 
 原始证据保存在忽略目录 `evidence/execution-hosts/`。其中私有隔离数据不进入源码包、安装包或 GitHub。

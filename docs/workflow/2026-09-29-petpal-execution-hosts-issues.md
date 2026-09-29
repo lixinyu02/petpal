@@ -8,7 +8,7 @@
 
 - Goal: 登录桌面自动注册，四端在同一账号和聊天中选择执行电脑。
 - Ordering rule: 顺序完成 issue；当前 issue 内按独立文件协作。
-- Current status: issue-25 done; issue-26 in_progress
+- Current status: issue-25 done; issue-26 done
 
 ## issue-25
 
@@ -28,6 +28,6 @@
 - 范围: 受控部署、Chrome 列表/历史验收、新桌面包与使用说明、推送源码
 - 依赖: issue-25
 - 验收标准: 线上界面可选择已登录新客户端，账号/语音/聊天保留；桌面包可获取；报告真实验证边界
-- 状态: in_progress
-- 验证方式: 线上 23 文件逐字节匹配，保留 2 账号/14 会话；匿名 hosts 401、test 200。Windows 最终 EXE 实际登记在线、内置 CLI/OpenCLI、退出清理通过；Ubuntu 双包各 6970 文件独立比对；Android 同开发签名/code 10；Web ZIP 23 文件读回；五平台 sequence 4 签名清单已生成。GitHub 九资产发布及公开下载中心待最终验收。
-- commit: pending
+- 状态: done
+- 验证方式: 线上 23 文件逐字节匹配，保留 2 账号/14 会话；匿名 hosts 401、test 200。Windows 最终 EXE 实际登记在线、内置 CLI/OpenCLI、退出清理通过；Ubuntu 双包各 6970 文件独立比对；Android 同开发签名/code 10；Web ZIP 23 文件读回。v0.8.0 已公开为 latest，九资产官方 SHA-256/大小通过，匿名下载三个控制文件逐字节匹配、sequence 4 五目标签名及 tag commit 通过。Chrome 登录下载中心显示 Android/Windows/Ubuntu 0.8.0，Ubuntu x64/arm64 选择有效。Ubuntu/Android 实机及 Windows 重复启动性能未验证；临时上传资产/分支已清理。
+- commit: 5f350ab (v0.8.0)；公开发布后的验收记录见本文件后续提交
