@@ -35,8 +35,9 @@ if (!sevenZip) {
   }
 }
 assert.ok(sevenZip && await exists(sevenZip), 'Pass the electron-builder 7za.exe path as the second argument');
-await mkdir(path.join(root, '.tools'), { recursive: true });
-const extraction = await mkdtemp(path.join(root, `.tools/windows-v${series.replace('.', '')}-readback-`));
+const readbackRoot = process.env.PETPAL_WINDOWS_READBACK_ROOT ? path.resolve(process.env.PETPAL_WINDOWS_READBACK_ROOT) : path.join(root, '.tools');
+await mkdir(readbackRoot, { recursive: true });
+const extraction = await mkdtemp(path.join(readbackRoot, `windows-v${series.replace('.', '')}-readback-`));
 const options = { windowsHide: true, timeout: 180000, maxBuffer: 2 * 1024 * 1024 };
 // The standalone 7za build auto-detects the nested 7z stream and lacks NSIS
 // support. Use full 7z for the outer layer, then 7za for its exact inner file.

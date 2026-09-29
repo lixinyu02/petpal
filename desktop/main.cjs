@@ -446,8 +446,18 @@ async function boot() {
     const executorBridge = await mainWindow.webContents.executeJavaScript(`(async () => {
       const value = window.petpal.executor;
       if (!value || !['connect', 'disconnect', 'status'].every(key => typeof value[key] === 'function')) throw new Error('Executor preload facade is unavailable');
-      return { available: true, ...(await value.status()) };
+      const deadline = Date.now() + 15000;
+      while (Date.now() < deadline) {
+        const status = await value.status();
+        if (status.state === 'online' && status.hostId) return { available: true, ...status };
+        if (status.state === 'error') throw new Error('Executor registration failed in isolated smoke profile');
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      throw new Error('Executor registration did not become online in isolated smoke profile');
     })()`);
+    const registeredHosts = await fetch(`${origin}/api/agent/hosts`, { headers: { Authorization: `Bearer ${backend.token}` } }).then(response => response.json());
+    if (!registeredHosts.hosts?.some(host => host.id === executorBridge.hostId && host.online && host.kind === 'desktop' && host.platform === process.platform)) throw new Error('Executor is not visible in the authenticated host list');
+    executorBridge.listedOnline = true;
     const codex = await fetch(`${origin}/api/codex/status`, { headers: { Authorization: `Bearer ${backend.token}` } }).then(r => r.json());
     const desktopTools = await fetch(`${origin}/api/desktop-tools/status`, { headers: { Authorization: `Bearer ${backend.token}` } }).then(async response => {
       if (!response.ok) throw new Error('Desktop tools status is unavailable');

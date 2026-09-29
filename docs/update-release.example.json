@@ -1,38 +1,38 @@
 {
   "repository": "lixinyu02/petpal",
-  "tag": "v0.7.0",
-  "sequence": 3,
+  "tag": "v0.8.0",
+  "sequence": 4,
   "expiresAt": "2027-09-29T00:00:00Z",
   "artifacts": [
     {
       "target": "windows-x64",
-      "file": "../releases/desktop/PetPal-0.7.0-Windows-x64.exe",
-      "version": "0.7.0",
+      "file": "../releases/desktop/PetPal-0.8.0-Windows-x64.exe",
+      "version": "0.8.0",
       "notes": "软件内更新入口；退出旧程序后打开校验后的新版便携程序。"
     },
     {
       "target": "ubuntu-x64",
-      "file": "../releases/ubuntu/PetPal-0.7.0-Ubuntu-x64.tar.gz",
-      "version": "0.7.0",
+      "file": "../releases/ubuntu/PetPal-0.8.0-Ubuntu-x64.tar.gz",
+      "version": "0.8.0",
       "notes": "软件内检查与下载；校验后手动解压到新目录启动。"
     },
     {
       "target": "ubuntu-arm64",
-      "file": "../releases/ubuntu/PetPal-0.7.0-Ubuntu-arm64.tar.gz",
-      "version": "0.7.0",
+      "file": "../releases/ubuntu/PetPal-0.8.0-Ubuntu-arm64.tar.gz",
+      "version": "0.8.0",
       "notes": "ARM64 更新入口；目标桌面环境需独立验证。"
     },
     {
       "target": "android",
-      "file": "../releases/android/PetPal-0.7.0-Android-debug.apk",
-      "version": "0.7.0",
-      "versionCode": 9,
+      "file": "../releases/android/PetPal-0.8.0-Android-debug.apk",
+      "version": "0.8.0",
+      "versionCode": 10,
       "notes": "同包名、同签名且 versionCode 增加时交给系统安装器确认。"
     },
     {
       "target": "web",
-      "file": "../releases/v0.7.0/PetPal-0.7.0-Web.zip",
-      "version": "0.7.0",
+      "file": "../releases/v0.8.0/PetPal-0.8.0-Web.zip",
+      "version": "0.8.0",
       "notes": "管理员部署对应静态资源后，客户端才可刷新使用。"
     }
   ]

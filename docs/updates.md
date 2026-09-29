@@ -1,5 +1,9 @@
 # 软件内更新与 GitHub 发布
 
+当前 [v0.8.0](https://github.com/lixinyu02/petpal/releases/tag/v0.8.0) 提供 Windows x64、Ubuntu x64 / ARM64、Android 和 Web 五个更新目标。清单 sequence 为 **4**，延续原 Ed25519 发布公钥；Android versionCode 为 **10**，仍采用和 0.7.0 相同的开发签名。桌面更新后登录同一中央服务账号即可登记为执行电脑。平台验收范围见 [执行电脑验收](acceptance-execution-hosts.md)。
+
+## 历史版本与信任配置
+
 0.6.1 首个公开发行版提供 Windows x64 便携 EXE、Web 静态 ZIP、`petpal-update.json` 签名更新清单、公钥及校验摘要，下载见 [GitHub Release v0.6.1](https://github.com/lixinyu02/petpal/releases/tag/v0.6.1)。本版没有 Ubuntu / Android 安装包。以下构建与发布命令是维护者的流程示例，示例路径不代表对应平台已发布。
 
 此前的 0.4 / 0.5 安装包没有更新入口，首次使用应手动下载包含更新功能的版本。0.6.1 发行包不内置个人服务配置或发布源信任；管理员在软件更新设置中填写 `lixinyu02/petpal` 和[发布公钥](petpal-update-public-key.txt)。公钥 SPKI DER 的 SHA-256 指纹为 `5e649530901ba590d7ed894e74c3f77e29f34e0ca0ac4c5a5bfe1dfefa300d6c`。首份清单 sequence 为 1，有效期到 `2027-09-28T00:00:00Z`；同版本客户端不会显示升级。

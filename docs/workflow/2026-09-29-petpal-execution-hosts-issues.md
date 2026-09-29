@@ -8,7 +8,7 @@
 
 - Goal: 登录桌面自动注册，四端在同一账号和聊天中选择执行电脑。
 - Ordering rule: 顺序完成 issue；当前 issue 内按独立文件协作。
-- Current status: issue-25 done; issue-26 todo
+- Current status: issue-25 done; issue-26 in_progress
 
 ## issue-25
 
@@ -19,7 +19,7 @@
 - 验收标准: 不切换中央账号与历史即可选择同账号电脑；真实执行器接收指定任务；撤销、离线、重复请求及密钥隔离正确
 - 状态: done
 - 验证方式: 515/515 全量测试、TypeScript/Vite、318 文件公开源码审计通过。真实 GPT-6 Luna + 两个隔离 Windows 执行器完成 A→B→B 三轮（同物理主机），保留中央 2/4/6 条消息及同机 thread resume。Chrome 登录/切机/历史/离线禁发、412×915 无溢出通过。自查修复旧接口回落、成员空模型越权、跨 delta 密钥回显和未知执行状态；详见 docs/acceptance-execution-hosts.md。
-- commit: 本 issue 实现提交（见 Git 历史）
+- commit: 9427987
 
 ## issue-26
 
@@ -28,6 +28,6 @@
 - 范围: 受控部署、Chrome 列表/历史验收、新桌面包与使用说明、推送源码
 - 依赖: issue-25
 - 验收标准: 线上界面可选择已登录新客户端，账号/语音/聊天保留；桌面包可获取；报告真实验证边界
-- 状态: todo
-- 验证方式: 待 issue-25 完成
+- 状态: in_progress
+- 验证方式: 线上 23 文件逐字节匹配，保留 2 账号/14 会话；匿名 hosts 401、test 200。Windows 最终 EXE 实际登记在线、内置 CLI/OpenCLI、退出清理通过；Ubuntu 双包各 6970 文件独立比对；Android 同开发签名/code 10；Web ZIP 23 文件读回；五平台 sequence 4 签名清单已生成。GitHub 九资产发布及公开下载中心待最终验收。
 - commit: pending
