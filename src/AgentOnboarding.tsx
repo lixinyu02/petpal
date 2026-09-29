@@ -1,5 +1,6 @@
 import { CheckCircle2, CircleHelp, KeyRound, Loader2, Settings2, ShieldCheck, Terminal } from 'lucide-react';
 import type { AgentHost, CodexStatus, User } from './api';
+import WorkspaceDisclosure from './WorkspaceDisclosure';
 import './workspace-controls.css';
 
 export function AgentOnboarding({ codex, user, host, hostLoading = false, localHostId = '', onConfigure }: { codex: CodexStatus; user?: User; host?: AgentHost; hostLoading?: boolean; localHostId?: string; onConfigure(): void }) {
@@ -23,10 +24,15 @@ export function AgentOnboarding({ codex, user, host, hostLoading = false, localH
     ready: { icon: CheckCircle2, title: `Agent 已就绪 · ${host?.name || '执行电脑'}`, description: `任务在${local ? '此电脑' : host?.name || '所选电脑'}执行，按发送前选择的访问范围与运行策略工作。` },
   }[status];
   const Icon = details.icon;
+  if (status === 'ready') return <WorkspaceDisclosure className="agent-onboarding-ready" label="Agent 连接详情" summary={<><CheckCircle2 size={14}/><span>已就绪</span></>}>
+    <h3>{details.title}</h3><p>{details.description}</p>
+    <p className="agent-onboarding-hint"><CircleHelp size={13}/>图片理解取决于所选模型；主机软件操作需要相应权限。</p>
+    {owner && <button type="button" className="agent-onboarding-configure" onClick={onConfigure}><Settings2 size={14}/>模型设置</button>}
+  </WorkspaceDisclosure>;
   return <section className={`agent-onboarding agent-onboarding-${status}`} aria-label="Agent 连接状态">
     <Icon size={20} className={status === 'checking' ? 'spin' : undefined} aria-hidden="true"/>
-    <div className="agent-onboarding-copy"><h3>{details.title}</h3><p>{details.description}</p>{status === 'ready' && <p className="agent-onboarding-hint"><CircleHelp size={12}/>图片理解取决于所选模型；主机软件操作需要相应权限。</p>}</div>
-    {owner && !['checking','offline'].includes(status) && <button type="button" className="agent-onboarding-configure" onClick={onConfigure}><Settings2 size={14}/>{status === 'ready' ? '模型设置' : '配置 Agent'}</button>}
+    <div className="agent-onboarding-copy"><h3>{details.title}</h3><p>{details.description}</p></div>
+    {owner && !['checking','offline'].includes(status) && <button type="button" className="agent-onboarding-configure" onClick={onConfigure}><Settings2 size={14}/>配置 Agent</button>}
   </section>;
 }
 

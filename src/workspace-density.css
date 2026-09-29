@@ -1,0 +1,151 @@
+/* The conversation is the working surface; secondary controls open in place. */
+.app-shell{min-height:0}
+.app-shell .topbar{height:64px}
+.app-shell .main-nav{margin:18px 0 25px}
+.app-shell .chat-area{padding:0 clamp(18px,2.4vw,40px);overflow-y:auto}
+.app-shell .chat-scroll{min-height:180px;overscroll-behavior:contain;padding:20px 0 8px}
+.app-shell .workspace-controls{flex-shrink:0;padding:16px 0 13px;background:transparent;border-bottom:1px solid var(--line);z-index:12}
+.workspace-mode-row{gap:12px;flex-wrap:wrap;min-height:38px}
+.workspace-mode-row .mode-switch{padding:3px}
+.workspace-mode-row .mode-switch button{min-height:36px;padding:7px 13px}
+.workspace-context-row{display:flex;align-items:flex-start;gap:10px;margin-top:11px;min-width:0}
+.workspace-context-row.has-execution-target{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.workspace-context-row .workspace-model-picker{min-width:0;max-width:100%;flex:1}
+.workspace-context-row .workspace-model-trigger{width:100%;min-height:46px;box-shadow:none;background:#fcfdf9}
+.workspace-context-row .workspace-model-current{flex:1}
+.workspace-context-row .workspace-model-current strong{max-width:none;font-size:12px}
+.workspace-context-row .workspace-model-current small{font-size:10px}
+.workspace-context-row .workspace-execution-target{width:auto;max-width:none;gap:5px}
+.workspace-context-row .workspace-host-control{min-height:46px;position:relative;gap:7px;padding:6px 9px}
+.workspace-context-row .workspace-mode-note{align-self:center;white-space:normal;font-size:12px}
+.workspace-context-row .workspace-host-refresh{min-width:28px}
+.workspace-mode-row .agent-onboarding{flex:1 1 100%;margin:0;padding:10px 0;border-top:0;border-bottom:0}
+.workspace-mode-row .agent-onboarding-copy>p{font-size:12px}
+.workspace-mode-row .agent-onboarding-ready{margin-left:auto}
+.workspace-disclosure{position:relative;min-width:0;color:#5e735b}
+.workspace-disclosure>summary{display:flex;align-items:center;gap:7px;list-style:none;cursor:pointer;min-height:34px;padding:5px 7px;font-size:12px;line-height:1.5;border-radius:7px;white-space:nowrap}
+.workspace-disclosure>summary::-webkit-details-marker{display:none}
+.workspace-disclosure>summary:hover,.workspace-disclosure[open]>summary{background:#edf2e7;color:#355a42}
+.workspace-disclosure>summary:focus-visible{outline:2px solid #648d70;outline-offset:2px}
+.workspace-disclosure .disclosure-chevron{margin-left:auto;transition:transform .16s ease}
+.workspace-disclosure[open]>summary>.disclosure-chevron{transform:rotate(180deg)}
+.workspace-disclosure-content{position:absolute;z-index:40;top:calc(100% + 7px);right:0;width:320px;max-width:calc(100vw - 36px);max-height:min(420px,65dvh);overflow-y:auto;overscroll-behavior:contain;padding:17px;background:#fcfdf9;border:1px solid #dce5d6;border-radius:12px;box-shadow:0 10px 34px #203f2a20;animation:workspace-popover-in .14s ease-out;color:#52684e}
+.workspace-disclosure-content>h3{font-size:13px;line-height:1.6;color:#36573c;margin-bottom:10px}
+.workspace-disclosure-content>p{font-size:12px;line-height:1.8;margin:7px 0 0;white-space:normal}
+.workspace-disclosure-content .agent-onboarding-hint{display:flex;align-items:flex-start;gap:6px;color:#6d7b63}
+.workspace-disclosure-content .agent-onboarding-hint svg{margin-top:4px}
+.workspace-disclosure-content .agent-onboarding-configure{margin:14px 0 0;min-height:36px}
+.workspace-host-help{position:static}
+.workspace-host-help>summary{padding:0;min-width:28px;min-height:32px;justify-content:center}
+.workspace-host-help>summary>.disclosure-chevron{display:none}
+.workspace-host-help .workspace-disclosure-content{right:0}
+.app-shell .composer-area{padding-top:8px;padding-bottom:12px;position:relative;z-index:13}
+.composer-runtime{display:flex;align-items:center;justify-content:space-between;gap:6px 15px;flex-wrap:wrap;position:relative;z-index:2}
+.composer-runtime .agent-permissions{padding:0;margin:0 0 6px}
+.agent-permissions .workspace-disclosure-content{top:auto;bottom:calc(100% + 7px);left:0;right:auto;width:350px}
+.agent-permissions .agent-permission-fields{display:grid;gap:12px}
+.agent-permissions .agent-permission-fields label{display:flex;align-items:center;font-size:12px;gap:8px}
+.agent-permissions .agent-permission-fields label>span{display:inline}
+.agent-permissions .agent-permission-fields select{margin-left:auto;min-height:38px;max-width:160px;font-size:13px}
+.permission-divider{margin:0 7px;color:#98a28f}
+.composer-runtime .stream-status{margin:0 0 6px;padding:0 3px;max-height:none;min-height:30px;font-size:11px;flex-wrap:wrap;color:#617554;overflow:visible}
+.approval-jump{min-height:30px;color:#315a43;text-decoration:underline;text-underline-offset:3px;font-size:12px}
+.app-shell .composer{box-shadow:none;border-radius:13px}
+.app-shell .composer textarea{padding:12px 16px 5px;font-size:14px;line-height:1.7}
+.app-shell .composer-bottom{padding:0 10px 10px 12px}
+.app-shell .composer-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:4px}
+.composer-footer .speech-controls{display:flex;align-items:center;flex-wrap:wrap;gap:5px 13px;padding:0}
+.speech-options .workspace-disclosure-content{top:auto;bottom:calc(100% + 7px);left:0;right:auto;width:310px}
+.speech-options .speech-controls-row{gap:12px;align-items:flex-start;flex-direction:column}
+.speech-options .speech-controls-row button{min-height:32px}
+.speech-options .speech-toggle{min-height:30px}
+.speech-options .speech-feedback{font-size:12px;line-height:1.7;margin-top:12px}
+.composer-footer .speech-stop{min-height:34px;border:0;padding:4px 6px;font-size:12px}
+.app-shell .composer-footer .composer-footnote{margin:0;text-align:right;font-size:10px}
+.app-shell .composer-footer .composer-footnote>span{margin-left:10px}
+.speech-error{color:#995e4b;font-size:12px}
+.composer-area .agent-queue{margin:0 0 7px;padding:2px 0 5px;border-top:0;border-bottom:1px solid #e4e9df;max-height:none;overflow:visible}
+.agent-queue-heading{gap:9px;min-height:34px;flex-wrap:wrap}
+.agent-queue-heading .agent-queue-toggle{min-height:34px;font-size:12px;gap:6px;padding:4px 6px;color:#52694a;border-radius:6px}
+.agent-queue-toggle:hover{background:#edf2e7}
+.agent-queue-toggle[aria-expanded=true]>svg:last-child{transform:rotate(180deg)}
+.agent-queue-heading>span:nth-child(2){margin-left:auto;font-size:11px}
+.agent-queue-heading .queue-paused{color:#8a6749}
+.agent-queue-heading>button:not(.agent-queue-toggle){min-height:34px;padding:5px}
+.agent-queue ol{max-height:150px;overflow-y:auto;overscroll-behavior:contain;padding-right:5px;margin:0}
+.agent-queue ol[hidden]{display:none}
+.agent-queue-actions button{width:32px;height:32px}
+.agent-queue-error{font-size:12px;line-height:1.75;max-height:130px;overflow-y:auto;overscroll-behavior:contain}
+.agent-queue-error span{display:block;overflow-wrap:anywhere}
+.app-shell .approval{margin:12px 0 18px;padding:16px}
+.app-shell .approval>div{min-width:0;flex:1}
+.app-shell .approval p{font-size:13px;line-height:1.7}
+.companion-panel-toggle{display:flex;align-items:center;gap:7px;min-height:36px;padding:5px 8px;font-size:12px;color:#687965;border-radius:7px}
+.companion-panel-toggle:hover,.companion-panel-toggle[aria-expanded=true]{background:#edf1e7}
+@media(min-width:961px){
+ .workspace:not(.workspace-companion-visible)>.pet-panel{display:none}
+ .workspace.workspace-companion-visible>.pet-panel{display:flex;width:270px;padding:23px 22px 20px;overflow-y:auto}
+ .workspace.workspace-companion-visible .pet-scene{height:260px;flex-shrink:0;margin-top:14px}
+ .workspace.workspace-companion-visible .pet-touch{width:230px}
+ .app-shell .topbar-actions .single-companion-return{display:none}
+}
+@media(min-width:1400px){.workspace.workspace-companion-visible>.pet-panel{width:300px}}
+@media(max-width:960px){
+ .companion-panel-toggle{display:none}
+ .app-shell:has(.workspace) .topbar{height:calc(72px + env(safe-area-inset-top,0px))}
+ .app-shell .chat-area{padding:0 24px}
+ .app-shell .workspace-controls{padding-top:12px}
+}
+@media(max-width:650px){
+ .app-shell .chat-area{padding:0 16px}
+ .app-shell .chat-scroll{padding-top:14px;min-height:150px}
+ .app-shell .workspace-controls{padding:8px 0 10px}
+ .workspace-mode-row{gap:6px}
+ .workspace-mode-row .mode-switch button{min-height:36px;padding:7px 10px}
+ .workspace-mode-row .mode-switch span{display:none}
+ .workspace-context-row{gap:7px;margin-top:8px}
+ .workspace-context-row.has-execution-target{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+ .workspace-context-row .workspace-model-trigger{padding:6px 8px;gap:5px;min-height:48px}
+ .workspace-context-row .workspace-model-trigger>svg:first-child,.workspace-context-row .workspace-host-control>svg:first-child{display:none}
+ .workspace-context-row .workspace-model-current strong{font-size:12px}
+ .workspace-context-row .workspace-host-control{padding:6px;gap:2px;min-height:48px}
+ .workspace-context-row .workspace-host-control select{font-size:12px}
+ .workspace-context-row .workspace-host-refresh{min-width:28px;min-height:34px}
+ .workspace-host-help>summary{min-width:26px;min-height:34px}
+ .workspace-mode-row .agent-onboarding{padding:5px 0}
+ .workspace-mode-row .agent-onboarding-configure{margin-left:28px}
+ .workspace-disclosure-content{padding:15px}
+ .app-shell .composer-area{padding:6px 0 calc(8px + env(safe-area-inset-bottom,0px))}
+ .app-shell .composer textarea{padding:11px 13px 4px;font-size:16px;line-height:1.55}
+ .app-shell .composer-bottom{padding:0 8px 8px 10px}
+ .composer .send-button{width:38px;height:38px}
+ .composer-runtime{gap:3px 9px}
+ .composer-runtime .agent-permissions{margin-bottom:3px}
+ .composer-runtime .stream-status{margin-bottom:3px;min-height:32px}
+ .agent-send-choice select{max-width:145px;font-size:12px;padding-right:16px}
+ .app-shell .composer-footer .composer-footnote{display:none}
+ .composer-footer .speech-controls{width:100%;justify-content:space-between}
+ .composer-area .agent-queue{margin-bottom:4px}
+ .agent-queue ol{max-height:120px}
+ .agent-queue-actions button{width:38px;height:38px}
+ .agent-queue-content textarea{font-size:16px}
+ .agent-permissions .agent-permission-fields select{font-size:16px}
+ .app-shell .message-text{font-size:14px}
+}
+@media(max-height:680px){
+ .app-shell .topbar{height:52px}
+ .app-shell .workspace-controls{padding-top:7px;padding-bottom:8px}
+ .workspace-context-row{margin-top:6px}
+ .app-shell .chat-scroll{min-height:130px}
+ .app-shell .composer-area{padding-top:5px;padding-bottom:7px}
+ .app-shell .composer textarea{padding-top:8px;padding-bottom:0}
+ .app-shell .composer-bottom{padding-bottom:6px}
+ .app-shell .composer-footer{margin-top:1px}
+ .app-shell .welcome{padding-top:12px}
+ .app-shell .welcome-symbol{display:none}
+ .app-shell .welcome h1{font-size:30px;margin-top:8px}
+ .app-shell .suggestions{margin-top:18px}
+ .workspace.workspace-companion-visible .pet-panel-bottom{padding-top:12px}
+ .workspace.workspace-companion-visible .quiet-note{display:none}
+}
+@media(prefers-reduced-motion:reduce){.workspace-disclosure-content{animation:none}.workspace-disclosure .disclosure-chevron{transition:none}}

@@ -1,9 +1,10 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, Cloud, Cpu, Loader2, Monitor, RefreshCw, Search, X } from 'lucide-react';
+import { Check, ChevronDown, CircleHelp, Cloud, Cpu, Loader2, Monitor, RefreshCw, Search, X } from 'lucide-react';
 import type { AgentHost, Provider } from './api';
 import { executionPlatform } from './execution-hosts.mjs';
 import './workspace-controls.css';
+import WorkspaceDisclosure from './WorkspaceDisclosure';
 
 export { AgentOnboarding } from './AgentOnboarding';
 
@@ -104,7 +105,7 @@ export function ExecutionTarget({ hosts, value, onChange, disabled = false, load
   const hasDesktop = hosts.some(host => host.kind === 'desktop' && host.online);
   const legacyDesktop = typeof window !== 'undefined' && window.petpal && !window.petpal.executor;
   return <div className="workspace-execution-target" aria-busy={loading}>
-    <div className="workspace-host-control">
+    <div className="workspace-host-control" title={disabled ? '本次任务的执行电脑已固定' : undefined}>
       {selected?.kind === 'central' ? <Cloud size={17} aria-hidden="true"/> : <Monitor size={17} aria-hidden="true"/>}
       <label htmlFor={id}><span>执行电脑</span><select id={id} aria-label="执行电脑" value={value} disabled={disabled || (loading && !hosts.length)} onChange={event => {
         if (hosts.some(host => host.id === event.target.value && host.online)) onChange(event.target.value);
@@ -113,9 +114,14 @@ export function ExecutionTarget({ hosts, value, onChange, disabled = false, load
         {hosts.map(host => <option key={host.id} value={host.id} disabled={!host.online}>{host.name}{host.id === localHostId ? ' · 此电脑' : ''} · {host.kind === 'central' ? '服务器' : executionPlatform(host.platform)} · {host.online ? '在线' : '离线'}</option>)}
       </select></label>
       {onRefresh && <button type="button" className="workspace-host-refresh" disabled={loading} aria-label="刷新执行电脑" onClick={onRefresh}>{loading ? <Loader2 size={14} className="spin"/> : <RefreshCw size={14}/>}</button>}
+      <WorkspaceDisclosure className="workspace-host-help" label="连接执行电脑帮助" summary={<CircleHelp size={15}/>}>
+        <h3>选择执行电脑</h3>
+        <p>{legacyDesktop ? '此客户端还没有执行器，请从「下载客户端」更新后重新登录。' : '在 Windows 或 Ubuntu 客户端登录同一账号，即可在这里选择它。客户端需要保持运行。'}</p>
+        <p>{disabled ? '本次任务的执行电脑已固定，完成后可以切换。' : '切换电脑后，账号与聊天记录仍保留在个人服务。'}</p>
+        {!hasDesktop && !loading && <p>目前没有已连接的桌面电脑。</p>}
+      </WorkspaceDisclosure>
     </div>
-    <span className={`workspace-target-host${selected?.online ? '' : ' is-offline'}`} role="status"><span className="workspace-target-dot"/>{disabled ? '任务已固定执行电脑' : selected ? selected.online ? '账号与聊天记录保留在个人服务' : '电脑已离线，请登录客户端后再发送' : '等待选择执行电脑'}</span>
-    {legacyDesktop ? <span className="workspace-target-hint">此客户端还没有执行器，请从「下载客户端」更新后重新登录。</span> : !hasDesktop && !loading && <span className="workspace-target-hint">在电脑客户端登录同一账号，即可在这里选择它。</span>}
+    {selected && !selected.online && <span className="workspace-target-host is-offline" role="status"><span className="workspace-target-dot"/>电脑已离线，请登录客户端后再发送</span>}
     {error && <span className="workspace-target-error" role="alert">{error}</span>}
   </div>;
 }
