@@ -19,7 +19,7 @@ import { createDownloadsCatalog } from './downloads.mjs';
 import { createExecutors } from './executors.mjs';
 import { RemoteCodexBridge } from './remote-codex.mjs';
 
-const VERSION = '0.8.0';
+const VERSION = '0.9.0';
 const now = () => new Date().toISOString();
 const failure = (status, message) => Object.assign(new Error(message), { status });
 

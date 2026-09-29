@@ -374,6 +374,31 @@ async function inspectAppFixture({ expressions = false } = {}) {
   }
 }
 
+function isBrowserSafePort(port) {
+  // Chromium net/base/port_util.cc and Fetch's bad-port list also apply to loopback.
+  // Some Windows dynamic port ranges include these values; listen(0) alone is insufficient.
+  const restricted = [1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080];
+  return Number.isInteger(port) && port > 0 && port <= 65535 && !restricted.includes(port);
+}
+
+async function listenDesktopBackend(server, maximumAttempts = 20) {
+  if (!Number.isInteger(maximumAttempts) || maximumAttempts < 1 || maximumAttempts > 20) throw new RangeError('Invalid desktop port attempt limit');
+  for (let attempt = 0; attempt < maximumAttempts; attempt++) {
+    await new Promise((resolve, reject) => {
+      const clean = () => { server.removeListener('error', failed); server.removeListener('listening', listening); };
+      const failed = error => { clean(); reject(error); };
+      const listening = () => { clean(); resolve(); };
+      server.once('error', failed); server.once('listening', listening);
+      try { server.listen(0, '127.0.0.1'); } catch (error) { failed(error); }
+    });
+    const port = server.address()?.port;
+    if (isBrowserSafePort(port)) return port;
+    // Close only the listening socket; the backend's services remain usable for the next attempt.
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+  throw new Error('未能分配浏览器可访问的本机端口，请重新启动小伴。');
+}
+
 async function boot() {
   const { createPetServer } = await import(pathToFileURL(path.join(root, 'server', 'app.mjs')).href);
   const serviceSettings = await readDesktopServiceSettings(app.getPath('userData'));
@@ -387,11 +412,8 @@ async function boot() {
     workspaceRoot,
     codexHttpOrigins: serviceSettings.codexHttpOrigins,
   });
-  await new Promise((resolve, reject) => {
-    backend.server.once('error', reject);
-    backend.server.listen(0, '127.0.0.1', resolve);
-  });
-  origin = `http://127.0.0.1:${backend.server.address().port}`;
+  const port = await listenDesktopBackend(backend.server);
+  origin = `http://127.0.0.1:${port}`;
   const executorModule = await import(pathToFileURL(path.join(__dirname, 'executor.mjs')).href);
   executor = new executorModule.DesktopExecutor({ dataDir: path.join(app.getPath('userData'), 'executor') });
   for (const [channel, handler] of Object.entries(executorModule.createExecutorHandlers(executor,
