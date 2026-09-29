@@ -5,7 +5,7 @@
 - Related design: 2026-09-29-petpal-anime-motion-design.md
 - Goal: 先上线网页体验轻飘发梢与丰富表情
 - Ordering rule: 顺序完成 issue，同一 issue 的独立模块可协作实现。
-- Current status: issue-31 done，issue-32 in_progress
+- Current status: issue-31/32 done
 
 ## issue-31
 
@@ -16,7 +16,7 @@
 - 验收标准: 发根与面部稳定，左右发梢轻摆；开心／俏皮／关切可辨，过渡平滑，互动不伪造语音；休息、隐藏、减少动态及降级正确
 - 状态: done
 - 验证方式: 发束9项、表演最终20项通过；全量586项通过（新增最后1项表演测试另经定向验证），TS/Vite隔离构建通过。自审并修复DOM眉毛覆盖基础表情的问题；独立表情通道不干扰口型，未增加GPU贴图。
-- commit: 本提交
+- commit: b046cdf
 
 ## issue-32
 
@@ -25,6 +25,6 @@
 - 范围: 桌面／窄屏实际验收、必要修正、隔离构建、备份部署及记录
 - 依赖: issue-31
 - 验收标准: 实际页面动作与降级通过；保留账号与聊天，生产页面可访问；不更新安装包
-- 状态: in_progress
-- 验证方式: pending
-- commit: pending
+- 状态: done
+- 验证方式: Chrome桌面、390/412px、触控抚摸、单眼招呼、休息/减少动态、WebGL丢失降级及朗读并行通过。生产23文件逐一SHA-256一致，匿名状态/语音401；完整state与部署前备份一致，语音参考文件保留。详见2026-09-29-petpal-anime-motion-acceptance.md；安装包仍为0.9.0。
+- commit: 本提交
