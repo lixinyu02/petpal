@@ -190,7 +190,7 @@ const requiredFiles = [
   'src/AccountsSettings.tsx', 'src/VoiceSettings.tsx', 'src/MediaDevicesSettings.tsx',
   'src/auth/request-scope.mjs', 'src/auth/request-scope.d.mts', 'src/media/device-preferences.mjs', 'src/media/device-preferences.d.mts', 'src/media/devices.ts',
   'server/app.mjs', 'server/codex.mjs', 'server/auth.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs',
-  'desktop/main.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'package-lock.json', 'android/gradle/wrapper/gradle-wrapper.jar',
+  'desktop/main.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'package-lock.json', 'android/gradle/wrapper/gradle-wrapper.jar',
   'android/app/src/main/AndroidManifest.xml', 'android/app/src/main/java/com/petpal/app/MainActivity.java', 'android/app/src/main/java/com/petpal/app/LocalMediaChromeClient.java',
   'android/app/src/main/java/com/petpal/app/PetOverlayService.java', 'android/app/src/main/java/com/petpal/app/PetOverlayWebView.java',
   'android/app/src/main/java/com/petpal/app/OverlayAssetPolicy.java', 'android/app/src/test/java/com/petpal/app/OverlayAssetPolicyTest.java',

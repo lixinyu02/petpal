@@ -1,5 +1,5 @@
 /* The conversation is the working surface; secondary controls open in place. */
-.app-shell{min-height:0}
+.app-shell{min-height:0;height:var(--app-viewport-height,100dvh);width:100%;max-width:100%}
 .app-shell .topbar{height:64px}
 .app-shell .main-nav{margin:18px 0 25px}
 .app-shell .chat-area{padding:0 clamp(18px,2.4vw,40px);overflow-y:auto}
@@ -9,7 +9,7 @@
 .workspace-mode-row .mode-switch{padding:3px}
 .workspace-mode-row .mode-switch button{min-height:36px;padding:7px 13px}
 .workspace-context-row{display:flex;align-items:flex-start;gap:10px;margin-top:11px;min-width:0}
-.workspace-context-row.has-execution-target{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.workspace-context-row.has-execution-target{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr))}
 .workspace-context-row .workspace-model-picker{min-width:0;max-width:100%;flex:1}
 .workspace-context-row .workspace-model-trigger{width:100%;min-height:46px;box-shadow:none;background:#fcfdf9}
 .workspace-context-row .workspace-model-current{flex:1}
@@ -92,7 +92,7 @@
 @media(min-width:1400px){.workspace.workspace-companion-visible>.pet-panel{width:300px}}
 @media(max-width:960px){
  .companion-panel-toggle{display:none}
- .app-shell:has(.workspace) .topbar{height:calc(72px + env(safe-area-inset-top,0px))}
+ .app-shell:has(.workspace) .topbar{height:var(--workspace-header-height,calc(72px + env(safe-area-inset-top,0px)))}
  .app-shell .chat-area{padding:0 24px}
  .app-shell .workspace-controls{padding-top:12px}
 }
@@ -104,7 +104,7 @@
  .workspace-mode-row .mode-switch button{min-height:36px;padding:7px 10px}
  .workspace-mode-row .mode-switch span{display:none}
  .workspace-context-row{gap:7px;margin-top:8px}
- .workspace-context-row.has-execution-target{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+ .workspace-context-row.has-execution-target{grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr))}
  .workspace-context-row .workspace-model-trigger{padding:6px 8px;gap:5px;min-height:48px}
  .workspace-context-row .workspace-model-trigger>svg:first-child,.workspace-context-row .workspace-host-control>svg:first-child{display:none}
  .workspace-context-row .workspace-model-current strong{font-size:12px}
@@ -149,3 +149,82 @@
  .workspace.workspace-companion-visible .quiet-note{display:none}
 }
 @media(prefers-reduced-motion:reduce){.workspace-disclosure-content{animation:none}.workspace-disclosure .disclosure-chevron{transition:none}}
+
+/* Shared portrait and keyboard layouts use the available CSS viewport, on every shell. */
+.app-shell .main-area,.app-shell .workspace,.app-shell .chat-area{min-height:0;min-width:0}
+.app-shell .chat-area{overflow:hidden}
+.app-shell .chat-scroll{min-height:min(72px,12%);flex:1 1 0;scroll-padding-block:12px}
+.app-shell .workspace-controls{max-height:44%;min-height:48px;flex-shrink:1;overflow-y:auto;overscroll-behavior:contain}
+.app-shell .composer-area{max-height:64%;overflow-y:auto;overscroll-behavior:contain;flex-shrink:0}
+.app-shell .composer-runtime,.app-shell .composer-footer{min-width:0}
+.app-shell .workspace-controls .workspace-disclosure-content,.app-shell .composer-area .workspace-disclosure-content{z-index:50}
+.app-shell .workspace-controls:has(.workspace-disclosure[open]),.app-shell .composer-area:has(.workspace-disclosure[open]){z-index:30}
+.app-shell .workspace-context-row .workspace-model-trigger{min-height:48px}
+.app-shell .workspace-context-row .workspace-host-control{min-height:48px}
+@media(max-width:650px){
+ .app-shell .topbar-title{min-width:0}
+ .app-shell .topbar-actions{gap:8px}
+ .app-shell .workspace-mode-row .mode-switch button{min-height:44px;padding-inline:12px}
+ .app-shell .workspace-mode-row .agent-onboarding-ready>summary{min-height:44px}
+ .app-shell .workspace-context-row .workspace-host-refresh{min-width:44px;min-height:44px}
+ .app-shell .workspace-host-help>summary{min-width:44px;min-height:44px}
+ .app-shell .workspace-context-row .workspace-host-control{padding:2px 5px 2px 10px}
+ .app-shell .workspace-context-row .workspace-model-trigger{padding:7px 10px}
+ .app-shell .workspace-disclosure>summary{min-height:44px}
+ .app-shell .workspace-disclosure-content select{min-height:44px}
+ .app-shell .workspace-model-close{min-width:44px;min-height:44px}
+ .app-shell .composer .send-button{width:44px;height:44px}
+ .app-shell .composer .composer-tools{gap:3px;min-width:0}
+ .app-shell .agent-send-choice{min-width:0}
+ .app-shell .agent-send-choice select{min-height:44px;max-width:145px}
+ .app-shell .composer-footer .speech-stop,.app-shell .approval-jump{min-height:44px}
+ .app-shell .agent-queue-heading .agent-queue-toggle,.app-shell .agent-queue-heading>button:not(.agent-queue-toggle){min-height:44px}
+ .app-shell .agent-queue-actions button{width:44px;height:44px}
+ .app-shell .settings-tabs{overflow-x:auto;overscroll-behavior-x:contain;gap:20px;scroll-padding-inline:5px}
+ .app-shell .settings-tabs>button{flex-shrink:0;min-height:44px;white-space:nowrap}
+ .app-shell .sidebar{width:min(280px,calc(var(--app-viewport-width,100vw) - 36px));padding-top:calc(20px + env(safe-area-inset-top,0px));padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+ .app-shell .host-status{padding-top:13px}
+ .app-shell .sidebar-bottom{padding-top:10px}
+}
+@media(max-width:560px){
+ .app-shell .workspace-context-row .workspace-model-current{flex-direction:row;align-items:center;gap:10px}
+ .app-shell .workspace-context-row .workspace-model-current small{flex:0 0 64px;font-size:11px;white-space:nowrap}
+ .app-shell .workspace-context-row .workspace-model-current strong{flex:1;font-size:13px;line-height:1.5}
+ .app-shell .workspace-context-row .workspace-host-control label{flex-direction:row;align-items:center;gap:10px}
+ .app-shell .workspace-context-row .workspace-host-control label>span{flex:0 0 64px;font-size:11px;white-space:nowrap}
+ .app-shell .workspace-context-row .workspace-host-control select{flex:1;width:0;font-size:14px;min-height:40px}
+ .app-shell .workspace-context-row{gap:6px}
+ .app-shell .workspace-mode-row .mode-switch span{display:inline;font-size:11px}
+ .app-shell .workspace-mode-row .mode-switch button{gap:5px;padding-inline:10px}
+}
+@media(max-width:370px){
+ .app-shell .workspace-mode-row .mode-switch span{display:none}
+ .app-shell .chat-area{padding-inline:12px}
+ .app-shell .workspace-context-row .workspace-model-current small,.app-shell .workspace-context-row .workspace-host-control label>span{flex-basis:60px}
+ .app-shell .agent-send-choice select{max-width:126px}
+}
+/* data-short-viewport also follows an Android/Chrome keyboard that leaves layout height unchanged. */
+html[data-short-viewport=true] .app-shell .workspace-controls{max-height:40%;padding-top:5px;padding-bottom:6px}
+html[data-short-viewport=true] .app-shell .composer-area{max-height:64%;padding-top:4px;padding-bottom:max(4px,env(safe-area-inset-bottom,0px))}
+html[data-short-viewport=true] .app-shell .chat-scroll{padding-top:8px}
+html[data-short-viewport=true] .app-shell .composer textarea{height:39px;min-height:39px;padding-top:7px;padding-bottom:2px;line-height:1.6}
+html[data-short-viewport=true] .app-shell .composer-bottom{padding-bottom:4px}
+html[data-short-viewport=true] .app-shell .composer-footer{margin-top:0}
+html[data-short-viewport=true] .app-shell .agent-queue ol{max-height:85px}
+html[data-short-viewport=true] .app-shell .agent-queue-error{max-height:85px}
+html[data-short-viewport=true] .app-shell .welcome{padding-top:10px}
+html[data-short-viewport=true] .app-shell .welcome-symbol{display:none}
+html[data-short-viewport=true] .app-shell .suggestions{margin-top:14px}
+@media(min-width:900px) and (max-height:600px){
+ .app-shell .workspace-controls{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:6px 12px}
+ .app-shell .workspace-mode-row{justify-content:flex-start;align-items:flex-start;flex-direction:column;gap:0}
+ .app-shell .workspace-mode-row .agent-onboarding-ready{margin-left:0}
+ .app-shell .workspace-mode-row .agent-onboarding-ready>summary{min-height:28px;padding-block:2px}
+ .app-shell .workspace-context-row{margin-top:0}
+ .app-shell .workspace-context-row.has-execution-target{grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr))}
+ .app-shell .workspace-controls .execution-reconnect{grid-column:1/-1;margin-top:0}
+ .app-shell .workspace-mode-row:has(.agent-onboarding){grid-column:1/-1;flex-direction:row}
+ .app-shell .workspace-mode-row:has(.agent-onboarding)+.workspace-context-row{grid-column:1/-1}
+ .app-shell .composer textarea{height:39px;min-height:39px;padding-top:7px;padding-bottom:2px}
+ .app-shell .composer-footer .composer-footnote{font-size:10px}
+}

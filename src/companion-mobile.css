@@ -1,7 +1,13 @@
-/* Keep the existing Scene reachable when the full companion sidebar no longer fits. */
+/* Keep the character reachable without spending conversation space on a sidebar. */
 @media (max-width: 960px) {
+  .app-shell:has(.workspace) {
+    --workspace-pet-height: clamp(48px, calc(var(--app-viewport-height, 100dvh) * .085), 82px);
+    --workspace-pet-width: calc(var(--workspace-pet-height) * .86);
+    --workspace-header-height: calc(var(--workspace-pet-height) + 12px + env(safe-area-inset-top, 0px));
+  }
+
   .app-shell:has(.workspace) .topbar {
-    height: calc(76px + env(safe-area-inset-top, 0px));
+    height: var(--workspace-header-height);
     padding-top: env(safe-area-inset-top, 0px);
     padding-right: max(18px, env(safe-area-inset-right, 0px));
     gap: 12px;
@@ -22,7 +28,7 @@
   .app-shell:has(.workspace) .topbar-actions {
     flex-shrink: 0;
     gap: 12px;
-    padding-right: 72px;
+    padding-right: calc(var(--workspace-pet-width) + 12px);
   }
 
   .app-shell:has(.workspace) .topbar-actions .today {
@@ -33,10 +39,10 @@
     display: block;
     position: fixed;
     z-index: 8;
-    top: calc(3px + env(safe-area-inset-top, 0px));
+    top: calc(var(--app-viewport-top, 0px) + 6px + env(safe-area-inset-top, 0px));
     right: max(18px, env(safe-area-inset-right, 0px));
-    width: 60px;
-    height: 70px;
+    width: var(--workspace-pet-width);
+    height: var(--workspace-pet-height);
     margin: 0;
     padding: 0;
     border: 0;

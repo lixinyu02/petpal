@@ -9,6 +9,7 @@ directories:
 files:
   - dist/**
   - desktop/main.cjs
+  - desktop/window-layout.cjs
   - desktop/preload.cjs
   - desktop/updates.mjs
   - desktop/media-permissions.cjs

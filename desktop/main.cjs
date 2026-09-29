@@ -7,6 +7,7 @@ const fsSync = require('node:fs');
 const { canRequestMedia, canCheckMedia } = require('./media-permissions.cjs');
 const { readDesktopServiceSettings } = require('./service-settings.cjs');
 const { createDesktopRemoteHttp, isPetPalReleaseUrl } = require('./remote-http.cjs');
+const { mainWindowLayout, petWindowLayout } = require('./window-layout.cjs');
 const { spawn } = require('node:child_process');
 
 let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
@@ -79,12 +80,41 @@ function secureWindow(win) {
   });
 }
 
+function fitWindowToDisplay(win, isPet = false) {
+  if (!win || win.isDestroyed()) return;
+  const bounds = win.getBounds();
+  const area = screen.getDisplayMatching(bounds).workArea;
+  const { minWidth, minHeight, ...next } = isPet ? petWindowLayout(area, bounds) : mainWindowLayout(area, bounds);
+  if (!isPet) {
+    const [currentMinWidth, currentMinHeight] = win.getMinimumSize();
+    if (currentMinWidth !== minWidth || currentMinHeight !== minHeight) win.setMinimumSize(minWidth, minHeight);
+  }
+  // Let the window manager own maximized/fullscreen geometry. Restoration is
+  // checked separately, including after a monitor was unplugged while hidden.
+  if (win.isMinimized() || win.isMaximized() || win.isFullScreen()) return;
+  if (['x', 'y', 'width', 'height'].some(key => next[key] !== bounds[key])) win.setBounds(next);
+}
+
+function trackWindowDisplay(win, isPet = false) {
+  let timer;
+  const update = () => fitWindowToDisplay(win, isPet);
+  const schedule = () => { clearTimeout(timer); timer = setTimeout(update, 120); };
+  // Debounce native move events so dragging between displays remains possible.
+  for (const event of ['move', 'resize', 'restore', 'unmaximize', 'leave-full-screen']) win.on(event, schedule);
+  for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(event, update);
+  win.once('closed', () => {
+    clearTimeout(timer);
+    for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) screen.removeListener(event, update);
+  });
+}
+
 function createMain() {
   mainWindow = new BrowserWindow({
-    width: 1180, height: 800, minWidth: 760, minHeight: 540,
+    ...mainWindowLayout(screen.getPrimaryDisplay().workArea),
     title: '小伴 PetPal', icon: iconPath, backgroundColor: '#f7f6f2', show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
+  trackWindowDisplay(mainWindow);
   secureWindow(mainWindow);
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.on('close', event => {
@@ -100,6 +130,7 @@ function createMain() {
 function showMain() {
   if (!mainWindow) createMain();
   if (mainWindow.isMinimized()) mainWindow.restore();
+  fitWindowToDisplay(mainWindow);
   mainWindow.show(); mainWindow.focus();
 }
 
@@ -107,11 +138,12 @@ function showPet() {
   if (!petWindow) {
     const area = screen.getPrimaryDisplay().workArea;
     petWindow = new BrowserWindow({
-      width: 300, height: 340, x: area.x + area.width - 320, y: area.y + area.height - 360,
+      ...petWindowLayout(area),
       frame: false, transparent: true, resizable: false, hasShadow: false, alwaysOnTop: true,
       skipTaskbar: true, show: false, title: '小伴桌宠', icon: iconPath,
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
     });
+    trackWindowDisplay(petWindow, true);
     // Windows requires pop-up-menu to retain the native WS_EX_TOPMOST flag.
     petWindow.setAlwaysOnTop(true, process.platform === 'win32' ? 'pop-up-menu' : 'floating');
     if (process.platform !== 'win32') petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -119,7 +151,7 @@ function showPet() {
     petWindow.once('ready-to-show', () => petWindow?.showInactive());
     petWindow.on('closed', () => { petWindow = null; });
     petLoaded = petWindow.loadURL(`${origin}/?pet=1`);
-  } else petWindow.showInactive();
+  } else { fitWindowToDisplay(petWindow, true); petWindow.showInactive(); }
 }
 
 async function inspectAvatarWindow(win, requireWorld, kind) {
@@ -517,7 +549,7 @@ async function boot() {
         if (mobile.viewport.width !== 390 || mobile.viewport.height !== 844) throw new Error(`Mobile viewport differs: ${JSON.stringify(mobile.viewport)}`);
         await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'anime-mobile.png'), (await mainWindow.webContents.capturePage()).toPNG());
         mainWindow.setBounds(desktopBounds);
-        mainWindow.setMinimumSize(760, 540);
+        fitWindowToDisplay(mainWindow);
         await mainWindow.webContents.executeJavaScript('new Promise(resolve => setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(resolve)), 250))');
         result.poses = { mobile };
       }
@@ -553,7 +585,7 @@ async function boot() {
       const bytes = await fs.readFile(absolute);
       return [{ path: relative.split(path.sep).join('/'), bytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }];
     };
-    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
+    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
     if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'result.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
     if (!health.ok || !bridge.hasToken || !codex.available || !desktopTools.opencli.available || desktopTools.opencli.version !== '1.8.8') exitCode = 1;

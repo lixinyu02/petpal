@@ -3,6 +3,8 @@ import ReactDOM from 'react-dom/client';
 import './styles.css';
 import './companion.css';
 import './natural-companion.css';
+import './adaptive-screen.css';
+import { useViewport } from './platform/useViewport';
 import { getSessionEpoch, initConnection, subscribeSession } from './api';
 import { Capacitor } from '@capacitor/core';
 import { PetOverlay as NativeOverlay } from './platform/overlay';
@@ -14,6 +16,7 @@ const PetOverlay = lazy(() => import('./pet/PetOverlay'));
 const params = new URLSearchParams(location.search);
 const overlay = isPassiveNativeOverlay(location.href, Capacitor.isNativePlatform() || !!window.petpal);
 function SessionRoot(){
+  useViewport();
   const epoch=useSyncExternalStore(subscribeSession,getSessionEpoch,getSessionEpoch);
   const[ready,setReady]=useState(overlay);
   useEffect(()=>{if(overlay)return;let alive=true;void initConnection(Capacitor.getPlatform()==='android'||window.petpal?'https://magicdatou.top:44318':'').finally(()=>{if(alive)setReady(true);}).catch(()=>{});return()=>{alive=false;};},[]);
