@@ -1,12 +1,13 @@
 // Text boundary shapes plus optional PCM energy envelope; not phoneme recognition.
 import { detectAvatarEmotion as emotion, emotionAtSpeechBoundary as emotionAtBoundary } from './emotion.mjs';
+import { createAvatarGestures, gestureAtSpeechBoundary } from './gestures.mjs';
 const PHASES = new Set(['idle', 'listening', 'thinking', 'speaking', 'error']);
 const REACTIONS = new Set(['pet', 'greet', 'wake']);
 const MAX_STEP = .1, MAX_BACKLOG_SECONDS = 4.8, MAX_BACKLOG_UNITS = 64, MAX_INCREMENT_CHARS = 192;
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 const ease = (value, target, dt, rate = 12) => value + (target - value) * (1 - Math.exp(-dt * rate));
-const FACE_CHANNELS = ['warmAmount', 'curiousAmount', 'surpriseAmount', 'concernAmount', 'smileAmount', 'sadAmount', 'downcastAmount', 'excitedAmount', 'shyAmount', 'eyeSmile', 'tearAmount'];
-const NEGATIVE_EXPRESSIONS = new Set(['sad','downcast','concerned']);
+const FACE_CHANNELS = ['warmAmount', 'curiousAmount', 'surpriseAmount', 'concernAmount', 'smileAmount', 'sadAmount', 'downcastAmount', 'excitedAmount', 'shyAmount', 'smugAmount', 'poutAmount', 'reliefAmount', 'determinedAmount', 'eyeSmile', 'tearAmount'];
+const NEGATIVE_EXPRESSIONS = new Set(['sad','downcast','concerned','pout','determined']);
 // Facial targets are independent of articulation. Renderers must continue to
 // composite mouth movement after expression layers, including a smiling face.
 const expressions = {
@@ -20,11 +21,15 @@ const expressions = {
   excited: { excitedAmount: 1, warmAmount: .6, smileAmount: 1, eyeSmile: .3, browRaise: .48, blush: .4, gazeOffsetY: .1, headTilt: .08 },
   sad: { sadAmount: 1, downcastAmount: .18, concernAmount: .32, browRaise: .28, browTilt: .65, blush: .03, gazeOffsetY: -.32, headTilt: -.14, tearAmount: .85 },
   downcast: { downcastAmount: 1, sadAmount: .08, concernAmount: .28, browRaise: -.12, browTilt: .36, gazeOffsetY: -.26, headTilt: -.17, tearAmount: .14 },
+  smug: { smugAmount: 1, warmAmount: .25, smileAmount: .68, eyeSmile: .25, browRaise: .22, browTilt: -.32, blush: .32, gazeOffsetX: .14, headTilt: .16 },
+  pout: { poutAmount: 1, browRaise: -.2, browTilt: -.4, blush: .5, gazeOffsetX: -.16, headTilt: -.12 },
+  relieved: { reliefAmount: 1, warmAmount: .65, smileAmount: .5, eyeSmile: .72, browRaise: -.12, blush: .24, gazeOffsetY: -.08 },
+  determined: { determinedAmount: 1, browRaise: -.16, browTilt: -.25, gazeOffsetY: .08, headTilt: .02 },
   playful: { warmAmount: .6, curiousAmount: .12, smileAmount: .8, browRaise: .25, browTilt: -.12, blush: .2, gazeOffsetX: .12, headTilt: -.12 },
   concerned: { warmAmount: .18, curiousAmount: .18, concernAmount: 1, smileAmount: .05, browRaise: .14, browTilt: .42, gazeOffsetX: -.05, gazeOffsetY: -.1, headTilt: -.07 },
 };
 const reactions = { pet: { expression: 'happy', duration: 1.65, amount: .62 }, greet: { expression: 'playful', duration: 1.55, amount: .72 }, wake: { expression: 'warm', duration: 1.2, amount: .38 } };
-const neutral = () => ({ expression: 'neutral', expressionAmount: 0, warmAmount: 0, curiousAmount: 0, surpriseAmount: 0, concernAmount: 0, smileAmount: 0, sadAmount: 0, downcastAmount: 0, excitedAmount: 0, shyAmount: 0, eyeSmile: 0, tearAmount: 0, voiceEnergy: 0, mouthOpen: 0, mouthShape: 'rest', blinkLeft: 0, blinkRight: 0, browRaise: 0, browTilt: 0, blush: 0, headTilt: 0, headNod: 0, gazeOffsetX: 0, gazeOffsetY: 0, speaking: false });
+const neutral = () => ({ expression: 'neutral', expressionAmount: 0, warmAmount: 0, curiousAmount: 0, surpriseAmount: 0, concernAmount: 0, smileAmount: 0, sadAmount: 0, downcastAmount: 0, excitedAmount: 0, shyAmount: 0, smugAmount: 0, poutAmount: 0, reliefAmount: 0, determinedAmount: 0, eyeSmile: 0, tearAmount: 0, voiceEnergy: 0, mouthOpen: 0, mouthShape: 'rest', blinkLeft: 0, blinkRight: 0, browRaise: 0, browTilt: 0, blush: 0, headTilt: 0, headNod: 0, gazeOffsetX: 0, gazeOffsetY: 0, gesture: 'none', gestureProgress: 0, bodyLean: 0, bodyLift: 0, bodyTurn: 0, headShake: 0, speaking: false });
 
 function cue(character) {
   if (!character) return { shape: 'rest', open: 0, duration: .06 };
@@ -49,11 +54,14 @@ export function createAvatarPerformance() {
   let queue = [], current = null, hidden = false, external = false, externalActive = false, externalIndex = -1, externalAudio = null;
   let emotionKind = null, emotionRemaining = 0, motionTime = 0, blinkAt = 3.1, blinkRemaining = 0, blinkNumber = 0;
   let reaction = null, winkAge = null, winkCooldown = 0, motionReduced = false;
+  const gestures=createAvatarGestures();
+  let gestureFromSpeech=false;
   // Remember consumed lengths, not old message bodies. Reset/cancel must not replay a visited reply.
   const consumed = new Map();
   const reacted = new Set();
   const clearMouth = () => { queue = []; current = null; output.mouthOpen = 0; output.mouthShape = 'rest'; output.speaking = false; };
-  const resetPose = () => { clearMouth(); output = neutral(); emotionKind = null; emotionRemaining = 0; reaction = null; winkAge = null; winkCooldown = 0; motionTime = 0; blinkAt = 3.1; blinkRemaining = 0; blinkNumber = 0; };
+  const clearGestures = (clearHead=true) => { gestures.cancel(); gestureFromSpeech=false; output.gesture='none'; output.gestureProgress=output.bodyLean=output.bodyLift=output.bodyTurn=output.headShake=0; if(clearHead)output.headTilt=output.headNod=0; };
+  const resetPose = () => { clearMouth(); gestures.reset(); gestureFromSpeech=false; output = neutral(); emotionKind = null; emotionRemaining = 0; reaction = null; winkAge = null; winkCooldown = 0; motionTime = 0; blinkAt = 3.1; blinkRemaining = 0; blinkNumber = 0; };
   const rememberLength = (id, length) => {
     const previous = consumed.get(id) ?? 0;
     consumed.delete(id); consumed.set(id, Math.max(length, previous));
@@ -86,6 +94,8 @@ export function createAvatarPerformance() {
     externalAudio = external && Number.isFinite(next.speech.audioLevel) ? (externalActive ? clamp(next.speech.audioLevel) : 0) : null;
     if(next.phase!=='speaking'||!externalActive||externalAudio===null||externalAudio<=.025)output.voiceEnergy=0;
     externalIndex = external && Number.isFinite(next.speech.charIndex) ? clamp(Math.floor(next.speech.charIndex), 0, next.text.length) : -1;
+    if(gestureFromSpeech&&(changed||rewritten))clearGestures(false);
+    if(hidden||motionReduced||(wasSpeaking&&next.phase!=='speaking')||(next.phase==='speaking'&&external&&(!externalActive||externalIndex<0||externalIndex>=next.text.length)))clearGestures();
     let boundaryAdvanced = false;
     if (next.phase !== 'speaking' || hidden) { clearMouth(); emotionKind = null; emotionRemaining = 0; }
     else if (external) {
@@ -111,6 +121,11 @@ export function createAvatarPerformance() {
     // Keep the current semantic cue while actual PCM is still audible, even
     // between estimated character boundaries. Energy never selects an emotion.
     if(externalActive&&externalAudio>.025&&emotionKind)emotionRemaining=Math.max(emotionRemaining,.4);
+    const cueAdvanced=external?externalActive&&(changed||!priorExternal||!priorActive||!wasSpeaking||externalIndex>priorIndex):Boolean(appended);
+    if(next.phase==='speaking'&&cueAdvanced){
+      const cue=gestureAtSpeechBoundary(next.text,external?externalIndex:next.text.length-1);
+      if(cue&&gestures.trigger(`speech:${next.utteranceId}:${cue.sentenceStart}`,cue.gesture,!hidden&&!motionReduced))gestureFromSpeech=true;
+    }
   }
 
   function react(event) {
@@ -121,6 +136,10 @@ export function createAvatarPerformance() {
     // Hidden reactions are consumed, not deferred until the page is visible.
     if (hidden) return false;
     reaction = { ...reactions[event.kind], age: 0 };
+    // During a sad/serious line a touch remains gentle instead of forcing joy.
+    const negative=NEGATIVE_EXPRESSIONS.has(emotionKind??output.expression);
+    const gesture=negative?'settle':event.kind==='pet'?'tilt':event.kind==='greet'?'nod':'settle';
+    if(gestures.trigger(`reaction:${event.id}`,gesture,!motionReduced&&!(input.phase==='speaking'&&external&&!externalActive)))gestureFromSpeech=false;
     if (event.kind === 'greet' && winkCooldown <= 0) {
       winkCooldown = 2.4;
       if (!motionReduced) winkAge = 0;
@@ -129,21 +148,28 @@ export function createAvatarPerformance() {
   }
 
   function step(deltaSeconds, { reducedMotion = false, hidden: nowHidden = false } = {}) {
-    const dt = Number.isFinite(deltaSeconds) && deltaSeconds > 0 ? Math.min(deltaSeconds, MAX_STEP) : 0;
+    const elapsed = Number.isFinite(deltaSeconds) && deltaSeconds > 0 ? deltaSeconds : 0;
+    // Keep approximate articulation and autonomous motion bounded after a
+    // stalled frame, but expire semantic reactions against real wall time.
+    const dt = Math.min(elapsed, MAX_STEP);
     hidden = Boolean(nowHidden);
     motionReduced = Boolean(reducedMotion);
     if (hidden) {
       externalAudio = null;
+      clearGestures();
       clearMouth(); emotionKind = null; emotionRemaining = 0; blinkRemaining = 0; reaction = null; winkAge = null;
       output = neutral();
       return { ...output };
     }
     if (motionReduced) {
+      clearGestures();
       blinkRemaining = 0; winkAge = null;
       output.voiceEnergy=0;
       output.blinkLeft = output.blinkRight = output.headTilt = output.headNod = output.gazeOffsetX = output.gazeOffsetY = 0;
     }
     if (dt > 0) {
+      const gesture=gestures.step(elapsed,{blocked:motionReduced||(input.phase==='speaking'&&external&&!externalActive)});
+      for(const channel of ['gesture','gestureProgress','bodyLean','bodyLift','bodyTurn','headShake'])output[channel]=gesture[channel];
       if (input.phase === 'speaking') {
         let remainingDt = dt;
         while (remainingDt > 0) {
@@ -159,39 +185,40 @@ export function createAvatarPerformance() {
       output.mouthOpen = targetOpen === 0 ? 0 : ease(output.mouthOpen, targetOpen, dt, 28);
       output.mouthShape = audible ? (targetOpen > 0 ? (current?.shape && current.shape !== 'rest' && current.shape !== 'M' ? current.shape : 'A') : 'rest') : current?.shape ?? 'rest';
       output.speaking = input.phase === 'speaking' && (audible ? targetOpen > 0 : Boolean(current || queue.length));
-      emotionRemaining = Math.max(0, emotionRemaining - dt);
-      winkCooldown = Math.max(0, winkCooldown - dt);
-      if (reaction) { reaction.age += dt; if (reaction.age >= reaction.duration) reaction = null; }
+      const liveEmotion=input.phase==='speaking'&&externalActive&&externalAudio>.025&&emotionKind;
+      emotionRemaining = Math.max(liveEmotion ? .4 : 0, emotionRemaining - elapsed);
+      winkCooldown = Math.max(0, winkCooldown - elapsed);
+      if (reaction) { reaction.age += elapsed; if (reaction.age >= reaction.duration) reaction = null; }
       const base = input.phase === 'thinking' ? 'thoughtful' : input.phase === 'listening' ? 'curious' : input.phase === 'error' ? 'concerned' : output.speaking ? 'warm' : 'neutral';
       const selected = emotionRemaining > 0 ? emotionKind : base;
-      const vivid=['happy','shy','sad','downcast','excited'].includes(selected);
+      const vivid=['happy','shy','sad','downcast','excited','smug','pout','relieved','determined'].includes(selected);
       const amount = selected === 'neutral' ? 0 : emotionRemaining > 0 ? (vivid ? (externalAudio!==null ? .86+.1*output.voiceEnergy : .9) : .85) : .4;
       const negative=NEGATIVE_EXPRESSIONS.has(selected);
       const reactionAmount = reaction&&!negative ? reaction.amount * clamp((reaction.duration - reaction.age) / .55) : 0;
       const face = expressions[selected], response = expressions[reaction?.expression ?? 'neutral'];
       output.expression = reactionAmount>0 && (selected === 'neutral' || selected === 'warm') ? reaction.expression : selected;
       const strength = Math.max(amount, reactionAmount);
-      output.expressionAmount = ease(output.expressionAmount, strength, dt, strength > output.expressionAmount ? 9 : 4.5);
+      output.expressionAmount = ease(output.expressionAmount, strength, elapsed, strength > output.expressionAmount ? 9 : 4.5);
       for (const channel of FACE_CHANNELS) {
         const target = Math.max((face[channel] ?? 0) * amount, (response[channel] ?? 0) * reactionAmount);
-        output[channel] = ease(output[channel], target, dt, target > output[channel] ? 9 : 4.5);
+        output[channel] = ease(output[channel], target, elapsed, target > output[channel] ? 9 : 4.5);
       }
       const poseTarget = channel => (face[channel] ?? 0) * amount * (1 - reactionAmount * .3) + (response[channel] ?? 0) * reactionAmount * .7;
-      output.browRaise = ease(output.browRaise, poseTarget('browRaise'), dt, 7);
-      output.browTilt = ease(output.browTilt, poseTarget('browTilt'), dt, 7);
-      output.blush = ease(output.blush, Math.max((face.blush ?? 0) * amount, (response.blush ?? 0) * reactionAmount), dt, 5);
+      output.browRaise = ease(output.browRaise, poseTarget('browRaise'), elapsed, 7);
+      output.browTilt = ease(output.browTilt, poseTarget('browTilt'), elapsed, 7);
+      output.blush = ease(output.blush, Math.max((face.blush ?? 0) * amount, (response.blush ?? 0) * reactionAmount), elapsed, 5);
       if (!motionReduced) {
-        motionTime += dt; blinkRemaining = Math.max(0, blinkRemaining - dt);
-        if (winkAge !== null) { winkAge += dt; if (winkAge >= .38) winkAge = null; else blinkAt = Math.max(blinkAt, motionTime + .7); }
+        motionTime += dt; blinkRemaining = Math.max(0, blinkRemaining - elapsed);
+        if (winkAge !== null) { winkAge += elapsed; if (winkAge >= .38) winkAge = null; else blinkAt = Math.max(blinkAt, motionTime + .7); }
         if (motionTime >= blinkAt) { blinkRemaining = .18; blinkAt = motionTime + [3.4, 4.3, 2.9][blinkNumber++ % 3]; }
         const blink = blinkRemaining > 0 ? Math.sin((1 - blinkRemaining / .18) * Math.PI) : 0;
         const wink = !negative && winkAge !== null && winkAge > .07 ? Math.sin(clamp((winkAge - .07) / .31) * Math.PI) : 0;
         output.blinkLeft = clamp(blink); output.blinkRight = clamp(Math.max(wink, blink * (selected === 'shy' ? .92 : 1)));
-        output.headTilt = ease(output.headTilt, Math.sin(motionTime * .75) * .08 + poseTarget('headTilt'), dt, 8);
+        output.headTilt = clamp(ease(output.headTilt, Math.sin(motionTime * .75) * .08 + poseTarget('headTilt')+gesture.headTilt, elapsed, 8),-1,1);
         const voiceMotion=output.speaking?(externalAudio!==null?output.voiceEnergy:.5):0;
-        output.headNod = ease(output.headNod, Math.sin(motionTime * (1.4+voiceMotion*(selected==='excited'?4:2.6))) * (.018+voiceMotion*(selected==='excited'?.11:.065)), dt, 12);
-        output.gazeOffsetX = ease(output.gazeOffsetX, poseTarget('gazeOffsetX'), dt, 5);
-        output.gazeOffsetY = ease(output.gazeOffsetY, poseTarget('gazeOffsetY'), dt, 5);
+        output.headNod = clamp(ease(output.headNod, Math.sin(motionTime * (1.4+voiceMotion*(selected==='excited'?4:2.6))) * (.018+voiceMotion*(selected==='excited'?.11:.065))+gesture.headNod, elapsed, 12),-1,1);
+        output.gazeOffsetX = ease(output.gazeOffsetX, poseTarget('gazeOffsetX'), elapsed, 5);
+        output.gazeOffsetY = ease(output.gazeOffsetY, poseTarget('gazeOffsetY'), elapsed, 5);
       }
     }
     return { ...output };

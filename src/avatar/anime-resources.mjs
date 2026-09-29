@@ -18,7 +18,7 @@ export async function loadAvatarImages({ load, onBase, onVariant, onIssue, isSto
   if (!baseName) return;
   // Serial decoding keeps the extra emotion texture from competing with the
   // body/eyes/lips needed for the first visible frame and ordinary conversation.
-  for (const name of ['blink', 'talk', 'round', 'curious', 'warm', 'sad']) {
+  for (const name of ['blink', 'talk', 'round', 'curious', 'warm', 'sad', 'pout']) {
     if (isStopped()) return;
     if (name === baseName) continue;
     try {

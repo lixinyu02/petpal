@@ -193,7 +193,8 @@ test('micro expressions remain finite and bounded; snapshots are isolated and in
   const a = createAvatarPerformance(), b = createAvatarPerformance();
   a.setInput(input('你好')); b.setInput(input('你好'));
   a.step(NaN); a.step(-10); a.step(Infinity);
-  assert.deepEqual(a.step(10), b.step(.1));
+  const stalled=a.step(10),regular=b.step(.1);
+  assert.deepEqual(mouth(stalled),mouth(regular),'stalled frames never fast-forward the bounded text articulation queue');
   assert.throws(() => a.setInput(input('ok', { phase: 'unknown' })), /Invalid/);
   a.setInput(input('ok', { speech: { active: true, charIndex: NaN } }));
   assert.equal(a.step(.025).mouthOpen, 0);
@@ -374,4 +375,122 @@ test('spoken continuation keeps tears/shyness until a real new cue or sentence b
   controller.setInput(input(shy,{utteranceId:'shy',speech:{active:true,charIndex:0,ended:false,audioLevel:.5}}));assert.notEqual(controller.step(.025).expression,'shy');
   controller.setInput(input(shy,{utteranceId:'shy',speech:{active:true,charIndex:shy.indexOf('我有点'),ended:false,audioLevel:.5}}));run(controller,.5);
   controller.setInput(input(shy,{utteranceId:'shy',speech:{active:true,charIndex:shy.indexOf('脸都'),ended:false,audioLevel:.5}}));assert.equal(controller.step(.025).expression,'shy');
+});
+
+const gestureChannels=['gestureProgress','bodyLean','bodyLift','bodyTurn','headShake'];
+test('new facial channels are vivid and crossfade without flashing neutral',()=>{
+  for(const [text,kind,channel]of [['我有点得意。','smug','smugAmount'],['哼，我有点气鼓鼓。','pout','poutAmount'],['现在安心了。','relieved','reliefAmount'],['我会认真做好。','determined','determinedAmount']]){
+    const controller=createAvatarPerformance();controller.setInput(input(text));const pose=run(controller,.8).at(-1);
+    assert.equal(pose.expression,kind);assert.ok(pose[channel]>.85,channel);
+    if(kind==='pout'||kind==='determined')assert.equal(pose.smileAmount,0);
+    controller.setInput(input('普通说明。',{utteranceId:'next'}));assert.equal(controller.step(0)[channel],pose[channel]);
+    assert.ok(run(controller,1.5).at(-1)[channel]<.002);
+  }
+});
+
+test('incremental text triggers one complete motion per sentence and never replays old history',()=>{
+  const controller=createAvatarPerformance(),text='好的，我会完成这项工作，然后继续检查。';
+  const frames=[];
+  for(let index=1;index<=text.length;index++){
+    controller.setInput(input(text.slice(0,index)));frames.push(...run(controller,.1));
+  }
+  frames.push(...run(controller,2));
+  let starts=0,active=false;
+  for(const frame of frames){const next=frame.gesture!=='none';if(next&&!active)starts++;active=next;}
+  assert.equal(starts,1);assert.equal(frames.at(-1).gesture,'none');
+  controller.setInput(input(text));assert.equal(controller.step(.025).gesture,'none');
+  controller.reset();controller.setInput(input(text));assert.equal(controller.step(.025).gesture,'none');
+  controller.setInput(input(text+'太好了！'));assert.equal(controller.step(.025).gesture,'bounce');
+});
+
+test('TTS performs only the current clause and does not replay a sentence while its character boundary advances',()=>{
+  const controller=createAvatarPerformance(),text='这是普通内容，我有点害羞。现在安心了。';
+  const set=index=>controller.setInput(input(text,{speech:{active:true,charIndex:index,audioLevel:.5}}));
+  set(0);assert.equal(controller.step(.1).gesture,'none');
+  set(text.indexOf('我有点'));assert.equal(controller.step(.1).gesture,'shy');
+  run(controller,2.5);
+  set(text.indexOf('害羞'));assert.equal(controller.step(.1).gesture,'none');
+  set(text.indexOf('现在'));assert.equal(controller.step(.1).gesture,'settle');
+});
+
+test('hidden, stop, buffering and reduced motion immediately clear gestures and never replay the cancelled sentence',()=>{
+  for(const interruption of ['hidden','stop','buffering','reduced']){
+    const controller=createAvatarPerformance(),text='太好了，今天真的很开心。',speech={active:true,charIndex:0,audioLevel:.5};
+    controller.setInput(input(text,{speech}));const moving=run(controller,.3).at(-1);assert.equal(moving.gesture,'bounce');assert.ok(moving.bodyLift>.2);
+    if(interruption==='hidden')controller.step(0,{hidden:true});
+    else if(interruption==='reduced')controller.step(0,{reducedMotion:true});
+    else controller.setInput(input(text,{phase:interruption==='stop'?'idle':'speaking',speech:{...speech,active:false}}));
+    const stopped=controller.step(0,{hidden:interruption==='hidden',reducedMotion:interruption==='reduced'});
+    assert.equal(stopped.gesture,'none');for(const key of gestureChannels)assert.equal(stopped[key],0,`${interruption}.${key}`);
+    controller.step(0);controller.setInput(input(text,{speech:{...speech,charIndex:4}}));
+    assert.ok(run(controller,3).every(frame=>frame.gesture==='none'),interruption);
+    controller.setInput(input(text+'现在安心了。',{speech:{...speech,charIndex:text.length}}));
+    assert.equal(controller.step(.1).gesture,'settle','a genuinely new sentence can animate');
+  }
+});
+
+test('direct touch and greeting trigger a gentle one-shot pose without a smile over negative dialogue',()=>{
+  for(const [kind,gesture]of [['pet','tilt'],['greet','nod'],['wake','settle']]){
+    const controller=createAvatarPerformance();controller.react({id:kind,kind});
+    const pose=run(controller,.4).at(-1);assert.equal(pose.gesture,gesture);assert.deepEqual(mouth(pose),{open:0,shape:'rest',speaking:false});
+    assert.ok(run(controller,3).every(frame=>frame.gesture===gesture||frame.gesture==='none'));
+    assert.equal(controller.step(0).gesture,'none');
+  }
+  const sad=createAvatarPerformance();sad.setInput(input('我很伤心。'));run(sad,.3);sad.react({id:'gentle-pet',kind:'pet'});
+  const pose=run(sad,.3).at(-1);assert.equal(pose.gesture,'settle');assert.equal(pose.smileAmount,0);assert.equal(pose.expression,'sad');
+});
+
+test('an enabled but idle TTS player does not disable touch gestures',()=>{
+  const controller=createAvatarPerformance(),idle=input('',{phase:'idle',speech:{active:false,charIndex:0,ended:true}});
+  controller.setInput(idle);controller.react({id:'idle-pet',kind:'pet'});
+  const frames=[];
+  for(let frame=0;frame<20;frame++){controller.setInput(idle);frames.push(controller.step(.025));}
+  assert.ok(frames.every(frame=>frame.gesture==='tilt'));
+  assert.ok(frames.at(-1).bodyTurn>.1);
+});
+
+test('all new motion and expression channels stay bounded across arbitrary input changes',()=>{
+  const controller=createAvatarPerformance();
+  for(let frame=0;frame<240;frame++){
+    if(frame%15===0)controller.setInput(input(['我有点得意。','哼，我有点气鼓鼓。','现在安心了。','我会认真做好。'][Math.floor(frame/15)%4],{utteranceId:`id-${frame}`}));
+    const pose=controller.step(.025);
+    for(const key of ['smugAmount','poutAmount','reliefAmount','determinedAmount','gestureProgress'])assert.ok(Number.isFinite(pose[key])&&pose[key]>=0&&pose[key]<=1,key);
+    for(const key of ['bodyLean','bodyLift','bodyTurn','headShake','headTilt','headNod'])assert.ok(Number.isFinite(pose[key])&&Math.abs(pose[key])<=1,key);
+  }
+});
+
+test('low frame rate expires gestures, facial reactions and winks in real time with no stale head pose',()=>{
+  const touched=createAvatarPerformance();touched.react({id:'hello',kind:'greet'});
+  const moving=touched.step(.18);assert.equal(moving.gesture,'nod');assert.ok(moving.headNod>.1);
+  const finished=touched.step(2);
+  assert.equal(finished.gesture,'none');assert.equal(finished.expression,'neutral');
+  assert.ok(finished.smileAmount<.001&&Math.abs(finished.headNod)<.03);
+  assert.equal(finished.blinkLeft,finished.blinkRight,'old wink does not survive the frame gap');
+  assert.ok(gestureChannels.every(key=>finished[key]===0));
+  assert.equal(touched.react({id:'hello',kind:'greet'}),false);
+  const text=createAvatarPerformance();text.setInput(input('我很伤心。'));text.step(.2);
+  const expired=text.step(3);assert.notEqual(expired.expression,'sad');assert.ok(expired.sadAmount<.001&&expired.tearAmount<.001);
+});
+
+test('one-fps incremental updates cannot repeat a consumed sentence or replay after visibility returns',()=>{
+  const controller=createAvatarPerformance(),text='好的，我会继续认真完成这项工作。';
+  for(let index=2;index<=text.length;index++){
+    controller.setInput(input(text.slice(0,index)));const frame=controller.step(1);
+    if(index>=3)assert.equal(frame.gesture,'none',`frame ${index} never restarts the sentence`);
+  }
+  controller.step(0,{hidden:true});controller.setInput(input(text+'还有一段在后台追加的文字。'));
+  const visible=controller.step(1);assert.equal(visible.gesture,'none');assert.equal(visible.mouthOpen,0);
+});
+
+test('audible PCM retains current emotion across slow frames while buffering cancels its motion immediately',()=>{
+  const controller=createAvatarPerformance(),text='我有点害羞，脸红了。',speech={active:true,charIndex:0,audioLevel:.5};
+  for(let frame=0;frame<5;frame++){
+    controller.setInput(input(text,{speech}));const pose=controller.step(1);
+    assert.equal(pose.expression,'shy');assert.ok(pose.mouthOpen>0);
+    if(frame>=1)assert.equal(pose.gesture,'none');
+  }
+  controller.setInput(input(text,{speech:{...speech,active:false}}));
+  const buffering=controller.step(0);assert.equal(buffering.gesture,'none');assert.equal(buffering.mouthOpen,0);
+  controller.setInput(input(text,{speech:{...speech,charIndex:2}}));
+  assert.equal(controller.step(1).gesture,'none');
 });

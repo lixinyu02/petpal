@@ -4,6 +4,10 @@ const emotions={
   excited:/兴奋|激动|迫不及待|好期待|\bexcited\b|\bthrilled\b|\bcan(?:not|'t) wait\b|[🤩🎉🥳]/giu,
   shy:/不好意思|害羞|脸红|嘿嘿|\bembarrass(?:ed)?\b|\bblush(?:ing)?\b|\bshy\b|[😳🙈]/giu,
   happy:/太好了|真棒|好耶|哈哈|开心|高兴|快乐|\bhappy\b|\bhooray\b|\bjoyful\b|[😄🥰]/giu,
+  smug:/得意|小骄傲|我厉害吧|夸夸我|\bsmug\b|\bproud of myself\b/giu,
+  pout:/鼓腮|气鼓鼓|撅嘴|闹别扭|有点生气|不理你了|哼(?=[，,！!。])|\bpout(?:ing)?\b/giu,
+  relieved:/松了(?:一口)?气|松(?:一口|口)气|安心|放心了|如释重负|\brelieved\b|\bwhat a relief\b/giu,
+  determined:/认真|下定决心|我会努力|交给我吧|打起精神|一定要(?:努力|做好|完成)|\bdetermined\b|\bfocused\b/giu,
 };
 const negated=prefix=>/(?:(?:不是不|并非不|不|不是|并非|没(?:有)?|从未|无须|别|勿|莫)(?:再|太|很|怎么|那么|这么|会|想|觉得|感到|特别|真的|有点){0,3}|not(?:\s+(?:really|very|feeling)){0,3}|never|no\s+longer|(?:don|doesn|didn|isn|wasn|weren|aren)['’]t(?:\s+feel(?:ing)?)?)\s*$/iu.test(prefix);
 function affirmed(text,expression) {
@@ -33,6 +37,10 @@ export function detectAvatarEmotion(value) {
   if(affirmed(text,emotions.sad))return 'sad';
   if(affirmed(text,emotions.downcast))return 'downcast';
   if(affirmed(text,/担心|着急|自责|害怕|\bworr(?:y|ied)\b/giu))return 'concerned';
+  if(affirmed(text,emotions.pout))return 'pout';
+  if(affirmed(text,emotions.relieved))return 'relieved';
+  if(affirmed(text,emotions.determined))return 'determined';
+  if(affirmed(text,emotions.smug))return 'smug';
   if(affirmed(text,emotions.excited))return 'excited';
   if(affirmed(text,/开个玩笑|逗你|调皮|眨眨眼|\bwink\b|\bplayful\b|[😉😋]/giu))return 'playful';
   if(affirmed(text,emotions.shy))return 'shy';

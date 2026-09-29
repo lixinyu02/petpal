@@ -44,3 +44,11 @@ test('explicit denial or neutral transition clears inherited cues and prevents l
   const changed='我很伤心，不过现在很开心，想和你分享一下。';
   assert.equal(at(changed,changed.indexOf('不过')),'happy');assert.equal(at(changed,changed.indexOf('想和')),'happy');
 });
+
+test('Galgame cues distinguish small pride, pouting, relief and determination without performing negations',()=>{
+  for(const [text,kind]of [['嘿嘿，我有一点小得意，我厉害吧。','smug'],['哼，我有点气鼓鼓，不理你了。','pout'],['终于松了一口气，现在安心了。','relieved'],['我会认真做好这件事，交给我吧。','determined'],['I feel relieved.','relieved'],['I am determined.','determined'],['I am smug.','smug'],['I am pouting.','pout']])assert.equal(emotion(text),kind,text);
+  for(const [text,kind]of [['我不得意。','smug'],['别得意。','smug'],['我没有鼓腮。','pout'],['我不安心。','relieved'],['我并不认真。','determined'],['I am not relieved.','relieved'],['I am not determined.','determined']])assert.notEqual(emotion(text),kind,text);
+  for(const text of ['得意、鼓腮、安心、认真。','支持得意和鼓腮两种表情。','“安心”这个词是什么意思？'])assert.equal(emotion(text),null,text);
+  const text='先看看情况，现在安心了，终于可以休息。接下来是普通说明。';
+  assert.equal(at(text,0),null);assert.equal(at(text,text.indexOf('现在')),'relieved');assert.equal(at(text,text.indexOf('终于')),'relieved');assert.equal(at(text,text.indexOf('接下来')),null);
+});

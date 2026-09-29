@@ -1,5 +1,6 @@
 export type PerformancePhase = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
-export type AvatarExpression = 'neutral' | 'warm' | 'curious' | 'thoughtful' | 'surprised' | 'shy' | 'happy' | 'playful' | 'concerned' | 'sad' | 'downcast' | 'excited';
+export type AvatarExpression = 'neutral' | 'warm' | 'curious' | 'thoughtful' | 'surprised' | 'shy' | 'happy' | 'playful' | 'concerned' | 'sad' | 'downcast' | 'excited' | 'smug' | 'pout' | 'relieved' | 'determined';
+export type AvatarGesture = 'none' | 'nod' | 'shake' | 'tilt' | 'shy' | 'bounce' | 'recoil' | 'settle';
 export interface AvatarReaction { id: string; kind: 'pet' | 'greet' | 'wake' }
 export type MouthShape = 'rest' | 'A' | 'E' | 'O' | 'M';
 export interface PerformanceInput {
@@ -22,6 +23,10 @@ export interface AvatarPerformanceSnapshot {
   downcastAmount: number;
   excitedAmount: number;
   shyAmount: number;
+  smugAmount: number;
+  poutAmount: number;
+  reliefAmount: number;
+  determinedAmount: number;
   eyeSmile: number;
   tearAmount: number;
   /** Smoothed actual PCM energy for subtle body motion; zero when silent/reduced. */
@@ -38,6 +43,14 @@ export interface AvatarPerformanceSnapshot {
   /** Normalized -1..1 pose cues; the renderer chooses angle/displacement amplitude. */
   headTilt: number;
   headNod: number;
+  /** A single semantic or touch reaction, never a repeating idle animation. */
+  gesture:AvatarGesture;
+  gestureProgress:number;
+  /** -1..1: positive lean approaches viewer, lift moves up, turn/shake move screen-right. */
+  bodyLean:number;
+  bodyLift:number;
+  bodyTurn:number;
+  headShake:number;
   /** Signed -1..1 expression gaze offset; zero during reduced motion. */
   gazeOffsetX: number;
   gazeOffsetY: number;
@@ -47,6 +60,7 @@ export interface AvatarPerformance {
   setInput(input: PerformanceInput): void;
   /** React once per id without changing speech/input; false for duplicate or hidden events. */
   react(event: AvatarReaction): boolean;
+  /** Pass actual elapsed seconds, including throttled RAF gaps; local motion integration is capped internally. */
   step(dt: number, options?: { reducedMotion?: boolean; hidden?: boolean }): AvatarPerformanceSnapshot;
   /** Clear pose/reactions/queued speech, retaining bounded message and reaction replay protection. */
   reset(): void;

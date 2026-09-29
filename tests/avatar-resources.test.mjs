@@ -23,13 +23,23 @@ test('the body becomes usable before optional images finish and one missing expr
   assert.ok(events.includes('variant:round'));
   assert.ok(events.includes('variant:warm'));
   assert.ok(events.includes('variant:sad'));
+  assert.ok(events.includes('variant:pout'));
   assert.equal(events.filter(event => event.startsWith('base:')).length, 1);
 });
 
 test('missing sad artwork keeps the visible body and all six original textures available', async () => {
   const bases=[],variants=[],issues=[];
   await loadAvatarImages({load:async name=>{if(name==='sad')throw new Error('optional 404');return{name};},onBase:image=>bases.push(image.name),onVariant:image=>variants.push(image.name),onIssue:name=>issues.push(name)});
-  assert.deepEqual(bases,['idle']);assert.deepEqual(variants,['blink','talk','round','curious','warm']);assert.deepEqual(issues,['sad']);
+  assert.deepEqual(bases,['idle']);assert.deepEqual(variants,['blink','talk','round','curious','warm','pout']);assert.deepEqual(issues,['sad']);
+});
+
+test('missing pout or both optional portraits keeps the base and original expression images',async()=>{
+  for(const missing of [['pout'],['sad','pout']]){
+    const bases=[],variants=[],issues=[];
+    await loadAvatarImages({load:async name=>{if(missing.includes(name))throw new Error('optional 404');return{name};},onBase:image=>bases.push(image.name),onVariant:image=>variants.push(image.name),onIssue:name=>issues.push(name)});
+    assert.deepEqual(bases,['idle']);assert.deepEqual(issues,missing);
+    assert.deepEqual(variants,['blink','talk','round','curious','warm',...(missing.includes('sad')?[]:['sad'])]);
+  }
 });
 
 test('missing idle uses an independent same-character portrait, while total base failure never reports ready', async () => {
