@@ -33,7 +33,7 @@ export function ConnectionDialog({ close }: { close?(): void }) {
     {window.petpal && <button className="secondary-button full-button auth-owner" disabled={busy} onClick={localOwner}>以本机管理员身份登录</button>}
     <p className="field-help login-note"><ShieldCheck size={14}/>管理员分配模型与 Agent 权限；登录凭据仅保留当前会话。</p>
   </section>;
-  return close ? <div className="modal-backdrop" role="dialog" aria-modal="true">{formContent}</div> : <main className="login-page"><a href="/" className="login-brand"><PawPrint size={29}/><span>小伴<small>PetPal</small></span></a><div className="login-layout"><div className="login-welcome"><span>你的日常伙伴</span><h1>聊聊想法，<br/>一起把事情做好。</h1><img src="/avatars/akari/idle.png" alt="温柔的二次元伙伴" onError={e => { e.currentTarget.style.display = 'none'; }}/></div>{formContent}</div></main>;
+  return close ? <div className="modal-backdrop" role="dialog" aria-modal="true">{formContent}</div> : <main className="login-page"><a href="/" className="login-brand"><PawPrint size={29}/><span>小伴<small>PetPal</small></span></a><div className="login-layout"><div className="login-welcome"><span>你的日常伙伴</span><h1>聊聊想法，<br/>一起把事情做好。</h1><img src="/avatars/akari/idle.webp" alt="温柔的二次元伙伴" width="1024" height="1536" decoding="async" fetchPriority="high" onError={e => { e.currentTarget.style.display = 'none'; }}/></div>{formContent}</div></main>;
 }
 
 export default function LoginGate({ children }: { children: ReactNode }) {

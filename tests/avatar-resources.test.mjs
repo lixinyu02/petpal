@@ -85,7 +85,7 @@ test('image requests time out, cancel cleanly, and a new attempt can succeed', a
   controller.abort(); await assert.rejects(pending, { name: 'AbortError' });
   assert.equal(images[1].src, ''); assert.equal(images[1].onerror, null);
   const retry = loadAvatarImage('idle');
-  assert.equal(images[2].src, '/avatars/akari/idle.png');
+  assert.equal(images[2].src, '/avatars/akari/idle.webp');
   images[2].onload(); assert.equal(await retry, images[2]);
   assert.equal(images[2].onload, null);
 });

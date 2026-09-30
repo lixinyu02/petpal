@@ -133,8 +133,8 @@ if (process.argv.includes('--compare-current-dist')) {
   for (const file of await expectedFiles('dist')) if (!frontend.some(item => item.path === file)) failures.push(`Current frontend member absent from archive: ${file}`);
 }
 const companionAssets = frontend.filter(file => file.path.startsWith('dist/avatars/'));
-for (const name of ['idle', 'blink', 'talk', 'round', 'curious', 'warm']) {
-  if (!companionAssets.some(file => file.path === `dist/avatars/akari/${name}.png`)) failures.push(`Required anime texture missing: ${name}`);
+for (const name of ['idle', 'blink', 'talk', 'round', 'curious', 'warm', 'sad', 'pout']) {
+  if (!companionAssets.some(file => file.path === `dist/avatars/akari/${name}.webp`)) failures.push(`Required anime texture missing: ${name}`);
 }
 const hash = createHash('sha256'); for await (const chunk of createReadStream(archive)) hash.update(chunk);
 console.log(JSON.stringify({ archive: path.resolve(archive), bytes: (await stat(archive)).size, sha256: hash.digest('hex'), version: manifest?.app, arch: manifest?.arch, entries: count, native, frontend, companionAssets, applicationSource,

@@ -32,7 +32,7 @@ OpenCLI 网页控制需要官方 Chrome Browser Bridge 扩展和明确选择的�
 
 需要 Linux GUI 依赖和可用的 WebGL 图形驱动。Ubuntu 完整桌面通常已有 GTK、NSS、X11 和音频库；极简系统需由管理员通过发行版软件源补齐。保留 Chromium 沙箱；不要以 root 运行，也不要加入 `--no-sandbox`。透明置顶桌宠优先使用 X11，Wayland 的位置控制、置顶和透明效果依赖合成器。
 
-二次元伙伴和 3D 小猫共用账号设置、模型和历史，形象选择持久化为 `settings.companionKind`。小猫使用 Three.js/WebGL；主界面与透明窗口共用 `PetScene`、`CatModel` 和行为状态机。二次元角色源码与资源位于 `src/avatar/` 和 `public/avatars/`，为原创 PNG 和网格动画，不是 Cubism `.moc3` 运行时。旧精灵图 / GIF 仅保留为历史素材；不能用静态截图代替实时渲染验证。
+二次元伙伴和 3D 小猫共用账号设置、模型和历史，形象选择持久化为 `settings.companionKind`。小猫使用 Three.js/WebGL；主界面与透明窗口共用 `PetScene`、`CatModel` 和行为状态机。二次元角色源码与发布资源位于 `src/avatar/` 和 `public/avatars/`，为原创立绘的无损 WebP 和网格动画，不是 Cubism `.moc3` 运行时。8 张原始 PNG 保留在 `artwork/akari/`，仅源码包收录，安装包不同时带两份立绘。旧精灵图 / GIF 仅保留为历史素材；不能用静态截图代替实时渲染验证。
 
 CosyVoice 已接入经过认证的个人服务，每条完成的 AI 消息可单独朗读 / 停止。系统音色和物理扬声器取决于目标桌面；通用远程 TTS、远程 ASR 与浏览器识别仍只是预备配置。保存配置不会自动录音。
 

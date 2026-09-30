@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "format": "webp-lossless",
+  "encoderOptions": [
+    "-lossless",
+    "-exact",
+    "-m",
+    "6"
+  ],
+  "entries": [
+    {
+      "name": "idle",
+      "width": 1024,
+      "height": 1536,
+      "originalBytes": 2356254,
+      "publishedBytes": 1492668,
+      "originalSha256": "e351b622273c8db8faf24caa164d89b555f3fdf69d046343fd11f29fbdbca026",
+      "publishedSha256": "0aa3e4a3dc2c47786a4990443090bb6ff2d749032e861e6dab1b16f5291117da",
+      "decodedRgbaSha256": "fb1f5113fc3fd21c5145db3e9877427fe50f0be4b147d90c7a6631cca214cbf3",
+      "rgbaEqual": true
+    },
+    {
+      "name": "blink",
+      "width": 1024,
+      "height": 1536,
+      "originalBytes": 2202000,
+      "publishedBytes": 1380860,
+      "originalSha256": "748559e11ab3d49c2fe6cd71af2304028a20755d9f15d85c1161773e2cc36705",
+      "publishedSha256": "94a2ab9f3831619158061609cb00dcc9bde7adac1304269457f53ba5d69a5d11",
+      "decodedRgbaSha256": "dfa24c68b291686129503c88900eacda1e5b366bed71536a5ae936db10437292",
+      "rgbaEqual": true
+    },
+    {
+      "name": "talk",
+      "width": 1024,
+      "height": 1536,
+      "originalBytes": 2194359,
+      "publishedBytes": 1369032,
+      "originalSha256": "a679d75e1b20a0294c0f9892c26f15ed740e04893c68a2517235975f45d73e81",
+      "publishedSha256": "456aaad0996da0d3c1730f512f136335d5bc9c7b326028a86e82e43840103a1b",
+      "decodedRgbaSha256": "82bac51b91ee3193e6b635363a17e6cb49585bd932808eb122b21ea61fd21f35",
+      "rgbaEqual": true
+    },
+    {
+      "name": "round",
+      "width": 1024,
+      "height": 1536,
+      "originalBytes": 2257706,
+      "publishedBytes": 1417266,
+      "originalSha256": "9b29b9eaf757695807f9f3ffb4b924e9e063dc83f3e738f6d31ee51bb52be427",
+      "publishedSha256": "a4bbc7c339116fb7faf8afedfa2b6886fdbdf6974a6c70b69e3051404c926bfa",
+      "decodedRgbaSha256": "3c43f8bf06a8f79547c3c22f00cdbd24de786fd543d8f98efb1e7dc022f8ad68",
+      "rgbaEqual": true
+    },
+    {
+      "name": "curious",
+      "width": 1024,
+      "height": 1536,
+      "originalBytes": 2223185,
+      "publishedBytes": 1394834,
+      "originalSha256": "4db7191e95b3587d3d7df8fc9a7d29663ebe39484623946cf0a79affb19c4146",
+      "publishedSha256": "b3b964e228e2700979529c69d286e1d86c20a3d52f782339e994b1a450b86e3f",
+      "decodedRgbaSha256": "7f6d182ab22a57fb72625df828947924c305aab3f94b91d0457a63bd6fb3add7",
+      "rgbaEqual": true
+    },
+    {
+      "name": "warm",
+      "width": 1024,
+      "height": 1536,
+      "originalBytes": 2229364,
+      "publishedBytes": 1383308,
+      "originalSha256": "0c1cf890d282773fffeb2867b57c7eb326efe4688872c913bb7824f28bef4c91",
+      "publishedSha256": "641e51e8d8c6af9bdc0006e53fe6465fac7348c51964db7ab3431a27a42bcb37",
+      "decodedRgbaSha256": "bc116eceb9eb8f150b0555b2fb14700433dbdff821aa13b45db707d905fa5b13",
+      "rgbaEqual": true
+    },
+    {
+      "name": "sad",
+      "width": 1024,
+      "height": 1536,
+      "originalBytes": 2217336,
+      "publishedBytes": 1392646,
+      "originalSha256": "6f553761f789eaeea402924ccc1b48c22221db38647d0929ce3f59bac0c09a49",
+      "publishedSha256": "fe79e0527345ea74c9ddef4fc7c34741ab64024454ad483fdfd72106b4fc5aec",
+      "decodedRgbaSha256": "69c99f09f76ba03f5d06632816a5427d95760a14cafb7e22227d067eb10beedc",
+      "rgbaEqual": true
+    },
+    {
+      "name": "pout",
+      "width": 1024,
+      "height": 1536,
+      "originalBytes": 2218845,
+      "publishedBytes": 1392228,
+      "originalSha256": "0e6fdff6ca01a19020ce0230d312289648575da674269618fcf73324e57bcf4f",
+      "publishedSha256": "6b31373305b5297f6364b7aaa68042df783cc8078ed27ca9eb25a76ca8408d99",
+      "decodedRgbaSha256": "a3cf51b9b1fe2579f462673a3a343294ce6b60497b3e9b1348c9709707fbfa16",
+      "rgbaEqual": true
+    }
+  ],
+  "originalTotalBytes": 17899049,
+  "publishedTotalBytes": 11222842,
+  "decodedRgbaTotalBytes": 50331648
+}

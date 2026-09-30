@@ -1,4 +1,4 @@
-export const avatarImageUrl = name => `/avatars/akari/${name}.png`;
+export const avatarImageUrl = name => `/avatars/akari/${name}.webp`;
 
 /** Load the visible body first. Expressions are optional and never hold it hostage. */
 export async function loadAvatarImages({ load, onBase, onVariant, onIssue, isStopped = () => false }) {

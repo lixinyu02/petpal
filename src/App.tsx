@@ -1,5 +1,7 @@
 import DownloadsView from './DownloadsView';
 import ChatMessages from './ChatMessages';
+import ConversationHistory from './ConversationHistory';
+import {watchCompanionBreakpoint} from './companion-mount.mjs';
 import {createChatDisplay,type ChatDisplay} from './chat-display.mjs';
 import {useChatScroll} from './useChatScroll';
 import { ModelPicker, ExecutionTarget, AgentOnboarding } from './WorkspaceControls';
@@ -12,7 +14,7 @@ import { useAttachments, AttachmentInput, AttachmentDrafts, MessageImages } from
 import './workspace.css';
 import { ConnectionDialog } from './auth/LoginGate';
 import UpdatesSettings from './UpdatesSettings';
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ArrowDown, ArrowUp, Download, ListOrdered, CornerDownRight, Check, ChevronDown, CircleHelp, Code2, Coffee, Globe2, History, Link2, Loader2, Menu, MessageCircle, Monitor, MoreHorizontal, PawPrint, Pencil, Plug, Plus, Settings2, ShieldCheck, Square, Terminal, Trash2, Unplug, Volume2, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { PetOverlay as Overlay, showPet } from './platform/overlay';
@@ -36,6 +38,7 @@ import { api, getConnection, getSessionEpoch, initConnection, connectWithToken, 
 
 const emptyState: State = { settings: { petName: '小伴', companionKind: 'anime', persona: '你是用户温柔、机灵的个人 AI 伙伴。用自然简洁的中文回应，认真倾听；不知道的事情坦诚说明。' }, providers: [], conversations: [], codex: {} };
 type Approval = { id: string; kind: string; description: string };
+const dateFormatter=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric'});
 
 export default function App() {
   const accountEpoch = useRef(getSessionEpoch()).current;
@@ -75,6 +78,7 @@ export default function App() {
   const [petSay, setPetSay] = useState('我在这里，听你说。');
   const [mobileNav, setMobileNav] = useState(false);
   const [companionPanelOpen, setCompanionPanelOpen] = useState(() => window.matchMedia('(min-width: 1400px)').matches);
+  const [companionPanelMounted,setCompanionPanelMounted]=useState(()=>companionPanelOpen||window.matchMedia('(max-width: 960px)').matches);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -94,14 +98,14 @@ export default function App() {
   const responseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSequence = useRef(0);
   const petOnly = new URLSearchParams(location.search).get('pet') === '1';
-  const conversation = state.conversations.find(c => c.id === selected);
-  const historyConversations = state.conversations.filter(c => !c.backgroundParentId);
+  const conversation = useMemo(()=>state.conversations.find(c => c.id === selected),[state.conversations,selected]);
+  const historyConversations = useMemo(()=>state.conversations.filter(c => !c.backgroundParentId),[state.conversations]);
   const provider = state.providers.find(p => p.id === (conversation?.providerId || providerId));
   const currentMode = conversation?.mode || mode;
   const agentRunning = currentMode==='codex' && (conversation?.agent?.run?.status==='running'||conversation?.agent?.run?.status==='stopping');
   const agentUnknown = currentMode==='codex' && conversation?.agent?.run?.status==='unknown';
   const working = busy || agentRunning;
-  const agentProviders=state.providers.filter(item=>state.codex.eligibleProviderIds?.includes(item.id));
+  const agentProviders=useMemo(()=>state.providers.filter(item=>state.codex.eligibleProviderIds?.includes(item.id)),[state.providers,state.codex.eligibleProviderIds]);
   const activePermissions=agentRunning?conversation!.agent!.run!.permissions:permissions;
   const activeProviderId=agentRunning?conversation!.agent!.run!.providerId||'':agentProviderId;
   const hostScope=state.instanceId&&state.user?`${state.instanceId}:${state.user.id}`:'';
@@ -111,14 +115,19 @@ export default function App() {
   const selectedHostId=resolveExecutionHostId({requestedId:agentHostId,lockedId:lockedHostId,localHostId,defaultHostId});
   const selectedHost=agentHosts.find(host=>host.id===selectedHostId);
   const hostBusy=agentRunning||agentUnknown||!!conversation?.agent?.queue.length;
-  const selectedCodex=selectedHost?.kind==='desktop'?{...state.codex,...selectedHost.codex}:state.codex;
+  const selectedCodex=useMemo(()=>selectedHost?.kind==='desktop'?{...state.codex,...selectedHost.codex}:state.codex,[state.codex,selectedHost?.kind,selectedHost?.codex]);
   const activeAgentProvider=state.providers.find(item=>item.id===activeProviderId);
   const activeAgentModel=(agentRunning?conversation!.agent!.run!.model:activeAgentProvider?.model||selectedCodex.model)||'';
   const agentSupportsImages=activeAgentProvider?.supportsImages!==false&&activeAgentModel.toLowerCase()!=='halogen-qwen3.8-flash-next';
   const canSendAgent=!!selectedHost?.online&&!!selectedCodex.available&&!hostsError&&!agentUnknown;
   const shownApprovals=currentMode==='codex'?conversation?.agent?.approvals||[]:approvals;
   const chatScroll=useChatScroll({scrollRef,conversationId:conversation?.id||'',active:ready&&view==='chat'&&!petOnly,messages:conversation?.messages,approvalKey:shownApprovals.map(item=>item.id).join(',')});
-  const lastReply = conversation?.messages.slice().reverse().find(message => message.role === 'assistant' && message.status === 'complete' && message.content.trim());
+  const lastReply = useMemo(()=>{
+    const messages=conversation?.messages;if(!messages)return;
+    for(let index=messages.length-1;index>=0;index--){const message=messages[index];if(message.role==='assistant'&&message.status==='complete'&&message.content.trim())return message;}
+  },[conversation?.messages]);
+  const todayKey=new Date().toDateString();
+  const todayLabel=useMemo(()=>dateFormatter.format(new Date()),[todayKey]);
   const performanceInput: PerformanceInput = mood === 'sleep' ? { utteranceId: 'sleep', text: '', phase: 'idle' } : speech.playing
     ? { utteranceId: speech.utteranceId, text: speech.text, phase: 'speaking', speech: { active: speech.active, charIndex: speech.charIndex, ended: speech.ended, audioLevel:speech.audioLevel } }
     : { ...responsePerformance, ...(speech.enabled ? { speech: { active: false, charIndex: 0, ended: true } } : {}) };
@@ -201,6 +210,8 @@ export default function App() {
     void poll();return()=>{controller.abort();if(timer)clearTimeout(timer);};
   },[connected,state.user?.canUseCodex,hostScope,hostRefresh,currentMode]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 3800); return () => clearTimeout(timer); }, [notice]);
+  useEffect(()=>{if(companionPanelOpen)setCompanionPanelMounted(true);},[companionPanelOpen]);
+  useEffect(()=>watchCompanionBreakpoint(window.matchMedia('(max-width: 960px)'),()=>setCompanionPanelMounted(true)),[]);
   useEffect(() => {
     const hidden = () => { if (document.hidden) { if (responseTimer.current) clearTimeout(responseTimer.current); setResponsePerformance(previous => ({ ...previous, phase: 'idle' })); } };
     document.addEventListener('visibilitychange', hidden);
@@ -233,6 +244,12 @@ export default function App() {
     if(c.mode==='codex')setAgentHostId(c.agent?.run?.hostId||c.agentHostId||c.threadHostId||'central');
     setSelected(c.id); setMode(c.mode); setView('chat'); setError(''); setMobileNav(false); setApprovals([]);
   }
+  // Memoized navigation always selects the current conversation and observes
+  // current busy/submission guards, without subscribing to every voice tick.
+  const historySelection=useRef({conversations:state.conversations,select:selectChat});
+  historySelection.current={conversations:state.conversations,select:selectChat};
+  const selectHistory=useCallback((id:string)=>{const current=historySelection.current;const item=current.conversations.find(c=>c.id===id);if(item)current.select(item);},[]);
+  const deleteHistory=useCallback((id:string)=>setDeleting(id),[]);
   function openMode(next:'chat'|'codex') {
     if(next===currentMode){setView('chat');setMobileNav(false);return;}
     newChat(next);
@@ -446,7 +463,7 @@ export default function App() {
         <button className={view === 'chat' ? 'active' : ''} onClick={() => openMode(currentMode)}><MessageCircle size={19}/>对话</button>
       </nav>
       <div className="history-heading"><span>最近的对话</span><History size={14}/></div>
-      <div className="history-list">{historyConversations.length === 0 ? <p className="history-empty">我们的故事，从一句你好开始。</p> : historyConversations.map(c => <div className={`history-row ${selected === c.id && view === 'chat' ? 'selected' : ''}`} key={c.id}><button className="history-item" title={c.title} onClick={() => selectChat(c)}>{c.mode === 'codex' ? <Terminal size={15}/> : <MessageCircle size={15}/>}<span>{c.title || '新对话'}</span></button><button disabled={busy} className="history-delete icon-button" aria-label={`删除对话 ${c.title}`} onClick={() => setDeleting(c.id)}><Trash2 size={13}/></button></div>)}</div>
+      <ConversationHistory conversations={historyConversations} selectedId={selected} active={view==='chat'} busy={busy} onSelect={selectHistory} onDelete={deleteHistory}/>
       <div className="sidebar-bottom"><button className={`settings-link ${view==='downloads'?'active':''}`} onClick={()=>{setView('downloads');setMobileNav(false);}}><Download size={18}/>下载客户端</button>
         <button className={`settings-link ${view === 'settings' ? 'active' : ''}`} onClick={() => { if (busy) { setNotice('请先完成或停止当前回复。'); return; } setView('settings'); setMobileNav(false); }}><Settings2 size={18}/>连接与设置</button>
         <button className="host-status" onClick={() => { stopPresentation(); setConnectionOpen(true); }}><span className={`status-light ${connected ? 'online' : ''}`}/><span>{connected ? state.user?.displayName || '个人服务已连接' : '登录你的个人服务'}<small>{window.petpal ? '桌面 · 账号与执行电脑' : Capacitor.isNativePlatform() ? 'Android · 远程服务' : 'Web · 个人空间'}</small></span><ChevronDown size={14}/></button>
@@ -454,7 +471,7 @@ export default function App() {
     </aside>
 
     <main className="main-area">
-      <header className="topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileNav(true)}><Menu size={21}/></button><span className="breadcrumb">我的空间</span><span className="breadcrumb-divider">/</span><strong>{view === 'settings' ? '连接与设置' : view==='downloads'?'下载客户端':currentMode === 'codex' ? 'Agent · 执行任务' : 'Chat · 聊天'}</strong></div><div className="topbar-actions">{view === 'chat' && <button type="button" className="companion-panel-toggle" aria-label={companionPanelOpen ? '收起伙伴栏' : '展开伙伴栏'} aria-expanded={companionPanelOpen} aria-controls="workspace-companion-panel" onClick={() => setCompanionPanelOpen(value => !value)}><PawPrint size={16}/><span>{companionPanelOpen ? '收起伙伴' : '伙伴'}</span></button>}<span className="today">{new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric' }).format(new Date())}</span><button className="avatar account-entry" aria-label="我的账号" onClick={() => { stopPresentation(); setSettingsTab('accounts'); setView('settings'); }}>{state.user?.displayName?.slice(0,1) || '我'}</button><a className="single-companion-return" href="/" aria-label="回到伙伴身边"><PawPrint size={20}/></a></div></header>
+      <header className="topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileNav(true)}><Menu size={21}/></button><span className="breadcrumb">我的空间</span><span className="breadcrumb-divider">/</span><strong>{view === 'settings' ? '连接与设置' : view==='downloads'?'下载客户端':currentMode === 'codex' ? 'Agent · 执行任务' : 'Chat · 聊天'}</strong></div><div className="topbar-actions">{view === 'chat' && <button type="button" className="companion-panel-toggle" aria-label={companionPanelOpen ? '收起伙伴栏' : '展开伙伴栏'} aria-expanded={companionPanelOpen} aria-controls="workspace-companion-panel" onClick={() => setCompanionPanelOpen(value => !value)}><PawPrint size={16}/><span>{companionPanelOpen ? '收起伙伴' : '伙伴'}</span></button>}<span className="today">{todayLabel}</span><button className="avatar account-entry" aria-label="我的账号" onClick={() => { stopPresentation(); setSettingsTab('accounts'); setView('settings'); }}>{state.user?.displayName?.slice(0,1) || '我'}</button><a className="single-companion-return" href="/" aria-label="回到伙伴身边"><PawPrint size={20}/></a></div></header>
       {!ready ? <div className="loading-view"><Loader2 className="spin"/>正在准备你的小伴…</div> : view==='downloads'?<DownloadsView/>:view === 'settings' ? <SettingsView state={state} connected={connected} refresh={refresh} notice={setNotice} connect={() => setConnectionOpen(true)} initialTab={settingsTab} hasDraft={!!draft.trim()||!!attachments.items.length||working}/> : <div className={`workspace${companionPanelOpen ? ' workspace-companion-visible' : ''}`}>
         <section className="chat-area">
           <div className={`workspace-controls is-${currentMode==='chat'?'chat':'agent'}`}>
@@ -495,7 +512,7 @@ export default function App() {
           </div>
 
         </section>
-        <aside className="pet-panel" id="workspace-companion-panel"><div className="pet-panel-heading"><span>你的小伙伴</span><span className="live-tag"><span/>{mood === 'sleep' ? '打盹中' : speech.active ? '朗读中' : responsePerformance.phase === 'speaking' ? '回应中' : working ? '思考中' : '在你身边'}</span></div><div className="pet-scene"><div className="scene-circle"/><svg className="scene-leaf" viewBox="0 0 90 120" aria-hidden="true"><path d="M42 118V44m0 50C3 85 8 54 42 75m0-9c33-6 40-31 8-28m-8 4C17 32 24 5 42 15" fill="#b7c8a5" stroke="#9bad8a" strokeWidth="2"/><path d="M26 100h34l-5 20H31z" fill="#d9cbb5" stroke="none"/></svg><div className="pet-touch"><Cat performanceInput={performanceInput} onState={companionState} onInteract={companionInteract}/></div><div className="scene-floor"/></div><div className="pet-name"><h2>{state.settings.petName}</h2><span>{companionKind === 'anime' ? '温柔的二次元伙伴' : '一只喜欢陪着你的小猫'}</span></div><div className="pet-speech">{mood !== 'sleep' && working ? '让我想一想，马上就好…' : petSay}</div><p className="pet-interaction-hint">轻触回应 · 长按休息</p><a className="motion-preview-link" href="/">回到伙伴身边 <span>↗</span></a><div className="pet-panel-bottom"><div className="quiet-note"><span>✦</span><p>不用每一刻都很有生产力。<br/>有我陪着，发会儿呆也很好。</p></div>{window.petpal ? <button className="desktop-pet-button" onClick={() => window.petpal?.showPet()}><Monitor size={16}/>放到桌面上<span>↗</span></button> : Capacitor.isNativePlatform() ? <button className="desktop-pet-button" onClick={() => setView('settings')}><Monitor size={16}/>开启悬浮伙伴<span>↗</span></button> : <div className="platform-note"><Monitor size={14}/><span>桌面版支持透明悬浮伙伴</span></div>}</div></aside>
+        <aside className="pet-panel" id="workspace-companion-panel"><div className="pet-panel-heading"><span>你的小伙伴</span><span className="live-tag"><span/>{mood === 'sleep' ? '打盹中' : speech.active ? '朗读中' : responsePerformance.phase === 'speaking' ? '回应中' : working ? '思考中' : '在你身边'}</span></div><div className="pet-scene"><div className="scene-circle"/><svg className="scene-leaf" viewBox="0 0 90 120" aria-hidden="true"><path d="M42 118V44m0 50C3 85 8 54 42 75m0-9c33-6 40-31 8-28m-8 4C17 32 24 5 42 15" fill="#b7c8a5" stroke="#9bad8a" strokeWidth="2"/><path d="M26 100h34l-5 20H31z" fill="#d9cbb5" stroke="none"/></svg><div className="pet-touch">{companionPanelMounted&&<Cat performanceInput={performanceInput} onState={companionState} onInteract={companionInteract}/>}</div><div className="scene-floor"/></div><div className="pet-name"><h2>{state.settings.petName}</h2><span>{companionKind === 'anime' ? '温柔的二次元伙伴' : '一只喜欢陪着你的小猫'}</span></div><div className="pet-speech">{mood !== 'sleep' && working ? '让我想一想，马上就好…' : petSay}</div><p className="pet-interaction-hint">轻触回应 · 长按休息</p><a className="motion-preview-link" href="/">回到伙伴身边 <span>↗</span></a><div className="pet-panel-bottom"><div className="quiet-note"><span>✦</span><p>不用每一刻都很有生产力。<br/>有我陪着，发会儿呆也很好。</p></div>{window.petpal ? <button className="desktop-pet-button" onClick={() => window.petpal?.showPet()}><Monitor size={16}/>放到桌面上<span>↗</span></button> : Capacitor.isNativePlatform() ? <button className="desktop-pet-button" onClick={() => setView('settings')}><Monitor size={16}/>开启悬浮伙伴<span>↗</span></button> : <div className="platform-note"><Monitor size={14}/><span>桌面版支持透明悬浮伙伴</span></div>}</div></aside>
       </div>}
     </main>
     {notice && <div className="toast" role="status"><Check size={16}/>{notice}</div>}

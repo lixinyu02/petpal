@@ -99,7 +99,7 @@ OpenCLI 网页工具另需官方 Chrome Browser Bridge 扩展和明确选择的�
 
 首页通过「二次元伙伴 / 3D 小猫」选择形象，默认二次元伙伴。每次只渲染当前选择的一个角色。切换会保留名字、性格、模型连接、聊天与 Agent 历史；连接个人服务后保存选择，Windows / Ubuntu 的同源桌宠窗口同步选项，Android 悬浮窗接收已选形象。
 
-二次元伙伴使用六张原创 PNG 的局部眼眉 / 嘴部混合与 40×60 网格形变，提供呼吸、眨眼、轻微转头、头发摆动，以及浅笑、好奇、思考、惊讶、害羞等微表情。文字或朗读进度驱动 A/E/O/M 的近似口型，标点之间会停顿。未集成 Cubism Core，不支持导入 `.moc3`。实现范围见 [角色方案研究](docs/avatar-research.md)，素材说明见 [原创形象](public/avatars/akari/README.md) 与 [表情生成记录](docs/avatar-expression-prompts.md)。
+二次元伙伴使用八张原创立绘的局部眼眉 / 嘴部混合与 40×60 网格形变，提供呼吸、眨眼、轻微转头、头发摆动，以及浅笑、好奇、思考、惊讶、害羞、伤心和鼓腮等微表情。网页与安装包发布逐像素一致的无损 WebP，原始 PNG 保留在 `artwork/akari/`，总资源下载量减少 37.30%。文字或朗读进度驱动 A/E/O/M 的近似口型，标点之间会停顿。未集成 Cubism Core，不支持导入 `.moc3`。实现范围见 [角色方案研究](docs/avatar-research.md)，素材说明见 [原创形象](public/avatars/akari/README.md) 与 [表情生成记录](docs/avatar-expression-prompts.md)。
 
 橘白小猫由 Three.js WebGL 实时渲染，同一模型完成呼吸、眨眼、转头、摆尾、走动、抚摸、进食、睡眠与跳跃。短宽耳、连续脸颊和口鼻、贴合脸部的眼睛、连续前腿与圆爪改善模型比例；走动时展开后腿、将躯干转为四足站姿，以四拍短步和脚底约束保持贴地。渲染说明见 [3D 小猫方案](docs/renderer-decision.md)。
 

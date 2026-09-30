@@ -112,7 +112,7 @@ $metadata = [ordered]@{
   packagedSourceFilesCompared=@($result.bundleFiles | Where-Object { $_.path -notlike 'dist/*' }).Count
   startupDiagnosticsCompared=@($result.bundleFiles | Where-Object { $_.path -eq 'desktop/startup-diagnostics.cjs' }).Count -eq 1
   generatedPackageSha256=$generatedPackageSha
-  avatarResources=@($result.bundleFiles | Where-Object { $_.path -like 'dist/avatars/akari/*.png' })
+  avatarResources=@($result.bundleFiles | Where-Object { $_.path -like 'dist/avatars/akari/*.webp' })
   sourceInputs=$sourceInputs
 }
 $metadataJson = $metadata | ConvertTo-Json -Depth 12

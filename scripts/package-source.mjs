@@ -17,9 +17,9 @@ const versionSeries = metadata.version.split('.').slice(0, 2).join('.');
 const folderName = `PetPal-${metadata.version}-source`;
 const archive = path.join(root, 'releases', `${folderName}.zip`);
 const checkOnly = process.argv.includes('--check');
-const sourceRoots = ['src', 'server', 'desktop', 'public', 'tests', 'scripts', 'docs'];
-// Recursive source/public roots dynamically include every shipped avatar file, without fixed artwork names.
-const requiredCompanionRoots = ['src/avatar', 'public/avatars'];
+const sourceRoots = ['src', 'server', 'desktop', 'public', 'artwork', 'tests', 'scripts', 'docs'];
+// Recursive source/public/artwork roots include published textures and original artwork.
+const requiredCompanionRoots = ['src/avatar', 'public/avatars', 'artwork/akari'];
 const topFiles = ['.gitattributes', '.gitignore', 'package.json', 'package-lock.json', 'index.html', 'README.md', 'tsconfig.json', 'vite.config.ts', 'capacitor.config.ts', 'LICENSE', 'NOTICE'];
 const androidFiles = [
   'android/.gitignore', 'android/build.gradle', 'android/settings.gradle', 'android/variables.gradle', 'android/gradle.properties',
@@ -180,7 +180,7 @@ const plan = {
   version: metadata.version, archive: path.relative(root, archive).replaceAll('\\', '/'), checkedAt: new Date().toISOString(),
   checkOnly, files: entries.map(({ content, ...entry }) => entry), totalInputBytes: entries.reduce((total, entry) => total + entry.bytes, 0),
   sanitized, excluded, skippedReleaseEvidence, boundaryScan: 'pass', requiredCompanionRoots, pendingCompanionRoots,
-  notes: ['Current companion choices are a default anime-style character and one persistent Three.js/WebGL cat; both share chat and Codex history.', 'All files under src/avatar and public/avatars are dynamically included through recursive source/public roots; final archive creation requires both roots to be populated.', 'The outputs/animations provenance and legacy public sprite are retained only as historical 0.1 artwork, not current product or current release acceptance.', `codex-live.json is reused 0.1 real CLI backend protocol evidence, not a new ${metadata.version} model call or native renderer acceptance.`, 'Only explicitly selected evidence is included; JSON local paths and identity/credential fields are removed.', 'Fixture credentials in source are fixed synthetic test strings, never live credentials.', 'Generated Android web assets are rebuilt by npm run android:sync; native sources, asset-policy tests and Gradle wrapper are included.', 'No draft atlas, frame intermediates, runtime state, build output, tools, dependency tree, or logs are included.'],
+  notes: ['Current companion choices are a default anime-style character and one persistent Three.js/WebGL cat; both share chat and Codex history.', 'All files under src/avatar, public/avatars and artwork/akari are included through recursive roots; final archive creation requires all three roots to be populated.', 'The outputs/animations provenance and legacy public sprite are retained only as historical 0.1 artwork, not current product or current release acceptance.', `codex-live.json is reused 0.1 real CLI backend protocol evidence, not a new ${metadata.version} model call or native renderer acceptance.`, 'Only explicitly selected evidence is included; JSON local paths and identity/credential fields are removed.', 'Fixture credentials in source are fixed synthetic test strings, never live credentials.', 'Generated Android web assets are rebuilt by npm run android:sync; native sources, asset-policy tests and Gradle wrapper are included.', 'No draft atlas, frame intermediates, runtime state, build output, tools, dependency tree, or logs are included.'],
 };
 await mkdir(path.join(root, 'evidence'), { recursive: true });
 await writeFile(path.join(root, 'evidence', 'source-package-plan.json'), `${JSON.stringify(plan, null, 2)}\n`);
