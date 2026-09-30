@@ -16,8 +16,11 @@ requiredApplicationSource.push('desktop/startup-diagnostics.cjs', 'server/music-
   'server/native/music-mcp/netease/server.py', 'server/native/music-mcp/netease/LICENSE', 'server/native/music-mcp/netease/pyproject.toml', 'server/native/music-mcp/netease/PROVENANCE.json',
   'server/native/music-mcp/qqmusic/login.py', 'server/native/music-mcp/qqmusic/LICENSE', 'server/native/music-mcp/qqmusic/pyproject.toml', 'server/native/music-mcp/qqmusic/PROVENANCE.json',
   'server/native/music-mcp/qqmusic/src/mcp_qqmusic/__init__.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/__main__.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/server.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/format.py');
-const isApplicationSource = relative => /^(?:server\/[^/]+\.mjs|server\/native\/[^/]+\.ps1|server\/native\/music-mcp\/(?:netease\/(?:server\.py|LICENSE|pyproject\.toml|PROVENANCE\.json)|qqmusic\/(?:login\.py|LICENSE|pyproject\.toml|PROVENANCE\.json|src\/mcp_qqmusic\/(?:__init__|__main__|server|format)\.py))|desktop\/(?:main|preload|window-layout|media-permissions|service-settings|startup-diagnostics|remote-http)\.cjs|desktop\/(?:updates|executor)\.mjs|NOTICE)$/.test(relative);
+const isApplicationSource = relative => /^(?:server\/[^/]+\.mjs|server\/native\/[^/]+\.ps1|server\/native\/computer-use\/(?:LICENSE|patches\/linux-x11-window-geometry\.patch|linux-(?:x64|arm64)\/(?:PROVENANCE\.json|computer-use-napi\.linux-(?:x64|arm64)\.node))|server\/native\/music-mcp\/(?:netease\/(?:server\.py|LICENSE|pyproject\.toml|PROVENANCE\.json)|qqmusic\/(?:login\.py|LICENSE|pyproject\.toml|PROVENANCE\.json|src\/mcp_qqmusic\/(?:__init__|__main__|server|format)\.py))|desktop\/(?:main|preload|window-layout|media-permissions|service-settings|startup-diagnostics|remote-http)\.cjs|desktop\/(?:updates|executor)\.mjs|NOTICE)$/.test(relative);
 const packageMetadata = new Map(), dependencyHashes = new Map(), launchers = new Map();
+requiredApplicationSource.push('server/computer-use-mcp.mjs','server/computer-use-tool-names.mjs','server/computer-use-mcp-routes.mjs','server/dynamic-tool-output.mjs','server/model-request-limits.mjs');
+requiredApplicationSource.push('server/native/computer-use/LICENSE','server/native/computer-use/patches/linux-x11-window-geometry.patch');
+const computerPrefix='node_modules/@zavora-ai/computer-use-mcp/';
 const requiredOpencliFiles = ['package.json', 'LICENSE', 'cli-manifest.json', 'dist/src/main.js', 'dist/src/daemon.js', 'dist/src/browser/base-page.js'].map(name => `node_modules/@jackwener/opencli/${name}`);
 const archivePrefix = path.basename(archive).replace(/\.tar\.gz$/, '');
 await tar.t({ file: archive, strict: true, onReadEntry(entry) {
@@ -40,7 +43,7 @@ await tar.t({ file: archive, strict: true, onReadEntry(entry) {
     const hash = createHash('sha256'); entry.on('data', chunk => hash.update(chunk));
     entry.on('end', () => applicationSource.push({ path: entry.path.split('/resources/app/')[1], sha256: hash.digest('hex') }));
   }
-  if (entry.type === 'File' && appRelative?.startsWith('node_modules/') && (/\/package\.json$/.test(appRelative) || /\/(?:licen[cs]e|copying)(?:[._-][^/]*)?$/i.test(appRelative) || requiredOpencliFiles.includes(appRelative))) {
+  if (entry.type === 'File' && appRelative?.startsWith('node_modules/') && (/\/package\.json$/.test(appRelative) || /\/(?:licen[cs]e|copying)(?:[._-][^/]*)?$/i.test(appRelative) || requiredOpencliFiles.includes(appRelative) || appRelative.startsWith(computerPrefix))) {
     const hash = createHash('sha256'); let text = '';
     entry.on('data', chunk => { hash.update(chunk); if (appRelative.endsWith('/package.json')) text += chunk; });
     entry.on('end', () => {
@@ -52,13 +55,15 @@ await tar.t({ file: archive, strict: true, onReadEntry(entry) {
     let text = ''; entry.on('data', chunk => { text += chunk; });
     entry.on('end', () => { launchers.set(path.posix.basename(entry.path), { mode: entry.mode, text }); if ((entry.mode & 0o111) !== 0o111) failures.push(`Missing launcher executable bits: ${entry.path}`); });
   }
-  const isNative = entry.type === 'File' && (entry.path.endsWith('/petpal') || /\/node_modules\/@openai\/codex-linux-(?:x64|arm64)\/vendor\//.test(entry.path) && !/\.(?:json|txt|md)$/i.test(entry.path));
+  const isComputerNative=entry.type==='File'&&appRelative?.startsWith(computerPrefix)&&appRelative.endsWith('.node');
+  if(isComputerNative&&!/computer-use-napi\.linux-(?:x64|arm64)\.node$/.test(entry.path))failures.push(`Wrong Computer Use platform: ${entry.path}`);
+  const isNative = entry.type === 'File' && (isComputerNative || entry.path.endsWith('/petpal') || /\/node_modules\/@openai\/codex-linux-(?:x64|arm64)\/vendor\//.test(entry.path) && !/\.(?:json|txt|md)$/i.test(entry.path));
   if (isNative) {
     const hash = createHash('sha256'); let header = Buffer.alloc(0);
     entry.on('data', chunk => { hash.update(chunk); if (header.length < 64) header = Buffer.concat([header, chunk]).subarray(0, 64); });
     entry.on('end', () => {
       if (header.length < 64 || !header.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])) || header[4] !== 2 || header[5] !== 1) failures.push(`Missing ELF64 little-endian header: ${entry.path}`);
-      if ((entry.mode & 0o111) !== 0o111) failures.push(`Missing executable bits: ${entry.path}`);
+      if (!isComputerNative && (entry.mode & 0o111) !== 0o111) failures.push(`Missing executable bits: ${entry.path}`);
       native.push({ path: entry.path, mode: entry.mode.toString(8), machine: header.length >= 64 ? header.readUInt16LE(18) : null, sha256: hash.digest('hex') });
     });
   }
@@ -77,6 +82,11 @@ else {
     if (![...frontend, ...applicationSource].some(item => item.path === file.path && item.sha256 === file.sha256)) failures.push(`Manifest app member missing: ${file.path}`);
   }
   for (const file of requiredApplicationSource) if (!applicationSource.some(item => item.path === file)) failures.push(`Required application source missing: ${file}`);
+  const computerMetadata=packageMetadata.get(computerPrefix+'package.json');
+  if(!manifest.computerUse||computerMetadata?.version!=='7.4.0'||computerMetadata.license!=='MIT'||manifest.computerUse.arch!==manifest.arch)failures.push('Computer Use package/version manifest mismatch');
+  for(const file of manifest.computerUse?.files??[])if(dependencyHashes.get(file.path)!==file.sha256)failures.push(`Computer Use runtime/attribution mismatch: ${file.path}`);
+  const computerNatives=native.filter(file=>file.path.includes(computerPrefix));
+  if(computerNatives.length!==1||!computerNatives[0].path.endsWith(`computer-use-napi.linux-${manifest.arch}.node`)||computerNatives[0].sha256!==manifest.computerUse?.native?.sha256)failures.push('Computer Use native target/hash mismatch');
 }
 const closure = new Map(), edges = [], optionalAbsent = [];
 function locateDependency(directory, name) {

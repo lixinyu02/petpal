@@ -125,7 +125,7 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false } = 
     nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, Menu: { buildFromTemplate: value => value },
     readDesktopServiceSettings: async () => ({ codexHttpOrigins: '' }),
     serverModule: { createPetServer: async () => backendStub },
-    executorModuleStub: { DesktopExecutor: class { async disconnect() {} }, createExecutorHandlers: () => ({}), createMusicMcpHandlers: () => ({}) },
+    executorModuleStub: { DesktopExecutor: class { async disconnect() {} }, createExecutorHandlers: () => ({}), createMusicMcpHandlers: () => ({}), createComputerUseMcpHandlers: () => ({}) },
     updaterModuleStub: { DesktopUpdateManager: class {}, createDesktopUpdateHandlers: () => ({}) },
     createDesktopRemoteHttp: () => ({}), listenDesktopBackend: async () => 50000,
     launchPreparedUpdate() {}, queuePortableUpdate() {}, requireUpdateOwner() {}, showMain() {}, shell: { showItemInFolder() {} },

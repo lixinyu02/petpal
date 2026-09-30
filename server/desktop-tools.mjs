@@ -1,9 +1,13 @@
 import { MusicController, musicPlayers, validateMusicCommand } from './music.mjs';
 import { OpenCliRunner, validateBrowserAction } from './opencli.mjs';
 import { MusicMcpManager, validateMusicMcpCall, MUSIC_MCP_TOOLS } from './music-mcp.mjs';
+import { ComputerUseMcpManager, validateComputerUseCall, validateComputerUseTools } from './computer-use-mcp.mjs';
+import { CODEX_TOOL_VERSION } from './codex-config.mjs';
 
 const musicActions = { open: '打开', play: '播放', pause: '暂停', next: '下一首', previous: '上一首' };
 export const desktopToolSpecs = [
+  {type:'function',name:'petpal_computer_use_tools',description:'在选中的执行电脑连接已启用的 Zavora Computer Use MCP，获取真实工具清单；传 tool 可获取一个工具的完整参数。支持应用、Accessibility、截图、键鼠、剪贴板和脚本。不会安装程序。每项实际操作需要完整访问并遵循当前审批方式。',inputSchema:{type:'object',properties:{tool:{type:'string'}},additionalProperties:false}},
+  {type:'function',name:'petpal_computer_use_call',description:'调用选中执行电脑上的 Computer Use。先查真实 schema，再发现窗口、读取 Accessibility，必要时截图；基于最近结果操作并读回验证。截图直接给模型观察。先确认软件/窗口，支持 focus_strategy 的操作只允许 strict。失败不得声称完成。脚本/剪贴板/全屏观察也需完整访问与当前审批。',inputSchema:{type:'object',properties:{tool:{type:'string'},arguments:{type:'object'}},required:['tool','arguments'],additionalProperties:false}},
   { type: 'function', name: 'petpal_music_mcp_tools', description: '连接已启用的本机音乐 MCP 并返回真实工具清单与参数。网易云桌面 MCP 仅 Windows；Ubuntu 使用现有媒体工具。QQ MCP 仅查询和播放链接，不能控制QQ桌面播放。只在选中的执行电脑运行，不会配置或安装服务。', inputSchema: {type:'object',properties:{player:{type:'string',enum:['netease','qqmusic']}},required:['player'],additionalProperties:false} },
   { type: 'function', name: 'petpal_music_mcp_call', description: '按真实MCP工具清单调用音乐服务。先用petpal_music_mcp_tools获取参数。网易云支持搜索/播放/队列/循环模式/音量/桌面歌词；上一首下一首用petpal_music_command。QQ支持search/detail/lyric/url/recommend/mv/similar/producer/hot_comments；排行榜用detail(type=top)。QQ只返回链接，失败或返回链接均不得声称已播放。禁止全局快捷键和未列出的工具。', inputSchema:{type:'object',properties:{player:{type:'string',enum:['netease','qqmusic']},tool:{type:'string'},arguments:{type:'object'}},required:['player','tool','arguments'],additionalProperties:false} },
   { type: 'function', name: 'petpal_music_status', description: '检查本机 QQ 音乐和网易云音乐的安装、媒体会话与可用控制；不会打开或播放音乐。媒体接口不提供歌曲搜索。', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
@@ -14,9 +18,20 @@ export const desktopToolSpecs = [
   }, required: ['action'], additionalProperties: false } },
 ];
 
-export function createDesktopTools({ dataDir, music = new MusicController(), opencli = new OpenCliRunner({ dataDir }), musicMcpDataDir = dataDir, musicMcpScope = 'local', musicMcp, scopeForConversation } = {}) {
+export function createDesktopTools({ dataDir, music = new MusicController(), opencli = new OpenCliRunner({ dataDir }), musicMcpDataDir = dataDir, musicMcpScope = 'local', musicMcp, computerUseMcpDataDir = musicMcpDataDir, computerUseMcp, scopeForConversation } = {}) {
   const mcp = musicMcp ?? new MusicMcpManager({dataDir:musicMcpDataDir,scope:musicMcpScope});
   const scoped = new Map([[musicMcpScope,mcp]]);
+  const computer = computerUseMcp ?? new ComputerUseMcpManager({dataDir:computerUseMcpDataDir,scope:musicMcpScope});
+  const computerScoped = new Map([[musicMcpScope,computer]]);
+  const computerFor = conversationId => {
+    const scope=scopeForConversation?scopeForConversation(conversationId):musicMcpScope;
+    if(typeof scope!=='string'||!scope)throw new Error('无法确认电脑任务所属账号，请重新创建对话。');
+    if(!computerScoped.has(scope)){
+      if(computerScoped.size>=32)throw new Error('本机电脑助手账号实例已达上限。');
+      computerScoped.set(scope,new ComputerUseMcpManager({dataDir:computerUseMcpDataDir,scope}));
+    }
+    return computerScoped.get(scope);
+  };
   const managerFor = conversationId => {
     const scope = scopeForConversation ? scopeForConversation(conversationId) : musicMcpScope;
     if(typeof scope!=='string'||!scope)throw new Error('无法确认音乐任务所属账号，请重新创建对话。');
@@ -28,6 +43,16 @@ export function createDesktopTools({ dataDir, music = new MusicController(), ope
   };
   let active = null, closed = false;
   function describe(name, args) {
+    if(name==='petpal_computer_use_tools'){
+      const value=validateComputerUseTools(args);
+      return {description:`连接这台执行电脑的 Zavora MCP，读取${value.tool||'工具清单'}`,approvalRequired:true};
+    }
+    if(name==='petpal_computer_use_call'){
+      const value=validateComputerUseCall(args);
+      const description=`这台执行电脑 · Zavora ${value.tool}\n${JSON.stringify(value.arguments)}`;
+      if(description.length>8000)throw new Error('电脑操作内容过长，无法完整展示审批，请拆分任务。');
+      return {description,approvalRequired:true};
+    }
     if(name==='petpal_music_mcp_tools'){
       if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).length!==1||!Object.hasOwn(MUSIC_MCP_TOOLS,args.player))throw new Error('请选择网易云或QQ音乐MCP。');
       return {description:`连接${musicPlayers[args.player]}MCP并读取工具（不会播放）`,approvalRequired:true};
@@ -54,8 +79,9 @@ export function createDesktopTools({ dataDir, music = new MusicController(), ope
   return {
     specs: desktopToolSpecs,
     musicMcp:mcp,
+    computerUseMcp:computer,
     describe,
-    async status() { const [m, o, c] = await Promise.all([music.status(), opencli.status(),mcp.status()]); return { music: m, opencli: o, musicMcp:c, toolVersion: 'music-mcp-v2', busy: Boolean(active) }; },
+    async status() { const [m, o, c, u] = await Promise.all([music.status(), opencli.status(),mcp.status(),computer.status()]); return { music: m, opencli: o, musicMcp:c, computerUseMcp:u, toolVersion: CODEX_TOOL_VERSION, busy: Boolean(active) }; },
     async execute(name, args, { signal, conversationId } = {}) {
       describe(name, args);
       if (closed || signal?.aborted) throw Object.assign(new Error('操作已停止。'), { name: 'AbortError' });
@@ -64,6 +90,8 @@ export function createDesktopTools({ dataDir, music = new MusicController(), ope
       const operation = { controller, done: new Promise(resolve => { finish = resolve; }) }; active = operation;
       const cancel = () => controller.abort(); signal?.addEventListener('abort', cancel, { once: true });
       try {
+        if(name==='petpal_computer_use_tools')return await computerFor(conversationId).tools(args,{signal:controller.signal});
+        if(name==='petpal_computer_use_call')return await computerFor(conversationId).call(args,{signal:controller.signal});
         if(name==='petpal_music_mcp_tools'){
           const manager=managerFor(conversationId);await manager.connect(args.player,{signal:controller.signal});
           const status=await manager.status();return {ok:true,...status.servers.find(server=>server.id===args.player)};
@@ -74,6 +102,6 @@ export function createDesktopTools({ dataDir, music = new MusicController(), ope
         return await opencli.execute(args, { signal: controller.signal });
       } finally { signal?.removeEventListener('abort', cancel); if (active === operation) active = null; finish(); }
     },
-    async close() { closed = true; const pending = active; pending?.controller.abort(); await Promise.all([opencli.close(),...Array.from(scoped.values(),manager=>manager.close())]); await pending?.done; },
+    async close() { closed = true; const pending = active; pending?.controller.abort(); await Promise.all([opencli.close(),...Array.from(scoped.values(),manager=>manager.close()),...Array.from(computerScoped.values(),manager=>manager.close())]); await pending?.done; },
   };
 }

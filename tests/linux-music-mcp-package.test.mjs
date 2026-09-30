@@ -84,6 +84,12 @@ test('Linux archive audit rejects every missing or modified music MCP vendor mem
   for(const launcher of ['start-petpal.sh','codex.sh','opencli.sh'])await put(launcher,launcher==='opencli.sh'?'#!/bin/sh\nELECTRON_RUN_AS_NODE=1 ./petpal resources/app/node_modules/@jackwener/opencli/dist/src/main.js\n':'#!/bin/sh\n./petpal\n');
   const manifest={app:'fixture',platform:'linux',arch:'x64',sourceReceipt,electron:{sha256:hash(elf)},codex:{sha256:hash(elf),helpers:[]},opencliVersion:pkg.version,
     opencli:{version:pkg.version,files:opencliFiles,packages:[{...pkg,path:`${prefix}/package.json`,sha256:opencliFiles[0].sha256,licenseFiles:[opencliFiles[1]]}],edges:[],optionalAbsent:[]}};
+  const computerPrefix='node_modules/@zavora-ai/computer-use-mcp',computerFiles=[];
+  for(const file of ['package.json','LICENSE','dist/server.js','dist/native.js','dist/session/openai-compat.js','libexec/linux-atspi.py','computer-use-napi.linux-x64.node']){
+    const content=file.endsWith('.node')?elf:Buffer.from(file==='package.json'?JSON.stringify({name:'@zavora-ai/computer-use-mcp',version:'7.4.0',license:'MIT'}):`fixture ${file}`);
+    await put(`resources/app/${computerPrefix}/${file}`,content);computerFiles.push({path:`${computerPrefix}/${file}`,sha256:hash(content)});
+  }
+  manifest.computerUse={version:'7.4.0',arch:'x64',files:computerFiles,native:{sha256:hash(elf)}};
   await put('BUILD-MANIFEST.json',JSON.stringify(manifest));
   async function verify(){
     await tar.c({cwd:payload,prefix:name,file:archive,gzip:true,portable:true,onWriteEntry:entry=>{entry.stat.mode=entry.type==='Directory'||/(?:^|\/)petpal$/.test(entry.path)||entry.path.endsWith('.sh')||entry.path.includes('/@openai/codex-linux-x64/vendor/')?0o755:0o644;}},['.']);
@@ -91,7 +97,7 @@ test('Linux archive audit rejects every missing or modified music MCP vendor mem
     catch(error){assert.equal(error.code,1,error.stderr);return {code:error.code,...JSON.parse(error.stdout)};}
   }
   const baseline=await verify();assert.equal(baseline.ok,true,baseline.failures.join('\n'));
-  for(const file of vendorFiles){
+  for(const file of [...vendorFiles,'server/native/computer-use/patches/linux-x11-window-geometry.patch']){
     await t.test(`missing ${file}`,async()=>{
       await rm(path.join(app,file));
       try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Required application source missing: ${file}`));}

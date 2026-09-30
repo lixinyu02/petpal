@@ -22,6 +22,8 @@ import { createExecutors } from './executors.mjs';
 import { RemoteCodexBridge } from './remote-codex.mjs';
 import { createChatAssistant, normalizeChatAssistant } from './chat-assistant.mjs';
 import { mountMusicMcpRoutes } from './music-mcp-routes.mjs';
+import { mountComputerUseMcpRoutes } from './computer-use-mcp-routes.mjs';
+import { MODEL_REQUEST_BYTES } from './model-request-limits.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const now = () => new Date().toISOString();
@@ -107,7 +109,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
 
   app.get('/api/health', (req, res) => res.json({ ok: true, version: VERSION }));
   // Run credentials have a separate, narrow boundary and cannot call user APIs.
-  app.post('/api/agent/executors/:connectionId/runs/:runId/model/responses', express.raw({ type: 'application/json', limit: '4mb' }), (req, res) => executors.relay(req, res));
+  app.post('/api/agent/executors/:connectionId/runs/:runId/model/responses', express.raw({ type: 'application/json', limit: MODEL_REQUEST_BYTES }), (req, res) => executors.relay(req, res));
   app.get('/api/agent/executors/:connectionId/runs/:runId/attachments/:id', async (req, res) => {
     const value = await executors.attachment(req.params.connectionId, req.params.runId, req.params.id, req.headers.authorization);
     res.set({ 'Content-Type': value.record.mimeType, 'Content-Length': String(value.bytes.length), 'Content-Security-Policy': "default-src 'none'; sandbox" }).send(value.bytes);
@@ -638,6 +640,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   });
   app.get('/api/codex/status', async (req, res) => { requireCodex(req.user); const value = await userCodexStatus(req.user); requireCurrentAuth(req); requireCodex(req.user); res.json(value); });
   mountMusicMcpRoutes({app,manager:localTools.musicMcp,requireAdmin,requireCurrentAuth,probes});
+  mountComputerUseMcpRoutes({app,manager:localTools.computerUseMcp,requireAdmin,requireCurrentAuth,probes});
   app.get('/api/desktop-tools/status', async (req, res) => { requireAdmin(req.user); const value = await localTools.status(); requireCurrentAuth(req); res.json(redactCodex(value)); });
   app.post('/api/desktop-tools/action', async (req, res) => {
     requireAdmin(req.user);

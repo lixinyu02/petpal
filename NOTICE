@@ -41,3 +41,17 @@ Model Context Protocol TypeScript SDK
 Package: @modelcontextprotocol/sdk 1.31.0
 https://github.com/modelcontextprotocol/typescript-sdk
 License: MIT; the npm package retains its LICENSE.
+
+Computer Use
+------------
+Package: @zavora-ai/computer-use-mcp 7.4.0
+https://github.com/zavora-ai/computer-use-mcp
+License: MIT; retained in node_modules/@zavora-ai/computer-use-mcp/LICENSE.
+PetPal uses the fixed stdio server and the native module for the execution host.
+The upstream Linux binaries require glibc 2.39. PetPal ships Ubuntu 22.04-compatible
+x64 and ARM64 rebuilds from the fixed 7.4.0 source with one Linux X11 window
+geometry/title correction. The exact patch, MIT license, build provenance and
+native hashes are retained under server/native/computer-use/. ARM64 desktop
+operation has not been physically tested.
+The upstream package's Model Context Protocol 2.0.0 and Zod dependencies retain
+their package licenses. PetPal is an independent integration.

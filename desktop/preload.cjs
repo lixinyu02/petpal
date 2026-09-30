@@ -54,6 +54,14 @@ contextBridge.exposeInMainWorld('petpal', Object.freeze({
     disconnect: body => ipcRenderer.invoke('petpal:music-mcp:disconnect', body),
     cancel: () => ipcRenderer.invoke('petpal:music-mcp:cancel'),
   }),
+  computerUse: Object.freeze({
+    config: () => ipcRenderer.invoke('petpal:computer-use:config'),
+    status: () => ipcRenderer.invoke('petpal:computer-use:status'),
+    configure: body => ipcRenderer.invoke('petpal:computer-use:configure',body),
+    connect: () => ipcRenderer.invoke('petpal:computer-use:connect'),
+    disconnect: () => ipcRenderer.invoke('petpal:computer-use:disconnect'),
+    cancel: () => ipcRenderer.invoke('petpal:computer-use:cancel'),
+  }),
   updates: Object.freeze({
     status: () => updateCall('status'),
     check: () => updateCall('check'),

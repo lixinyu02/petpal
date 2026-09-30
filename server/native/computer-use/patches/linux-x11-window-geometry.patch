@@ -1,0 +1,82 @@
+diff --git a/native/src/windows.rs b/native/src/windows.rs
+index cc6bce9..b16a877 100644
+--- a/native/src/windows.rs
++++ b/native/src/windows.rs
+@@ -62,6 +62,25 @@ mod platform {
+         }
+     }
+ 
++    // Require live geometry; do not return zero dimensions that produce invalid
++    // screenshot-to-desktop coordinate mappings. The window ID is a numeric argv.
++    fn x11_window_bounds(window_id: u32) -> Option<serde_json::Value> {
++        let output = Command::new("xdotool")
++            .args(["getwindowgeometry", "--shell", &window_id.to_string()])
++            .output().ok()?;
++        if !output.status.success() { return None; }
++        let text = String::from_utf8_lossy(&output.stdout);
++        let coordinate = |key: &str| -> Option<i32> {
++            text.lines().find_map(|line| line.strip_prefix(key)?.parse::<i32>().ok())
++        };
++        let x = coordinate("X=")?;
++        let y = coordinate("Y=")?;
++        let width = coordinate("WIDTH=")?;
++        let height = coordinate("HEIGHT=")?;
++        if width <= 0 || height <= 0 { return None; }
++        Some(serde_json::json!({ "x": x, "y": y, "width": width, "height": height }))
++    }
++
+     fn list_windows_x11(bundle_id: &Option<String>) -> Vec<serde_json::Value> {
+         let output = Command::new("wmctrl")
+             .args(["-l", "-p"])
+@@ -82,20 +101,23 @@ mod platform {
+ 
+         let mut result = Vec::new();
+         for line in text.lines() {
+-            let parts: Vec<&str> = line
+-                .splitn(5, char::is_whitespace)
+-                .filter(|s| !s.is_empty())
+-                .collect();
++            // wmctrl pads columns with repeated spaces; splitn consumes those
++            // separators before reaching the title. Rejoin title words afterward.
++            let parts: Vec<&str> = line.split_whitespace().collect();
+             if parts.len() < 4 {
+                 continue;
+             }
+             let wid = u32::from_str_radix(parts[0].trim_start_matches("0x"), 16).unwrap_or(0);
+             let pid = parts[2].parse::<i32>().unwrap_or(0);
+             let title = if parts.len() >= 5 {
+-                parts[4].to_string()
++                parts[4..].join(" ")
+             } else {
+                 String::new()
+             };
++            let bounds = match x11_window_bounds(wid) {
++                Some(bounds) => bounds,
++                None => continue,
++            };
+             let proc_name = std::fs::read_to_string(format!("/proc/{pid}/comm"))
+                 .unwrap_or_default()
+                 .trim()
+@@ -113,7 +135,7 @@ mod platform {
+                 "displayName": proc_name,
+                 "pid": pid,
+                 "title": title,
+-                "bounds": { "x": 0, "y": 0, "width": 0, "height": 0 },
++                "bounds": bounds,
+                 "isOnScreen": true,
+                 "isFocused": wid == active,
+                 "displayId": 0,
+@@ -179,10 +201,12 @@ mod platform {
+         if title.is_empty() && pid == 0 {
+             return Ok(serde_json::json!(null));
+         }
++        let bounds = x11_window_bounds(window_id).ok_or_else(||
++            napi::Error::from_reason("X11 window is unavailable or has no valid current geometry"))?;
+         Ok(serde_json::json!({
+             "windowId": window_id, "bundleId": proc_name, "displayName": proc_name,
+             "pid": pid, "title": title,
+-            "bounds": { "x": 0, "y": 0, "width": 0, "height": 0 },
++            "bounds": bounds,
+             "isOnScreen": true, "isFocused": false, "displayId": 0,
+         }))
+     }

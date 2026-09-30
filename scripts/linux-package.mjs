@@ -1,5 +1,5 @@
 // Cross-package Linux artifacts without executing Linux binaries on the build host.
-import { readFile, writeFile, mkdir, cp, rename, stat, open, readdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, cp, rename, stat, open, readdir, rm } from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
@@ -12,6 +12,7 @@ import electronBuilder from 'electron-builder';
 import builderUtil from 'builder-util';
 import semver from 'semver';
 import yauzl from 'yauzl';
+import {filterComputerUseNative,auditComputerUsePackage} from './computer-use-package.mjs';
 
 const { build, Platform } = electronBuilder;
 const { Arch } = builderUtil;
@@ -23,6 +24,8 @@ const codexVersion = metadata.dependencies['@openai/codex'];
 const opencliVersion = metadata.dependencies['@jackwener/opencli'];
 const requiredApplicationSource = ['server/updates.mjs', 'desktop/updates.mjs', 'server/app.mjs', 'server/auth.mjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/index.mjs', 'server/providers.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'NOTICE'];
 requiredApplicationSource.push('server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs');
+requiredApplicationSource.push('server/computer-use-mcp.mjs','server/computer-use-tool-names.mjs','server/computer-use-mcp-routes.mjs','server/dynamic-tool-output.mjs','server/model-request-limits.mjs');
+requiredApplicationSource.push('server/native/computer-use/LICENSE','server/native/computer-use/patches/linux-x11-window-geometry.patch');
 requiredApplicationSource.push('desktop/startup-diagnostics.cjs', 'server/music-mcp.mjs', 'server/music-mcp-routes.mjs',
   'server/native/music-mcp/netease/server.py', 'server/native/music-mcp/netease/LICENSE', 'server/native/music-mcp/netease/pyproject.toml', 'server/native/music-mcp/netease/PROVENANCE.json',
   'server/native/music-mcp/qqmusic/login.py', 'server/native/music-mcp/qqmusic/LICENSE', 'server/native/music-mcp/qqmusic/pyproject.toml', 'server/native/music-mcp/qqmusic/PROVENANCE.json',
@@ -193,6 +196,7 @@ try {
     if (!(await stat(installed).catch(() => null))) { if (item.optional) continue; throw new Error(`Production dependency missing: ${relative}`); }
     await cp(installed, path.join(source, relative), { recursive: true });
   }
+  await filterComputerUseNative(source,{platform:'linux'});
   const sourceFiles = await allFiles(source);
   for (const file of requiredApplicationSource) if (!sourceFiles.includes(file)) throw new Error(`Required application source is absent: ${file}`);
   for (const file of sourceFiles.filter(file => file.startsWith('server/native/music-mcp/'))) if (!requiredApplicationSource.includes(file)) throw new Error(`Unexpected music MCP vendor member: ${file}`);
@@ -231,6 +235,16 @@ try {
     await report(`stage-${arch}`);
     const archRoot = path.join(staging, arch); const appRoot = path.join(archRoot, 'app'); const runtime = path.join(archRoot, 'electron');
     await cp(source, appRoot, { recursive: true }); await mkdir(runtime, { recursive: true });
+    await filterComputerUseNative(appRoot,{platform:'linux',arch});
+    const compatibleDirectory=path.join(appRoot,'server','native','computer-use',`linux-${arch}`);
+    for(const otherArch of ['x64','arm64'].filter(value=>value!==arch))await rm(path.join(appRoot,'server','native','computer-use',`linux-${otherArch}`),{recursive:true,force:true});
+    const archSourceReceipt=sourceReceipt.filter(item=>!/^server\/native\/computer-use\/linux-(?:x64|arm64)\//.test(item.path)||item.path.startsWith(`server/native/computer-use/linux-${arch}/`));
+    if((await stat(path.join(compatibleDirectory,'PROVENANCE.json')).catch(()=>null))?.isFile()){
+      const provenance=JSON.parse(await readFile(path.join(compatibleDirectory,'PROVENANCE.json'),'utf8'));
+      if(provenance.version!=='7.4.0'||provenance.platform!=='linux'||provenance.arch!==arch||provenance.sourceCommit!=='cfbb6af0e704da17c43df6c668225a2f84aca762'||provenance.nativeFile!==`computer-use-napi.linux-${arch}.node`||await digest(path.join(compatibleDirectory,provenance.nativeFile))!==provenance.sha256)throw Error('Computer Use compatible build provenance mismatch');
+      await cp(path.join(compatibleDirectory,provenance.nativeFile),path.join(appRoot,'node_modules','@zavora-ai','computer-use-mcp',provenance.nativeFile));
+    }
+    const computerUseSource=await auditComputerUsePackage(appRoot,{platform:'linux',arch});
     await auditZip(input.electronZip);
     await extractZip(input.electronZip, { dir: runtime });
     const nativeRoot = path.join(appRoot, 'node_modules', '@openai', `codex-linux-${arch}`);
@@ -270,6 +284,11 @@ try {
     if (packagedCodex.sha256 !== nativeAudit.sha256) throw new Error('Builder changed native Codex binary');
     await elf(path.join(portable, 'petpal'), arch);
     const packagedApp = path.join(portable, 'resources', 'app');
+    for(const file of archSourceReceipt.filter(item=>item.path.startsWith('server/native/computer-use/'))){if(await digest(path.join(packagedApp,file.path))!==file.sha256)throw Error('Computer Use native provenance payload mismatch');}
+    await cp(path.join(appRoot,'node_modules','@zavora-ai','computer-use-mcp','package.json'),path.join(packagedApp,'node_modules','@zavora-ai','computer-use-mcp','package.json'));
+    const computerUseAudit=await auditComputerUsePackage(packagedApp,{platform:'linux',arch,expected:computerUseSource});
+    const packagedComputerNatives=(await allFiles(path.join(packagedApp,'node_modules','@zavora-ai','computer-use-mcp'))).filter(file=>file.endsWith('.node'));
+    if(packagedComputerNatives.length!==1||packagedComputerNatives[0]!==`computer-use-napi.linux-${arch}.node`)throw Error('Computer Use wrong-platform native payload');
     // Native Python and attribution files must survive builder filtering with
     // exactly the bytes recorded before the build, including --dir-only runs.
     const packagedSource = await allFiles(path.join(packagedApp, 'server'));
@@ -293,7 +312,7 @@ try {
     const files = await allFiles(portable);
     if (files.some(file => /\.exe$|\.dll$|codex-win32-|codex-darwin-/i.test(file))) throw new Error('Portable artifact contains wrong-platform executable');
     const manifestFile = path.join(portable, 'BUILD-MANIFEST.json');
-    const manifestValue = { app: metadata.version, platform: 'linux', arch, crossPackagedOn: process.platform, runtimeVerified: false, electronVersion, codexVersion, opencliVersion, opencli: opencliAudit, sourceReceipt, electron: { sha256: electronAudit.sha256, machine: electronAudit.machine, zipSha256: input.electronSha256 }, codex: { sha256: nativeAudit.sha256, machine: nativeAudit.machine, npmIntegrity: input.codexIntegrity, helpers: nativeHelpers.map(item => ({ ...item, path: path.relative(nativeRoot, item.path).replaceAll('\\', '/') })) }, packageMethod: 'electron-builder linux dir + portable tar.gz' };
+    const manifestValue = { app: metadata.version, platform: 'linux', arch, crossPackagedOn: process.platform, runtimeVerified: false, electronVersion, codexVersion, opencliVersion, opencli: opencliAudit, computerUse:computerUseAudit, sourceReceipt:archSourceReceipt, electron: { sha256: electronAudit.sha256, machine: electronAudit.machine, zipSha256: input.electronSha256 }, codex: { sha256: nativeAudit.sha256, machine: nativeAudit.machine, npmIntegrity: input.codexIntegrity, helpers: nativeHelpers.map(item => ({ ...item, path: path.relative(nativeRoot, item.path).replaceAll('\\', '/') })) }, packageMethod: 'electron-builder linux dir + portable tar.gz' };
     await writeFile(manifestFile, `${JSON.stringify(manifestValue, null, 2)}\n`);
     await report(`archive-and-audit-${arch}`);
     const archive = path.join(outputRoot, `${folderName}.tar.gz`);
@@ -310,7 +329,7 @@ try {
     } });
     if (!foundManifest || executableModes.length < 5) throw new Error('Final archive is incomplete');
     await rename(`${archive}.partial`, archive);
-    const receipt = { version: metadata.version, arch, archive: path.relative(root, archive).replaceAll('\\', '/'), stagedPayload: path.relative(root, portable).replaceAll('\\', '/'), bytes: (await stat(archive)).size, sha256: await digest(archive), entryCount, executableModes, electronVersion, codexVersion, opencliVersion, opencli: opencliAudit, electronMachine: electronAudit.machine, codexMachine: nativeAudit.machine, codexSha256: nativeAudit.sha256, electronZipSha256: input.electronSha256, codexNpmIntegrity: input.codexIntegrity, runtimeVerified: false };
+    const receipt = { version: metadata.version, arch, archive: path.relative(root, archive).replaceAll('\\', '/'), stagedPayload: path.relative(root, portable).replaceAll('\\', '/'), bytes: (await stat(archive)).size, sha256: await digest(archive), entryCount, executableModes, electronVersion, codexVersion, opencliVersion, opencli: opencliAudit, computerUse:computerUseAudit, electronMachine: electronAudit.machine, codexMachine: nativeAudit.machine, codexSha256: nativeAudit.sha256, electronZipSha256: input.electronSha256, codexNpmIntegrity: input.codexIntegrity, runtimeVerified: false };
     progress.artifacts.push(receipt);
     await writeFile(path.join(evidenceDir, `linux-package-${arch}.json`), `${JSON.stringify(receipt, null, 2)}\n`);
     await writeFile(path.join(evidenceDir, `linux-package-${arch}-${metadata.version}.json`), `${JSON.stringify(receipt, null, 2)}\n`);

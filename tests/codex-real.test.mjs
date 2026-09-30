@@ -124,11 +124,11 @@ test('real bundled Codex sends gpt-6-luna reasoning max unchanged on initial and
   }
 });
 
-async function within(promise, milliseconds = 10_000) {
+async function within(promise, label, milliseconds = 10_000) {
   let timer;
   try {
     return await Promise.race([promise, new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error('Local Codex fixture timed out')), milliseconds);
+      timer = setTimeout(() => reject(new Error(`Local Codex fixture timed out: ${label}`)), milliseconds);
     })]);
   } finally { clearTimeout(timer); }
 }
@@ -224,7 +224,7 @@ child.once('exit', code => process.exit(code ?? 1));
   const controller = new AbortController();
   const cancelled = bridge.run({ prompt: 'Cancellation fixture.', signal: controller.signal });
   const cancellation = assert.rejects(cancelled, { name: 'AbortError' });
-  await within(opened); controller.abort(); await within(cancellation); await within(disconnected);
+  await within(opened, 'cancellation request opened'); controller.abort(); await within(cancellation, 'cancelled turn rejected'); await within(disconnected, 'cancelled upstream response closed');
   assert.equal(bridge.transport.activeRequests, 0);
   mode = 'text';
   assert.equal((await bridge.run({ prompt: 'Cancellation must leave the bridge reusable.' })).text, first.text);
@@ -242,7 +242,7 @@ child.once('exit', code => process.exit(code ?? 1));
   const finalDisconnected = new Promise(resolve => { requestClosed = resolve; });
   const transport = bridge.transport;
   const stopped = assert.rejects(bridge.run({ prompt: 'Close fixture.' }), /后台已关闭/);
-  await within(finalOpened); await bridge.close(); await within(stopped); await within(finalDisconnected);
+  await within(finalOpened, 'close request opened'); await bridge.close(); await within(stopped, 'closed bridge rejected'); await within(finalDisconnected, 'closed upstream response closed');
   assert.equal(transport.activeRequests, 0); assert.equal(bridge.transport, null);
   assert.equal(errors.length, 0, errors.map(error => error.message).join('; '));
   t.diagnostic(`native CLI verified simplified text, final-only tools, empty-reply failure, private credentials, upstream cancellation and isolated restart across ${requests.length} local requests`);

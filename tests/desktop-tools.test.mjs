@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDesktopTools } from '../server/desktop-tools.mjs';
 
-const fixture = (overrides,musicMcp={status:async()=>({servers:[]}),close:async()=>{}}) => createDesktopTools({dataDir:'.unused-fixture',musicMcp,music:{status:async()=>({players:[]}),execute:async()=>({ok:true}),...overrides},opencli:{status:async()=>({ready:false}),execute:async()=>({ok:true}),close:async()=>{}}});
+const computerUseMcp = { status: async()=>({enabled:false}), close:async()=>{} };
+const fixture = (overrides,musicMcp={status:async()=>({servers:[]}),close:async()=>{}}) => createDesktopTools({dataDir:'.unused-fixture',computerUseMcp,musicMcp,music:{status:async()=>({players:[]}),execute:async()=>({ok:true}),...overrides},opencli:{status:async()=>({ready:false}),execute:async()=>({ok:true}),close:async()=>{}}});
 test('registry validates parameters before producing reviewable approvals',()=>{
   const tools=fixture();assert.equal(tools.describe('petpal_music_status',{}).approvalRequired,false);
   assert.match(tools.describe('petpal_music_command',{player:'qqmusic',action:'pause'}).description,/QQ 音乐.*暂停/);
@@ -25,7 +26,7 @@ test('MCP discovery and calls use the injected local manager and require reviewa
 
 test('central MCP missing conversation identity never falls back to owner credentials',async()=>{
   let calls=0;
-  const tools=createDesktopTools({dataDir:'.unused-fixture',scopeForConversation:()=>null,musicMcp:{connect:async()=>{calls++;},close:async()=>{}},music:{},opencli:{close:async()=>{}}});
+  const tools=createDesktopTools({dataDir:'.unused-fixture',computerUseMcp,scopeForConversation:()=>null,musicMcp:{connect:async()=>{calls++;},close:async()=>{}},music:{},opencli:{close:async()=>{}}});
   await assert.rejects(tools.execute('petpal_music_mcp_tools',{player:'qqmusic'},{conversationId:'missing'}),/所属账号/);
   assert.equal(calls,0);await tools.close();
 });

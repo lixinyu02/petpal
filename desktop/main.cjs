@@ -671,6 +671,8 @@ async function boot() {
     event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting))) ipcMain.handle(channel, handler);
   for (const [channel, handler] of Object.entries(executorModule.createMusicMcpHandlers(executor,
     event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting))) ipcMain.handle(channel, handler);
+  for (const [channel, handler] of Object.entries(executorModule.createComputerUseMcpHandlers(executor,
+    event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting))) ipcMain.handle(channel, handler);
   await startupMilestone('transport-create');
   remoteHttp = createDesktopRemoteHttp({ isAllowed: event => isTrusted(event) && event.sender === mainWindow?.webContents });
   ipcMain.handle('petpal:remote:request', (event, request) => remoteHttp.request(event, request));

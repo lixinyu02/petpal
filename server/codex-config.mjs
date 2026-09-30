@@ -4,7 +4,7 @@ import { mkdir, writeFile, rename, chmod, unlink } from 'node:fs/promises';
 import { normalizeBaseUrl, normalizeReasoningEffort } from './providers.mjs';
 
 const failure = (status, message) => Object.assign(new Error(message), { status });
-export const CODEX_TOOL_VERSION = 'music-mcp-v2';
+export const CODEX_TOOL_VERSION = 'computer-use-v1';
 export const CODEX_KEY_ENV = 'PETPAL_CODEX_API_KEY';
 export const defaultCodexConfig = () => ({ mode: 'host', baseUrl: '', model: '', reasoningEffort: '', apiKey: '', revision: randomUUID(), toolVersion: CODEX_TOOL_VERSION });
 

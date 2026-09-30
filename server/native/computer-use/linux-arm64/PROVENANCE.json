@@ -1,0 +1,53 @@
+{
+  "version": "7.4.0",
+  "platform": "linux",
+  "arch": "arm64",
+  "nativeFile": "computer-use-napi.linux-arm64.node",
+  "sourceCommit": "cfbb6af0e704da17c43df6c668225a2f84aca762",
+  "sha256": "fdefb9683c9f7d92f45533dbf6b25efee2eb24d953b5b901c0c5d78e715a1d8c",
+  "bytes": 1533176,
+  "minimumGlibc": "2.35",
+  "requiredGlibc": "2.34",
+  "source": {
+    "repository": "https://github.com/zavora-ai/computer-use-mcp",
+    "commit": "cfbb6af0e704da17c43df6c668225a2f84aca762",
+    "manifestSha256": "a0cae310bdaef584d7a429bbba63c6d4982542fa7b536dc09c1afb43916a45ad",
+    "modifiedTrackedSource": true,
+    "cargoLocked": true,
+    "patch": {
+      "file": "linux-x11-window-geometry.patch",
+      "baseCommit": "cfbb6af0e704da17c43df6c668225a2f84aca762",
+      "sha256": "ad05d1b466c94d2ca90f009630ece9d8dcc0d52aa2b571a09a974d4b6f51ad71"
+    },
+    "patchedManifestSha256": "35e44138f62aef0c95e20d802a4ba34fddaa9ac57fca6a915e288faf5c7e6814"
+  },
+  "build": {
+    "os": "Ubuntu 22.04",
+    "glibc": "2.35",
+    "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+    "cargo": "cargo 1.90.0 (840b83a10 2025-07-30)",
+    "node": "v22.16.0",
+    "napi": "10",
+    "baseImage": "docker.m.daocloud.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02",
+    "containerImage": "sha256:426f34c90ce2d5e9b3e3054a310eb45b4fb57e531e451c501f346a2df6454209",
+    "command": "cargo build --locked --release --target aarch64-unknown-linux-gnu -j 4",
+    "crossCompiler": "aarch64-linux-gnu-gcc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0",
+    "rebuiltIdentically": true,
+    "rebuildContainerImage": "sha256:32ecbd28ddf5c97606acd314a5e8fda19d290ef434b5b04bb048b5fb066f8658"
+  },
+  "needed": [
+    "libX11.so.6",
+    "libXtst.so.6",
+    "libXi.so.6",
+    "libgcc_s.so.1",
+    "libm.so.6",
+    "libc.so.6"
+  ],
+  "acceptance": {
+    "ubuntu22NativeLoad": false,
+    "physicalDesktop": false,
+    "containerGui": "not-tested",
+    "qemuUbuntu22NativeLoad": true,
+    "physicalArm64": false
+  }
+}

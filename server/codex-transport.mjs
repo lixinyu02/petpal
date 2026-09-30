@@ -1,7 +1,8 @@
 import http from 'node:http';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
+import {MODEL_REQUEST_BYTES} from './model-request-limits.mjs';
 
-const DEFAULTS={requestBytes:4*1024*1024,frameBytes:2*1024*1024,outputBytes:24*1024*1024,events:100000};
+const DEFAULTS={requestBytes:MODEL_REQUEST_BYTES,frameBytes:2*1024*1024,outputBytes:24*1024*1024,events:100000};
 const invalid=()=>new Error('Responses 流不完整或格式无效，请检查服务兼容性。');
 const aborted=()=>Object.assign(new Error('Responses 请求已停止。'),{name:'AbortError'});
 const object=value=>value&&typeof value==='object'&&!Array.isArray(value);

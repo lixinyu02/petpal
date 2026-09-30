@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { tokenHash, secureEqual } from './auth.mjs';
 import { createExecutorRelayRedactor } from './executor-relay.mjs';
+import { MODEL_REQUEST_BYTES } from './model-request-limits.mjs';
 
 const failure = (status, message, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 const unknown = () => failure(409, '执行电脑已断开，任务执行状态未知；队列已暂停，不会自动重试。', 'execution_unknown');
@@ -242,7 +243,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
   }
   async function relay(req,res) {
     const run = bearerRun(req.params.connectionId,req.params.runId,req.headers.authorization);
-    if (!Buffer.isBuffer(req.body) || req.body.length > 4*1024*1024 || req.headers['content-encoding'] && req.headers['content-encoding'] !== 'identity') throw failure(400,'模型请求格式无效。');
+    if (!Buffer.isBuffer(req.body) || req.body.length > MODEL_REQUEST_BYTES || req.headers['content-encoding'] && req.headers['content-encoding'] !== 'identity') throw failure(400,'模型请求格式无效。');
     let body; try { body=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(req.body)); } catch { throw failure(400,'模型请求格式无效。'); }
     if (!object(body) || body.stream !== true || body.model !== run.entry.model || run.relays.size >= 2) throw failure(400,'模型请求不属于当前任务。');
     const config=getConfig(); if(config.mode!=='api') throw failure(409,'中央 API 模型不可用。');

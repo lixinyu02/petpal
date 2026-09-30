@@ -84,6 +84,10 @@ export function createMusicMcpHandlers(executor, isAllowed) {
       return executor.manageMusicMcp(action, body);
     }]));
 }
+export function createComputerUseMcpHandlers(executor,isAllowed) {
+  return Object.fromEntries(['config','status','configure','connect','disconnect','cancel'].map(action=>
+    [`petpal:computer-use:${action}`,(event,body)=>{if(!isAllowed(event))throw new Error('Computer Use 仅允许可信主窗口管理。');return executor.manageComputerUseMcp(action,body);}]));
+}
 
 /** One outbound executor belongs to a verified central login, never a renderer request. */
 export class DesktopExecutor {
@@ -153,6 +157,30 @@ export class DesktopExecutor {
       ctx.controller.signal.removeEventListener('abort', abort);
       if (ctx.musicOperation === operation) ctx.musicOperation = null; finish();
     }
+  }
+  async manageComputerUseMcp(action,body) {
+    if(!['config','status','configure','connect','disconnect','cancel'].includes(action))throw invalid();
+    if(action!=='configure'&&body!==undefined)throw invalid();
+    const ctx=this.current;
+    if(!ctx||this.visible.state!=='online')throw new Error('请先登录并连接这台执行电脑。');
+    if(action==='cancel'){
+      await this._musicIdentity(ctx);
+      const pending=ctx.computerUseOperation;pending?.controller.abort();await pending?.done;
+      await this._musicIdentity(ctx);const result=await this._tools(ctx).computerUseMcp.status();await this._musicIdentity(ctx);return result;
+    }
+    if(ctx.computerUseOperation)throw new Error('Computer Use 正在处理请求，请等待或停止。');
+    if(ctx.run&&!['config','status'].includes(action))throw new Error('请等当前 Agent 任务结束后再修改 Computer Use。');
+    const controller=new AbortController(),abort=()=>controller.abort();let finish;
+    const operation={controller,done:new Promise(resolve=>{finish=resolve;})};ctx.computerUseOperation=operation;
+    ctx.controller.signal.addEventListener('abort',abort,{once:true});
+    try{
+      await this._musicIdentity(ctx);controller.signal.throwIfAborted();const manager=this._tools(ctx).computerUseMcp;
+      let result;
+      if(action==='configure')result=await manager.configure(body);
+      else if(['config','status'].includes(action))result=await manager[action]();
+      else{await manager[action]({signal:controller.signal});controller.signal.throwIfAborted();await this._musicIdentity(ctx);result=await manager.status();}
+      controller.signal.throwIfAborted();await this._musicIdentity(ctx);return result;
+    }finally{ctx.controller.signal.removeEventListener('abort',abort);if(ctx.computerUseOperation===operation)ctx.computerUseOperation=null;finish();}
   }
   _queue(work) { const result = this.transition.catch(() => {}).then(work); this.transition = result.catch(() => {}); return result; }
   _assert(ctx) { if (this.closed || this.current !== ctx || ctx.generation !== this.generation || ctx.controller.signal.aborted) throw stopped(); }
@@ -434,7 +462,7 @@ export class DesktopExecutor {
     ctx.retired = true; ctx.controller.abort(); ctx.run?.controller.abort();
     ctx.retiring = (async () => {
       await Promise.allSettled([ctx.run?.bridge?.close(), ctx.tools?.close()]);
-      await Promise.allSettled([ctx.run?.done, ctx.musicOperation?.done, ...ctx.loops]);
+      await Promise.allSettled([ctx.run?.done, ctx.musicOperation?.done, ctx.computerUseOperation?.done, ...ctx.loops]);
       if (ctx.connectionId) await this._unregister(ctx).catch(() => {});
       ctx.connection.token = ''; ctx.run = null;
     })();

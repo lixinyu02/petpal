@@ -1,0 +1,51 @@
+{
+  "version": "7.4.0",
+  "platform": "linux",
+  "arch": "x64",
+  "nativeFile": "computer-use-napi.linux-x64.node",
+  "sourceCommit": "cfbb6af0e704da17c43df6c668225a2f84aca762",
+  "sha256": "b7625c7bea15811b9fa78f3b90b39ddced5c9c12e64e936f90b97f1ca2dc27e9",
+  "bytes": 1804696,
+  "minimumGlibc": "2.35",
+  "requiredGlibc": "2.34",
+  "source": {
+    "repository": "https://github.com/zavora-ai/computer-use-mcp",
+    "commit": "cfbb6af0e704da17c43df6c668225a2f84aca762",
+    "manifestSha256": "a0cae310bdaef584d7a429bbba63c6d4982542fa7b536dc09c1afb43916a45ad",
+    "modifiedTrackedSource": true,
+    "cargoLocked": true,
+    "patch": {
+      "file": "linux-x11-window-geometry.patch",
+      "baseCommit": "cfbb6af0e704da17c43df6c668225a2f84aca762",
+      "sha256": "ad05d1b466c94d2ca90f009630ece9d8dcc0d52aa2b571a09a974d4b6f51ad71"
+    },
+    "patchedManifestSha256": "35e44138f62aef0c95e20d802a4ba34fddaa9ac57fca6a915e288faf5c7e6814"
+  },
+  "build": {
+    "os": "Ubuntu 22.04",
+    "glibc": "2.35",
+    "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+    "cargo": "cargo 1.90.0 (840b83a10 2025-07-30)",
+    "node": "v22.16.0",
+    "napi": "10",
+    "baseImage": "docker.m.daocloud.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02",
+    "containerImage": "sha256:602930d322e71d7d3ba9e39be86efafb9833ece3de49a4da2525a8008d145340",
+    "command": "cargo build --locked --release -j 4",
+    "rebuiltIdentically": true,
+    "rebuildContainerImage": "sha256:51945b20254ac6d2584cdb4c6a2f5579ed21a4bd8b0b56b17c28f2ddabe04567"
+  },
+  "needed": [
+    "libX11.so.6",
+    "libXtst.so.6",
+    "libXi.so.6",
+    "libgcc_s.so.1",
+    "libm.so.6",
+    "libc.so.6",
+    "ld-linux-x86-64.so.2"
+  ],
+  "acceptance": {
+    "ubuntu22NativeLoad": true,
+    "physicalDesktop": false,
+    "containerGui": "product-manager-x11-atspi-window-geometry-screenshot-mouse-type-button-readback-pass"
+  }
+}
