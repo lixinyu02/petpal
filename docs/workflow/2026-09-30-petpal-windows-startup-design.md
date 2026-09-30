@@ -2,7 +2,7 @@
 
 - Date: 2026-09-30
 - Complexity: L1
-- Status: accepted / implementing
+- Status: complete
 
 ## Background
 
