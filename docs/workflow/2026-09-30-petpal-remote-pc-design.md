@@ -2,7 +2,7 @@
 
 - Date: 2026-09-30
 - Complexity: L1（沿用现有执行器/账户/权限协议，若发现协议风险再提升）
-- Status: in_progress
+- Status: done
 - Baseline: 0529534
 
 ## 目标
@@ -14,6 +14,8 @@
 实际验收 PC 客户端的登录注册、认证 HTTPS 长轮询/心跳、Codex app-server 和远程任务。先检查已发布 Windows 包与当前执行电脑，再用隔离 Windows 客户端 profile、同一账号及无副作用的只读 Codex 任务完成公网端到端证据。模型/设备不可用时报告具体阻塞，不把 fixture 在线替代真实 CLI 执行。
 
 保持鉴权、账号隔离、权限与审批合同，不开放 PC 入站端口，不输出凭据。若修复涉及桌面原生代码，准备可交付新包；单纯网页/UI 更新不重做安装包。按 issue 顺序提交，完成网页与公网验收后推送；只操作 PetPal，禁止触碰 RK3566 固件。
+
+新增 HTTPS 适配：CLIProxyAPI 证书绑定 magicdatou.top，使用受信 HTTPS 域名地址同步现有模型连接与 Codex Responses 配置，保留默认模型/强度、账号分配及密钥，不禁用 CA/主机名校验。桌面源代码修改仅为验收 smoke，正常执行器协议没有改动，既有发布包保持冻结。
 
 ## 验证
 

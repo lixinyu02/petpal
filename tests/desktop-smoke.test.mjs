@@ -70,6 +70,9 @@ test('native smoke fails clearly when the interactive character is missing', asy
   await assert.rejects(f.gesture('tap'), /Interactive companion is unavailable/);
   await assert.rejects(f.gesture('unknown'), /Unknown smoke gesture/);
   assert.equal(f.inputs.length, 0);
+  f.document.querySelectorAll = () => [{ getAttribute: () => null, getBoundingClientRect: () => ({ left: 100, top: 50, width: 200, height: 0 }) }];
+  await assert.rejects(f.gesture('tap'), /Interactive companion is unavailable/);
+  assert.equal(f.inputs.length, 0, 'a zero-height scene cannot count as a real character interaction');
 });
 
 test('native app smoke feeds real SSE records through Chat and restores instrumentation on failure', async () => {
@@ -111,7 +114,7 @@ test('native app smoke feeds real SSE records through Chat and restores instrume
   } };
   const inspect = smokeFunction('inspectAppFixture', {
     origin, backend:{token:'fixture'}, fetch: async () => ({ok:true}), mainWindow,
-    inspectAvatarWindow: async () => ({}), process: {env:{}},
+    expandSmokeAppCompanion: async () => ({expanded:true,clicked:true}), inspectAvatarWindow: async () => ({}), process: {env:{}},
   });
   await assert.rejects(inspect(), /intentional failure after instrumentation/);
   assert.equal(window.fetch, nativeFetch);

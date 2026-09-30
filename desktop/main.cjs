@@ -198,27 +198,35 @@ function showPet() {
   } else { fitWindowToDisplay(petWindow, true); petWindow.showInactive(); }
 }
 
-async function inspectAvatarWindow(win, requireWorld, kind) {
+async function inspectAvatarWindow(win, requireWorld, kind, expectedCatEnabled) {
   return win.webContents.executeJavaScript(`new Promise((resolve, reject) => {
     const deadline = Date.now() + 25000;
     const check = () => {
       const canvases = document.querySelectorAll('canvas[data-renderer="webgl"]');
       const canvas = canvases[0];
+      const bounds = canvas?.getBoundingClientRect(), style = canvas && getComputedStyle(canvas);
+      const visible = bounds?.width > 0 && bounds?.height > 0 && bounds.right > 0 && bounds.bottom > 0 && bounds.left < innerWidth && bounds.top < innerHeight
+        && canvas.getAttribute('aria-hidden') !== 'true' && style.display !== 'none' && style.visibility === 'visible' && !document.hidden;
       const ready = ${requireWorld ? `!!document.querySelector('.companion-world[data-ready="true"][data-companion-kind="${kind}"]')` : 'true'};
       const expectedRenderer = ${JSON.stringify(kind)} === 'anime' ? canvas?.dataset.avatarRenderer === 'mesh2d' : canvas?.dataset.avatarRenderer !== 'mesh2d';
-      if (ready && expectedRenderer && canvases.length === 1 && canvas.dataset.petCount === '1' && Number(canvas.dataset.renderFrames) >= 2) {
+      let display; try { display = JSON.parse(localStorage.getItem('petpal.displayCompanion') || 'null'); } catch {}
+      const displayReady = ${typeof expectedCatEnabled === 'boolean' ? `display?.version === 2 && display.kind === ${JSON.stringify(kind)} && display.catEnabled === ${JSON.stringify(expectedCatEnabled)}` : 'true'};
+      if (ready && visible && expectedRenderer && displayReady && canvases.length === 1 && canvas.dataset.petCount === '1' && Number(canvas.dataset.renderFrames) >= 2) {
         const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
         if (gl && !gl.isContextLost()) return resolve({
           is3d: ${JSON.stringify(kind)} === 'cat', kind: ${JSON.stringify(kind)}, renderer: canvas.dataset.avatarRenderer || 'three3d', petCount: 1, canvasCount: canvases.length,
           renderFrames: Number(canvas.dataset.renderFrames), glVersion: gl.getParameter(gl.VERSION),
           petAction: canvas.dataset.petAction || 'unknown',
           width: canvas.width, height: canvas.height, viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
-          storedKind: localStorage.getItem('petpal.companionKind'), blink: canvas.dataset.blink, speaking: canvas.dataset.speaking,
+          canvasBounds: { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }, visible: true,
+          storedKind: localStorage.getItem('petpal.companionKind'),
+          display: display && { version: display.version, kind: display.kind, catEnabled: display.catEnabled },
+          blink: canvas.dataset.blink, speaking: canvas.dataset.speaking,
           expression: canvas.dataset.expression, mouthShape: canvas.dataset.mouthShape, mouthOpen: canvas.dataset.mouthOpen,
           phase: canvas.dataset.phase, speechSource: canvas.dataset.speechSource
         });
       }
-      if (Date.now() >= deadline) reject(new Error('One live WebGL ${kind} avatar did not become ready'));
+      if (Date.now() >= deadline) reject(new Error('One visible live WebGL ${kind} avatar did not become ready'));
       else setTimeout(check, 50);
     };
     check();
@@ -272,24 +280,153 @@ async function clickSmokeButton(container, label) {
   })()`);
 }
 
+async function inspectSmokeAvatarPair(kind, catEnabled) {
+  const [main, pet] = await Promise.all([inspectAvatarWindow(mainWindow, true, kind, catEnabled), inspectAvatarWindow(petWindow, false, kind, catEnabled)]);
+  if ([main, pet].some(value => value.display?.version !== 2 || value.display.kind !== kind || value.display.catEnabled !== catEnabled)) {
+    console.log(JSON.stringify({ event: 'desktop-smoke-check', check: 'avatar-display-pair', expected: { kind, catEnabled }, main: main.display, pet: pet.display }));
+    throw new Error('Effective v2 avatar display did not synchronize between desktop windows');
+  }
+  return { main, pet };
+}
+
+async function inspectSmokeCatChoice(expectedVisible) {
+  return mainWindow.webContents.executeJavaScript(`(() => {
+    const choice = [...document.querySelectorAll('.companion-switch button')].find(button => button.textContent.trim() === '3D 小猫');
+    const visible = !!choice && choice.getClientRects().length > 0;
+    if (visible !== ${JSON.stringify(expectedVisible)}) throw new Error('Cat choice visibility does not match the explicit capability');
+    return visible;
+  })()`);
+}
+
+async function inspectSmokeCatSettings(expected, next) {
+  await mainWindow.loadURL(`${origin}/?chat=1&settings=1`);
+  await mainWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 20000;
+    const check = () => {
+      const tab = [...document.querySelectorAll('.settings-tabs button')].find(button => button.textContent.trim() === '小伴个性');
+      if (tab && !tab.disabled && tab.getClientRects().length) return resolve(true);
+      if (Date.now() >= deadline) return reject(new Error('Companion settings tab did not become ready'));
+      setTimeout(check, 40);
+    }; check();
+  })`);
+  await clickSmokeButton('.settings-tabs', '小伴个性');
+  return mainWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 20000; let clicked = false, before;
+    const check = () => {
+      const control = document.querySelector('.companion-cat-option[role="switch"][aria-label="启用 3D 小猫"]');
+      if (control && !control.disabled && control.getClientRects().length) {
+        const checked = control.getAttribute('aria-checked');
+        if (checked !== 'true' && checked !== 'false') return reject(new Error('Cat settings switch has an invalid state'));
+        if (before === undefined) {
+          before = checked === 'true';
+          if (before !== ${JSON.stringify(expected)}) return reject(new Error('Cat settings switch does not match the expected opt-in'));
+          if (${typeof next === 'boolean'}) { clicked = true; control.click(); }
+        }
+        if (checked === ${JSON.stringify(String(typeof next === 'boolean' ? next : expected))}) return resolve({ before, checked: checked === 'true', clicked });
+      }
+      if (Date.now() >= deadline) return reject(new Error('Cat settings switch did not settle after its UI interaction'));
+      setTimeout(check, 40);
+    }; check();
+  })`);
+}
+
+async function snapshotSmokeRawCompanionPreference() {
+  // Compare exact preference records privately; only the pass/fail receipt is exported.
+  const local = await mainWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 15000;
+    const check = () => {
+      const records = Object.keys(localStorage).filter(key => key === 'petpal.companionPreference' || key.startsWith('petpal.companionPreference:')).sort().map(key => [key, localStorage.getItem(key)]);
+      if (!records.some(([, raw]) => { try { return JSON.parse(raw)?.dirty === true; } catch { return false; } })) {
+        return resolve(JSON.stringify({ legacyKind: localStorage.getItem('petpal.companionKind'), records }));
+      }
+      if (Date.now() >= deadline) return reject(new Error('Raw companion preference did not finish its existing save'));
+      setTimeout(check, 40);
+    }; check();
+  })`);
+  const response = await fetch(`${origin}/api/state`, { headers: { Authorization: `Bearer ${backend.token}` } });
+  if (!response.ok) throw new Error('Raw companion preference read failed');
+  return { local, serverKind: (await response.json()).settings.companionKind };
+}
+
+async function assertSmokeRawCompanionPreference(previous) {
+  const current = await snapshotSmokeRawCompanionPreference();
+  if (current.local !== previous.local || current.serverKind !== previous.serverKind) {
+    console.log(JSON.stringify({ event: 'desktop-smoke-check', check: 'raw-companion-preference', localEqual: current.local === previous.local, serverEqual: current.serverKind === previous.serverKind }));
+    throw new Error('Cat capability changed a raw companion preference');
+  }
+  return true;
+}
+
+async function reloadSmokeWindow(win) {
+  await new Promise((resolve, reject) => {
+    const contents = win.webContents;
+    const cleanup = () => { clearTimeout(timer); contents.removeListener('did-finish-load', loaded); contents.removeListener('did-fail-load', failed); };
+    const loaded = () => { cleanup(); resolve(); };
+    const failed = (_event, _code, _description, _url, isMainFrame) => { if (isMainFrame !== false) { cleanup(); reject(new Error('Smoke window reload failed')); } };
+    const timer = setTimeout(() => { cleanup(); reject(new Error('Smoke window reload timed out')); }, 20000);
+    contents.once('did-finish-load', loaded); contents.on('did-fail-load', failed);
+    try { contents.reload(); } catch (error) { cleanup(); reject(error); }
+  });
+}
+
+async function expandSmokeAppCompanion() {
+  return mainWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 20000; let clicked = false;
+    const check = () => {
+      const button = document.querySelector('button[aria-controls="workspace-companion-panel"]');
+      const canvas = document.querySelector('#workspace-companion-panel canvas[data-pet-count="1"]');
+      if (matchMedia('(max-width: 960px)').matches && canvas?.getClientRects().length) return resolve({ expanded: true, clicked, alwaysVisible: true });
+      if (button && !button.disabled && button.getClientRects().length) {
+        if (button.getAttribute('aria-expanded') === 'true') return resolve({ expanded: true, clicked });
+        if (!clicked) { clicked = true; button.click(); }
+      }
+      if (Date.now() >= deadline) return reject(new Error('Chat companion panel did not expand'));
+      setTimeout(check, 40);
+    }; check();
+  })`);
+}
+
+async function openSmokeSpeechOptions() {
+  await mainWindow.webContents.executeJavaScript(`(() => {
+    const disclosure = document.querySelector('.speech-controls details.speech-options'), summary = disclosure?.querySelector('summary');
+    if (!summary || !summary.getClientRects().length) throw new Error('Chat speech options are unavailable');
+    if (!disclosure.open) summary.click();
+  })()`);
+}
+
 async function gestureSmokeCharacter(gesture) {
   if (!['tap', 'double-tap', 'hold'].includes(gesture)) throw new Error('Unknown smoke gesture');
   mainWindow.show(); mainWindow.focus();
   const point = await mainWindow.webContents.executeJavaScript(`(() => {
-    const canvas = [...document.querySelectorAll('canvas[data-pet-count="1"]')].find(item => item.getAttribute('aria-hidden') !== 'true' && item.getBoundingClientRect().width > 0);
+    const canvas = [...document.querySelectorAll('canvas[data-pet-count="1"]')].find(item => item.getAttribute('aria-hidden') !== 'true' && item.getBoundingClientRect().width > 0 && item.getBoundingClientRect().height > 0);
     if (!canvas) throw new Error('Interactive companion is unavailable');
     const rect = canvas.getBoundingClientRect();
     const x = Math.round(rect.left + rect.width * .5), y = Math.round(rect.top + rect.height * .62);
     if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) throw new Error('Companion gesture would be outside the window');
-    return { x, y };
+    const target = document.elementFromPoint?.(x, y), style = typeof getComputedStyle === 'function' ? getComputedStyle(canvas) : {};
+    const container = canvas.parentElement, bounds = container?.getBoundingClientRect(), base = container?.querySelector('.anime-fallback-model > img');
+    let portrait;
+    if (bounds && base?.complete && base.naturalWidth) {
+      const width = Math.max(1, bounds.width), height = Math.max(1, bounds.height), portraitWidth = height / Math.max(1.64, 1.04 / (width / height));
+      const px = (x - bounds.left - width / 2) / portraitWidth + .5, py = (y - bounds.top - height / 2) / (portraitWidth * 1.5) + .5;
+      let alpha; try { const probe = document.createElement('canvas'); probe.width = 96; probe.height = 144; const context = probe.getContext('2d'); context.drawImage(base, 0, 0, 96, 144); alpha = context.getImageData(Math.max(0, Math.min(95, Math.floor(px * 96))), Math.max(0, Math.min(143, Math.floor(py * 144))), 1, 1).data[3]; } catch {}
+      portrait = { x: px, y: py, alpha, width: base.naturalWidth, height: base.naturalHeight };
+    }
+    return { x, y, canvasBounds: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      containerBounds: bounds && { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }, portrait,
+      surface: { role: canvas.getAttribute('role'), ariaHidden: canvas.getAttribute('aria-hidden'), tabIndex: canvas.tabIndex },
+      target: target && { tag: target.tagName, className: target.className, isCanvas: target === canvas },
+      visible: { hidden: !!document.hidden, visibility: style.visibility, display: style.display, opacity: style.opacity } };
   })()`);
+  if (point.visible.hidden || (point.target && !point.target.isCanvas)) throw new Error('Smoke gesture does not reach the visible companion canvas');
+  const coordinates = { x: point.x, y: point.y };
   const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
   const count = gesture === 'double-tap' ? 2 : 1;
-  mainWindow.webContents.sendInputEvent({ type: 'mouseMove', ...point });
+  mainWindow.webContents.sendInputEvent({ type: 'mouseMove', ...coordinates });
   for (let index = 0; index < count; index++) {
-    mainWindow.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: index + 1, ...point });
+    mainWindow.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: index + 1, ...coordinates });
     try { await pause(gesture === 'hold' ? 800 : 60); }
-    finally { mainWindow.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: index + 1, ...point }); }
+    finally { mainWindow.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: index + 1, ...coordinates }); }
     if (index + 1 < count) await pause(100);
   }
   return { gesture, ...point, trustedInput: true };
@@ -313,13 +450,33 @@ async function waitForPose(action, stableMilliseconds = 120) {
 }
 
 async function inspectNaturalGestures(kind) {
-  await gestureSmokeCharacter('tap'); const touch = await waitForPose('pet');
+  await mainWindow.webContents.executeJavaScript(`(() => {
+    const events = [], record = event => { if (events.length >= 24) return; const item = { type: event.type, trusted: event.isTrusted, pointerType: event.pointerType,
+      button: event.button, x: event.clientX, y: event.clientY, target: event.target?.tagName }; events.push(item);
+      queueMicrotask(() => { const feedback = document.querySelector('.companion-hand-feedback'), canvas = document.querySelector('canvas[data-pet-count="1"]'); item.after = { hidden: feedback?.hidden, phase: feedback?.dataset.phase, cursor: canvas?.style.cursor, action: canvas?.dataset.petAction }; });
+    };
+    for (const type of ['pointermove', 'pointerdown', 'pointerup', 'pointercancel', 'pointerleave', 'blur']) document.addEventListener(type, record, true);
+    window.__petpalSmokePointerTrace = { events, record };
+  })()`);
+  let tapped, inputTrace;
+  try { tapped = await gestureSmokeCharacter('tap'); }
+  finally {
+    inputTrace = await mainWindow.webContents.executeJavaScript(`(() => {
+      const trace = window.__petpalSmokePointerTrace;
+      if (trace) for (const type of ['pointermove', 'pointerdown', 'pointerup', 'pointercancel', 'pointerleave', 'blur']) document.removeEventListener(type, trace.record, true);
+      delete window.__petpalSmokePointerTrace;
+      const feedback = document.querySelector('.companion-hand-feedback');
+      return { events: trace?.events || [], focused: document.hasFocus(), hidden: document.hidden, feedback: { hidden: feedback?.hidden, phase: feedback?.dataset.phase } };
+    })()`);
+    console.log(JSON.stringify({ event: 'desktop-smoke-gesture', kind, ...tapped, inputTrace }));
+  }
+  const touch = await waitForPose('pet');
   await gestureSmokeCharacter('double-tap'); const greeting = await waitForPose('jump');
   await gestureSmokeCharacter('hold'); const sleep = await waitForPose('sleep', 700);
   if (kind === 'anime' && Number(sleep.blink) < .9) throw new Error('Resting anime eyes did not close');
   if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, `${kind}-sleep.png`), (await mainWindow.webContents.capturePage()).toPNG());
   await gestureSmokeCharacter('tap'); const awake = await waitForPose('idle');
-  return { trustedInput: true, touch, greeting, sleep, awake };
+  return { trustedInput: true, input: tapped, touch, greeting, sleep, awake };
 }
 
 async function inspectSystemSpeech(win) {
@@ -356,6 +513,7 @@ async function inspectAppFixture({ expressions = false } = {}) {
   // This does not call a model and is not evidence of a live upstream provider.
   await fetch(`${origin}/api/providers`, { method:'POST', headers:{Authorization:`Bearer ${backend.token}`,'Content-Type':'application/json'},body:JSON.stringify({name:'Isolated UI fixture',protocol:'chat-completions',baseUrl:'http://127.0.0.1:1/v1',model:'fixture',apiKey:''}) }).then(async response=>{if(!response.ok)throw new Error(await response.text());});
   await mainWindow.loadURL(`${origin}/?chat=1`); mainWindow.show();mainWindow.focus();
+  const companionPanel = await expandSmokeAppCompanion();
   await inspectAvatarWindow(mainWindow,false,'anime');
   await mainWindow.webContents.executeJavaScript(`(async()=>{
     const nativeFetch=window.fetch.bind(window), connection=await window.petpal.connection();
@@ -385,7 +543,15 @@ async function inspectAppFixture({ expressions = false } = {}) {
     await mainWindow.webContents.executeJavaScript(`(()=>{window.__appFixture.nextReply=${JSON.stringify(reply)};const field=document.querySelector('textarea[aria-label="消息"]');if(!field||field.disabled)throw new Error('Chat composer unavailable');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(field,${JSON.stringify(text)});field.dispatchEvent(new Event('input',{bubbles:true}));})()`);
     await mainWindow.webContents.executeJavaScript(`(()=>{const button=document.querySelector('button[aria-label="发送消息"]');if(!button||button.disabled)throw new Error('Chat send unavailable');button.click();})()`);
   };
-  const observe = expression => mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const started=performance.now();const check=()=>{const canvas=document.querySelector('canvas[data-avatar-renderer="mesh2d"]');const fixture=window.__appFixture;if(${expression})return resolve({phase:canvas?.dataset.phase,action:canvas?.dataset.petAction,expression:canvas?.dataset.expression,mouthShape:canvas?.dataset.mouthShape,mouthOpen:Number(canvas?.dataset.mouthOpen),source:canvas?.dataset.speechSource,speaking:window.speechSynthesis?.speaking,utterances:fixture.utterances,events:fixture.speechEvents.slice(),chunks:fixture.chunks.slice(),hidden:document.hidden});if(performance.now()-started>25000)return reject(new Error('App fixture condition timed out: '+JSON.stringify({hidden:document.hidden,phase:canvas?.dataset.phase,mouthOpen:canvas?.dataset.mouthOpen,body:document.body.innerText.slice(-900)})));setTimeout(check,20);};check();})`);
+  const observe = async expression => {
+    try {
+      return await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject)=>{const started=performance.now();const check=()=>{const canvas=document.querySelector('canvas[data-avatar-renderer="mesh2d"]');const fixture=window.__appFixture;if(${expression})return resolve({phase:canvas?.dataset.phase,action:canvas?.dataset.petAction,expression:canvas?.dataset.expression,mouthShape:canvas?.dataset.mouthShape,mouthOpen:Number(canvas?.dataset.mouthOpen),source:canvas?.dataset.speechSource,speaking:window.speechSynthesis?.speaking,utterances:fixture.utterances,events:fixture.speechEvents.slice(),chunks:fixture.chunks.slice(),hidden:document.hidden});if(performance.now()-started>25000)return reject(new Error('App fixture condition timed out'));setTimeout(check,20);};check();})`);
+    } catch (error) {
+      const state = await mainWindow.webContents.executeJavaScript(`(() => { const canvas = document.querySelector('canvas[data-avatar-renderer="mesh2d"]'), fixture = window.__appFixture; return { hidden: document.hidden, phase: canvas?.dataset.phase, action: canvas?.dataset.petAction, mouthOpen: canvas?.dataset.mouthOpen, source: canvas?.dataset.speechSource, speaking: speechSynthesis.speaking, pending: speechSynthesis.pending, utterances: fixture?.utterances, events: fixture?.speechEvents, chunkCount: fixture?.chunks.length }; })()`);
+      console.log(JSON.stringify({ event: 'desktop-smoke-check', check: 'app-fixture', condition: expression, state }));
+      throw error;
+    }
+  };
   const capture = async name => {
     if(process.env.PETPAL_SMOKE_DIR)await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR,name),(await mainWindow.webContents.capturePage()).toPNG());
   };
@@ -410,7 +576,8 @@ async function inspectAppFixture({ expressions = false } = {}) {
       }
     }
     const localVoice=await mainWindow.webContents.executeJavaScript(`'speechSynthesis' in window&&speechSynthesis.getVoices().some(v=>v.localService&&/^zh(?:-|_)/i.test(v.lang))`);
-    if(!localVoice)return{fixture:true,upstreamModelCalled:false,singleChunk,settled,responses,speechUi:{available:false,defaultOff,reason:'no-local-chinese-voice',audioAudibilityVerified:false}};
+    if(!localVoice)return{fixture:true,upstreamModelCalled:false,companionPanel,singleChunk,settled,responses,speechUi:{available:false,defaultOff,reason:'no-local-chinese-voice',audioAudibilityVerified:false}};
+    await openSmokeSpeechOptions();
     await mainWindow.webContents.executeJavaScript(`(()=>{const toggle=document.querySelector('.speech-toggle input');if(!toggle||toggle.disabled)throw new Error('Chat speech toggle unavailable');if(!toggle.checked)toggle.click();})()`,true);
     const longReply='谢谢你，今天也一起慢慢度过。想到开心的事情，可以随时告诉我。我们还有很多时间。';
     await send('真实语音与口型验收',longReply);
@@ -418,6 +585,7 @@ async function inspectAppFixture({ expressions = false } = {}) {
     await capture('anime-system-speech.png');
     const completed=await observe(`fixture.speechEvents.some(event=>event.type==='end')&&!speechSynthesis.speaking&&!speechSynthesis.pending&&canvas?.dataset.phase==='idle'&&Number(canvas?.dataset.mouthOpen)===0`);
     if(completed.events.some(event=>event.type==='error'))throw new Error('System speech emitted an error');
+    await openSmokeSpeechOptions();
     await clickSmokeButton('.speech-controls','朗读上一条');
     const manual=await observe(`fixture.utterances>${completed.utterances}&&speechSynthesis.speaking&&fixture.speechEvents.some(event=>event.type==='start'&&event.index>${completed.utterances})`);
     await gestureSmokeCharacter('hold');
@@ -430,12 +598,14 @@ async function inspectAppFixture({ expressions = false } = {}) {
     if(sleepingReply.utterances!==manual.utterances)throw new Error('Sleeping app auto-read a completed reply');
     await capture('app-sleep-quiet.png');
     await gestureSmokeCharacter('tap'); await waitForPose('idle');
+    await openSmokeSpeechOptions();
     await clickSmokeButton('.speech-controls','朗读上一条');
     const resumed=await observe(`fixture.utterances>${sleepingReply.utterances}&&speechSynthesis.speaking`);
-    await clickSmokeButton('.speech-controls','停止朗读');
+    await mainWindow.webContents.executeJavaScript(`(() => { const button = document.querySelector('.speech-controls button.speech-stop'); if (!button || button.disabled || !button.getClientRects().length) throw new Error('Current speech stop control is unavailable'); button.click(); })()`);
     await mainWindow.webContents.executeJavaScript('new Promise(resolve=>setTimeout(resolve,600))');
     const stopped=await observe(`!speechSynthesis.speaking&&!speechSynthesis.pending&&canvas?.dataset.phase==='idle'&&Number(canvas?.dataset.mouthOpen)===0`);
     if(stopped.utterances!==resumed.utterances)throw new Error('Stopped speech restarted');
+    await openSmokeSpeechOptions();
     await clickSmokeButton('.speech-controls','朗读上一条');
     await observe(`fixture.utterances>${stopped.utterances}&&speechSynthesis.speaking`);
     mainWindow.hide();
@@ -443,7 +613,7 @@ async function inspectAppFixture({ expressions = false } = {}) {
     mainWindow.show();mainWindow.focus();
     if(!hidden.hidden||hidden.speaking||hidden.pending)throw new Error('Hidden window did not cancel system speech');
     await observe(`canvas?.dataset.phase==='idle'&&Number(canvas?.dataset.mouthOpen)===0`);
-    return{fixture:true,upstreamModelCalled:false,singleChunk,settled,responses,manual,sleepCancelled,sleepingReply,speechUi:{available:true,defaultOff,live,completed,stopped,hidden,audioAudibilityVerified:false}};
+    return{fixture:true,upstreamModelCalled:false,companionPanel,singleChunk,settled,responses,manual,sleepCancelled,sleepingReply,speechUi:{available:true,defaultOff,live,completed,stopped,hidden,audioAudibilityVerified:false}};
   } finally {
     mainWindow.show();mainWindow.focus();
     await mainWindow.webContents.executeJavaScript(`(()=>{document.querySelector('.speech-stop')?.click();const toggle=document.querySelector('.speech-toggle input');if(toggle?.checked)toggle.click();const fixture=window.__appFixture;if(fixture){window.fetch=fixture.nativeFetch;if(fixture.originalSpeak)speechSynthesis.speak=fixture.originalSpeak;delete window.__appFixture;}})()`);
@@ -594,7 +764,8 @@ async function boot() {
       return;
     }
     await startupMilestone('smoke-anime');
-    const [animeMain, animePet] = await Promise.all([inspectAvatarWindow(mainWindow, true, 'anime'), inspectAvatarWindow(petWindow, false, 'anime')]);
+    const { main: animeMain, pet: animePet } = await inspectSmokeAvatarPair('anime', false);
+    const defaultChoiceHidden = !(await inspectSmokeCatChoice(false));
     await mainWindow.webContents.executeJavaScript(`(async () => {
       await document.fonts.ready;
       await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})));
@@ -607,6 +778,7 @@ async function boot() {
           runtime: desktopTools.opencli.runtime, daemonState: desktopTools.opencli.daemon?.state,
           extensionConnected: desktopTools.opencli.extension?.connected, readOnlyProbe: true } },
       avatars: { anime: { main: animeMain, pet: animePet } }, defaultAvatar: 'anime',
+      catCapability: { defaultOff: { main: animeMain, pet: animePet, choiceHidden: defaultChoiceHidden } },
       codex: { available: codex.available, running: codex.running, authenticated: codex.authenticated, sandbox: codex.sandbox },
       pet: { alwaysOnTop: petWindow.isAlwaysOnTop(), transparent: true } };
     await startupMilestone('smoke-system-speech');
@@ -637,9 +809,17 @@ async function boot() {
     await startupMilestone('smoke-anime-gestures');
     result.gestures = { anime: await inspectNaturalGestures('anime') };
     await startupMilestone('smoke-cat');
+    const initialRawPreference = await snapshotSmokeRawCompanionPreference();
+    const enabledSettings = await inspectSmokeCatSettings(false, true);
+    result.catCapability.defaultOff.settingsChecked = enabledSettings.before;
+    const enablePreservedPreference = await assertSmokeRawCompanionPreference(initialRawPreference);
+    await mainWindow.loadURL(origin);
+    await inspectSmokeAvatarPair('anime', true);
+    const enabledChoiceVisible = await inspectSmokeCatChoice(true);
     await clickSmokeButton('.companion-switch', '3D 小猫');
-    const [catMain, catPet] = await Promise.all([inspectAvatarWindow(mainWindow, true, 'cat'), inspectAvatarWindow(petWindow, false, 'cat')]);
-    if (catMain.storedKind !== 'cat' || catPet.storedKind !== 'cat') throw new Error('Avatar storage selection did not synchronize');
+    const { main: catMain, pet: catPet } = await inspectSmokeAvatarPair('cat', true);
+    result.catCapability.enabled = { main: catMain, pet: catPet, settingsChecked: enabledSettings.checked,
+      clickedSettingsSwitch: enabledSettings.clicked, choiceVisible: enabledChoiceVisible, rawPreferenceUnchanged: enablePreservedPreference };
     result.is3d = true; result.renderer = { main: catMain, pet: catPet }; result.avatars.cat = result.renderer;
     if (process.env.PETPAL_SMOKE_DIR) {
       await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'cat-main.png'), (await mainWindow.webContents.capturePage()).toPNG());
@@ -653,9 +833,33 @@ async function boot() {
     result.gestures.cat = await inspectNaturalGestures('cat');
     await startupMilestone('smoke-avatar-return');
     await clickSmokeButton('.companion-switch', '二次元伙伴');
-    const [returnMain, returnPet] = await Promise.all([inspectAvatarWindow(mainWindow, true, 'anime'), inspectAvatarWindow(petWindow, false, 'anime')]);
-    result.switchSynced = returnMain.storedKind === 'anime' && returnPet.storedKind === 'anime';
-    if (!result.switchSynced) throw new Error('Avatar storage return transition did not synchronize');
+    const returned = await inspectSmokeAvatarPair('anime', true);
+    result.catCapability.returned = returned;
+    result.switchSynced = true;
+    // Disable while the saved choice is cat: gating must not replace that raw preference with anime.
+    await clickSmokeButton('.companion-switch', '3D 小猫');
+    await inspectSmokeAvatarPair('cat', true);
+    const selectedCatPreference = await snapshotSmokeRawCompanionPreference();
+    if (selectedCatPreference.serverKind !== 'cat') throw new Error('Explicit cat choice did not finish saving before the disable check');
+    const disabledSettings = await inspectSmokeCatSettings(true, false);
+    const disablePreservedPreference = await assertSmokeRawCompanionPreference(selectedCatPreference);
+    await mainWindow.loadURL(origin);
+    const disabledAvatars = await inspectSmokeAvatarPair('anime', false);
+    result.catCapability.disabled = { ...disabledAvatars, settingsChecked: disabledSettings.checked,
+      clickedSettingsSwitch: disabledSettings.clicked, choiceHidden: !(await inspectSmokeCatChoice(false)),
+      rawKindPreserved: selectedCatPreference.serverKind, rawPreferenceUnchanged: disablePreservedPreference };
+    await Promise.all([reloadSmokeWindow(mainWindow), reloadSmokeWindow(petWindow)]);
+    const reloadedAvatars = await inspectSmokeAvatarPair('anime', false);
+    const reloadChoiceHidden = !(await inspectSmokeCatChoice(false));
+    const reloadedSettings = await inspectSmokeCatSettings(false);
+    result.catCapability.reloaded = { ...reloadedAvatars, settingsChecked: reloadedSettings.checked,
+      choiceHidden: reloadChoiceHidden, bothWindowsReloaded: true, rawKindPreserved: selectedCatPreference.serverKind,
+      rawPreferenceUnchanged: await assertSmokeRawCompanionPreference(selectedCatPreference) };
+    await mainWindow.loadURL(origin);
+    await inspectSmokeAvatarPair('anime', false);
+    result.catCapability.legacyPreferenceUnchanged = [catMain, returned.main, disabledAvatars.main, reloadedAvatars.main].every(value => value.storedKind === animeMain.storedKind)
+      && [catPet, returned.pet, disabledAvatars.pet, reloadedAvatars.pet].every(value => value.storedKind === animePet.storedKind);
+    if (!result.catCapability.legacyPreferenceUnchanged) throw new Error('Avatar capability or selection overwrote the legacy global preference');
     if (process.env.PETPAL_SMOKE_APP === '1' || process.env.PETPAL_SMOKE_POSES === '1') {
       await startupMilestone('smoke-app');
       result.appFixture = await inspectAppFixture({ expressions: process.env.PETPAL_SMOKE_POSES === '1' });

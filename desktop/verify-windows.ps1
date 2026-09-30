@@ -51,6 +51,22 @@ if ($result.desktopTools.opencli.daemonState -notin @('stopped', 'external', 'un
 if ($result.desktopTools.music.platform -ne 'win32' -or @($result.desktopTools.music.players | Where-Object { $_.id -in @('qqmusic', 'netease') }).Count -ne 2) { throw 'Windows music status did not report both supported players.' }
 if (-not $result.is3d -or $result.renderer.main.petCount -ne 1 -or $result.renderer.pet.petCount -ne 1 -or $result.renderer.main.renderFrames -lt 2 -or $result.renderer.pet.renderFrames -lt 2) { throw 'Live single-cat 3D renderer verification failed.' }
 if (-not $result.switchSynced -or $result.defaultAvatar -ne 'anime' -or $result.avatars.anime.main.renderer -ne 'mesh2d' -or $result.avatars.anime.pet.renderer -ne 'mesh2d' -or $result.avatars.anime.main.petCount -ne 1 -or $result.avatars.anime.pet.petCount -ne 1 -or $result.avatars.anime.main.renderFrames -lt 2 -or $result.avatars.anime.pet.renderFrames -lt 2) { throw 'Anime renderer or shared-window avatar selection verification failed.' }
+$capability = $result.catCapability
+if (-not $capability.defaultOff.choiceHidden -or $capability.defaultOff.settingsChecked -ne $false -or
+  -not $capability.enabled.choiceVisible -or $capability.enabled.settingsChecked -ne $true -or -not $capability.enabled.clickedSettingsSwitch -or -not $capability.enabled.rawPreferenceUnchanged -or
+  -not $capability.disabled.choiceHidden -or $capability.disabled.settingsChecked -ne $false -or -not $capability.disabled.clickedSettingsSwitch -or -not $capability.disabled.rawPreferenceUnchanged -or $capability.disabled.rawKindPreserved -ne 'cat' -or
+  -not $capability.reloaded.choiceHidden -or $capability.reloaded.settingsChecked -ne $false -or -not $capability.reloaded.bothWindowsReloaded -or -not $capability.reloaded.rawPreferenceUnchanged -or $capability.reloaded.rawKindPreserved -ne 'cat' -or
+  -not $capability.legacyPreferenceUnchanged) { throw 'Explicit cat capability UI, default-off, reload, or raw-preference preservation verification failed.' }
+foreach ($phase in @('defaultOff', 'enabled', 'returned', 'disabled', 'reloaded')) {
+  $expectedKind = if ($phase -eq 'enabled') { 'cat' } else { 'anime' }
+  $expectedEnabled = $phase -in @('enabled', 'returned')
+  foreach ($windowName in @('main', 'pet')) {
+    $avatar = $capability.$phase.$windowName
+    if ($avatar.kind -ne $expectedKind -or $avatar.display.version -ne 2 -or $avatar.display.kind -ne $expectedKind -or $avatar.display.catEnabled -ne $expectedEnabled -or -not $avatar.visible -or $avatar.canvasBounds.width -le 0 -or $avatar.canvasBounds.height -le 0 -or
+      $avatar.canvasCount -ne 1 -or $avatar.petCount -ne 1 -or $avatar.renderFrames -lt 2 -or
+      ($expectedKind -eq 'anime' -and $avatar.renderer -ne 'mesh2d')) { throw "Effective v2 display did not synchronize for $phase/$windowName." }
+  }
+}
 Add-Type -AssemblyName System.Drawing
 $pet = [System.Drawing.Bitmap]::FromFile((Join-Path $EvidenceDirectory 'pet.png'))
 try { if ($pet.GetPixel(0,0).A -ne 0) { throw 'Pet window corner is not transparent.' } } finally { $pet.Dispose() }
