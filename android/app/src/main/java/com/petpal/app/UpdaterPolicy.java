@@ -12,14 +12,58 @@ public final class UpdaterPolicy {
     private UpdaterPolicy() { }
     private static boolean controls(String value, boolean space) { for (int i = 0; i < value.length(); i++) if (value.charAt(i) < (space ? 33 : 32) || value.charAt(i) == 127) return true; return false; }
 
-    private static URI https(String value, int limit) {
+    private static URI https(String value, int limit) { return https(value, limit, false); }
+    private static URI https(String value, int limit, boolean allowPort) {
         if (value == null || value.length() > limit || controls(value, true)) throw new IllegalArgumentException("更新地址无效。");
         try {
             URI uri = new URI(value);
-            if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getRawUserInfo() != null
-                || uri.getPort() != -1 || uri.getRawFragment() != null || value.indexOf('\\') >= 0) throw new IllegalArgumentException();
+            if (!(allowPort ? "https".equalsIgnoreCase(uri.getScheme()) : "https".equals(uri.getScheme())) || uri.getHost() == null || uri.getRawUserInfo() != null
+                || (!allowPort && uri.getPort() != -1) || uri.getPort() == 0 || uri.getPort() > 65535
+                || uri.getRawFragment() != null || value.indexOf('\\') >= 0) throw new IllegalArgumentException();
             return uri;
         } catch (Exception error) { throw new IllegalArgumentException("更新地址必须为受支持的 HTTPS 地址。"); }
+    }
+
+    private static String source(String value) {
+        if (value == null || "github".equals(value)) return "github";
+        if ("server".equals(value)) return value;
+        throw new IllegalArgumentException("更新发布源无效。");
+    }
+
+    private static boolean safePath(String path, boolean absolute) {
+        if (path == null || path.isEmpty() || (absolute && !path.startsWith("/"))) return false;
+        String[] segments = path.split("/", -1);
+        for (int i = path.startsWith("/") ? 1 : 0; i < segments.length; i++) {
+            if (!segments[i].matches("[A-Za-z0-9][A-Za-z0-9._+-]*")) return false;
+        }
+        return true;
+    }
+
+    private static URI serverManifest(String value) {
+        URI uri = https(value, 8192, true);
+        if (uri.getRawQuery() != null || !safePath(uri.getRawPath(), true) || !uri.getRawPath().endsWith("/petpal-update.json")) {
+            throw new IllegalArgumentException("更新服务器清单地址无效。");
+        }
+        return uri;
+    }
+
+    private static int originPort(URI uri) { return uri.getPort() == -1 ? 443 : uri.getPort(); }
+    private static boolean sameOrigin(URI first, URI second) {
+        return first.getScheme().equalsIgnoreCase(second.getScheme()) && first.getHost().equalsIgnoreCase(second.getHost()) && originPort(first) == originPort(second);
+    }
+
+    public static URI initialUrl(String value, String source, String manifestUrl) {
+        if ("github".equals(source(source))) {
+            if (manifestUrl != null && !manifestUrl.isEmpty()) throw new IllegalArgumentException("更新发布源与清单不匹配。");
+            return initialUrl(value);
+        }
+        URI manifest = serverManifest(manifestUrl), asset = https(value, 8192, true);
+        String directory = manifest.getRawPath().substring(0, manifest.getRawPath().lastIndexOf('/') + 1);
+        if (asset.getRawQuery() != null || !sameOrigin(manifest, asset) || !safePath(asset.getRawPath(), true)
+            || !asset.getRawPath().startsWith(directory)) {
+            throw new IllegalArgumentException("更新 APK 必须位于清单所在的 HTTPS 服务器目录中。");
+        }
+        return asset;
     }
 
     public static URI initialUrl(String value) {
@@ -47,12 +91,35 @@ public final class UpdaterPolicy {
         return github;
     }
 
+    public static URI redirect(URI initial, URI previous, String location, int count, String source, String manifestUrl) {
+        if ("github".equals(source(source))) {
+            initialUrl(initial.toString(), source, manifestUrl);
+            return redirect(initial, previous, location, count);
+        }
+        if (count < 1 || count > MAX_REDIRECTS || location == null || location.isEmpty() || location.length() > 8192
+            || controls(location, true) || location.indexOf('\\') >= 0) throw new IllegalArgumentException("更新下载重定向次数或地址无效。");
+        initialUrl(initial.toString(), source, manifestUrl);
+        initialUrl(previous.toString(), source, manifestUrl);
+        try {
+            // Inspect before resolve: URI.resolve would erase ../ segments and hide an unsafe redirect.
+            URI relative = new URI(location);
+            if (relative.getRawQuery() != null || relative.getRawFragment() != null || relative.getRawUserInfo() != null
+                || (!relative.isAbsolute() && relative.getRawAuthority() != null)
+                || !safePath(relative.getRawPath(), relative.isAbsolute())) throw new IllegalArgumentException();
+            return initialUrl(previous.resolve(relative).toString(), source, manifestUrl);
+        } catch (Exception error) { throw new IllegalArgumentException("更新下载重定向地址无效。"); }
+    }
+
     public static void metadata(String id, String target, String format, String version, long versionCode, String url, String hash, long bytes, long installedCode) {
+        metadata(id, target, format, version, versionCode, url, hash, bytes, installedCode, "github", null);
+    }
+
+    public static void metadata(String id, String target, String format, String version, long versionCode, String url, String hash, long bytes, long installedCode, String source, String manifestUrl) {
         if (id == null || id.isEmpty() || id.length() > 160 || controls(id, false) || !"android".equals(target) || !"apk".equals(format)
             || version == null || !version.matches("(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)")
             || version.length() > 60 || versionCode <= installedCode || versionCode > Integer.MAX_VALUE || bytes < 1 || bytes > MAX_BYTES
             || hash == null || !hash.matches("[0-9a-fA-F]{64}")) throw new IllegalArgumentException("更新版本、大小或校验信息无效；仅可安装更高版本。");
-        initialUrl(url);
+        initialUrl(url, source, manifestUrl);
     }
 
     public static void apkIdentity(String applicationId, long code, String version, String[] installedSigners, String[] candidateSigners, long installedCode, long expectedCode, String expectedVersion) {
@@ -65,9 +132,16 @@ public final class UpdaterPolicy {
     }
 
     public static void binding(String revision, String manifestHash, long sequence, String repository, String url) {
+        binding(revision, manifestHash, sequence, repository, url, "github", null);
+    }
+
+    public static void binding(String revision, String manifestHash, long sequence, String repository, String url, String source, String manifestUrl) {
         if (revision == null || !revision.matches("[A-Za-z0-9._:-]{1,160}") || manifestHash == null || !manifestHash.matches("[a-f0-9]{64}")
-            || sequence < 1 || sequence > 9007199254740991L || repository == null || repository.length() > 201) throw new IllegalArgumentException("更新清单绑定信息无效，请重新检查更新。");
-        String[] path = initialUrl(url).getRawPath().split("/");
+            || sequence < 1 || sequence > 9007199254740991L) throw new IllegalArgumentException("更新清单绑定信息无效，请重新检查更新。");
+        URI asset = initialUrl(url, source, manifestUrl);
+        if ("server".equals(source(source))) return;
+        if (repository == null || repository.length() > 201) throw new IllegalArgumentException("更新清单绑定信息无效，请重新检查更新。");
+        String[] path = asset.getRawPath().split("/");
         if (!(path[1] + "/" + path[2]).toLowerCase(java.util.Locale.ROOT).equals(repository)) throw new IllegalArgumentException("更新仓库与发布文件不匹配。");
     }
 

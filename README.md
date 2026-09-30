@@ -119,7 +119,14 @@ PETPAL_ALLOWED_ORIGINS=https://localhost,https://pet.example.com
 
 ## 软件更新
 
-「连接与设置 → 软件更新」显示客户端版本。主机管理员配置公开仓库与 Ed25519 [发布公钥](docs/petpal-update-public-key.txt)；成员可检查更新，桌面程序下载和交接仅由本机主账号执行。Windows 下载并校验后打开新版便携程序，保留原 EXE；Ubuntu 定位校验后的归档，由用户解压启动；Android 核对 APK 包名、签名与版本后交系统安装器；Web 仅在当前站点已部署新版时提供刷新。发布流程见 [更新与发布](docs/updates.md)。
+「连接与设置 → 软件更新」显示客户端版本，并支持 **GitHub Releases / HTTPS 服务器** 两种来源。主机管理员选择来源并配置对应 Ed25519 公钥；成员须登录后检查更新，桌面程序下载和交接仅由本机主账号执行。
+
+- GitHub：`source: "github"`，公开仓库 `lixinyu02/petpal`，继续使用原 [GitHub 发布公钥](docs/petpal-update-public-key.txt)。
+- 服务器：`source: "server"`，清单地址 `https://magicdatou.top:44318/downloads/updates/petpal-update.json`，使用同目录的独立 [服务器发布公钥](https://magicdatou.top:44318/downloads/updates/update-public.pem)。服务器资产与重定向限定清单同源、所在目录及子目录。
+
+两种发布身份的公钥不能交叉使用。切换来源、清单地址、仓库或公钥会改变配置 revision，须重新检查；同公钥的防回滚序号记录会保留。Windows 下载并校验后打开新版便携程序，保留原 EXE；Ubuntu 定位校验后的归档，由用户解压启动；Android 核对 APK 包名、签名与版本后交系统安装器；Web 仅在当前站点已部署新版时提供刷新。发布流程与签名命令见 [更新与发布](docs/updates.md)。
+
+**本轮先上线网页与后端，未重打原生客户端。** 服务器上的 Windows、Ubuntu 与 Android 包只是原发布文件的镜像；新版来源选择和原生下载支持要等后续客户端新版发布，不能把网页升级视为旧安装包已经获得该功能。
 
 ## 环境变量
 

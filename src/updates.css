@@ -5,3 +5,4 @@
 .update-progress{display:flex;align-items:center;gap:12px;margin:18px 0}
 .update-progress progress{flex:1;min-width:0;accent-color:#637d4d}
 .update-reload{padding:16px 0}
+.update-source-description{overflow-wrap:anywhere}

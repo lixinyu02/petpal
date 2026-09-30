@@ -44,17 +44,19 @@ public final class PetUpdaterPlugin extends Plugin {
     private boolean destroyed;
 
     private static final class Release {
-        final String id, target, format, version, url, sha256, revision, manifestHash, repository;
+        final String id, target, format, version, url, sha256, revision, manifestHash, repository, source, manifestUrl;
         final long versionCode, bytes, sequence;
         Release(JSObject data, long installedCode) {
             if (data == null) throw new IllegalArgumentException("缺少已检查的发布信息。");
             id = data.getString("id"); target = data.getString("target"); format = data.getString("format"); version = data.getString("version");
             url = data.getString("url"); sha256 = data.getString("sha256"); versionCode = integer(data, "versionCode"); bytes = integer(data, "bytes");
-            UpdaterPolicy.metadata(id, target, format, version, versionCode, url, sha256, bytes, installedCode);
+            if (data.has("source") && !(data.opt("source") instanceof String)) throw new IllegalArgumentException("更新发布源无效。");
+            source = data.has("source") ? data.getString("source") : "github"; manifestUrl = data.getString("manifestUrl");
+            UpdaterPolicy.metadata(id, target, format, version, versionCode, url, sha256, bytes, installedCode, source, manifestUrl);
             revision = data.getString("revision"); manifestHash = data.getString("manifestHash"); repository = data.getString("repository"); sequence = integer(data, "sequence", 9007199254740991L);
-            UpdaterPolicy.binding(revision, manifestHash, sequence, repository, url);
+            UpdaterPolicy.binding(revision, manifestHash, sequence, repository, url, source, manifestUrl);
         }
-        JSObject json() { JSObject out = new JSObject(); out.put("id", id); out.put("target", target); out.put("format", format); out.put("version", version); out.put("versionCode", versionCode); out.put("url", url); out.put("sha256", sha256); out.put("bytes", bytes); out.put("revision", revision); out.put("manifestHash", manifestHash); out.put("sequence", sequence); out.put("repository", repository); return out; }
+        JSObject json() { JSObject out = new JSObject(); out.put("id", id); out.put("target", target); out.put("format", format); out.put("version", version); out.put("versionCode", versionCode); out.put("url", url); out.put("sha256", sha256); out.put("bytes", bytes); out.put("revision", revision); out.put("manifestHash", manifestHash); out.put("sequence", sequence); out.put("repository", repository); out.put("source", source); if (manifestUrl != null && !manifestUrl.isEmpty()) out.put("manifestUrl", manifestUrl); return out; }
         private static long integer(JSObject data, String key) {
             return integer(data, key, UpdaterPolicy.MAX_BYTES);
         }
@@ -153,7 +155,7 @@ public final class PetUpdaterPlugin extends Plugin {
         File complete = new File(getContext().getCacheDir(), "petpal-updates/installer/" + name + ".apk");
         try {
             if ((!staging.getParentFile().isDirectory() && !staging.getParentFile().mkdirs()) || (!complete.getParentFile().isDirectory() && !complete.getParentFile().mkdirs())) throw new IOException("更新缓存不可用。");
-            URI initial = UpdaterPolicy.initialUrl(requested.url), next = initial;
+            URI initial = UpdaterPolicy.initialUrl(requested.url, requested.source, requested.manifestUrl), next = initial;
             HttpsURLConnection connection = null;
             for (int redirects = 0; ; redirects++) {
                 operation.check();
@@ -166,7 +168,7 @@ public final class PetUpdaterPlugin extends Plugin {
                 int status = connection.getResponseCode(); operation.check();
                 if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
                     String location = connection.getHeaderField("Location"); connection.disconnect(); operation.connection = null;
-                    next = UpdaterPolicy.redirect(initial, next, location, redirects + 1); continue;
+                    next = UpdaterPolicy.redirect(initial, next, location, redirects + 1, requested.source, requested.manifestUrl); continue;
                 }
                 if (status != 200) throw new IOException("更新服务器未返回完整文件。");
                 String encoding = connection.getHeaderField("Content-Encoding"), length = connection.getHeaderField("Content-Length");

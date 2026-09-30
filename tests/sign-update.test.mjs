@@ -68,6 +68,33 @@ test('sign hashes real file bytes, derives immutable GitHub URL and self-verifie
   await assert.rejects(f.sign(), /已存在/); assert.deepEqual(await readFile(f.outputFile), envelopeBytes);
 });
 
+test('server signing derives same-directory HTTPS asset from real bytes without requiring a GitHub tag', async t => {
+  const f = await fixture(t), value = config(), manifestUrl = 'https://updates.example.test:44318/updates/current/petpal-update.json';
+  delete value.repository; delete value.tag;
+  Object.assign(value, { source: 'server', manifestUrl, sequence: 18 });
+  await writeFile(f.configFile, JSON.stringify(value));
+  const result = await f.sign(), pem = await readFile(f.keyResult.publicKeyPath, 'utf8'), envelope = await readFile(f.outputFile);
+  const payload = verifyUpdateEnvelope(envelope, { source: 'server', manifestUrl, publicKey: pem, now: epoch });
+  assert.equal(result.source, 'server'); assert.equal(result.manifestUrl, manifestUrl);
+  assert.equal(payload.releases[0].url, 'https://updates.example.test:44318/updates/current/PetPal-0.7.0-Windows-x64.exe');
+  assert.equal(payload.releases[0].bytes, bytes.length); assert.equal(payload.releases[0].sha256, createHash('sha256').update(bytes).digest('hex'));
+  assert.throws(() => verifyUpdateEnvelope(envelope, { source: 'server', manifestUrl: 'https://other.example.test/updates/current/petpal-update.json', publicKey: pem, now: epoch }), /发布项/);
+  assert.throws(() => verifyUpdateEnvelope(envelope, { repository: 'lixinyu02/petpal', publicKey: pem, now: epoch }), /发布项/);
+});
+
+test('server signing rejects unsafe origins, normalized traversal and injected per-asset URLs before producing output', async t => {
+  const f = await fixture(t);
+  for (const manifestUrl of ['http://updates.example.test/petpal-update.json', 'https://user:password@updates.example.test/petpal-update.json', 'https://updates.example.test/updates/../petpal-update.json', 'https://updates.example.test/updates/%2e%2e/petpal-update.json', 'https://updates.example.test/updates/petpal-update.json?token=secret', 'https://updates.example.test/updates/feed.json']) {
+    await writeFile(f.configFile, JSON.stringify({ ...config(), source: 'server', manifestUrl }));
+    await assert.rejects(f.sign());
+    await assert.rejects(stat(f.outputFile), { code: 'ENOENT' });
+  }
+  const value = { ...config(), source: 'server', manifestUrl: 'https://updates.example.test/updates/petpal-update.json' };
+  value.artifacts[0].url = 'https://other.example.test/untrusted.exe';
+  await writeFile(f.configFile, JSON.stringify(value)); await assert.rejects(f.sign(), /发布平台/);
+  await assert.rejects(stat(f.outputFile), { code: 'ENOENT' });
+});
+
 test('artifact paths resolve relative to config and all five targets receive fixed formats', async t => {
   const f = await fixture(t), sub = path.join(f.directory, 'configuration'); await mkdir(sub);
   const value = config();

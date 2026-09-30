@@ -11,10 +11,13 @@ import { DesktopUpdateManager, createDesktopUpdateHandlers, validateDesktopAsset
 const payload = Buffer.from('test-only verified update bytes; never executable');
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const standardRelease = { id: 'release-061-windows', target: 'windows-x64', version: '0.6.1', url: 'https://github.com/test-owner/petpal/releases/download/v0.6.1/PetPal.exe', sha256: digest(payload), bytes: payload.length, format: 'portable-exe', notes: 'Test only', revision: 'revision-1', repository: 'test-owner/petpal', manifestHash: 'manifest-1', sequence: 1 };
+const serverManifestUrl = 'https://updates.example:8443/petpal/stable/petpal-update.json';
+const serverRelease = { ...standardRelease, source: 'server', manifestUrl: serverManifestUrl, url: 'https://updates.example:8443/petpal/stable/PetPal.exe' };
+const serverConfig = { source: 'server', manifestUrl: serverManifestUrl };
 
 async function fixture(t, options = {}) {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'petpal-update-test-'));
-  const config = { repository: 'test-owner/petpal', revision: 'revision-1', configured: true };
+  const config = { repository: 'test-owner/petpal', revision: 'revision-1', configured: true, ...options.config };
   const calls = [], launches = [], reveals = [];
   const release = { ...standardRelease, ...options.release };
   const service = {
@@ -78,6 +81,146 @@ test('download follows only bounded official redirects, validates exact bytes/ha
   assert.equal(files.length, 1); assert.match(files[0], /\.exe$/);
   assert.deepEqual(await readFile(path.join(f.manager.directory, files[0])), payload);
   assert.equal(f.launches.length, 0);
+});
+
+test('server source downloads same-origin HTTPS assets on an explicit port and revalidates before portable handoff', async t => {
+  const f = await fixture(t, { config: serverConfig, release: serverRelease,
+    fetch: url => url === serverRelease.url
+      ? new Response(null, { status: 307, headers: { location: 'assets/PetPal-0.6.1.exe' } })
+      : new Response(payload, { headers: { 'content-length': String(payload.length) } }),
+  });
+  const checked = await f.manager.check();
+  assert.equal(checked.phase, 'available');
+  assert.equal(checked.release.url, undefined); assert.equal(checked.release.manifestUrl, undefined);
+  const downloaded = await f.manager.download(checked.release.id);
+  assert.equal(downloaded.phase, 'downloaded'); assert.equal(downloaded.canInstall, true);
+  assert.deepEqual(f.requests.map(request => request.url), [serverRelease.url, 'https://updates.example:8443/petpal/stable/assets/PetPal-0.6.1.exe']);
+  assert.deepEqual(await readFile(f.manager.downloaded.file), payload);
+  const installed = await f.manager.install(checked.release.id);
+  assert.equal(installed.phase, 'downloaded'); assert.equal(f.launches.length, 1);
+  assert.equal(f.calls.filter(call => call.action === 'resolve').length, 2);
+  assert.equal(f.launches[0].release.source, 'server'); assert.equal(f.launches[0].release.manifestUrl, serverManifestUrl);
+  assert.equal(f.launches[0].release.repository, standardRelease.repository);
+  assert.doesNotMatch(JSON.stringify(installed), /updates\.example|https:\/\/|petpal-update-test-/);
+});
+
+test('Ubuntu server updates keep the verified archive reveal flow without launching or extracting it', async t => {
+  const f = await fixture(t, { config: serverConfig, platform: 'linux', arch: 'arm64',
+    release: { ...serverRelease, id: 'server-ubuntu-061', target: 'ubuntu-arm64', format: 'tar.gz', url: 'https://updates.example:8443/petpal/stable/PetPal.tar.gz' },
+  });
+  assert.equal((await f.manager.check()).phase, 'available');
+  assert.equal((await f.manager.download(f.release.id)).canInstall, true);
+  const installed = await f.manager.install(f.release.id);
+  assert.equal(installed.installMode, 'reveal-archive');
+  assert.equal(f.launches.length, 0); assert.deepEqual(f.reveals, [f.manager.downloaded.file]);
+  assert.equal(f.calls.filter(call => call.action === 'resolve').length, 2);
+  assert.deepEqual(await readFile(f.reveals[0]), payload);
+});
+
+test('desktop rejects unbound server metadata and out-of-scope initial assets before making any request', async t => {
+  const cases = [
+    { config: serverConfig, release: { ...serverRelease, source: undefined } },
+    { config: serverConfig, release: { ...serverRelease, manifestUrl: 'https://updates.example:8443/other/petpal-update.json' } },
+    { config: serverConfig, release: { ...serverRelease, source: 'unknown' } },
+    { config: {}, release: serverRelease },
+    ...['http://updates.example:8443/petpal/stable/PetPal.exe', 'https://updates.example:9443/petpal/stable/PetPal.exe',
+      'https://elsewhere.example:8443/petpal/stable/PetPal.exe', 'https://updates.example:8443/petpal/PetPal.exe',
+      'https://updates.example:8443/petpal/stable/../stable/PetPal.exe', 'https://updates.example:8443/petpal/stable/%2e%2e/stable/PetPal.exe',
+      'https://updates.example:8443/petpal/stable/PetPal.exe?token=secret', 'https://user:secret@updates.example:8443/petpal/stable/PetPal.exe',
+    ].map(url => ({ config: serverConfig, release: { ...serverRelease, url } })),
+  ];
+  for (const options of cases) {
+    const f = await fixture(t, options);
+    assert.equal((await f.manager.check()).phase, 'error');
+    assert.equal(f.requests.length, 0); assert.equal(f.launches.length, 0);
+  }
+});
+
+test('source kind or server manifest changes invalidate checked downloads even when revision and repository are unchanged', async t => {
+  for (const changed of ['source', 'manifestUrl']) {
+    const f = await fixture(t, { config: serverConfig, release: serverRelease });
+    await f.manager.check(); await f.manager.download(serverRelease.id);
+    const cached = f.manager.downloaded.file;
+    f.config[changed] = changed === 'source' ? 'github' : 'https://updates.example:8443/next/petpal-update.json';
+    const status = f.manager.status();
+    assert.equal(status.canInstall, false); assert.equal(status.release, undefined);
+    assert.throws(() => f.manager.install(serverRelease.id), /已检查/);
+    assert.deepEqual(await readFile(cached), payload); assert.equal(f.launches.length, 0);
+  }
+  const f = await fixture(t);
+  await f.manager.check(); await f.manager.download(standardRelease.id);
+  Object.assign(f.config, serverConfig);
+  assert.equal(f.manager.status().canInstall, false); assert.equal(f.manager.status().release, undefined);
+});
+
+test('server downloads reject raw traversal, cross-origin, credential, query and fallback redirects without fetching their targets', async t => {
+  const locations = [
+    'https://evil.example/petpal/stable/PetPal.exe', standardRelease.url,
+    'http://updates.example:8443/petpal/stable/PetPal.exe', 'https://updates.example:9443/petpal/stable/PetPal.exe',
+    '/petpal/PetPal.exe', '../stable/PetPal.exe', '%2e%2e/stable/PetPal.exe', '%252e%252e/PetPal.exe',
+    '/petpal/stable//PetPal.exe', '/petpal/stable/%2fPetPal.exe',
+    'https://user:secret@updates.example:8443/petpal/stable/PetPal.exe', 'PetPal.exe?token=secret', 'PetPal.exe#fragment',
+  ];
+  for (const location of locations) {
+    const f = await fixture(t, { config: serverConfig, release: serverRelease,
+      fetch: () => new Response(null, { status: 302, headers: { location } }),
+    });
+    await f.manager.check();
+    const result = await f.manager.download(serverRelease.id);
+    assert.equal(result.phase, 'error', location); assert.equal(result.canInstall, false);
+    assert.equal(f.requests.length, 1, location); assert.deepEqual(await readdir(f.manager.directory), []);
+    assert.equal(f.launches.length, 0); assert.doesNotMatch(JSON.stringify(result), /secret|evil\.example/);
+  }
+  const loop = await fixture(t, { config: serverConfig, release: serverRelease,
+    fetch: () => new Response(null, { status: 302, headers: { location: 'PetPal.exe' } }),
+  });
+  await loop.manager.check(); assert.equal((await loop.manager.download(serverRelease.id)).phase, 'error');
+  assert.equal(loop.requests.length, 5); assert.deepEqual(await readdir(loop.manager.directory), []);
+});
+
+test('server payload and cached-file tampering never leave a runnable download or reach installation hooks', async t => {
+  for (const fetch of [
+    () => new Response(payload.subarray(1)),
+    () => new Response(Buffer.concat([payload, Buffer.from('extra')])),
+    () => new Response(Buffer.alloc(payload.length)),
+    () => new Response(payload, { headers: { 'content-length': '1' } }),
+  ]) {
+    const f = await fixture(t, { config: serverConfig, release: serverRelease, fetch });
+    await f.manager.check();
+    const status = await f.manager.download(serverRelease.id);
+    assert.equal(status.phase, 'error'); assert.equal(status.canInstall, false);
+    assert.deepEqual(await readdir(f.manager.directory), []); assert.equal(f.launches.length, 0);
+  }
+  const cached = await fixture(t, { config: serverConfig, release: serverRelease });
+  await cached.manager.check(); await cached.manager.download(serverRelease.id);
+  await writeFile(cached.manager.downloaded.file, Buffer.alloc(payload.length));
+  assert.equal((await cached.manager.install(serverRelease.id)).phase, 'error'); assert.equal(cached.launches.length, 0);
+  const fresh = await fixture(t, { config: serverConfig, release: serverRelease });
+  await fresh.manager.check(); await fresh.manager.download(serverRelease.id);
+  fresh.release.url = 'https://updates.example:8443/petpal/stable/other.exe';
+  assert.equal((await fresh.manager.install(serverRelease.id)).phase, 'error'); assert.equal(fresh.launches.length, 0);
+});
+
+test('server download cancellation and in-flight source changes clean partial bytes and prevent handoff', async t => {
+  let started;
+  const ready = new Promise(resolve => { started = resolve; });
+  const pending = await fixture(t, { config: serverConfig, release: serverRelease,
+    fetch: (_url, init) => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(payload.subarray(0, 5)); started(); init.signal.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')), { once: true }); },
+    })),
+  });
+  await pending.manager.check(); const downloading = pending.manager.download(serverRelease.id); await ready;
+  await writeFile(path.join(pending.manager.directory, 'user-note.txt'), 'keep');
+  await pending.manager.cancel(); await downloading;
+  assert.equal(pending.manager.status().canInstall, false);
+  assert.deepEqual(await readdir(pending.manager.directory), ['user-note.txt']); assert.equal(pending.launches.length, 0);
+  const changed = await fixture(t, { config: serverConfig, release: serverRelease });
+  await changed.manager.check(); let authorizations = 0;
+  await changed.manager.download(serverRelease.id, { authorize: async () => {
+    if (++authorizations === 2) changed.config.manifestUrl = 'https://updates.example:8443/next/petpal-update.json';
+  } });
+  assert.equal(changed.manager.status().canInstall, false);
+  assert.deepEqual(await readdir(changed.manager.directory), []); assert.equal(changed.launches.length, 0);
 });
 
 test('untrusted redirect, redirect loops, short/long/corrupt payloads leave no partial or runnable file', async t => {
@@ -259,10 +402,13 @@ async function mainHarness() {
 }
 
 test('final main handoff rechecks source and cancellation after hash/authorization, then launches without inherited portable or smoke overrides', async () => {
-  for (const key of ['configured', 'revision', 'repository', 'cancel']) {
+  for (const key of ['configured', 'revision', 'repository', 'source', 'manifestUrl', 'cancel']) {
     const f = await mainHarness();
+    if (key === 'manifestUrl') { Object.assign(f.config, serverConfig); f.prepared.release = { ...serverRelease }; }
     f.prepared.authorize = async () => {
       if (key === 'cancel') f.controller.abort();
+      else if (key === 'source') f.config.source = 'server';
+      else if (key === 'manifestUrl') f.config.manifestUrl = 'https://updates.example:8443/next/petpal-update.json';
       else f.config[key] = key === 'configured' ? false : 'changed';
     };
     await assert.rejects(f.launchPreparedUpdate(f.prepared));
@@ -274,6 +420,10 @@ test('final main handoff rechecks source and cancellation after hash/authorizati
   assert.equal(launch.file, f.prepared.file); assert.equal(launch.args.length, 0);
   assert.equal(launch.options.shell, false); assert.equal(launch.options.detached, true);
   assert.equal(launch.options.env.KEEP, 'yes'); assert.deepEqual(Object.keys(launch.options.env), ['KEEP']);
+  const server = await mainHarness();
+  Object.assign(server.config, serverConfig); server.prepared.release = { ...serverRelease };
+  await server.launchPreparedUpdate(server.prepared);
+  assert.equal(server.calls.filter(call => call.action === 'spawn').length, 1);
 });
 
 test('canceling a queued portable handoff leaves the application open and allows a later retry', async () => {

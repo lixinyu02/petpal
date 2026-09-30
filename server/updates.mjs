@@ -1,4 +1,5 @@
 import { createHash, createPublicKey, randomUUID, verify } from 'node:crypto';
+import { validateServerManifestUrl, validateServerAssetUrl, validateServerRedirect } from './update-source.mjs';
 
 export const UPDATE_CHANNEL = 'stable';
 export const UPDATE_MANIFEST_LIMIT = 128 * 1024;
@@ -8,6 +9,15 @@ const failure = (status, message) => Object.assign(new Error(message), { status 
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const fields = (value, allowed) => object(value) && Object.keys(value).every(key => allowed.includes(key));
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const updateSource = value => {
+  if (!['github', 'server'].includes(value)) throw failure(400, '更新来源必须是 github 或 server。');
+  return value;
+};
+function manifestUrl(value, source) {
+  if (typeof value !== 'string') throw failure(400, '服务器更新清单地址须为字符串。');
+  if (!value && source === 'github') return '';
+  return validateServerManifestUrl(value);
+}
 
 export function validateUpdateRepository(value) {
   if (typeof value !== 'string' || value.length > 140 || !/^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})\/[a-zA-Z0-9_.-]{1,100}$/.test(value) || value.split('/')[1].startsWith('.') || value.split('/')[1].endsWith('.')) throw failure(400, '更新仓库必须是公开 GitHub owner/repo。');
@@ -87,7 +97,9 @@ function timestamp(value) {
   return result;
 }
 
-export function verifyUpdateEnvelope(bytes, { repository, publicKey: pem, now = Date.now() }) {
+export function verifyUpdateEnvelope(bytes, { repository, source = 'github', manifestUrl: serverManifest = '', publicKey: pem, now = Date.now() }) {
+  updateSource(source);
+  if (source === 'server') serverManifest = validateServerManifestUrl(serverManifest);
   if (!Buffer.isBuffer(bytes)) bytes = Buffer.from(bytes);
   if (bytes.length > UPDATE_MANIFEST_LIMIT) throw failure(502, '更新清单超过 128 KiB 限制。');
   const envelope = parseJson(bytes);
@@ -104,7 +116,7 @@ export function verifyUpdateEnvelope(bytes, { repository, publicKey: pem, now = 
     try {
       if (!fields(item, ['id', 'target', 'version', 'versionCode', 'url', 'sha256', 'bytes', 'notes', 'format']) || typeof item.id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(item.id) || ids.has(item.id) || typeof item.target !== 'string' || !Object.hasOwn(FORMATS, item.target) || targets.has(item.target) || item.format !== FORMATS[item.target]) throw new Error('target');
       parseStableVersion(item.version);
-      const url = validateGitHubAssetUrl(item.url, repository);
+      const url = source === 'server' ? validateServerAssetUrl(item.url, serverManifest) : validateGitHubAssetUrl(item.url, repository);
       if (typeof item.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(item.sha256) || !Number.isSafeInteger(item.bytes) || item.bytes < 1 || item.bytes > UPDATE_FILE_LIMIT || typeof item.notes !== 'string' || item.notes.length > 16000 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(item.notes)) throw new Error('metadata');
       if (item.target === 'android' ? (!Number.isInteger(item.versionCode) || item.versionCode < 1 || item.versionCode > 2100000000) : item.versionCode !== undefined) throw new Error('versionCode');
       ids.add(item.id); targets.add(item.target);
@@ -138,14 +150,16 @@ async function limitedBody(response, signal) {
   } finally { signal.removeEventListener('abort', abort); if (!complete) void reader.cancel().catch(() => {}); }
 }
 
-async function fetchManifest(repository, fetchImpl, signal) {
-  let url = `https://github.com/${repository}/releases/latest/download/petpal-update.json`;
+async function fetchManifest(config, fetchImpl, signal) {
+  const serverSource = config.source === 'server';
+  let url = serverSource ? validateServerManifestUrl(config.manifestUrl) : `https://github.com/${config.repository}/releases/latest/download/petpal-update.json`;
   const visited = new Set();
   for (let redirects = 0; redirects <= 3; redirects++) {
     signal.throwIfAborted();
     if (visited.has(url)) throw failure(502, '更新源重定向形成循环。');
     visited.add(url);
-    const response = await fetchImpl(url, { method: 'GET', headers: { Accept: 'application/json', 'User-Agent': 'PetPal-Updater/0.6' }, redirect: 'manual', credentials: 'omit', signal });
+    const response = await fetchImpl(url, { method: 'GET', headers: { Accept: 'application/json', 'User-Agent': 'PetPal-Updater/0.6', ...(serverSource ? { 'Accept-Encoding': 'identity' } : {}) }, redirect: 'manual', credentials: 'omit', signal });
+    if (signal.aborted) void response.body?.cancel().catch(() => {});
     signal.throwIfAborted();
     // A custom transport must not silently follow redirects on our behalf.
     if (response.redirected || (response.url && response.url !== url)) { void response.body?.cancel().catch(() => {}); throw failure(502, '更新传输绕过了重定向校验。'); }
@@ -155,11 +169,17 @@ async function fetchManifest(repository, fetchImpl, signal) {
       if (!location || redirects === 3) throw failure(502, '更新源重定向次数过多或缺少地址。');
       if (location.length > 8192 || /[\x00-\x20\x7f\\]/.test(location)) throw failure(502, '更新源重定向地址无效。');
       let next;
-      try { next = new URL(location, url).href; } catch { throw failure(502, '更新源重定向地址无效。'); }
-      url = validateGitHubRedirect(url, next, repository); continue;
+      if (serverSource) {
+        next = validateServerRedirect(url, location, config.manifestUrl);
+        try { url = validateServerManifestUrl(next); } catch { throw failure(502, '服务器更新源返回不允许的清单地址。'); }
+      } else {
+        try { next = new URL(location, url).href; } catch { throw failure(502, '更新源重定向地址无效。'); }
+        url = validateGitHubRedirect(url, next, config.repository);
+      }
+      continue;
     }
-    if (response.status === 404) { void response.body?.cancel().catch(() => {}); throw failure(404, 'GitHub 仓库尚未发布签名更新清单。'); }
-    if (response.status !== 200) { void response.body?.cancel().catch(() => {}); throw failure(502, 'GitHub 更新源暂时不可用。'); }
+    if (response.status === 404) { void response.body?.cancel().catch(() => {}); throw failure(404, serverSource ? '服务器尚未发布签名更新清单。' : 'GitHub 仓库尚未发布签名更新清单。'); }
+    if (response.status !== 200) { void response.body?.cancel().catch(() => {}); throw failure(502, serverSource ? '服务器更新源暂时不可用。' : 'GitHub 更新源暂时不可用。'); }
     return limitedBody(response, signal);
   }
   throw failure(502, '更新源重定向次数过多。');
@@ -167,10 +187,14 @@ async function fetchManifest(repository, fetchImpl, signal) {
 
 export function createUpdateService({ store, fetchImpl = globalThis.fetch, now = Date.now, timeoutMs = 15000 } = {}) {
   const state = store.state;
-  state.updateConfig ??= { repository: 'lixinyu02/petpal', publicKey: '', revision: randomUUID() };
+  state.updateConfig ??= { source: 'github', manifestUrl: '', repository: 'lixinyu02/petpal', publicKey: '', revision: randomUUID() };
   state.updateTrustState ??= {};
   const stored = state.updateConfig;
-  if (!fields(stored, ['repository', 'publicKey', 'revision']) || validateUpdateRepository(stored.repository) !== stored.repository || publicKey(stored.publicKey).pem !== stored.publicKey || !/^[a-f0-9-]{36}$/.test(stored.revision) || !object(state.updateTrustState) || Object.entries(state.updateTrustState).some(([key, value]) => !/^[a-f0-9]{64}:stable$/.test(key) || !fields(value, ['sequence', 'payloadHash']) || !Number.isSafeInteger(value.sequence) || value.sequence < 1 || !/^[a-f0-9]{64}$/.test(value.payloadHash))) throw new Error('本地更新设置无效，请保留数据并检查备份。');
+  if (object(stored)) {
+    if (stored.source === undefined) stored.source = 'github';
+    if (stored.manifestUrl === undefined) stored.manifestUrl = '';
+  }
+  if (!fields(stored, ['repository', 'publicKey', 'revision', 'source', 'manifestUrl']) || updateSource(stored.source) !== stored.source || manifestUrl(stored.manifestUrl, stored.source) !== stored.manifestUrl || validateUpdateRepository(stored.repository) !== stored.repository || publicKey(stored.publicKey).pem !== stored.publicKey || !/^[a-f0-9-]{36}$/.test(stored.revision) || !object(state.updateTrustState) || Object.entries(state.updateTrustState).some(([key, value]) => !/^[a-f0-9]{64}:stable$/.test(key) || !fields(value, ['sequence', 'payloadHash']) || !Number.isSafeInteger(value.sequence) || value.sequence < 1 || !/^[a-f0-9]{64}$/.test(value.payloadHash))) throw new Error('本地更新设置无效，请保留数据并检查备份。');
   const running = new Set(), checked = new Map();
   let closed = false, changing = false, closing, configTask, trustQueue = Promise.resolve();
   const statusConfig = () => ({ ...state.updateConfig, configured: Boolean(state.updateConfig.publicKey), channel: UPDATE_CHANNEL });
@@ -179,11 +203,12 @@ export function createUpdateService({ store, fetchImpl = globalThis.fetch, now =
 
   const configure = async body => {
     assertLive();
-    if (!fields(body, ['repository', 'publicKey', 'revision'])) throw failure(400, '更新配置包含不支持的字段。');
+    if (!fields(body, ['repository', 'publicKey', 'revision', 'source', 'manifestUrl'])) throw failure(400, '更新配置包含不支持的字段。');
     const previous = state.updateConfig;
     if (body.revision !== undefined && body.revision !== previous.revision) throw failure(409, '更新设置已变化，请刷新后重试。');
-    const next = { ...previous, ...(body.repository !== undefined ? { repository: validateUpdateRepository(body.repository) } : {}), ...(body.publicKey !== undefined ? { publicKey: publicKey(body.publicKey).pem } : {}) };
-    if (next.repository === previous.repository && next.publicKey === previous.publicKey) return statusConfig();
+    const source = body.source === undefined ? previous.source : updateSource(body.source);
+    const next = { ...previous, source, manifestUrl: manifestUrl(body.manifestUrl === undefined ? previous.manifestUrl : body.manifestUrl, source), ...(body.repository !== undefined ? { repository: validateUpdateRepository(body.repository) } : {}), ...(body.publicKey !== undefined ? { publicKey: publicKey(body.publicKey).pem } : {}) };
+    if (['source', 'manifestUrl', 'repository', 'publicKey'].every(key => next[key] === previous[key])) return statusConfig();
     if (!Object.hasOwn(state.updateTrustState, `${publicKey(next.publicKey).fingerprint}:stable`) && Object.keys(state.updateTrustState).length >= 64 && next.publicKey) throw failure(400, '已保存过多发布公钥，请先整理可信更新历史。');
     next.revision = randomUUID(); changing = true;
     configTask = (async () => {
@@ -202,7 +227,7 @@ export function createUpdateService({ store, fetchImpl = globalThis.fetch, now =
     parseStableVersion(currentVersion);
     signal?.throwIfAborted();
     const config = statusConfig();
-    const result = { configured: config.configured, currentVersion, target, available: false, release: null, repository: config.repository, revision: config.revision, message: '尚未配置发布公钥，更新源未启用。', checkedAt: new Date(now()).toISOString() };
+    const result = { configured: config.configured, currentVersion, target, available: false, release: null, source: config.source, ...(config.source === 'server' ? { manifestUrl: config.manifestUrl } : {}), repository: config.repository, revision: config.revision, message: '尚未配置发布公钥，更新源未启用。', checkedAt: new Date(now()).toISOString() };
     if (!config.configured) return result;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(failure(504, '检查更新超时，请稍后重试。')), timeoutMs);
@@ -210,7 +235,7 @@ export function createUpdateService({ store, fetchImpl = globalThis.fetch, now =
     let finish;
     const done = new Promise(resolve => { finish = resolve; }), task = { controller, done }; running.add(task);
     try {
-      const bytes = await fetchManifest(config.repository, fetchImpl, combined);
+      const bytes = await fetchManifest(config, fetchImpl, combined);
       combined.throwIfAborted(); sameConfig(config);
       const payload = verifyUpdateEnvelope(bytes, { ...config, now: now() });
       const trustId = `${payload.keyFingerprint}:${UPDATE_CHANNEL}`;
@@ -232,14 +257,14 @@ export function createUpdateService({ store, fetchImpl = globalThis.fetch, now =
       const release = payload.releases.find(item => item.target === target);
       if (!release) return { ...result, message: '当前签名发布中没有此平台的安装包。' };
       if (compareStableVersions(release.version, currentVersion) <= 0) return { ...result, message: '当前客户端已是此更新源提供的最新版本。' };
-      const validated = { ...release, repository: config.repository, revision: config.revision, manifestHash: payload.payloadHash, sequence: payload.sequence };
+      const validated = { ...release, source: config.source, ...(config.source === 'server' ? { manifestUrl: config.manifestUrl } : {}), repository: config.repository, revision: config.revision, manifestHash: payload.payloadHash, sequence: payload.sequence };
       if (remember) checked.set(`${target}:${currentVersion}:${release.id}`, { revision: config.revision, manifestHash: payload.payloadHash, target, currentVersion });
       if (checked.size > 100) checked.delete(checked.keys().next().value);
       return { ...result, available: true, release: validated, message: '发现已验证的新版本。' };
     } catch (error) {
       if (combined.aborted) throw combined.reason;
       if (error.status) throw error;
-      throw failure(502, '无法连接 GitHub 更新源，请稍后重试。');
+      throw failure(502, config.source === 'server' ? '无法连接服务器更新源，请稍后重试。' : '无法连接 GitHub 更新源，请稍后重试。');
     } finally { clearTimeout(timer); running.delete(task); finish(); }
   };
 

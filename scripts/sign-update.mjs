@@ -5,11 +5,12 @@ import { lstat, mkdir, open, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseStableVersion, validateUpdateRepository, validateGitHubAssetUrl, verifyUpdateEnvelope, UPDATE_FILE_LIMIT, UPDATE_MANIFEST_LIMIT } from '../server/updates.mjs';
+import { validateServerManifestUrl, validateServerAssetUrl } from '../server/update-source.mjs';
 
 const FORMATS = Object.freeze({ 'windows-x64': ['portable-exe', '.exe'], 'ubuntu-x64': ['tar.gz', '.tar.gz'], 'ubuntu-arm64': ['tar.gz', '.tar.gz'], android: ['apk', '.apk'], web: ['web-zip', '.zip'] });
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
 const fields = (value, allowed) => record(value) && Object.keys(value).every(key => allowed.includes(key));
-const usage = `离线 GitHub 更新清单工具（Node.js 22+）
+const usage = `离线签名更新清单工具（GitHub Releases / 服务器，Node.js 22+）
   node scripts/sign-update.mjs keygen --out-dir .release-private
   node scripts/sign-update.mjs sign --config docs/update-release.example.json --key .release-private/update-private.pem --out releases/petpal-update.json
 keygen 需要显式目录，已有密钥或已有输出均不会覆盖。私钥内容不会输出。`;
@@ -65,9 +66,13 @@ export async function generateUpdateKeys(directory) {
 }
 
 function validateConfig(config, now) {
-  if (!fields(config, ['repository', 'tag', 'sequence', 'expiresAt', 'artifacts'])) throw new Error('发布配置字段无效。');
-  const repository = validateUpdateRepository(config.repository);
-  if (typeof config.tag !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(config.tag)) throw new Error('tag 必须是单段 GitHub 发布标签，例如 v0.6.0。');
+  if (!fields(config, ['source', 'manifestUrl', 'repository', 'tag', 'sequence', 'expiresAt', 'artifacts'])) throw new Error('发布配置字段无效。');
+  const source = config.source ?? 'github';
+  if (!['github', 'server'].includes(source)) throw new Error('发布来源必须为 github 或 server。');
+  const repository = validateUpdateRepository(config.repository ?? (source === 'server' ? 'lixinyu02/petpal' : undefined));
+  const manifestUrl = source === 'server' ? validateServerManifestUrl(config.manifestUrl) : '';
+  if (source === 'github' && (typeof config.tag !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(config.tag))) throw new Error('tag 必须是单段 GitHub 发布标签，例如 v0.6.0。');
+  if (source === 'github' && config.manifestUrl) throw new Error('GitHub 发布配置不能包含服务器清单地址。');
   if (!Number.isSafeInteger(config.sequence) || config.sequence < 1) throw new Error('sequence 必须是递增的正安全整数。');
   if (typeof config.expiresAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(config.expiresAt) || !Number.isFinite(Date.parse(config.expiresAt)) || Date.parse(config.expiresAt) <= now) throw new Error('expiresAt 必须是未来的 UTC ISO 时间。');
   if (!Array.isArray(config.artifacts) || !config.artifacts.length || config.artifacts.length > 5) throw new Error('artifacts 必须包含 1 到 5 个平台文件。');
@@ -82,7 +87,7 @@ function validateConfig(config, now) {
     if (item.notes !== undefined && (typeof item.notes !== 'string' || item.notes.length > 16000 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(item.notes))) throw new Error('更新说明必须是 16000 字符以内的纯文本。');
     if (item.target === 'android' ? (!Number.isInteger(item.versionCode) || item.versionCode < 1 || item.versionCode > 2100000000) : item.versionCode !== undefined) throw new Error('Android 必须指定有效 versionCode；其他平台不能指定 versionCode。');
   }
-  return repository;
+  return { repository, source, manifestUrl };
 }
 
 async function hashArtifact(file) {
@@ -113,7 +118,7 @@ export async function signUpdateManifest({ configFile, keyFile, outputFile, now 
   let config;
   try { config = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await readSmall(configPath, UPDATE_MANIFEST_LIMIT, '发布配置'))); }
   catch { throw new Error('无法读取发布配置，请提供 128 KiB 以内的 UTF-8 JSON 普通文件。'); }
-  const repository = validateConfig(config, issuedTime);
+  const {repository,source,manifestUrl} = validateConfig(config, issuedTime);
   let privateKey;
   try {
     privateKey = createPrivateKey(await readSmall(path.resolve(keyFile), 16 * 1024, '发布私钥'));
@@ -124,21 +129,23 @@ export async function signUpdateManifest({ configFile, keyFile, outputFile, now 
   for (const item of config.artifacts) {
     const file = path.resolve(path.dirname(configPath), item.file);
     const metadata = await hashArtifact(file);
-    const url = validateGitHubAssetUrl(`https://github.com/${repository}/releases/download/${encodeURIComponent(config.tag)}/${encodeURIComponent(path.basename(file))}`, repository);
+    const url = source === 'server'
+      ? validateServerAssetUrl(new URL(path.basename(file), manifestUrl).href, manifestUrl)
+      : validateGitHubAssetUrl(`https://github.com/${repository}/releases/download/${encodeURIComponent(config.tag)}/${encodeURIComponent(path.basename(file))}`, repository);
     releases.push({ id: `${item.target}-${item.version}`, target: item.target, version: item.version, ...(item.versionCode !== undefined ? { versionCode: item.versionCode } : {}), url, ...metadata, notes: item.notes ?? '', format: FORMATS[item.target][0] });
   }
   const payload = { product: 'petpal', channel: 'stable', sequence: config.sequence, issuedAt: new Date(issuedTime).toISOString(), expiresAt: config.expiresAt, releases };
   const payloadBytes = Buffer.from(JSON.stringify(payload));
   const envelope = { schemaVersion: 1, payload: payloadBytes.toString('base64url'), signature: sign(null, payloadBytes, privateKey).toString('base64url') };
   const contents = Buffer.from(`${JSON.stringify(envelope, null, 2)}\n`);
-  const verified = verifyUpdateEnvelope(contents, { repository, publicKey, now: now ?? Date.now() });
+  const verified = verifyUpdateEnvelope(contents, { repository, source, manifestUrl, publicKey, now: now ?? Date.now() });
   await mkdir(path.dirname(outputPath), { recursive: true });
   let handle, complete = false;
   try {
     handle = await open(outputPath, 'wx', 0o644);
     await handle.writeFile(contents); await handle.sync(); complete = true;
   } finally { await handle?.close(); if (handle && !complete) await unlink(outputPath).catch(() => {}); }
-  return { outputPath, repository, sequence: verified.sequence, releases: releases.length, bytes: contents.length, sha256: createHash('sha256').update(contents).digest('hex'), publicKeyFingerprint: verified.keyFingerprint };
+  return { outputPath, repository, source, ...(source === 'server' ? {manifestUrl} : {}), sequence: verified.sequence, releases: releases.length, bytes: contents.length, sha256: createHash('sha256').update(contents).digest('hex'), publicKeyFingerprint: verified.keyFingerprint };
 }
 
 export async function main(args = process.argv.slice(2)) {

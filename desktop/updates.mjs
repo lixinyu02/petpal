@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, lstat, open, rename, unlink, realpath } from 'node:fs/promises';
 import path from 'node:path';
+import { validateServerManifestUrl, validateServerAssetUrl, validateServerRedirect } from '../server/update-source.mjs';
 
 export const MAX_UPDATE_BYTES = 2 * 1024 * 1024 * 1024;
 const SUPPORTED = new Set(['windows-x64', 'ubuntu-x64', 'ubuntu-arm64']);
@@ -16,6 +17,12 @@ const newer = (left, right) => {
   const a = versionParts(left), b = versionParts(right);
   for (let i = 0; i < 3; i++) { if (a[i] !== b[i]) return a[i] > b[i]; }
   return false;
+};
+const updateSource = value => value === undefined ? 'github' : value;
+const sameSourceBinding = (release, config) => {
+  const source = updateSource(release?.source);
+  return ['github', 'server'].includes(source) && source === updateSource(config?.source) && release?.revision === config?.revision && release?.repository === config?.repository &&
+    (source === 'github' || release?.manifestUrl === config?.manifestUrl);
 };
 
 export function desktopUpdateTarget(platform = process.platform, arch = process.arch) {
@@ -40,13 +47,16 @@ function validateRelease(release, target, currentVersion, config) {
   if (!newer(release.version, currentVersion)) throw new Error('更新版本必须高于当前版本');
   const format = target === 'windows-x64' ? 'portable-exe' : 'tar.gz';
   if (release.format !== format || !Number.isSafeInteger(release.bytes) || release.bytes < 1 || release.bytes > MAX_UPDATE_BYTES || !/^[a-f0-9]{64}$/i.test(release.sha256 || '')) throw new Error('更新文件格式、大小或校验值无效');
-  if (!config?.configured || release.revision !== config.revision || release.repository !== config.repository) throw new Error('更新源已变化，请重新检查');
-  validateDesktopAssetUrl(release.url, config.repository);
-  return { ...release, sha256: release.sha256.toLowerCase() };
+  if (!config?.configured || !sameSourceBinding(release, config)) throw new Error('更新源已变化，请重新检查');
+  const source = updateSource(release.source);
+  const manifestUrl = source === 'server' ? validateServerManifestUrl(release.manifestUrl) : undefined;
+  if (manifestUrl !== undefined && manifestUrl !== config.manifestUrl) throw new Error('更新源已变化，请重新检查');
+  const url = source === 'server' ? validateServerAssetUrl(release.url, manifestUrl) : validateDesktopAssetUrl(release.url, config.repository);
+  return { ...release, source, manifestUrl, url, sha256: release.sha256.toLowerCase() };
 }
 
 function sameRelease(a, b) {
-  return ['id', 'target', 'version', 'bytes', 'sha256', 'format', 'revision', 'repository', 'manifestHash', 'sequence', 'url'].every(key => a?.[key] === b?.[key]);
+  return ['id', 'target', 'version', 'bytes', 'sha256', 'format', 'revision', 'repository', 'manifestHash', 'sequence', 'source', 'manifestUrl', 'url'].every(key => a?.[key] === b?.[key]);
 }
 
 /** Also used immediately before main-process portable launch, after old backend closes. */
@@ -91,7 +101,7 @@ export class DesktopUpdateManager {
   }
 
   #config() { return this.service.statusConfig(); }
-  #configMatches(release) { const config = this.#config(); return config.configured && config.revision === release?.revision && config.repository === release?.repository; }
+  #configMatches(release) { const config = this.#config(); return config.configured && sameSourceBinding(release, config); }
   status() {
     const config = this.#config();
     if (this.checked && !this.#configMatches(this.checked)) {
@@ -142,7 +152,7 @@ export class DesktopUpdateManager {
       await authorize();
       assertActive(signal);
       const config = this.#config();
-      if (result.revision !== config.revision || result.repository !== config.repository) throw new Error('更新源已变化');
+      if (!sameSourceBinding(result, config)) throw new Error('更新源已变化');
       if (!result.configured) this.state = { phase: 'not-configured', received: 0, total: 0, message: '更新源尚未配置发布公钥' };
       else if (!result.available) this.state = { phase: 'current', received: 0, total: 0, message: '没有更高版本的已验证更新' };
       else {
@@ -171,7 +181,8 @@ export class DesktopUpdateManager {
       try {
         assertActive(combined);
         handle = await open(partial, 'wx', 0o600);
-        let url = validateDesktopAssetUrl(release.url, release.repository);
+        const serverSource = release.source === 'server';
+        let url = serverSource ? validateServerAssetUrl(release.url, release.manifestUrl) : validateDesktopAssetUrl(release.url, release.repository);
         let response;
         for (let hops = 0; ; hops++) {
           resetStall();
@@ -181,8 +192,14 @@ export class DesktopUpdateManager {
           if (![301, 302, 303, 307, 308].includes(response.status)) break;
           const location = response.headers.get('location');
           await response.body?.cancel();
-          if (!location || hops >= 4 || new URL(url).hostname !== 'github.com') throw new Error('更新重定向过多或 CDN 返回了新的跳转');
-          url = validateDesktopAssetUrl(new URL(location, url).href, release.repository, { cdn: true });
+          if (!location || hops >= 4) throw new Error('更新重定向过多或缺少目标地址');
+          // Preserve the raw Location for server path validation: URL parsing
+          // would otherwise erase dot segments before the boundary sees them.
+          if (serverSource) url = validateServerRedirect(url, location, release.manifestUrl);
+          else {
+            if (new URL(url).hostname !== 'github.com') throw new Error('更新 CDN 返回了新的跳转');
+            url = validateDesktopAssetUrl(new URL(location, url).href, release.repository, { cdn: true });
+          }
         }
         if (response.status !== 200 || !response.body) throw new Error('更新下载未成功');
         const length = response.headers.get('content-length');

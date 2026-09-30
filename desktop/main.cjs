@@ -84,7 +84,7 @@ async function launchPreparedUpdate(prepared) {
   await prepared.authorize();
   prepared.signal.throwIfAborted();
   const config = backend.updates.statusConfig();
-  if (!config.configured || config.revision !== prepared.release.revision || config.repository !== prepared.release.repository) throw new Error('更新源已变化，请重新检查');
+  if (!config.configured || config.revision !== prepared.release.revision || config.repository !== prepared.release.repository || (config.source ?? 'github') !== (prepared.release.source ?? 'github') || (config.source === 'server' && config.manifestUrl !== prepared.release.manifestUrl)) throw new Error('更新源已变化，请重新检查');
   // The old backend is already closed. The new portable keeps the same app ID,
   // so release our lock before launch; neither old executable nor user data is replaced.
   app.releaseSingleInstanceLock();

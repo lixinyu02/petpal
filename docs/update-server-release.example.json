@@ -1,0 +1,20 @@
+{
+  "source": "server",
+  "manifestUrl": "https://magicdatou.top:44318/downloads/updates/petpal-update.json",
+  "sequence": 8,
+  "expiresAt": "2027-09-30T00:00:00Z",
+  "artifacts": [
+    {
+      "target": "windows-x64",
+      "file": "../releases/windows-0.9.1-public/PetPal-0.9.1-Windows-x64.exe",
+      "version": "0.9.1",
+      "notes": "服务器镜像的现有便携包；本轮新增来源选择需后续新版客户端。"
+    },
+    {
+      "target": "web",
+      "file": "../releases/server-updates/PetPal-0.9.1-Web.zip",
+      "version": "0.9.1",
+      "notes": "服务器提供的网页资源；部署完成后刷新使用。"
+    }
+  ]
+}
