@@ -4,3 +4,4 @@ android/gradlew text eol=lf
 *.png binary
 *.gif binary
 *.jar binary
+server/native/music-mcp/** -text

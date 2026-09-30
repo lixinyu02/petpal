@@ -23,6 +23,10 @@ const codexVersion = metadata.dependencies['@openai/codex'];
 const opencliVersion = metadata.dependencies['@jackwener/opencli'];
 const requiredApplicationSource = ['server/updates.mjs', 'desktop/updates.mjs', 'server/app.mjs', 'server/auth.mjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/index.mjs', 'server/providers.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'NOTICE'];
 requiredApplicationSource.push('server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs');
+requiredApplicationSource.push('desktop/startup-diagnostics.cjs', 'server/music-mcp.mjs', 'server/music-mcp-routes.mjs',
+  'server/native/music-mcp/netease/server.py', 'server/native/music-mcp/netease/LICENSE', 'server/native/music-mcp/netease/pyproject.toml', 'server/native/music-mcp/netease/PROVENANCE.json',
+  'server/native/music-mcp/qqmusic/login.py', 'server/native/music-mcp/qqmusic/LICENSE', 'server/native/music-mcp/qqmusic/pyproject.toml', 'server/native/music-mcp/qqmusic/PROVENANCE.json',
+  'server/native/music-mcp/qqmusic/src/mcp_qqmusic/__init__.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/__main__.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/server.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/format.py');
 const opencliPrefix = 'node_modules/@jackwener/opencli';
 const requiredOpencliFiles = ['package.json', 'LICENSE', 'cli-manifest.json', 'dist/src/main.js', 'dist/src/daemon.js', 'dist/src/browser/base-page.js'];
 if (![electronVersion, codexVersion, opencliVersion].every(version => /^\d+\.\d+\.\d+$/.test(version))) throw new Error('Electron, Codex and OpenCLI versions must be exact.');
@@ -191,6 +195,7 @@ try {
   }
   const sourceFiles = await allFiles(source);
   for (const file of requiredApplicationSource) if (!sourceFiles.includes(file)) throw new Error(`Required application source is absent: ${file}`);
+  for (const file of sourceFiles.filter(file => file.startsWith('server/native/music-mcp/'))) if (!requiredApplicationSource.includes(file)) throw new Error(`Unexpected music MCP vendor member: ${file}`);
   if (sourceFiles.some(file => /(?:^|\/)(?:\.env|\.data|\.tools|\.preview|preview|evidence|private|auth\.json|token)(?:$|\/)|\.exe$|\.dll$/i.test(file))) throw new Error('Source snapshot unexpectedly contains credentials/runtime/preview data or Windows binaries.');
   const sourceReceipt = [];
   for (const file of sourceFiles.filter(file => !file.startsWith('node_modules/'))) sourceReceipt.push({ path: file, sha256: await digest(path.join(source, file)) });
@@ -253,7 +258,7 @@ try {
       appId: 'com.petpal.desktop', productName: 'PetPal', asar: false, electronVersion, electronDist: runtime,
       npmRebuild: false, nodeGypRebuild: false, buildDependenciesFromSource: false,
       removePackageScripts: false, removePackageKeywords: false,
-      directories: { output: builderOutput }, files: ['dist/**', 'server/**', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'desktop/updates.mjs', 'desktop/assets/**', 'package.json', 'NOTICE'],
+      directories: { output: builderOutput }, files: ['dist/**', 'server/**', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'desktop/updates.mjs', 'desktop/assets/**', 'package.json', 'NOTICE'],
       linux: { executableName: 'petpal', category: 'Utility' },
     } });
     const unpacked = path.join(builderOutput, arch === 'x64' ? 'linux-unpacked' : `linux-${arch}-unpacked`);
@@ -264,6 +269,16 @@ try {
     const packagedCodex = await elf(finalCodex, arch);
     if (packagedCodex.sha256 !== nativeAudit.sha256) throw new Error('Builder changed native Codex binary');
     await elf(path.join(portable, 'petpal'), arch);
+    const packagedApp = path.join(portable, 'resources', 'app');
+    // Native Python and attribution files must survive builder filtering with
+    // exactly the bytes recorded before the build, including --dir-only runs.
+    const packagedSource = await allFiles(path.join(packagedApp, 'server'));
+    for (const relative of packagedSource.filter(file => file.startsWith('native/music-mcp/'))) if (!requiredApplicationSource.includes(`server/${relative}`)) throw new Error(`Unexpected packaged music MCP member: server/${relative}`);
+    for (const file of requiredApplicationSource) {
+      const target = path.join(packagedApp, file), expected = sourceReceipt.find(item => item.path === file);
+      if (!(await stat(target).catch(() => null))?.isFile()) throw new Error(`Required packaged application source is absent: ${file}`);
+      if (!expected || await digest(target) !== expected.sha256) throw new Error(`Builder changed application source: ${file}`);
+    }
     const preservedMetadata = await preserveOpencliMetadata(path.join(portable, 'resources', 'app'), opencliSource);
     const opencliAudit = await auditOpencli(path.join(portable, 'resources', 'app'), opencliSource);
     opencliAudit.preservedMetadata = preservedMetadata;

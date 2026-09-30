@@ -6,7 +6,7 @@ import os from 'node:os';
 import vm from 'node:vm';
 import { createHash } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
-import { DesktopExecutor, createExecutorHandlers, loadExecutorDeviceId, validateExecutorConnection } from '../desktop/executor.mjs';
+import { DesktopExecutor, createExecutorHandlers, createMusicMcpHandlers, loadExecutorDeviceId, validateExecutorConnection } from '../desktop/executor.mjs';
 
 const input = extra => ({ url: 'https://central.example', token: 'central-session-secret', instanceId: 'instance-one', userId: 'user-one', ...extra });
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { resolve, promise }; };
@@ -101,6 +101,64 @@ test('preload exposes only the fixed executor facade and pagehide does not disco
   await bridge.executor.connect(input()); await bridge.executor.status(); listeners.pagehide();
   assert.equal(calls[0][0], 'petpal:executor:connect'); assert.equal(calls[1][0], 'petpal:executor:status'); assert.equal(calls.length, 2);
   assert.deepEqual(Object.keys(bridge.executor), ['connect', 'disconnect', 'status']);
+});
+
+test('native MCP uses verified account scope on this PC and only fixed trusted-main IPC',async t=>{
+  const options=[],calls=[],mcp={status:async()=>({config:{revision:'fixture'},servers:[],busy:false}),connect:async player=>calls.push(player),close:async()=>{}};
+  const manager=await fixture(t,{toolsFactory:value=>{options.push(value);return {musicMcp:mcp,close:()=>mcp.close()};}});
+  await assert.rejects(manager.manageMusicMcp('status'),/登录/);await manager.connect(input());
+  const trusted={},handlers=createMusicMcpHandlers(manager,event=>event===trusted);
+  for(const handler of Object.values(handlers))assert.throws(()=>handler({},{}),/可信主窗口/);
+  await handlers['petpal:music-mcp:connect'](trusted,{player:'qqmusic'});
+  assert.deepEqual(calls,['qqmusic']);assert.equal(options.length,1);
+  assert.equal(options[0].musicMcpScope,'instance-one:user-one');assert.equal(options[0].musicMcpDataDir,manager.musicMcpDataDir);
+  assert.ok(options[0].dataDir.startsWith(manager.current.directory));
+  await assert.rejects(manager.manageMusicMcp('connect',{player:'qqmusic',url:'https://other.example'}));
+  await assert.rejects(manager.manageMusicMcp('status',{token:'fake'}));
+});
+
+test('native MCP rechecks full permission and account identity before touching runtime',async t=>{
+  let identity={instanceId:'instance-one',user:{id:'user-one',canUseCodex:true,agentAccess:'full'}},created=0;
+  const manager=await fixture(t,{fetchImpl:async()=>Response.json(identity),toolsFactory:()=>{created++;throw new Error('must not touch');}});
+  await manager.connect(input());
+  for(const user of [{id:'user-one',canUseCodex:true,agentAccess:'workspace'},{id:'other',canUseCodex:true,agentAccess:'full'},{id:'user-one',canUseCodex:false,agentAccess:'full'}]){
+    identity={instanceId:'instance-one',user};await assert.rejects(manager.manageMusicMcp('status'));assert.equal(created,0);
+  }
+});
+
+test('native logout aborts preparation, closes owned MCP and waits before accepting another account',async t=>{
+  const started=deferred(),closing=deferred(),closed=deferred();let signal;
+  const manager=await fixture(t,{toolsFactory:()=>({musicMcp:{prepare:async(_body,options)=>{signal=options.signal;started.resolve();await new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('stopped')),{once:true}));}},close:()=>{closing.resolve();return closed.promise;}})});
+  await manager.connect(input());const prepare=manager.manageMusicMcp('prepare',{player:'qqmusic'});const rejected=assert.rejects(prepare);
+  await started.promise;await assert.rejects(manager.manageMusicMcp('connect',{player:'qqmusic'}),/正在处理/);
+  let retired=false;const retirement=manager.disconnect().then(()=>{retired=true;});await closing.promise;
+  assert.equal(signal.aborted,true);assert.equal(retired,false);closed.resolve();await retirement;await rejected;assert.equal(retired,true);
+});
+
+test('native cancel aborts only the settings operation and leaves the executor online',async t=>{
+  const started=deferred();let signal;
+  const manager=await fixture(t,{toolsFactory:()=>({musicMcp:{connect:async(_player,options)=>{signal=options.signal;started.resolve();await new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('stopped')),{once:true}));},status:async()=>({servers:[],busy:false})},close:async()=>{}})});
+  await manager.connect(input());const connecting=manager.manageMusicMcp('connect',{player:'qqmusic'}),rejected=assert.rejects(connecting);await started.promise;
+  assert.equal((await manager.manageMusicMcp('cancel')).busy,false);await rejected;
+  assert.equal(signal.aborted,true);assert.equal(manager.status().state,'online');
+});
+
+test('native cancel rejects a late status after logout or full permission revocation',async t=>{
+  for(const change of ['logout','permission']){
+    const started=deferred(),response=deferred();
+    let identity={instanceId:'instance-one',user:{id:'user-one',canUseCodex:true,agentAccess:'full'}};
+    const manager=await fixture(t,{fetchImpl:async()=>Response.json(identity),toolsFactory:()=>({musicMcp:{status:()=>{started.resolve();return response.promise;}},close:async()=>{}})});
+    await manager.connect(input());
+    const pending=manager.manageMusicMcp('cancel'),outcome=pending.then(value=>({value}),error=>({error}));
+    await started.promise;
+    if(change==='logout')await manager.disconnect();
+    else identity={...identity,user:{...identity.user,agentAccess:'workspace'}};
+    response.resolve({servers:[],busy:false});
+    const result=await outcome;
+    assert.ok(result.error,`Late cancel status escaped ${change}`);
+    if(change==='logout')assert.equal(result.error.name,'AbortError');
+    else assert.match(result.error.message,/完整 Agent 权限/);
+  }
 });
 
 class ProtocolFixture extends DesktopExecutor { _start() {} }

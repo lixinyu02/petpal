@@ -12,7 +12,11 @@ if (!archive) throw new Error('Usage: node scripts/linux-verify.mjs <PetPal-Ubun
 const native = []; const failures = []; const frontend = []; const applicationSource = []; const seen = new Set(); let manifest; let count = 0;
 const requiredApplicationSource = ['server/app.mjs', 'server/auth.mjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/updates.mjs', 'desktop/updates.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/index.mjs', 'server/providers.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'NOTICE'];
 requiredApplicationSource.push('desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs');
-const isApplicationSource = relative => /^(?:server\/[^/]+\.mjs|server\/native\/[^/]+\.ps1|desktop\/(?:main|preload|window-layout|media-permissions|service-settings|remote-http)\.cjs|desktop\/(?:updates|executor)\.mjs|NOTICE)$/.test(relative);
+requiredApplicationSource.push('desktop/startup-diagnostics.cjs', 'server/music-mcp.mjs', 'server/music-mcp-routes.mjs',
+  'server/native/music-mcp/netease/server.py', 'server/native/music-mcp/netease/LICENSE', 'server/native/music-mcp/netease/pyproject.toml', 'server/native/music-mcp/netease/PROVENANCE.json',
+  'server/native/music-mcp/qqmusic/login.py', 'server/native/music-mcp/qqmusic/LICENSE', 'server/native/music-mcp/qqmusic/pyproject.toml', 'server/native/music-mcp/qqmusic/PROVENANCE.json',
+  'server/native/music-mcp/qqmusic/src/mcp_qqmusic/__init__.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/__main__.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/server.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/format.py');
+const isApplicationSource = relative => /^(?:server\/[^/]+\.mjs|server\/native\/[^/]+\.ps1|server\/native\/music-mcp\/(?:netease\/(?:server\.py|LICENSE|pyproject\.toml|PROVENANCE\.json)|qqmusic\/(?:login\.py|LICENSE|pyproject\.toml|PROVENANCE\.json|src\/mcp_qqmusic\/(?:__init__|__main__|server|format)\.py))|desktop\/(?:main|preload|window-layout|media-permissions|service-settings|startup-diagnostics|remote-http)\.cjs|desktop\/(?:updates|executor)\.mjs|NOTICE)$/.test(relative);
 const packageMetadata = new Map(), dependencyHashes = new Map(), launchers = new Map();
 const requiredOpencliFiles = ['package.json', 'LICENSE', 'cli-manifest.json', 'dist/src/main.js', 'dist/src/daemon.js', 'dist/src/browser/base-page.js'].map(name => `node_modules/@jackwener/opencli/${name}`);
 const archivePrefix = path.basename(archive).replace(/\.tar\.gz$/, '');
@@ -31,6 +35,7 @@ await tar.t({ file: archive, strict: true, onReadEntry(entry) {
     entry.on('end', () => frontend.push({ path: `dist/${entry.path.split('/resources/app/dist/')[1]}`, sha256: hash.digest('hex') }));
   }
   const appRelative = entry.path.split('/resources/app/')[1];
+  if (entry.type === 'File' && appRelative?.startsWith('server/native/music-mcp/') && !requiredApplicationSource.includes(appRelative)) failures.push(`Unexpected packaged music MCP member: ${appRelative}`);
   if (entry.type === 'File' && appRelative && isApplicationSource(appRelative)) {
     const hash = createHash('sha256'); entry.on('data', chunk => hash.update(chunk));
     entry.on('end', () => applicationSource.push({ path: entry.path.split('/resources/app/')[1], sha256: hash.digest('hex') }));

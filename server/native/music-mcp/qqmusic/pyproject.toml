@@ -1,0 +1,21 @@
+[project]
+name = "mcp-qqmusic"
+version = "1.0.0"
+description = "MCP Server for QQ Music - 基于 qqmusic_api SDK 的 QQ 音乐 MCP 服务"
+requires-python = ">=3.10"
+license = "MIT"
+readme = "README.md"
+dependencies = [
+    "mcp>=1.0.0",
+    "qqmusic-api-python>=0.6.0",
+]
+
+[project.scripts]
+mcp-qqmusic = "mcp_qqmusic.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_qqmusic"]

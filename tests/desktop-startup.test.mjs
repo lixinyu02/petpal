@@ -125,7 +125,7 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false } = 
     nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, Menu: { buildFromTemplate: value => value },
     readDesktopServiceSettings: async () => ({ codexHttpOrigins: '' }),
     serverModule: { createPetServer: async () => backendStub },
-    executorModuleStub: { DesktopExecutor: class { async disconnect() {} }, createExecutorHandlers: () => ({}) },
+    executorModuleStub: { DesktopExecutor: class { async disconnect() {} }, createExecutorHandlers: () => ({}), createMusicMcpHandlers: () => ({}) },
     updaterModuleStub: { DesktopUpdateManager: class {}, createDesktopUpdateHandlers: () => ({}) },
     createDesktopRemoteHttp: () => ({}), listenDesktopBackend: async () => 50000,
     launchPreparedUpdate() {}, queuePortableUpdate() {}, requireUpdateOwner() {}, showMain() {}, shell: { showItemInFolder() {} },
@@ -136,7 +136,7 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false } = 
   });
   const originalWindow = context.BrowserWindow;
   context.BrowserWindow = class extends originalWindow {
-    constructor() { super(); this.webContents.executeJavaScript = async script => script.includes('connection().then') ? { url: 'http://127.0.0.1:50000', hasToken: true } : { available: true, state: 'online', hostId: 'desktop-fixture' }; }
+    constructor() { super(); this.webContents.executeJavaScript = async script => script.includes('connection().then') ? { url: 'http://127.0.0.1:50000', hasToken: true } : script.includes('window.petpal.musicMcp') ? { available:true, enabled:false, connected:false, tools:0 } : { available: true, state: 'online', hostId: 'desktop-fixture' }; }
   };
   const boot = declaration('boot')
     .replace("await import(pathToFileURL(path.join(root, 'server', 'app.mjs')).href)", 'serverModule')

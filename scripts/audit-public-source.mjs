@@ -19,13 +19,17 @@ const syntheticSecrets = new Map([
   ['tests/updates.test.mjs', new Set(['updates-owner-token','test-passphrase-123','owner-passphrase-123'])],
   ['tests/providers.test.mjs', new Set(['private-test-key'])],
   ['tests/backend.test.mjs', new Set(['backend-test-secret', 'secret-not-in-state-response'])],
-  ['tests/codex.test.mjs', new Set(['supersecret'])],
+  ['tests/codex.test.mjs', new Set(['supersecret', 'nonstandard-diagnostic-fixture-secret'])],
   ['tests/codex-config.test.mjs', new Set(['nonstandard-provider-secret', 'config-owner-token', 'test-password-123'])],
   ['tests/codex-dynamic.test.mjs', new Set(['arbitrary-secret-value'])],
   ['tests/codex-real.test.mjs', new Set(['isolated-test-key'])],
   ['tests/desktop-service-settings.test.mjs', new Set(['desktop-settings-fixture-token'])],
   ['scripts/browser-fixture.mjs', new Set(['petpal-browser-acceptance-only-20260926'])],
   ['tests/auth-race.test.mjs', new Set(['original-race-password', 'replacement-race-password'])],
+  ['tests/cosyvoice-emotion.test.mjs', new Set(['private-fixture-key', 'isolated-password'])],
+  ['tests/server-updates.test.mjs', new Set(['server-update-fixture-owner', 'isolated-update-password'])],
+  ['tests/music-mcp-routes.test.mjs', new Set(['music-mount-fixture-bootstrap'])],
+  ['tests/music-mcp.test.mjs', new Set(['private-account-one'])],
   ['tests/users.test.mjs', new Set(['isolated-test-owner-token', 'test-password-123', 'fixture-provider-private-key', 'new-desktop-bootstrap-token', 'alice-private-voice-key', 'alice-private-asr-key', 'replacement-password', 'owner-new-password', 'incorrect-password', 'replacement-local-owner-token'])],
 ]);
 /** Pure inspection: diagnostics include only the path and fixed reason, never matched values. */

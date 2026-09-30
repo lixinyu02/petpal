@@ -77,13 +77,23 @@ export function createExecutorHandlers(executor, isAllowed) {
   }]));
 }
 
+export function createMusicMcpHandlers(executor, isAllowed) {
+  return Object.fromEntries(['config', 'status', 'configure', 'prepare', 'connect', 'disconnect', 'cancel'].map(action =>
+    [`petpal:music-mcp:${action}`, (event, body) => {
+      if (!isAllowed(event)) throw new Error('音乐 MCP 仅允许可信主窗口管理。');
+      return executor.manageMusicMcp(action, body);
+    }]));
+}
+
 /** One outbound executor belongs to a verified central login, never a renderer request. */
 export class DesktopExecutor {
-  constructor({ dataDir, fetchImpl = globalThis.fetch, bridgeFactory = options => new CodexBridge(options),
+  constructor({ dataDir, musicMcpDataDir = path.join(dataDir || '.', 'music'), fetchImpl = globalThis.fetch, bridgeFactory = options => new CodexBridge(options),
     toolsFactory = options => createDesktopTools(options), resolveCommand = resolveCodexCommand,
     name = hostname(), platform = process.platform, arch = process.arch, retryWait = delay } = {}) {
     if (typeof dataDir !== 'string' || !path.isAbsolute(dataDir)) throw new Error('执行电脑数据目录必须是绝对路径。');
+    if (typeof musicMcpDataDir !== 'string' || !path.isAbsolute(musicMcpDataDir)) throw new Error('音乐 MCP 数据目录必须是绝对路径。');
     this.dataDir = dataDir; this.fetch = fetchImpl; this.bridgeFactory = bridgeFactory;
+    this.musicMcpDataDir = musicMcpDataDir;
     this.toolsFactory = toolsFactory; this.resolveCommand = resolveCommand;
     this.metadata = { name: String(name).replace(/[\x00-\x1f\x7f]/g, '').slice(0, 120) || 'PetPal PC', platform, arch };
     this.current = null; this.generation = 0; this.transition = Promise.resolve(); this.closed = false;
@@ -92,6 +102,58 @@ export class DesktopExecutor {
   }
 
   status() { return { ...this.visible }; }
+  _tools(ctx) {
+    this._assert(ctx);
+    return ctx.tools ??= this.toolsFactory({ dataDir: path.join(ctx.directory, 'tools'),
+      musicMcpDataDir: this.musicMcpDataDir, musicMcpScope: `${ctx.connection.instanceId}:${ctx.connection.userId}` });
+  }
+
+  async _musicIdentity(ctx) {
+    this._assert(ctx);
+    const identity = await this._json(ctx, '/api/auth/me'); this._assert(ctx);
+    if (identity.instanceId !== ctx.connection.instanceId || identity.user?.id !== ctx.connection.userId ||
+        !identity.user?.canUseCodex || (!identity.user?.isOwner && identity.user?.agentAccess !== 'full')) {
+      throw new Error('音乐 MCP 设置需要当前账号的完整 Agent 权限。');
+    }
+    ctx.account = identity.user;
+  }
+
+  async manageMusicMcp(action, body) {
+    if (!['config', 'status', 'configure', 'prepare', 'connect', 'disconnect', 'cancel'].includes(action)) throw invalid();
+    if (['config', 'status', 'cancel'].includes(action) && body !== undefined) throw invalid();
+    if (['prepare', 'connect', 'disconnect'].includes(action) && (!object(body) || Object.keys(body).length !== 1 || !['netease', 'qqmusic'].includes(body.player))) throw invalid();
+    const ctx = this.current;
+    if (!ctx || this.visible.state !== 'online') throw new Error('请先登录并连接这台执行电脑。');
+    // Reserve before awaiting identity, so concurrent IPC requests cannot race.
+    if (action === 'cancel') {
+      await this._musicIdentity(ctx);
+      const pending = ctx.musicOperation; pending?.controller.abort(); await pending?.done;
+      await this._musicIdentity(ctx);
+      const result = await this._tools(ctx).musicMcp.status();
+      await this._musicIdentity(ctx); return result;
+    }
+    if (ctx.musicOperation) throw new Error('音乐 MCP 正在处理请求，请等待或停止。');
+    if (ctx.run && !['config', 'status'].includes(action)) throw new Error('请等当前 Agent 任务结束后再修改音乐 MCP。');
+    const controller = new AbortController(), abort = () => controller.abort();
+    let finish; const operation = { controller, done: new Promise(resolve => { finish = resolve; }) };
+    ctx.musicOperation = operation; ctx.controller.signal.addEventListener('abort', abort, { once: true });
+    try {
+      await this._musicIdentity(ctx); controller.signal.throwIfAborted();
+      const manager = this._tools(ctx).musicMcp;
+      let result;
+      if (action === 'configure') result = await manager.configure(body);
+      else if (['config', 'status'].includes(action)) result = await manager[action]();
+      else {
+        if (action === 'prepare') await manager.prepare(body, { signal: controller.signal });
+        else await manager[action](body.player, { signal: controller.signal });
+        result = await manager.status();
+      }
+      controller.signal.throwIfAborted(); await this._musicIdentity(ctx); return result;
+    } finally {
+      ctx.controller.signal.removeEventListener('abort', abort);
+      if (ctx.musicOperation === operation) ctx.musicOperation = null; finish();
+    }
+  }
   _queue(work) { const result = this.transition.catch(() => {}).then(work); this.transition = result.catch(() => {}); return result; }
   _assert(ctx) { if (this.closed || this.current !== ctx || ctx.generation !== this.generation || ctx.controller.signal.aborted) throw stopped(); }
   _invalidate() {
@@ -325,7 +387,7 @@ export class DesktopExecutor {
     try {
       await this._event(ctx, run, 'started', {});
       const images = await this._images(ctx, run, command.attachments); this._assert(ctx); run.controller.signal.throwIfAborted();
-      ctx.tools ??= this.toolsFactory({ dataDir: path.join(ctx.directory, 'tools') });
+      this._tools(ctx);
       const config = { mode: 'api', revision: command.codexRevision, baseUrl: `${ctx.connection.url}${ctx.route}/runs/${run.id}/model`,
         apiKey: run.relayToken, model: command.model, reasoningEffort: command.effort || '' };
       run.bridge = this.bridgeFactory({ dataDir: ctx.directory, workspaceRoot: path.join(ctx.directory, 'workspace'), config, desktopTools: ctx.tools });
@@ -372,7 +434,7 @@ export class DesktopExecutor {
     ctx.retired = true; ctx.controller.abort(); ctx.run?.controller.abort();
     ctx.retiring = (async () => {
       await Promise.allSettled([ctx.run?.bridge?.close(), ctx.tools?.close()]);
-      await Promise.allSettled([ctx.run?.done, ...ctx.loops]);
+      await Promise.allSettled([ctx.run?.done, ctx.musicOperation?.done, ...ctx.loops]);
       if (ctx.connectionId) await this._unregister(ctx).catch(() => {});
       ctx.connection.token = ''; ctx.run = null;
     })();

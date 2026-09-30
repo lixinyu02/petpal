@@ -1,6 +1,7 @@
 import { connectionFetch, type RemoteRequest, type RemoteEvent } from './auth/native-fetch';
 import { restoreTargetConnection } from './auth/connection-targets.mjs';
 import type { DesktopUpdates } from './platform/updates';
+import type { DesktopMusicMcp } from './platform/music-mcp';
 import { createRequestScope, SessionChangedError } from './auth/request-scope.mjs';
 import { readSpeechStream, type SpeechStreamHandlers } from './avatar/speech-stream.mjs';
 import { normalizeSpeechEmotion, type SpeechEmotion } from './avatar/speech-emotion.mjs';
@@ -45,7 +46,7 @@ export type Identity = {instanceId:string;userId:string};
 export type NativeExecutorStatus = {state:'disconnected'|'connecting'|'reconnecting'|'online'|'error';hostId?:string;name:string;platform:string;arch:string;error?:string;retryable?:boolean;retryAt?:number};
 export type NativeExecutor = {connect(input:Connection & Identity):Promise<NativeExecutorStatus>;disconnect():Promise<void>;status():Promise<NativeExecutorStatus>};
 declare global {
-  interface Window { petpal?: { connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; remoteAck?(id:string,sequence:number):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; updates?:DesktopUpdates; executor?:NativeExecutor }; }
+  interface Window { petpal?: { connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; remoteAck?(id:string,sequence:number):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; updates?:DesktopUpdates; executor?:NativeExecutor; musicMcp?:DesktopMusicMcp }; }
 }
 const requests = createRequestScope();
 const listeners = new Set<()=>void>();

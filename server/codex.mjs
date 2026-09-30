@@ -470,7 +470,7 @@ export class CodexBridge {
       if (run.settled || run.aborted || call.controller.signal.aborted) throw abortError();
       this._emit(run, 'status', { state: 'working', message: '正在执行已授权的桌面工具' });
       call.controller.signal.throwIfAborted();
-      const result = await this.desktopTools.execute(call.name, call.arguments, { signal: call.controller.signal });
+      const result = await this.desktopTools.execute(call.name, call.arguments, { signal: call.controller.signal, conversationId:run.conversationId });
       call.controller.signal.throwIfAborted();
       this._replyDynamic(call, result?.ok !== false, result ?? {});
     }).catch(error => {
@@ -541,7 +541,7 @@ export class CodexBridge {
       model ??= this.apiMode ? this.config.model : undefined;
       effort = effort || (this.apiMode ? this.config.reasoningEffort : '');
       const { sandboxPolicy, ...threadPermissions } = codexPermissionParams(permissions, this.workspaceRoot);
-      const threadParams = { cwd: this.workspaceRoot, ...threadPermissions, ...(model ? { model } : {}), ...(this.apiMode ? { modelProvider: 'petpal', developerInstructions: '根据本轮访问范围执行任务。音乐与浏览器优先使用 PetPal 桌面工具；受限权限不允许操作主机软件。没有工具或执行失败时如实说明，不得声称已完成。' } : {}) };
+      const threadParams = { cwd: this.workspaceRoot, ...threadPermissions, ...(model ? { model } : {}), developerInstructions: '根据本轮访问范围执行任务。音乐优先使用 PetPal 桌面工具；搜索、队列、音量、歌词先通过 petpal_music_mcp_tools 获取本机真实工具与参数，再用 petpal_music_mcp_call。网易云 MCP 仅支持 Windows；播放/暂停/上一首/下一首使用 petpal_music_command 的指定客户端媒体会话，不使用全局热键。QQ MCP 只提供查询和播放链接，返回 URL 不代表桌面已经播放；排行榜用 detail(type=top)。未启用时提示用户在该电脑的电脑助手设置中准备 MCP，不自行安装或更改配置。浏览器操作使用 PetPal 浏览器工具。受限权限不允许操作主机软件。失败时如实说明，不得声称已完成。', ...(this.apiMode ? { modelProvider: 'petpal' } : {}) };
       const result = await this._rpc(threadId ? 'thread/resume' : 'thread/start', { ...threadParams, ...(threadId ? { threadId } : { dynamicTools: this.desktopTools?.specs ?? [] }) });
       const actualId = result.thread?.id;
       if (typeof actualId !== 'string' || !actualId) throw new Error('Codex 未返回有效会话 ID');

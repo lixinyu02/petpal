@@ -666,8 +666,10 @@ async function boot() {
   origin = `http://127.0.0.1:${port}`;
   await startupMilestone('executor-create');
   const executorModule = await import(pathToFileURL(path.join(__dirname, 'executor.mjs')).href);
-  executor = new executorModule.DesktopExecutor({ dataDir: path.join(app.getPath('userData'), 'executor') });
+  executor = new executorModule.DesktopExecutor({ dataDir: path.join(app.getPath('userData'), 'executor'), musicMcpDataDir: path.join(app.getPath('userData'), 'data') });
   for (const [channel, handler] of Object.entries(executorModule.createExecutorHandlers(executor,
+    event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting))) ipcMain.handle(channel, handler);
+  for (const [channel, handler] of Object.entries(executorModule.createMusicMcpHandlers(executor,
     event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting))) ipcMain.handle(channel, handler);
   await startupMilestone('transport-create');
   remoteHttp = createDesktopRemoteHttp({ isAllowed: event => isTrusted(event) && event.sender === mainWindow?.webContents });
@@ -738,6 +740,13 @@ async function boot() {
     const registeredHosts = await fetch(`${origin}/api/agent/hosts`, { headers: { Authorization: `Bearer ${backend.token}` } }).then(response => response.json());
     if (!registeredHosts.hosts?.some(host => host.id === executorBridge.hostId && host.online && host.kind === 'desktop' && host.platform === process.platform)) throw new Error('Executor is not visible in the authenticated host list');
     executorBridge.listedOnline = true;
+    const musicMcpBridge = await mainWindow.webContents.executeJavaScript(`(async () => {
+      const value = window.petpal.musicMcp;
+      if (!value || !['config','status','configure','prepare','connect','disconnect','cancel'].every(key => typeof value[key] === 'function')) throw new Error('Music MCP preload facade is unavailable');
+      const status = await value.status();
+      if (!status.config || !Array.isArray(status.servers) || status.servers.length !== 2) throw new Error('Music MCP native status is unavailable');
+      return { available:true, enabled:status.servers.some(server => server.enabled), connected:status.servers.some(server => server.connected), tools:status.servers.reduce((n,server)=>n+server.tools.length,0) };
+    })()`);
     await startupMilestone('smoke-status');
     const codex = await fetch(`${origin}/api/codex/status`, { headers: { Authorization: `Bearer ${backend.token}` } }).then(r => r.json());
     const desktopTools = await fetch(`${origin}/api/desktop-tools/status`, { headers: { Authorization: `Bearer ${backend.token}` } }).then(async response => {
@@ -746,7 +755,7 @@ async function boot() {
     });
     if (process.argv.includes('--startup-only')) {
       const result = { event: 'desktop-startup-smoke', startupReady: true, health, loginGate,
-        bridge: { url: bridge.url, hasToken: bridge.hasToken }, executor: executorBridge,
+        bridge: { url: bridge.url, hasToken: bridge.hasToken }, executor: executorBridge, musicMcp: musicMcpBridge,
         runtimeRoot: path.dirname(process.execPath), electronVersion: process.versions.electron,
         codex: { available: codex.available, running: codex.running, authenticated: codex.authenticated },
         desktopTools: { music: desktopTools.music, opencli: { available: desktopTools.opencli.available,
@@ -771,7 +780,7 @@ async function boot() {
       await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})));
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     })()`);
-    const result = { event: 'desktop-smoke', health, loginGate, bridge: { url: bridge.url, hasToken: bridge.hasToken }, executor: executorBridge, uiReady: true,
+    const result = { event: 'desktop-smoke', health, loginGate, bridge: { url: bridge.url, hasToken: bridge.hasToken }, executor: executorBridge, musicMcp: musicMcpBridge, uiReady: true,
       runtimeRoot: path.dirname(process.execPath), electronVersion: process.versions.electron,
       desktopTools: { toolVersion: desktopTools.toolVersion, music: desktopTools.music,
         opencli: { available: desktopTools.opencli.available, version: desktopTools.opencli.version,

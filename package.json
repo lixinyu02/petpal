@@ -23,6 +23,7 @@
     "@capacitor/android": "^7.4.3",
     "@capacitor/core": "^7.4.3",
     "@jackwener/opencli": "1.8.8",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "@openai/codex": "0.143.0",
     "express": "^5.1.0",
     "lucide-react": "^0.468.0",

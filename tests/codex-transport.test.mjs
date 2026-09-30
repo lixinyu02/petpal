@@ -14,7 +14,16 @@ const parse=text=>text.split(/\r?\n\r?\n/).filter(Boolean).map(value=>value.spli
 const processEvents=values=>{const n=new ResponsesStreamNormalizer();return parse(values.flatMap(value=>n.accept(value)).concat(n.finish()).join(''));};
 async function fixture(t,options={}){
   const requests=[];
-  const transport=await createCodexTransport({config,fetchImpl:async(url,init)=>{requests.push({url,init});return options.fetch?options.fetch(url,init):new Response(simplified().map(frame).join(''),{headers:{'Content-Type':'text/event-stream'}});},...options});
+  let transport;
+  for(let attempt=0;attempt<20;attempt++){
+    const candidate=await createCodexTransport({config,fetchImpl:async(url,init)=>{requests.push({url,init});return options.fetch?options.fetch(url,init):new Response(simplified().map(frame).join(''),{headers:{'Content-Type':'text/event-stream'}});},...options});
+    try{
+      // Windows may allocate a low ephemeral port that WHATWG fetch refuses.
+      // This GET reaches only the fixed 404 route, never the fake upstream.
+      const response=await fetch(candidate.baseUrl);await response.arrayBuffer();assert.equal(response.status,404);
+      transport=candidate;break;
+    }catch(error){await candidate.close();if(error.cause?.message!=='bad port'||attempt===19)throw error;}
+  }
   t.after(()=>transport.close());
   const request=(overrides={})=>fetch(`${transport.baseUrl}${overrides.path??'/responses'}`,{method:overrides.method??'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${transport.apiKey}`,...overrides.headers},body:overrides.method==='GET'?undefined:overrides.body??JSON.stringify({model:config.model,stream:true,input:[]}),signal:overrides.signal});
   return {transport,requests,request};
@@ -129,22 +138,27 @@ test('SSE parser handles UTF-8 chunk boundaries but rejects invalid JSON, trunca
   assert.equal(parse(await (await bounded.request()).text()).at(-1).type,'error');
 });
 
-test('idle timeout and close abort pending upstream streams and drain owned requests',async t=>{
+test('idle timeout and close abort pending upstream streams and drain owned requests',{timeout:15000},async t=>{
   for(const action of ['timeout','close','cancel']){
     let aborted=false,entered;
     const ready=new Promise(resolve=>{entered=resolve;});
     const f=await fixture(t,{idleTimeoutMs:action==='timeout'?25:1000,requestTimeoutMs:2000,fetch:(_url,init)=>new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode(frame(created)));init.signal.addEventListener('abort',()=>{aborted=true;controller.error(new Error('stopped'));},{once:true});entered();},cancel(){aborted=true;}}),{headers:{'Content-Type':'text/event-stream'}})});
-    const response=f.request().then(value=>value.text()).catch(()=>null);await ready;
+    const incoming=f.request(),pending=incoming.then(value=>value.text()),response=pending.catch(()=>null);
+    await Promise.race([ready,pending.then(()=>{throw new Error('Request completed before entering the upstream fixture.');})]);
+    // start() runs before relaySse acquires its reader. Wait for response headers
+    // from the first written frame so an intentional abort cannot error an unread stream.
+    await incoming;
     if(action==='close')await f.transport.close();else if(action==='cancel')await f.transport.cancelAll();
     await response;assert.equal(aborted,true);assert.equal(f.transport.activeRequests,0);
     if(action==='close')await assert.rejects(fetch(f.transport.baseUrl));
   }
 });
 
-test('disconnecting the authenticated client cancels its upstream request',async t=>{
-  let canceled=0,entered;const ready=new Promise(resolve=>{entered=resolve;});
-  const f=await fixture(t,{fetch:()=>new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode(frame(created)));entered();},cancel(){canceled++;}}),{headers:{'Content-Type':'text/event-stream'}})});
-  const controller=new AbortController(),response=f.request({signal:controller.signal}).then(value=>value.text()).catch(()=>null);await ready;controller.abort();await response;
-  for(let i=0;i<50&&f.transport.activeRequests;i++)await new Promise(resolve=>setTimeout(resolve,10));
+test('disconnecting the authenticated client cancels its upstream request',{timeout:15000},async t=>{
+  let canceled=0,entered,finishCanceled;const ready=new Promise(resolve=>{entered=resolve;}),cancellation=new Promise(resolve=>{finishCanceled=resolve;});
+  const f=await fixture(t,{fetch:()=>new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode(frame(created)));entered();},cancel(){canceled++;finishCanceled();}}),{headers:{'Content-Type':'text/event-stream'}})});
+  const controller=new AbortController(),incoming=f.request({signal:controller.signal}),pending=incoming.then(value=>value.text()),response=pending.catch(()=>null);
+  await Promise.race([ready,pending.then(()=>{throw new Error('Request completed before entering the upstream fixture.');})]);await incoming;controller.abort();await response;
+  await cancellation;await f.transport.cancelAll();
   assert.equal(canceled,1);assert.equal(f.transport.activeRequests,0);
 });

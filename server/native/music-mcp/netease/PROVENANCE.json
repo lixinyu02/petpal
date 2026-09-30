@@ -1,0 +1,25 @@
+{
+  "repository": "Seraph310/cloudmusic-desktop-mcp",
+  "commit": "a61a611bf1284d9663df2742ec83f8769403465d",
+  "license": "MIT",
+  "files": [
+    {
+      "path": "server.py",
+      "bytes": 26140,
+      "sha256": "00e2d31e3165edfea9164a67996340a1bb4b587760de93286024c33856836909",
+      "gitBlobSha": "086523010bbccffcf6e96124500841ff00b8d1d3"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1066,
+      "sha256": "032cd66d510673aefdf931ef03f81761fea7feca9ae32fe1ec3b8f279d9a73eb",
+      "gitBlobSha": "05aaf5bf97590622a1774c5edd54d1db83db0746"
+    },
+    {
+      "path": "pyproject.toml",
+      "bytes": 307,
+      "sha256": "2cffe4168943aa0ce8e9faecd4c242837164e1c8af5400613f4d5d74e558e016",
+      "gitBlobSha": "6f2d4ea10457da518f83e2d871f47eb22019ee8b"
+    }
+  ]
+}

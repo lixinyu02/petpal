@@ -21,3 +21,23 @@ from the OpenCLI authors. No upstream NOTICE file was present in the official
 The installed upstream license is retained at:
 node_modules/@jackwener/opencli/LICENSE
 (desktop bundles place it in resources/app.asar.unpacked/node_modules/).
+
+Music MCP adapters
+------------------
+Seraph310/cloudmusic-desktop-mcp, commit a61a611bf1284d9663df2742ec83f8769403465d
+https://github.com/Seraph310/cloudmusic-desktop-mcp
+License: MIT. Original source and LICENSE are retained under
+server/native/music-mcp/netease/; exact file hashes are in PROVENANCE.json.
+PetPal excludes the upstream global media-key and shortcut tools.
+
+Sina5byg5L2z/mcp-qqmusic, commit 84f34a92cd44821cd44b5aaf59aa0889b4685e6d
+https://github.com/Sina5byg5L2z/mcp-qqmusic
+License: MIT. Original source and LICENSE are retained under
+server/native/music-mcp/qqmusic/; exact file hashes are in PROVENANCE.json.
+QQ credentials are optional private user data and are not distributed.
+
+Model Context Protocol TypeScript SDK
+-----------------------------------
+Package: @modelcontextprotocol/sdk 1.31.0
+https://github.com/modelcontextprotocol/typescript-sdk
+License: MIT; the npm package retains its LICENSE.

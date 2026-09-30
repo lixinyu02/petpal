@@ -1,0 +1,49 @@
+{
+  "repository": "Sina5byg5L2z/mcp-qqmusic",
+  "commit": "84f34a92cd44821cd44b5aaf59aa0889b4685e6d",
+  "license": "MIT",
+  "files": [
+    {
+      "path": "src/mcp_qqmusic/__init__.py",
+      "bytes": 27,
+      "sha256": "5ab050ad90fb8a9593fc53a6a83e2fe4c06591ade329d3414f3b5f58972d451b",
+      "gitBlobSha": "5cb294585c790240bbd5145d4bfe38b7e92615cc"
+    },
+    {
+      "path": "src/mcp_qqmusic/__main__.py",
+      "bytes": 77,
+      "sha256": "58be5c146e1a98d597b67155ff8ef00deb7600eca33357c09f0014a20ae92a2d",
+      "gitBlobSha": "d5b5ad8683c076ad130a8df61768928566127978"
+    },
+    {
+      "path": "src/mcp_qqmusic/server.py",
+      "bytes": 13471,
+      "sha256": "b74f003b4a995b6033d029c70b33d5039d56ad3ddaa3ba817086d811f8bf9d64",
+      "gitBlobSha": "98bd6e36b3e925ac81de814415f7878a8759065e"
+    },
+    {
+      "path": "src/mcp_qqmusic/format.py",
+      "bytes": 21124,
+      "sha256": "35600d6def34b52d9700e234373bf58c3272173b5ff6848b97ce2dd23373adfb",
+      "gitBlobSha": "1ebec66e3a67e1d3ac6ae4f1be405ba66b282cb5"
+    },
+    {
+      "path": "login.py",
+      "bytes": 1611,
+      "sha256": "0d6f4710548487c872d30e31a3255403dbda216184dcabf3f7abf8814aa28ee5",
+      "gitBlobSha": "6ea97307e8e39917853130e8291ec423b344d246"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1056,
+      "sha256": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685",
+      "gitBlobSha": "14fac913ccf80234b1848540089a3bbcb6e5283d"
+    },
+    {
+      "path": "pyproject.toml",
+      "bytes": 472,
+      "sha256": "57b2765972a1b63020d1885c1dcb28d48ff474fcdcd8e1f8cda9f8cac23ef741",
+      "gitBlobSha": "a43a2792efe835d9c8ba9cdaaec8207b3f68ca09"
+    }
+  ]
+}

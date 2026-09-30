@@ -21,6 +21,7 @@ import { createDownloadsCatalog } from './downloads.mjs';
 import { createExecutors } from './executors.mjs';
 import { RemoteCodexBridge } from './remote-codex.mjs';
 import { createChatAssistant, normalizeChatAssistant } from './chat-assistant.mjs';
+import { mountMusicMcpRoutes } from './music-mcp-routes.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const now = () => new Date().toISOString();
@@ -54,7 +55,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const cosyvoice = await createCosyVoiceService({ ...cosyvoiceOptions, store, dataDir });
   const asr = createAsrService({ ...asrOptions, store, authorizeSession: auth => authorizeAsrIdentity(auth) });
   await store.save();
-  const localTools = desktopTools ?? createDesktopTools({ dataDir });
+  const localTools = desktopTools ?? createDesktopTools({ dataDir,musicMcpScope:`${state.instanceId}:${state.ownerId}`,scopeForConversation:id=>{const conversation=state.conversations.find(item=>item.id===id);return conversation?`${state.instanceId}:${conversation.userId}`:null;} });
   const createBridge = config => (codexFactory ?? (options => new CodexBridge(options)))({ workspaceRoot, dataDir, config, desktopTools: localTools });
   let bridge = codex ?? createBridge(state.codexConfig);
   let configChanging = false, configSwap = null, codexReaders = 0;
@@ -636,6 +637,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     res.json(publicCodexConfig(state.codexConfig));
   });
   app.get('/api/codex/status', async (req, res) => { requireCodex(req.user); const value = await userCodexStatus(req.user); requireCurrentAuth(req); requireCodex(req.user); res.json(value); });
+  mountMusicMcpRoutes({app,manager:localTools.musicMcp,requireAdmin,requireCurrentAuth,probes});
   app.get('/api/desktop-tools/status', async (req, res) => { requireAdmin(req.user); const value = await localTools.status(); requireCurrentAuth(req); res.json(redactCodex(value)); });
   app.post('/api/desktop-tools/action', async (req, res) => {
     requireAdmin(req.user);

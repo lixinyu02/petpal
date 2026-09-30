@@ -1,0 +1,1 @@
+"""MCP QQ Music Server."""
