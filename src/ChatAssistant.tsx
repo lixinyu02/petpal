@@ -1,5 +1,6 @@
-import {useCallback,useEffect,useId,useState} from 'react';
-import {ArrowUpRight,Check,ChevronDown,Loader2,RefreshCw,ShieldCheck,Square,Terminal} from 'lucide-react';
+import {useCallback,useEffect,useId,useLayoutEffect,useRef,useState,type CSSProperties} from 'react';
+import {createPortal} from 'react-dom';
+import {ArrowUpRight,Check,ChevronDown,Loader2,RefreshCw,Settings2,ShieldCheck,Square,Terminal,X} from 'lucide-react';
 import {api,getSessionEpoch,isSessionChanged,type AgentHost,type AgentPermissions as Permissions,type AssistantTask,type ChatAssistantConfig,type Conversation,type Provider,type User} from './api';
 import {chatAssistantTargetIssue,readChatAssistantPreferences,saveChatAssistantPreferences,snapshotChatAssistant,type ChatAssistantPreferences} from './chat-assistant-preferences.mjs';
 import {executionPlatform} from './execution-hosts.mjs';
@@ -51,11 +52,96 @@ export function useChatAssistant({scope,allowed,hostState}:{scope:string;allowed
 
 export function ChatAssistantControls({assistant,allowed,user,providers,disabled=false,compact=false}:{assistant:ReturnType<typeof useChatAssistant>;allowed:boolean;user?:User;providers:Provider[];disabled?:boolean;compact?:boolean}) {
   const id=useId(),{value,hosts}=assistant;
+  const [open,setOpen]=useState(false),[placement,setPlacement]=useState<{layer:CSSProperties;panel:CSSProperties;sheet:boolean}>(),[ownedPortal,setOwnedPortal]=useState('');
+  const trigger=useRef<HTMLButtonElement>(null),panel=useRef<HTMLElement>(null),body=useRef<HTMLDivElement>(null),heading=useRef<HTMLDivElement>(null),closeButton=useRef<HTMLButtonElement>(null);
   const selected=hosts.find(host=>host.id===value.hostId),issue=chatAssistantTargetIssue(value,hosts,providers,!!user?.isOwner);
-  return <details className={`chat-assistant-controls${compact?' is-compact':''}`}>
-    <summary><Terminal size={14} aria-hidden="true"/><span>Chat + Agent</span><span className={`chat-assistant-summary-state${value.enabled?' is-enabled':''}`}>{value.enabled?selected?.name||'所选电脑':'已关闭'}</span><ChevronDown size={14} aria-hidden="true"/></summary>
-    <div className="chat-assistant-options">
-      <p>继续文字或语音聊天，需要操作电脑时，小伴会将任务交给后台 Agent。</p>
+  const ownedPopup=()=>{
+    const control=panel.current?.querySelector<HTMLElement>('.workspace-model-trigger[aria-controls]');
+    const list=control?.getAttribute('aria-controls');
+    return list?document.getElementById(list)?.closest<HTMLElement>('.workspace-model-popup'):null;
+  };
+  useLayoutEffect(()=>{
+    if(!open)return;
+    let frame=0;
+    const place=()=>{
+      const anchor=trigger.current?.getBoundingClientRect();if(!anchor||!panel.current)return;
+      const viewport=window.visualViewport,left=viewport?.offsetLeft||0,top=viewport?.offsetTop||0,width=viewport?.width||window.innerWidth,height=viewport?.height||window.innerHeight;
+      const sheet=width<=650,gutter=sheet?0:12,panelWidth=sheet?width:Math.min(380,width-gutter*2),fullHeight=Math.max(1,height-(sheet?10:24));
+      const naturalHeight=(heading.current?.offsetHeight||72)+(body.current?.scrollHeight||330)+2;
+      const below=top+height-anchor.bottom-19,above=anchor.top-top-19;
+      const aboveAnchor=below<Math.min(naturalHeight,330)&&above>below;
+      const available=aboveAnchor?above:below;
+      const maxHeight=sheet?fullHeight:Math.min(fullHeight,available>180?available:fullHeight),renderedHeight=Math.min(naturalHeight,maxHeight);
+      const panelTop=sheet?top+height-renderedHeight:Math.max(top+12,Math.min(aboveAnchor?anchor.top-renderedHeight-7:anchor.bottom+7,top+height-12-renderedHeight));
+      const next={sheet,layer:{left,top,width,height} as CSSProperties,panel:{left:sheet?left:Math.max(left+gutter,Math.min(anchor.right-panelWidth,left+width-gutter-panelWidth)),top:panelTop,width:panelWidth,maxHeight,height:renderedHeight} as CSSProperties};
+      setPlacement(previous=>JSON.stringify(previous)===JSON.stringify(next)?previous:next);
+    };
+    const schedule=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(place);};
+    place();
+    const observer=new ResizeObserver(schedule);if(panel.current)observer.observe(panel.current);if(body.current)observer.observe(body.current);
+    window.addEventListener('resize',schedule);window.addEventListener('scroll',schedule,true);window.visualViewport?.addEventListener('resize',schedule);window.visualViewport?.addEventListener('scroll',schedule);
+    return()=>{cancelAnimationFrame(frame);observer.disconnect();window.removeEventListener('resize',schedule);window.removeEventListener('scroll',schedule,true);window.visualViewport?.removeEventListener('resize',schedule);window.visualViewport?.removeEventListener('scroll',schedule);};
+  },[open]);
+  useEffect(()=>{
+    if(!open)return;
+    const previousOverflow=document.body.style.overflow;document.body.style.overflow='hidden';
+    closeButton.current?.focus({preventScroll:true});
+    const focusables=()=>Array.from(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[tabindex]:not([tabindex="-1"])')||[]).filter(element=>{
+      if(!element.getClientRects().length)return false;
+      const style=getComputedStyle(element);
+      if(style.display==='none'||style.visibility==='hidden'||style.visibility==='collapse')return false;
+      // Fixed-position descendants of closed details can retain geometry without being keyboard reachable.
+      for(let ancestor=element.parentElement;ancestor;ancestor=ancestor.parentElement){
+        if(ancestor instanceof HTMLDetailsElement&&!ancestor.open){
+          const summary=Array.from(ancestor.children).find(child=>child.tagName==='SUMMARY');
+          if(!summary?.contains(element))return false;
+        }
+      }
+      return true;
+    });
+    const focusInside=(event:FocusEvent)=>{
+      const target=event.target as Node,popup=ownedPopup();
+      if(!panel.current?.contains(target)&&!popup?.contains(target))closeButton.current?.focus({preventScroll:true});
+    };
+    const keyDown=(event:KeyboardEvent)=>{
+      if(event.key==='Escape'){
+        // Nested selectors handle Escape first; a permissions disclosure may be open without focus inside it.
+        if(ownedPopup())return;
+        const disclosure=panel.current?.querySelector<HTMLDetailsElement>('.workspace-disclosure[open]');
+        if(disclosure){event.preventDefault();disclosure.open=false;disclosure.querySelector<HTMLElement>('summary')?.focus({preventScroll:true});return;}
+        event.preventDefault();setOpen(false);return;
+      }
+      if(event.key!=='Tab')return;
+      const items=focusables();if(!items.length){event.preventDefault();panel.current?.focus({preventScroll:true});return;}
+      const active=document.activeElement,popup=ownedPopup();
+      if(popup?.contains(active)){
+        // ModelPicker closes itself on Tab. Continue from its trigger, rather than jumping to page controls.
+        const modelTrigger=panel.current?.querySelector<HTMLElement>('.workspace-model-trigger');
+        const index=modelTrigger?items.indexOf(modelTrigger):-1;
+        event.preventDefault();items[(index+(event.shiftKey?-1:1)+items.length)%items.length]?.focus({preventScroll:true});return;
+      }
+      const index=items.indexOf(active as HTMLElement);
+      if(index<0||(!event.shiftKey&&index===items.length-1)||(event.shiftKey&&index===0)){event.preventDefault();items[event.shiftKey?items.length-1:0].focus({preventScroll:true});}
+    };
+    const attachPortal=()=>{
+      const popup=ownedPopup();if(popup&&!popup.id)popup.id=`${id}-model-layer`;
+      setOwnedPortal(previous=>previous===(popup?.id||'')?previous:popup?.id||'');
+    };
+    const observer=new MutationObserver(attachPortal);observer.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['aria-controls']});attachPortal();
+    document.addEventListener('keydown',keyDown);document.addEventListener('focusin',focusInside);
+    return()=>{observer.disconnect();document.removeEventListener('keydown',keyDown);document.removeEventListener('focusin',focusInside);document.body.style.overflow=previousOverflow;setOwnedPortal('');if(trigger.current?.isConnected)trigger.current.focus({preventScroll:true});};
+  },[open,id]);
+  useEffect(()=>{if(!allowed)setOpen(false);},[allowed]);
+  const targetSummary=selected?`${selected.name}${selected.online?'':' · 离线'}`:value.hostId?'此前电脑 · 未连接':'选择执行电脑';
+  return <div className={`chat-assistant-controls${compact?' is-compact':''}`}>
+    <button ref={trigger} type="button" className={`chat-assistant-trigger${value.enabled?' is-enabled':''}`} aria-label={`Chat + Agent 设置：${value.enabled?'开启':'关闭'}，${targetSummary}`} aria-haspopup="dialog" aria-expanded={open} aria-controls={open?`${id}-dialog`:undefined} onClick={()=>setOpen(previous=>!previous)}>
+      <Terminal size={14} aria-hidden="true"/><span className="chat-assistant-trigger-copy"><strong>Chat + Agent</strong><small>{targetSummary}</small></span><span className="chat-assistant-trigger-state">{value.enabled?'开':'关'}</span><Settings2 size={13} aria-hidden="true"/>
+    </button>
+    {open&&createPortal(<div className="chat-assistant-layer" style={placement?.layer} onClick={event=>{if(event.target===event.currentTarget)setOpen(false);}}>
+      <section ref={panel} id={`${id}-dialog`} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} aria-owns={ownedPortal||undefined} tabIndex={-1} className={`chat-assistant-dialog${placement?.sheet?' is-sheet':''}`} style={placement?.panel}>
+        <div ref={heading} className="chat-assistant-dialog-heading"><div><h2 id={`${id}-title`}>Chat + Agent</h2><p id={`${id}-description`}>需要操作电脑时交给后台 Agent，聊天继续。</p></div><button ref={closeButton} type="button" aria-label="关闭 Chat + Agent 设置" onClick={()=>setOpen(false)}><X size={18}/></button></div>
+        <div ref={body} className="chat-assistant-options">
+      <label className="chat-assistant-enable"><input type="checkbox" role="switch" aria-label="启用 Chat + Agent" checked={value.enabled} disabled={disabled||!allowed||(!value.enabled&&!!issue)} onChange={event=>assistant.change({...value,enabled:event.target.checked})}/><span>自动派发 Agent 任务<small>按下方设置执行，仅本次登录有效。</small></span></label>
       <div className="chat-assistant-target-row">
         <label htmlFor={`${id}-host`}><span>执行电脑</span><select id={`${id}-host`} aria-label="Chat + Agent 执行电脑" value={value.hostId} disabled={disabled||!allowed} onChange={event=>assistant.change({...value,hostId:event.target.value})}>
           <option value="">请选择一台电脑</option>
@@ -66,10 +152,11 @@ export function ChatAssistantControls({assistant,allowed,user,providers,disabled
       </div>
       <ModelPicker providers={providers} value={value.providerId} label="后台 Agent 模型" fallbackLabel={user?.isOwner?'主机默认模型':'选择 Agent 模型'} fallbackOption={user?.isOwner?{label:'主机默认模型',description:'使用执行主机的 Codex 配置'}:undefined} disabled={disabled||!allowed} onChange={providerId=>assistant.change({...value,providerId})}/>
       <div className="chat-assistant-permissions"><AgentPermissions value={value.permissions} user={user} disabled={disabled||!allowed} onChange={permissions=>assistant.change({...value,permissions})}/></div>
-      <label className="chat-assistant-enable"><input type="checkbox" role="switch" aria-label="启用 Chat + Agent" checked={value.enabled} disabled={disabled||!allowed||(!value.enabled&&!!issue)} onChange={event=>assistant.change({...value,enabled:event.target.checked})}/><span>让 Chat 自动派发 Agent 任务<small>按所选电脑、模型和权限执行；下次登录需重新开启。</small></span></label>
-      {!allowed?<p className="chat-assistant-note">请先登录并开通 Agent 权限。</p>:assistant.error?<p className="chat-assistant-note is-error" role="status">{assistant.error}</p>:issue?<p className="chat-assistant-note" role="status">{issue}</p>:<p className="chat-assistant-note">后台任务固定到这台电脑；可以继续聊天、查看进度或取消。</p>}
-    </div>
-  </details>;
+      {!allowed?<p className="chat-assistant-note">请先登录并开通 Agent 权限。</p>:assistant.error?<p className="chat-assistant-note is-error" role="status">{assistant.error}</p>:issue?<p className="chat-assistant-note" role="status">{issue}</p>:disabled?<p className="chat-assistant-note" role="status">当前回复结束后，可以调整下一次任务的设置。</p>:null}
+        </div>
+      </section>
+    </div>,document.body)}
+  </div>;
 }
 
 /** Refresh background tasks without making the foreground conversation busy. */

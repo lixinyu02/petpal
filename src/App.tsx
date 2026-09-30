@@ -24,6 +24,7 @@ import type { PerformanceInput, PerformancePhase } from './avatar/performance.mj
 import './avatar/speech.css';
 import WorkspaceDisclosure from './WorkspaceDisclosure';
 import './workspace-density.css';
+import './workspace-room.css';
 import AccountsSettings from './AccountsSettings';
 import VoiceSettings from './VoiceSettings';
 import DesktopAssistantSettings from './DesktopAssistantSettings';
@@ -440,20 +441,20 @@ export default function App() {
       <header className="topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileNav(true)}><Menu size={21}/></button><span className="breadcrumb">我的空间</span><span className="breadcrumb-divider">/</span><strong>{view === 'settings' ? '连接与设置' : view==='downloads'?'下载客户端':currentMode === 'codex' ? 'Agent · 执行任务' : 'Chat · 聊天'}</strong></div><div className="topbar-actions">{view === 'chat' && <button type="button" className="companion-panel-toggle" aria-label={companionPanelOpen ? '收起伙伴栏' : '展开伙伴栏'} aria-expanded={companionPanelOpen} aria-controls="workspace-companion-panel" onClick={() => setCompanionPanelOpen(value => !value)}><PawPrint size={16}/><span>{companionPanelOpen ? '收起伙伴' : '伙伴'}</span></button>}<span className="today">{new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric' }).format(new Date())}</span><button className="avatar account-entry" aria-label="我的账号" onClick={() => { stopPresentation(); setSettingsTab('accounts'); setView('settings'); }}>{state.user?.displayName?.slice(0,1) || '我'}</button><a className="single-companion-return" href="/" aria-label="回到伙伴身边"><PawPrint size={20}/></a></div></header>
       {!ready ? <div className="loading-view"><Loader2 className="spin"/>正在准备你的小伴…</div> : view==='downloads'?<DownloadsView/>:view === 'settings' ? <SettingsView state={state} connected={connected} refresh={refresh} notice={setNotice} connect={() => setConnectionOpen(true)} initialTab={settingsTab} hasDraft={!!draft.trim()||!!attachments.items.length||working}/> : <div className={`workspace${companionPanelOpen ? ' workspace-companion-visible' : ''}`}>
         <section className="chat-area">
-          <div className="workspace-controls">
+          <div className={`workspace-controls is-${currentMode==='chat'?'chat':'agent'}`}>
             <div className="workspace-mode-row">
               <div className="mode-switch" role="group" aria-label="对话模式">
-                <button aria-pressed={currentMode==='chat'} onClick={()=>currentMode!=='chat'&&newChat('chat')}><MessageCircle size={16}/>Chat<span>聊天</span></button>
-                <button aria-pressed={currentMode==='codex'} disabled={!state.user?.canUseCodex} title={!state.user?.canUseCodex?'请联系管理员开通 Agent':undefined} onClick={()=>currentMode!=='codex'&&newChat('codex')}><Terminal size={16}/>Agent<span>执行任务</span></button>
+                <button aria-label="Chat 聊天" aria-pressed={currentMode==='chat'} onClick={()=>currentMode!=='chat'&&newChat('chat')}><MessageCircle size={16}/>Chat<span>聊天</span></button>
+                <button aria-label="Agent 执行任务" aria-pressed={currentMode==='codex'} disabled={!state.user?.canUseCodex} title={!state.user?.canUseCodex?'请联系管理员开通 Agent':undefined} onClick={()=>currentMode!=='codex'&&newChat('codex')}><Terminal size={16}/>Agent<span>执行任务</span></button>
               </div>
+              {currentMode==='chat'&&<ModelPicker providers={state.providers} value={conversation?.providerId||providerId} onChange={id=>void changeModel(id)} disabled={working||switchingModel||unconfirmed} label="Chat 模型" fallbackLabel="选择模型"/>}
+              {currentMode==='chat'&&state.user?.canUseCodex&&<ChatAssistantControls assistant={chatAssistant} allowed={connected&&!!state.user?.canUseCodex} user={state.user} providers={agentProviders} disabled={busy||switchingModel}/>}
               {currentMode==='codex'&&<AgentOnboarding codex={selectedCodex} user={state.user} host={selectedHost} hostLoading={hostsLoading} localHostId={localHostId} onConfigure={()=>{setSettingsTab('assistant');setView('settings');}}/>}
             </div>
-            <div className={`workspace-context-row${currentMode==='codex'?' has-execution-target':''}`}>
-              <ModelPicker providers={currentMode==='codex'?agentProviders:state.providers} value={currentMode==='codex'?activeProviderId:conversation?.providerId||providerId} onChange={id=>void changeModel(id)} disabled={working||agentUnknown||agentSubmitting||switchingModel||unconfirmed} label={currentMode==='codex'?'Agent 模型':'Chat 模型'} fallbackLabel={currentMode==='codex'?(agentRunning?conversation?.agent?.run?.model:state.codex.model)||'Codex 主机配置':'选择模型'} fallbackOption={currentMode==='codex'&&state.user?.isOwner?{label:(agentRunning?conversation?.agent?.run?.model:state.codex.model)||'Codex 主机配置',description:'使用主机默认模型与推理强度'}:undefined}/>
-              {currentMode==='codex'&&<ExecutionTarget hosts={agentHosts} value={selectedHostId} onChange={changeHost} disabled={busy||agentSubmitting||hostBusy||unconfirmed} loading={hostsLoading} error={hostsError} localHostId={localHostId} onRefresh={()=>setHostRefresh(value=>value+1)}/>}
-              {currentMode==='chat' && provider?.supportsImages===false && <span className="workspace-mode-note">当前模型仅支持文字</span>}
-            </div>
-            {currentMode==='chat'&&state.user?.canUseCodex&&<ChatAssistantControls assistant={chatAssistant} allowed={connected&&!!state.user?.canUseCodex} user={state.user} providers={agentProviders} disabled={busy||switchingModel}/>}
+            {currentMode==='codex'&&<div className="workspace-context-row has-execution-target">
+              <ModelPicker providers={agentProviders} value={activeProviderId} onChange={id=>void changeModel(id)} disabled={working||agentUnknown||agentSubmitting||switchingModel||unconfirmed} label="Agent 模型" fallbackLabel={(agentRunning?conversation?.agent?.run?.model:state.codex.model)||'Codex 主机配置'} fallbackOption={state.user?.isOwner?{label:(agentRunning?conversation?.agent?.run?.model:state.codex.model)||'Codex 主机配置',description:'使用主机默认模型与推理强度'}:undefined}/>
+              <ExecutionTarget hosts={agentHosts} value={selectedHostId} onChange={changeHost} disabled={busy||agentSubmitting||hostBusy||unconfirmed} loading={hostsLoading} error={hostsError} localHostId={localHostId} onRefresh={()=>setHostRefresh(value=>value+1)}/>
+            </div>}
             {currentMode==='codex' && nativeExecutor?.state==='reconnecting' && <p className="execution-reconnect" role="status"><Loader2 size={13} className="spin"/>此电脑连接中断，正在重连。原任务保持暂停。</p>}
           </div>
           <div className="chat-scroll" ref={scrollRef} aria-live="polite" aria-busy={working}>

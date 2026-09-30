@@ -1,0 +1,63 @@
+/* Keep daily controls in one calm toolbar; configuration opens separately. */
+.app-shell .workspace-controls.is-chat,
+.app-shell .workspace-controls.is-agent { display:block; }
+.app-shell .workspace-controls.is-chat { padding-block:12px; }
+.app-shell .workspace-controls.is-chat .workspace-mode-row {
+  display:grid;
+  grid-template-columns:auto minmax(140px,1fr) auto;
+  align-items:center;
+  gap:16px;
+}
+.app-shell .workspace-mode-row .mode-switch { width:max-content; }
+.app-shell .workspace-mode-row .mode-switch button { min-height:40px; }
+.app-shell .workspace-controls.is-chat .workspace-model-picker { width:100%;max-width:320px;justify-self:end; }
+.app-shell .workspace-controls.is-chat .workspace-model-trigger {
+  width:100%;min-height:44px;padding:8px 10px;background:transparent;border-color:transparent;border-radius:8px;
+}
+.app-shell .workspace-controls.is-chat .workspace-model-trigger:hover:not(:disabled),
+.app-shell .workspace-controls.is-chat .workspace-model-trigger[aria-expanded=true] { background:#eef2e8;border-color:#dce5d6; }
+.app-shell .workspace-controls.is-chat .workspace-model-current { flex:1; }
+.app-shell .workspace-controls.is-chat .workspace-model-current small { display:none; }
+.app-shell .workspace-controls.is-chat .workspace-model-current strong { max-width:none;font-size:13px; }
+.app-shell .workspace-controls.is-chat .chat-assistant-controls { width:auto;margin:0;justify-self:end; }
+.app-shell .workspace-controls.is-agent .workspace-context-row.has-execution-target {
+  grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;
+}
+.app-shell .workspace-controls.is-agent .workspace-context-row .workspace-model-trigger,
+.app-shell .workspace-controls.is-agent .workspace-context-row .workspace-host-control { min-height:46px;background:transparent; }
+.app-shell .welcome { padding-top:clamp(24px,5vh,54px); }
+.app-shell .welcome-symbol { margin-bottom:18px; }
+.app-shell .welcome .suggestions { margin-top:24px; }
+.app-shell .suggestions>button { box-shadow:none; }
+
+@media(max-width:1100px) and (min-width:651px) {
+  .app-shell .workspace-controls.is-chat .workspace-mode-row { grid-template-columns:auto minmax(0,1fr);gap:6px 12px; }
+  .app-shell .workspace-controls.is-chat .workspace-model-picker { grid-column:1/-1;grid-row:2;max-width:none; }
+  .app-shell .workspace-controls.is-chat .chat-assistant-controls { grid-column:2;grid-row:1; }
+}
+@media(max-width:650px) {
+  .app-shell:has(.workspace) {
+    --workspace-pet-height:clamp(48px,calc(var(--app-viewport-height,100dvh) * .065),64px);
+  }
+  .app-shell .workspace-controls.is-chat { padding-block:8px; }
+  .app-shell .workspace-controls.is-chat .workspace-mode-row { grid-template-columns:minmax(0,1fr) auto;gap:4px 8px; }
+  .app-shell .workspace-mode-row .mode-switch button { min-height:44px;gap:6px;padding:7px 10px; }
+  .app-shell .workspace-mode-row .mode-switch span { display:none; }
+  .app-shell .workspace-controls.is-chat .workspace-model-picker { grid-column:1/-1;grid-row:2;max-width:none; }
+  .app-shell .workspace-controls.is-chat .chat-assistant-controls { grid-column:2;grid-row:1; }
+  .app-shell .workspace-controls.is-chat .workspace-model-trigger { padding-inline:5px; }
+  .app-shell .workspace-controls.is-agent .workspace-context-row.has-execution-target { gap:8px; }
+  .app-shell .workspace-controls.is-agent .workspace-context-row .workspace-model-current,
+  .app-shell .workspace-controls.is-agent .workspace-context-row .workspace-host-control label { flex-direction:column;align-items:stretch;gap:3px; }
+  .app-shell .workspace-controls.is-agent .workspace-context-row .workspace-model-current small,
+  .app-shell .workspace-controls.is-agent .workspace-context-row .workspace-host-control label>span { flex-basis:auto;font-size:11px; }
+  .app-shell .workspace-controls.is-agent .workspace-context-row .workspace-model-current strong { font-size:12px; }
+  .app-shell .workspace-controls.is-agent .workspace-context-row .workspace-host-control select { width:100%;font-size:13px;min-height:24px; }
+  .app-shell .workspace-controls.is-agent .workspace-context-row .workspace-host-help { display:none; }
+  .app-shell .welcome { padding-top:30px; }
+  .app-shell .welcome h1 { font-size:32px;line-height:1.45; }
+  .app-shell .welcome-symbol { margin-bottom:16px; }
+  .app-shell .welcome .suggestions { gap:14px;margin-top:24px; }
+}
+html[data-short-viewport=true] .app-shell .workspace-controls.is-chat { padding-block:4px; }
+html[data-short-viewport=true] .app-shell .welcome { padding-top:10px; }
