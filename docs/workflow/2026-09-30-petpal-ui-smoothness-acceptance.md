@@ -16,7 +16,16 @@
 
 ## issue-49
 
-待最终 UI 构建、Chrome 桌面/竖屏、静态部署验收后填写。
+- 空会话删除重复英文和两行大标题，桌面欢迎区高度约 373 → 237 CSS px；两条预填建议保留。悬浮“回到最新”在消息区内，44px 高，不挤占 composer；消息区域可键盘 PageUp 阅读，焦点可见。
+- 修正短屏空会话被跟随到底而裁掉标题：空会话定位顶部，消息/审批存在时保持原跟随行为。
+- Chrome 隔离构建 1280×800、412×960、412×560：无横向溢出，输入、模式/模型、执行电脑和权限入口可达。短屏顶部设置区可独立滚动；Agent 模型浮层可正常打开。手机 PageUp 出现返回入口，按钮恢复后距底部约 0 CSS px；最终手机固定流式回复含完整尾标和朗读按钮，停止按钮退出。
+- 人物帧计数展开 39、收起 40，后续保持 40，重新展开到 43；首页二次元与 3D 猫切换、Enter 摸头均得到 `pet` 和相应反馈，无画面错误。
+- 最终 31/31 调度/滚动/消息/场景回归复验通过，TS 和 Vite 构建通过，最终只读复核无 blocker。Vite 的 Three.js chunk >500kB 提示仍存在，人物是动态加载，本轮未变更打包依赖或角色图像。
+- 静态原子部署 27 个文件 SHA-256 比对通过，保留旧 assets 和 `dist/downloads` 两份 Windows 0.9.1 镜像的长度/修改时间；旧 HTML 已备份。没有改动后端代码、模型权限、凭据或生产历史。
+- 本机及 `https://magicdatou.top:44318`：health 200/ok，匿名 state 401，HTML/入口 JS/CSS/App chunk 均 200 且与最终构建逐字节哈希一致。
+- 正式站点 Chrome 使用既有 test 账号成功登录，桌面和实际 412×960 UI 通过；Chat/Agent 切换、实际模型/在线执行电脑/权限状态可见。没有提交真实模型或 Agent 任务。
+- 证据：`deployment.json`、`live-acceptance.json`、`regression-final.log`、`build-final.log`，以及 desktop-final/public-desktop-final/public-mobile-final/mobile-history-final/anime-interaction-final 截图，均在忽略的 evidence 目录。
+- 本轮不重新打包 Windows/Ubuntu/Android；浏览器与协议回归不代表四端设备、麦克风/摄像头、实际 TTS/ASR 服务或新的 Agent 执行验收。
 
 ## Rust 评估
 

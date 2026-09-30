@@ -1,0 +1,47 @@
+/* Reading and input keep their space when the conversation grows. */
+.app-shell .chat-reading-area {
+  position:relative;display:flex;flex:1 1 0;min-width:0;min-height:0;
+}
+.app-shell .chat-scroll { width:100%; }
+.chat-scroll-content { min-width:0; }
+.app-shell .chat-scroll:focus-visible { outline:1px solid #648d70;outline-offset:-2px;border-radius:4px; }
+.chat-latest-button {
+  position:absolute;z-index:4;bottom:12px;left:50%;transform:translateX(-50%);
+  display:flex;align-items:center;gap:7px;min-height:44px;padding:9px 15px;
+  border:1px solid #d6e1d1;border-radius:24px;background:#fcfdf9;color:#315b43;
+  box-shadow:0 3px 12px #29432e12;font-size:12px;white-space:nowrap;
+  animation:chat-latest-in .14s ease-out;
+}
+.chat-latest-button:hover { background:#eef4e9; }
+.chat-latest-button:active { transform:translateX(-50%) scale(.97); }
+.chat-latest-button:focus-visible { outline:2px solid #648d70;outline-offset:3px; }
+.app-shell .welcome { max-width:560px;padding-top:clamp(20px,4vh,42px); }
+.app-shell .welcome-symbol { width:36px;height:36px;margin-bottom:12px; }
+.app-shell .welcome h1 { margin-top:0;font-size:clamp(25px,2.5vw,34px);line-height:1.4;letter-spacing:0; }
+.app-shell .welcome>p { margin-top:12px;font-size:13px;color:#6d7c66; }
+.app-shell .welcome .suggestions { margin-top:24px;gap:16px; }
+.app-shell .suggestions>button { min-height:48px;padding:13px 0;border-radius:0; }
+.app-shell .suggestions>button:hover { padding-left:0;background:transparent;color:#315b43; }
+.suggestion-arrow { transition:transform .16s ease; }
+.suggestions>button:hover .suggestion-arrow { transform:translate(3px,-2px); }
+@keyframes chat-latest-in {
+  from { opacity:0;translate:0 4px; }
+  to { opacity:1;translate:0 0; }
+}
+@media(max-width:650px) {
+  .app-shell .welcome { padding-top:22px; }
+  .app-shell .welcome h1 { font-size:27px; }
+  .app-shell .welcome>p { font-size:12px; }
+  .app-shell .welcome .suggestions { gap:12px;margin-top:20px; }
+  .app-shell .suggestions>button { gap:7px;font-size:12px; }
+}
+html[data-short-viewport=true] .app-shell .welcome { padding-top:10px; }
+html[data-short-viewport=true] .app-shell .welcome h1 { font-size:24px; }
+html[data-short-viewport=true] .app-shell .welcome>p { margin-top:8px; }
+html[data-short-viewport=true] .app-shell .welcome .suggestions { margin-top:14px; }
+@media(prefers-reduced-motion:reduce) {
+  .chat-latest-button { animation:none;transition:none; }
+  .suggestion-arrow { transition:none; }
+  .chat-latest-button:active,.suggestions>button:hover .suggestion-arrow { transform:none; }
+  .chat-latest-button:active { transform:translateX(-50%); }
+}

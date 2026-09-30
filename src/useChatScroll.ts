@@ -1,13 +1,15 @@
 import {useCallback,useLayoutEffect,useRef,useState,type RefObject} from 'react';
 import {createChatScroll} from './chat-scroll.mjs';
 
-export function useChatScroll({scrollRef,conversationId,active,messages,approvalKey}:{scrollRef:RefObject<HTMLDivElement|null>;conversationId:string;active:boolean;messages:unknown;approvalKey:string}) {
+export function useChatScroll({scrollRef,conversationId,active,messages,approvalKey}:{scrollRef:RefObject<HTMLDivElement|null>;conversationId:string;active:boolean;messages:readonly unknown[]|undefined;approvalKey:string}) {
   const contentRef=useRef<HTMLDivElement>(null),controller=useRef<ReturnType<typeof createChatScroll>|null>(null);
+  const hasMessages=useRef(false);
+  hasMessages.current=Boolean(messages?.length||approvalKey);
   const [following,setFollowing]=useState(true);
   useLayoutEffect(()=>{
     const element=scrollRef.current;
     if(!active||!element)return;
-    const follow=createChatScroll({read:()=>element,scrollBottom:()=>element.scrollTo({top:element.scrollHeight,behavior:'instant'}),onFollowing:setFollowing,isCurrent:()=>element.isConnected});
+    const follow=createChatScroll({read:()=>element,scrollBottom:()=>element.scrollTo({top:hasMessages.current?element.scrollHeight:0,behavior:'instant'}),onFollowing:setFollowing,isCurrent:()=>element.isConnected});
     controller.current=follow;setFollowing(true);follow.latest();
     const observer=typeof ResizeObserver==='function'?new ResizeObserver(()=>follow.contentChanged()):undefined;
     if(contentRef.current)observer?.observe(contentRef.current);

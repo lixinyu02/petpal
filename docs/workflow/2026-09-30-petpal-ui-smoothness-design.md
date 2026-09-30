@@ -2,7 +2,7 @@
 
 - Date: 2026-09-30
 - Complexity: L1
-- Status: implementing
+- Status: complete，网页已上线，源码已按 issue 提交
 
 ## Background
 
