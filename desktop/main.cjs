@@ -8,16 +8,57 @@ const { canRequestMedia, canCheckMedia } = require('./media-permissions.cjs');
 const { readDesktopServiceSettings } = require('./service-settings.cjs');
 const { createDesktopRemoteHttp, isPetPalReleaseUrl } = require('./remote-http.cjs');
 const { mainWindowLayout, petWindowLayout } = require('./window-layout.cjs');
+const { createStartupDiagnostics, startupFailureMessage } = require('./startup-diagnostics.cjs');
 const { spawn } = require('node:child_process');
 
 let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
 let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor;
+let startupDiagnostics, startupPhase = 'electron-ready', startupFailed = false;
 const root = path.resolve(__dirname, '..');
 const iconPath = path.join(__dirname, 'assets', 'icon.png');
 if (process.argv.includes('--smoke-test') && process.env.PETPAL_SMOKE_PROFILE) {
   const profile = path.resolve(process.env.PETPAL_SMOKE_PROFILE);
   fsSync.mkdirSync(profile, { recursive: true });
   app.setPath('userData', profile);
+}
+
+function getStartupDiagnostics() {
+  if (!startupDiagnostics) {
+    let userData, appVersion;
+    try { userData = app.getPath('userData'); } catch {}
+    try { appVersion = app.getVersion(); } catch {}
+    startupDiagnostics = createStartupDiagnostics({ userData, appVersion, electronVersion: process.versions.electron,
+      isSmoke: process.argv.includes('--smoke-test'), smokeDir: process.env.PETPAL_SMOKE_DIR || '' });
+  }
+  return startupDiagnostics;
+}
+
+async function startupMilestone(phase) {
+  startupPhase = phase;
+  await getStartupDiagnostics().milestone(phase);
+}
+
+async function handleStartupFailure(error) {
+  if (startupFailed || quitting) return;
+  startupFailed = true;
+  let result;
+  try { result = await getStartupDiagnostics().failure(error, startupPhase); } catch {}
+  // Arbitrary exception strings can contain private settings or HTTP credentials.
+  console.error('PetPal startup failed:', JSON.stringify(result?.record || { phase: startupPhase, code: 'UNKNOWN' }));
+  if (!process.argv.includes('--smoke-test')) {
+    try { dialog.showErrorBox('小伴启动失败', startupFailureMessage(error, result?.logPath)); } catch {}
+  }
+  exitCode = 1;
+  app.quit();
+}
+
+function rendererFailure(_event, details = {}) {
+  if (quitting || details.reason === 'clean-exit') return;
+  const reasons = { crashed: 'RENDERER_CRASHED', oom: 'RENDERER_OOM', 'launch-failed': 'RENDERER_LAUNCH_FAILED',
+    'integrity-failure': 'RENDERER_INTEGRITY_FAILURE', 'abnormal-exit': 'RENDERER_ABNORMAL_EXIT', killed: 'RENDERER_KILLED' };
+  startupPhase = 'renderer-run';
+  const error = Object.assign(new Error('Renderer unavailable'), { code: reasons[details.reason] || 'RENDERER_UNAVAILABLE' });
+  void handleStartupFailure(error);
 }
 
 function isTrusted(event) {
@@ -122,9 +163,11 @@ function createMain() {
     if (!quitting && tray) { event.preventDefault(); mainWindow.hide(); }
   });
   mainWindow.on('closed', () => { mainWindow = null; });
-  mainWindow.webContents.on('render-process-gone', () => { void executor?.disconnect().catch(() => {}); });
+  mainWindow.webContents.on('render-process-gone', (event, details) => { void executor?.disconnect().catch(() => {}); rendererFailure(event, details); });
   mainWindow.webContents.on('destroyed', () => { void executor?.disconnect().catch(() => {}); });
   mainLoaded = mainWindow.loadURL(origin);
+  // The boot sequence owns this rejection even if creating the other window fails first.
+  void mainLoaded.catch(() => {});
 }
 
 function showMain() {
@@ -151,6 +194,7 @@ function showPet() {
     petWindow.once('ready-to-show', () => petWindow?.showInactive());
     petWindow.on('closed', () => { petWindow = null; });
     petLoaded = petWindow.loadURL(`${origin}/?pet=1`);
+    void petLoaded.catch(() => {});
   } else { fitWindowToDisplay(petWindow, true); petWindow.showInactive(); }
 }
 
@@ -433,9 +477,12 @@ async function listenDesktopBackend(server, maximumAttempts = 20) {
 
 async function boot() {
   const { createPetServer } = await import(pathToFileURL(path.join(root, 'server', 'app.mjs')).href);
+  await startupMilestone('service-settings');
   const serviceSettings = await readDesktopServiceSettings(app.getPath('userData'));
+  await startupMilestone('workspace');
   const workspaceRoot = process.env.PETPAL_WORKSPACE || path.join(app.getPath('userData'), 'workspace');
   await fs.mkdir(workspaceRoot, { recursive: true });
+  await startupMilestone('backend-create');
   backend = await createPetServer({
     dataDir: path.join(app.getPath('userData'), 'data'),
     token: crypto.randomBytes(32).toString('hex'),
@@ -444,16 +491,20 @@ async function boot() {
     workspaceRoot,
     codexHttpOrigins: serviceSettings.codexHttpOrigins,
   });
+  await startupMilestone('backend-listen');
   const port = await listenDesktopBackend(backend.server);
   origin = `http://127.0.0.1:${port}`;
+  await startupMilestone('executor-create');
   const executorModule = await import(pathToFileURL(path.join(__dirname, 'executor.mjs')).href);
   executor = new executorModule.DesktopExecutor({ dataDir: path.join(app.getPath('userData'), 'executor') });
   for (const [channel, handler] of Object.entries(executorModule.createExecutorHandlers(executor,
     event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting))) ipcMain.handle(channel, handler);
+  await startupMilestone('transport-create');
   remoteHttp = createDesktopRemoteHttp({ isAllowed: event => isTrusted(event) && event.sender === mainWindow?.webContents });
   ipcMain.handle('petpal:remote:request', (event, request) => remoteHttp.request(event, request));
   ipcMain.handle('petpal:remote:abort', (event, id) => remoteHttp.abort(event, id));
   ipcMain.handle('petpal:remote:ack', (event, id, sequence) => remoteHttp.acknowledge(event, id, sequence));
+  await startupMilestone('updates-create');
   const updaterModule = await import(pathToFileURL(path.join(__dirname, 'updates.mjs')).href);
   verifyDownloadedUpdate = updaterModule.verifyDownloadedUpdate;
   updates = new updaterModule.DesktopUpdateManager({
@@ -464,6 +515,7 @@ async function boot() {
   });
   for (const [channel, handler] of Object.entries(updaterModule.createDesktopUpdateHandlers(updates,
     event => isTrusted(event) && event.sender === mainWindow?.webContents, requireUpdateOwner))) ipcMain.handle(channel, handler);
+  await startupMilestone('permissions');
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) =>
     callback(canRequestMedia({webContents, mainWindow, origin}, permission, details)));
   session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) =>
@@ -478,6 +530,7 @@ async function boot() {
     if (channel === 'petpal:connection' && event.sender !== mainWindow?.webContents) throw new Error('Credentials belong to the main window');
     return handler();
   });
+  await startupMilestone('tray-create');
   tray = new Tray(nativeImage.createFromPath(iconPath).resize({ width: 32, height: 32 }));
   tray.setToolTip('小伴 PetPal');
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -488,13 +541,18 @@ async function boot() {
     { label: '退出小伴', click: () => app.quit() },
   ]));
   tray.on('double-click', showMain);
+  await startupMilestone('window-create');
   createMain();
   showPet();
+  await startupMilestone('window-load');
+  await Promise.all([mainLoaded, petLoaded]);
+  await startupMilestone('ready');
   if (process.argv.includes('--smoke-test')) {
-    await Promise.all([mainLoaded, petLoaded]);
+    await startupMilestone('smoke-login');
     const loginGate = await loginSmokeMain();
     const health = await fetch(`${origin}/api/health`).then(r => r.json());
     const bridge = await mainWindow.webContents.executeJavaScript('window.petpal.connection().then(c => ({url: c.url, hasToken: !!c.token}))');
+    await startupMilestone('smoke-executor');
     const executorBridge = await mainWindow.webContents.executeJavaScript(`(async () => {
       const value = window.petpal.executor;
       if (!value || !['connect', 'disconnect', 'status'].every(key => typeof value[key] === 'function')) throw new Error('Executor preload facade is unavailable');
@@ -510,11 +568,32 @@ async function boot() {
     const registeredHosts = await fetch(`${origin}/api/agent/hosts`, { headers: { Authorization: `Bearer ${backend.token}` } }).then(response => response.json());
     if (!registeredHosts.hosts?.some(host => host.id === executorBridge.hostId && host.online && host.kind === 'desktop' && host.platform === process.platform)) throw new Error('Executor is not visible in the authenticated host list');
     executorBridge.listedOnline = true;
+    await startupMilestone('smoke-status');
     const codex = await fetch(`${origin}/api/codex/status`, { headers: { Authorization: `Bearer ${backend.token}` } }).then(r => r.json());
     const desktopTools = await fetch(`${origin}/api/desktop-tools/status`, { headers: { Authorization: `Bearer ${backend.token}` } }).then(async response => {
       if (!response.ok) throw new Error('Desktop tools status is unavailable');
       return response.json();
     });
+    if (process.argv.includes('--startup-only')) {
+      const result = { event: 'desktop-startup-smoke', startupReady: true, health, loginGate,
+        bridge: { url: bridge.url, hasToken: bridge.hasToken }, executor: executorBridge,
+        runtimeRoot: path.dirname(process.execPath), electronVersion: process.versions.electron,
+        codex: { available: codex.available, running: codex.running, authenticated: codex.authenticated },
+        desktopTools: { music: desktopTools.music, opencli: { available: desktopTools.opencli.available,
+          version: desktopTools.opencli.version, runtime: desktopTools.opencli.runtime,
+          daemonState: desktopTools.opencli.daemon?.state, readOnlyProbe: true } } };
+      if (!health.ok || !bridge.hasToken || !codex.available || !desktopTools.opencli.available || desktopTools.opencli.version !== '1.8.8') throw new Error('Startup smoke prerequisite failed');
+      await startupMilestone('smoke-evidence');
+      if (process.env.PETPAL_SMOKE_DIR) {
+        await fs.mkdir(process.env.PETPAL_SMOKE_DIR, { recursive: true });
+        await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'startup-result.json'), JSON.stringify(result, null, 2));
+      }
+      await startupMilestone('smoke-complete');
+      console.log(JSON.stringify(result));
+      app.quit();
+      return;
+    }
+    await startupMilestone('smoke-anime');
     const [animeMain, animePet] = await Promise.all([inspectAvatarWindow(mainWindow, true, 'anime'), inspectAvatarWindow(petWindow, false, 'anime')]);
     await mainWindow.webContents.executeJavaScript(`(async () => {
       await document.fonts.ready;
@@ -530,6 +609,7 @@ async function boot() {
       avatars: { anime: { main: animeMain, pet: animePet } }, defaultAvatar: 'anime',
       codex: { available: codex.available, running: codex.running, authenticated: codex.authenticated, sandbox: codex.sandbox },
       pet: { alwaysOnTop: petWindow.isAlwaysOnTop(), transparent: true } };
+    await startupMilestone('smoke-system-speech');
     result.systemSpeech = await inspectSystemSpeech(mainWindow);
     if (process.env.PETPAL_SMOKE_DIR) {
       await fs.mkdir(process.env.PETPAL_SMOKE_DIR, { recursive: true });
@@ -554,7 +634,9 @@ async function boot() {
         result.poses = { mobile };
       }
     }
+    await startupMilestone('smoke-anime-gestures');
     result.gestures = { anime: await inspectNaturalGestures('anime') };
+    await startupMilestone('smoke-cat');
     await clickSmokeButton('.companion-switch', '3D 小猫');
     const [catMain, catPet] = await Promise.all([inspectAvatarWindow(mainWindow, true, 'cat'), inspectAvatarWindow(petWindow, false, 'cat')]);
     if (catMain.storedKind !== 'cat' || catPet.storedKind !== 'cat') throw new Error('Avatar storage selection did not synchronize');
@@ -567,16 +649,20 @@ async function boot() {
         await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'cat-walk.png'), (await mainWindow.webContents.capturePage()).toPNG());
       }
     }
+    await startupMilestone('smoke-cat-gestures');
     result.gestures.cat = await inspectNaturalGestures('cat');
+    await startupMilestone('smoke-avatar-return');
     await clickSmokeButton('.companion-switch', '二次元伙伴');
     const [returnMain, returnPet] = await Promise.all([inspectAvatarWindow(mainWindow, true, 'anime'), inspectAvatarWindow(petWindow, false, 'anime')]);
     result.switchSynced = returnMain.storedKind === 'anime' && returnPet.storedKind === 'anime';
     if (!result.switchSynced) throw new Error('Avatar storage return transition did not synchronize');
     if (process.env.PETPAL_SMOKE_APP === '1' || process.env.PETPAL_SMOKE_POSES === '1') {
+      await startupMilestone('smoke-app');
       result.appFixture = await inspectAppFixture({ expressions: process.env.PETPAL_SMOKE_POSES === '1' });
       result.responsePerformance = result.appFixture.responses;
       result.speechUi = result.appFixture.speechUi;
     }
+    await startupMilestone('smoke-evidence');
     const hashBundle = async relative => {
       const absolute = path.join(root, relative);
       if ((await fs.stat(absolute)).isDirectory()) {
@@ -585,10 +671,11 @@ async function boot() {
       const bytes = await fs.readFile(absolute);
       return [{ path: relative.split(path.sep).join('/'), bytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }];
     };
-    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
+    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
     if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'result.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
-    if (!health.ok || !bridge.hasToken || !codex.available || !desktopTools.opencli.available || desktopTools.opencli.version !== '1.8.8') exitCode = 1;
+    if (!health.ok || !bridge.hasToken || !codex.available || !desktopTools.opencli.available || desktopTools.opencli.version !== '1.8.8') throw new Error('Desktop smoke prerequisite failed');
+    await startupMilestone('smoke-complete');
     app.quit();
   }
 }
@@ -596,12 +683,7 @@ async function boot() {
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   app.on('second-instance', () => { if (origin) showMain(); });
-  app.whenReady().then(boot).catch(error => {
-    console.error('PetPal startup failed:', error.message);
-    if (error.code === 'PETPAL_DESKTOP_SERVICE_SETTINGS' && !process.argv.includes('--smoke-test')) dialog.showErrorBox('小伴启动失败', error.message);
-    exitCode = 1;
-    app.quit();
-  });
+  app.whenReady().then(async () => { await startupMilestone('electron-ready'); await boot(); }).catch(handleStartupFailure);
   app.on('activate', () => { if (origin) showMain(); });
   app.on('window-all-closed', () => { if (!tray) app.quit(); });
   app.on('before-quit', event => {

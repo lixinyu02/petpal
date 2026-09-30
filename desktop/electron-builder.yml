@@ -14,6 +14,7 @@ files:
   - desktop/updates.mjs
   - desktop/media-permissions.cjs
   - desktop/service-settings.cjs
+  - desktop/startup-diagnostics.cjs
   - desktop/remote-http.cjs
   - desktop/executor.mjs
   - desktop/assets/**
