@@ -3,7 +3,7 @@ export const DOWNLOAD_RELEASES_URL = `https://github.com/${DOWNLOAD_REPOSITORY}/
 export const DOWNLOAD_API_URL = `https://api.github.com/repos/${DOWNLOAD_REPOSITORY}/releases?per_page=30`;
 const VERSION = '(?:0|[1-9]\\d{0,8})\\.(?:0|[1-9]\\d{0,8})\\.(?:0|[1-9]\\d{0,8})(?:-[A-Za-z0-9][A-Za-z0-9.-]{0,59})?';
 const tagPattern = new RegExp(`^v?(${VERSION})$`);
-const assetPattern = new RegExp(`^PetPal-(${VERSION})-(?:Android(?:-(debug|release))?\\.apk|Windows-(x64|arm64)\\.exe|Ubuntu-(x64|arm64)\\.(tar\\.gz|AppImage|deb))$`);
+const assetPattern = new RegExp(`^PetPal-(${VERSION})-(?:Android(?:-(debug|release))?\\.apk|Windows-(x64|arm64)\\.(exe|zip)|Ubuntu-(x64|arm64)\\.(tar\\.gz|AppImage|deb))$`);
 const timestamp = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
 
 /** Metadata becomes a link only when both its name and its exact download destination match. */
@@ -22,9 +22,9 @@ export function publishedDownloadPackages(releases) {
       const url = `${DOWNLOAD_RELEASES_URL}/download/${release.tag_name}/${asset.name}`;
       if (asset.browser_download_url !== url || seen.has(asset.id)) continue;
       seen.add(asset.id);
-      const platform = match[3] ? 'windows' : match[4] ? 'ubuntu' : 'android';
-      const format = platform === 'windows' ? 'portable-exe' : platform === 'android' ? 'apk' : match[5] === 'AppImage' ? 'appimage' : match[5];
-      packages.push({ id: String(asset.id), platform, arch: match[3] || match[4] || 'universal', version,
+      const platform = match[3] ? 'windows' : match[5] ? 'ubuntu' : 'android';
+      const format = platform === 'windows' ? match[4] === 'zip' ? 'portable-zip' : 'portable-exe' : platform === 'android' ? 'apk' : match[6] === 'AppImage' ? 'appimage' : match[6];
+      packages.push({ id: String(asset.id), platform, arch: match[3] || match[5] || 'universal', version,
         channel: release.prerelease ? 'preview' : 'stable', format, filename: asset.name, url,
         releaseUrl: `${DOWNLOAD_RELEASES_URL}/tag/${release.tag_name}`, bytes: asset.size, publishedAt,
         ...(/^sha256:[a-f\d]{64}$/i.test(asset.digest || '') ? { sha256: asset.digest.slice(7).toLowerCase() } : {}),
@@ -32,7 +32,10 @@ export function publishedDownloadPackages(releases) {
       });
     }
   }
-  return packages.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt) || a.filename.localeCompare(b.filename));
+  return packages.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt)
+    || (a.platform === 'windows' && b.platform === 'windows' && a.releaseUrl === b.releaseUrl && a.arch === b.arch
+      ? Number(b.format === 'portable-zip') - Number(a.format === 'portable-zip') : 0)
+    || a.filename.localeCompare(b.filename));
 }
 
 function abortable(promise, signal) {

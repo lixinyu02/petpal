@@ -32,6 +32,12 @@ win:
     - target: portable
       arch: [x64]
   artifactName: PetPal-${version}-Windows-${arch}.${ext}
+portable:
+  # electron-builder 26 uses true to omit UNPACK_DIR_NAME and keep NSIS's
+  # per-launch $PLUGINSDIR. A shared directory races before Electron's lock.
+  unpackDirName: true
+  requestExecutionLevel: user
+  splashImage: desktop/assets/startup.bmp
 linux:
   icon: desktop/assets/icon.png
   category: Utility

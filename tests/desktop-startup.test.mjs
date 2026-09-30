@@ -22,7 +22,7 @@ async function fixture(t) {
 const metadata = { appVersion: '0.9.1', electronVersion: '39.8.10', platform: 'win32', arch: 'x64', osVersion: '10.0.26100' };
 
 test('startup diagnostics never serialize exception text, stack, arbitrary names, codes or extra fields', async t => {
-  const f = await fixture(t), secret = 'sk-fixture-private-token-in-a-url-and-config';
+  const f = await fixture(t), secret = 'startup-privacy-fixture';
   const diagnostics = createStartupDiagnostics({ ...f, ...metadata });
   const error = Object.assign(new SyntaxError(secret), { name: secret, code: secret, token: secret, config: { apiKey: secret }, stack: secret });
   await diagnostics.milestone('backend-create');

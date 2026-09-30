@@ -6,19 +6,20 @@ import './downloads.css';
 type Platform = 'android' | 'windows' | 'ubuntu';
 type Package = {
   id: string; platform: Platform; arch: 'universal' | 'x64' | 'arm64'; version: string; channel: 'stable' | 'preview';
-  format: 'apk' | 'portable-exe' | 'tar.gz' | 'appimage' | 'deb'; filename: string; url: string; releaseUrl: string;
+  format: 'apk' | 'portable-exe' | 'portable-zip' | 'tar.gz' | 'appimage' | 'deb'; filename: string; url: string; releaseUrl: string;
   bytes: number; publishedAt: string; sha256?: string; debug: boolean;
 };
 type Catalog = { repository: string; releasesUrl: string; checkedAt: string | null; stale: boolean; error: string | null; retryAt: string | null; packages: Package[] };
 const platforms = [
   { id: 'android' as const, name: 'Android', icon: Smartphone, description: '手机陪伴 · 连接远程助手' },
-  { id: 'windows' as const, name: 'Windows', icon: Monitor, description: '桌宠常驻 · 本机 Codex' },
+  { id: 'windows' as const, name: 'Windows', icon: Monitor, description: 'Windows 10/11 x64 · 桌宠与本机 Agent' },
   { id: 'ubuntu' as const, name: 'Ubuntu', icon: Laptop, description: 'Linux 桌面 · 本机 Codex' },
 ];
-const formats = { apk: 'APK', 'portable-exe': '便携 EXE', 'tar.gz': 'tar.gz', appimage: 'AppImage', deb: 'DEB' };
+const formats = { apk: 'APK', 'portable-exe': '便携 EXE', 'portable-zip': '便携 ZIP（推荐）', 'tar.gz': 'tar.gz', appimage: 'AppImage', deb: 'DEB' };
 const installation = (item: Package) => item.format === 'apk'
   ? `${item.debug ? '调试签名，供试用。' : ''}下载 APK 后，按 Android 提示允许此来源安装。`
-  : item.format === 'portable-exe' ? '下载后直接运行 EXE 便携程序。'
+  : item.format === 'portable-zip' ? '推荐使用 ZIP：完整解压到本地新目录，再运行 PetPal.exe。请勿在压缩包内直接打开。'
+  : item.format === 'portable-exe' ? '下载后运行便携 EXE；每次启动都会解压，请等待窗口出现。首次启动可能需要较长时间。'
   : item.format === 'tar.gz' ? '解压到新目录，运行 ./start-petpal.sh；保留旧目录便于回退。'
   : item.format === 'appimage' ? '允许文件作为程序执行，然后打开 AppImage。'
   : '下载后使用 Ubuntu 的软件安装器打开 DEB。';
@@ -54,7 +55,8 @@ export default function DownloadsView() {
     {loading && !catalog && <p className="downloads-loading" role="status">正在读取 GitHub 已发布的安装包…</p>}
     <div className="downloads-list">
       {platforms.map(platform => {
-        const packages = (catalog?.packages || []).filter(item => item.platform === platform.id).sort((a, b) => Number(a.channel === 'preview') - Number(b.channel === 'preview') || b.publishedAt.localeCompare(a.publishedAt));
+        const packages = (catalog?.packages || []).filter(item => item.platform === platform.id).sort((a, b) => Number(a.channel === 'preview') - Number(b.channel === 'preview') || b.publishedAt.localeCompare(a.publishedAt)
+          || (a.platform === 'windows' && a.releaseUrl === b.releaseUrl && a.arch === b.arch ? Number(b.format === 'portable-zip') - Number(a.format === 'portable-zip') : 0));
         const item = packages.find(item => item.id === selected[platform.id]) || packages[0], Icon = platform.icon;
         return <article key={platform.id} className="downloads-row" aria-labelledby={`download-${platform.id}`}>
           <div className="downloads-platform"><Icon size={26} strokeWidth={1.6}/><div><h3 id={`download-${platform.id}`}>{platform.name}</h3><p>{platform.description}</p></div></div>

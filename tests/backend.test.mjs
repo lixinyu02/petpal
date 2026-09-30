@@ -42,6 +42,8 @@ const events = text => text.split('\n\n').filter(value => value.startsWith('even
 test('health is public, all state/mutation APIs authenticated, exact origin allowlist enforced', async t => {
   const { request, url } = await setup(t, { allowedOrigins: ['https://localhost'] });
   assert.equal((await request('/api/health', { auth: false })).status, 200);
+  assert.equal((await (await request('/api/health', { auth: false })).json()).version,
+    JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version);
   assert.equal((await request('/api/state', { auth: false })).status, 401);
   assert.equal((await request('/api/settings', { auth: false, method: 'PATCH', body: { petName: 'intruder' } })).status, 401);
   assert.equal((await request('/api/state', { headers: { Origin: 'https://evil.example' } })).status, 403);

@@ -1,5 +1,6 @@
 import express from 'express';
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
@@ -21,7 +22,7 @@ import { createExecutors } from './executors.mjs';
 import { RemoteCodexBridge } from './remote-codex.mjs';
 import { createChatAssistant, normalizeChatAssistant } from './chat-assistant.mjs';
 
-const VERSION = '0.9.0';
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const now = () => new Date().toISOString();
 const failure = (status, message) => Object.assign(new Error(message), { status });
 

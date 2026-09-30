@@ -1,14 +1,27 @@
 param(
   [string]$Executable,
-  [string]$EvidenceDirectory
+  [string]$EvidenceDirectory,
+  [string]$DistDirectory,
+  [string]$MetadataPath
 )
 $ErrorActionPreference = 'Stop'
 $project = Split-Path -Parent $PSScriptRoot
 $version = (Get-Content -LiteralPath "$project\package.json" -Raw | ConvertFrom-Json).version
 $versionSeries = ($version.Split('.')[0..1] -join '')
+if ($DistDirectory -and -not $MetadataPath) { throw '-DistDirectory requires -MetadataPath to preserve existing release evidence.' }
 if (-not $Executable) { $Executable = Join-Path $project "releases\desktop\PetPal-$version-Windows-x64.exe" }
 if (-not $EvidenceDirectory) { $EvidenceDirectory = Join-Path $project ('evidence\native\windows-' + (Get-Date -Format 'yyyyMMdd-HHmmss')) }
+if (-not $DistDirectory) { $DistDirectory = Join-Path $project 'dist' }
+$Executable = [System.IO.Path]::GetFullPath($Executable)
+$EvidenceDirectory = [System.IO.Path]::GetFullPath($EvidenceDirectory)
+$DistDirectory = [System.IO.Path]::GetFullPath($DistDirectory)
+if ($MetadataPath) {
+  $MetadataPath = [System.IO.Path]::GetFullPath($MetadataPath)
+  if (Test-Path -LiteralPath $MetadataPath) { throw "Independent metadata already exists: $MetadataPath" }
+  if ((Test-Path -LiteralPath $EvidenceDirectory) -and @((Get-ChildItem -LiteralPath $EvidenceDirectory -Force)).Count -gt 0) { throw "Independent evidence directory must be empty: $EvidenceDirectory" }
+}
 if (-not (Test-Path -LiteralPath $Executable)) { throw "Desktop executable not found: $Executable" }
+if (-not (Test-Path -LiteralPath (Join-Path $DistDirectory 'index.html') -PathType Leaf)) { throw "Frontend index not found: $DistDirectory" }
 New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
 $priorPath = $env:PATH
 $priorOutput = $env:PETPAL_SMOKE_DIR
@@ -42,7 +55,7 @@ Add-Type -AssemblyName System.Drawing
 $pet = [System.Drawing.Bitmap]::FromFile((Join-Path $EvidenceDirectory 'pet.png'))
 try { if ($pet.GetPixel(0,0).A -ne 0) { throw 'Pet window corner is not transparent.' } } finally { $pet.Dispose() }
 if (-not $result.bundleFiles -or $result.bundleFiles.Count -lt 10) { throw 'Packaged runtime did not report resource byte evidence.' }
-foreach ($required in @('desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE')) {
+foreach ($required in @('desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/remote-http.cjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE')) {
   if (-not @($result.bundleFiles | Where-Object { $_.path -eq $required }).Count) { throw "Missing required desktop assistant runtime member: $required" }
 }
 $generatedPackage = Get-Content -LiteralPath "$project\package.json" -Raw | ConvertFrom-Json
@@ -57,6 +70,7 @@ foreach ($file in $result.bundleFiles) {
     continue
   }
   $source = Join-Path $project $file.path
+  if ($file.path.StartsWith('dist/', [System.StringComparison]::Ordinal)) { $source = Join-Path $DistDirectory $file.path.Substring(5) }
   if ($file.path -eq 'node_modules/@jackwener/opencli/package.json') {
     $manifest = Get-Content -LiteralPath $source -Raw | ConvertFrom-Json
     # These metadata-only fields are stripped by electron-builder's fileTransformer.
@@ -78,7 +92,8 @@ foreach ($directory in @('src\avatar', 'src\pet', 'src\platform')) {
 $ownedProcesses = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($result.runtimeRoot + '\', [System.StringComparison]::OrdinalIgnoreCase) })
 if ($ownedProcesses.Count -gt 0) { throw 'Owned packaged runtime processes remained after smoke shutdown.' }
 $metadata = [ordered]@{
-  executable="releases/desktop/PetPal-$version-Windows-x64.exe"
+  executable=$Executable
+  distDirectory=$DistDirectory
   version=$version
   bytes=(Get-Item -LiteralPath $Executable).Length
   sha256=(Get-FileHash -LiteralPath $Executable).Hash
@@ -95,12 +110,24 @@ $metadata = [ordered]@{
   webIndexSha256=($result.bundleFiles | Where-Object { $_.path -eq 'dist/index.html' }).sha256
   webFilesCompared=@($result.bundleFiles | Where-Object { $_.path -like 'dist/*' }).Count
   packagedSourceFilesCompared=@($result.bundleFiles | Where-Object { $_.path -notlike 'dist/*' }).Count
+  startupDiagnosticsCompared=@($result.bundleFiles | Where-Object { $_.path -eq 'desktop/startup-diagnostics.cjs' }).Count -eq 1
   generatedPackageSha256=$generatedPackageSha
   avatarResources=@($result.bundleFiles | Where-Object { $_.path -like 'dist/avatars/akari/*.png' })
   sourceInputs=$sourceInputs
 }
 $metadataJson = $metadata | ConvertTo-Json -Depth 12
-$metadataJson | Set-Content -LiteralPath (Join-Path $project "evidence\native\windows-v$versionSeries-final.json") -Encoding utf8
-$metadataJson | Set-Content -LiteralPath (Join-Path $project 'evidence\native\windows-final.json') -Encoding utf8
+if ($MetadataPath) {
+  New-Item -ItemType Directory -Path (Split-Path -Parent $MetadataPath) -Force | Out-Null
+  $metadataStream = [System.IO.File]::Open($MetadataPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+  try {
+    $metadataBytes = [System.Text.Encoding]::UTF8.GetBytes($metadataJson + "`r`n")
+    $metadataStream.Write($metadataBytes, 0, $metadataBytes.Length)
+    $metadataStream.Flush($true)
+  } finally { $metadataStream.Dispose() }
+} else {
+  # Preserve the legacy release-finalizer contract only when no isolated output was requested.
+  $metadataJson | Set-Content -LiteralPath (Join-Path $project "evidence\native\windows-v$versionSeries-final.json") -Encoding utf8
+  $metadataJson | Set-Content -LiteralPath (Join-Path $project 'evidence\native\windows-final.json') -Encoding utf8
+}
 Write-Output "PASS: Windows portable, local backend, bundled Codex/OpenCLI, read-only music status, restricted preload, live avatars, and transparent pet. Evidence: $EvidenceDirectory"
 Get-FileHash -LiteralPath $Executable -Algorithm SHA256

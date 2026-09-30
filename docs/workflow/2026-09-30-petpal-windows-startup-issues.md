@@ -8,7 +8,7 @@
 
 - Goal: 修复 Windows 无提示失败并交付更可靠的启动包。
 - Ordering rule: Complete issues in sequence.
-- Current status: issue-45 done；issue-46 todo。
+- Current status: issue-45 done；issue-46 in_progress。
 
 ## Issue List
 
@@ -33,6 +33,6 @@
 - 范围: 打包、版本、下载说明、Windows EXE/ZIP、最终包验收与 GitHub 发布。
 - 依赖: issue-45
 - 验收标准: 中文空格路径、干净 profile 和无 Node/Git PATH 可启动；内置 CLI、OpenCLI 与窗口通过；公开下载显示正确版本与 hash。
-- 状态: todo
-- 验证方式: pending
-- commit: pending
+- 状态: in_progress
+- 验证方式: 816/816 全量回归，版本补充 13/13、诊断与公开源码补充 19/19；最终 EXE 源字节 readback 与原生 core smoke、ZIP 7,777 文件完整 readback 及中文空格路径 core smoke 通过；公开网页 27 文件部署、匿名 401 与授权 200、私有状态逐字节一致。并发正常启动与 GitHub 公布验收仍在进行。旧扩展 smoke-app 在当前默认折叠人物栏处等待渲染超时；未产生模型请求，该测试需先展开伙伴栏，并同步新的停止朗读按钮，不能解释为正常启动失败。
+- commit: issue-46 runtime freeze；发布验收文档随后补齐。

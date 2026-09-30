@@ -33,6 +33,41 @@ test('synthetic uploaded Linux packages retain format/architecture; drafts and u
   assert.equal(publishedDownloadPackages([{ ...fixture, published_at: 'invalid' }]).length, 0);
 });
 
+test('Windows ZIP and EXE packages keep their architecture, with ZIP preferred only within the same release and architecture', () => {
+  const tag = 'v0.9.1';
+  const names = ['PetPal-0.9.1-Windows-x64.exe', 'PetPal-0.9.1-Windows-arm64.exe', 'PetPal-0.9.1-Windows-x64.zip', 'PetPal-0.9.1-Windows-arm64.zip'];
+  const zipDigest = 'a'.repeat(64);
+  const fixture = release(tag, names.map((name, id) => asset(name, tag, { id: id + 80, ...(name.endsWith('.zip') ? { digest: `sha256:${zipDigest}` } : {}) })));
+  const current = release('v0.9.2', [asset('PetPal-0.9.2-Windows-x64.exe', 'v0.9.2', { id: 90 })], { published_at: '2026-09-30T01:00:00Z' });
+  const packages = publishedDownloadPackages([fixture, current]);
+  assert.equal(packages.length, 5);
+  assert.equal(packages[0].version, '0.9.2', 'an older ZIP must not displace a newer release');
+  for (const arch of ['x64', 'arm64']) {
+    const sameRelease = packages.filter(item => item.version === '0.9.1' && item.arch === arch);
+    assert.deepEqual(sameRelease.map(item => item.format), ['portable-zip', 'portable-exe']);
+    assert.equal(sameRelease[0].platform, 'windows');
+    assert.equal(sameRelease[0].url, `${DOWNLOAD_RELEASES_URL}/download/${tag}/PetPal-0.9.1-Windows-${arch}.zip`);
+    assert.equal(sameRelease[0].sha256, zipDigest);
+    assert.equal(sameRelease[0].debug, false);
+  }
+  assert.equal(packages.filter(item => item.format === 'portable-exe').length, 3, 'EXE remains selectable');
+});
+
+test('Windows ZIP accepts only an exact uploaded release asset, retaining version and trusted-URL validation', () => {
+  const tag = 'v0.9.1', name = 'PetPal-0.9.1-Windows-x64.zip', good = asset(name, tag, { id: 100 });
+  assert.equal(publishedDownloadPackages([release(tag, [good])])[0].format, 'portable-zip');
+  for (const patch of [
+    { name: 'PetPal-0.9.0-Windows-x64.zip' },
+    { name: 'PetPal-0.9.1-Windows-ia32.zip' },
+    { name: 'PetPal-0.9.1-Windows-x64.zip.exe' },
+    { name: 'PetPal-0.9.1-Windows-x64.ZIP' },
+    { browser_download_url: good.browser_download_url + '?private=token' },
+    { browser_download_url: good.browser_download_url.replace('/v0.9.1/', '/v0.9.0/') },
+    { browser_download_url: good.browser_download_url.replace('github.com', 'other.example') },
+    { state: 'new' }, { size: 0 }, { size: 2 * 1024 ** 3 + 1 }, { id: -1 },
+  ]) assert.deepEqual(publishedDownloadPackages([release(tag, [{ ...good, ...patch }])]), [], JSON.stringify(patch));
+});
+
 test('a package requires matching filename version, exact trusted URL, uploaded state, valid size and unique asset id', () => {
   const good = published[0].assets[0];
   for (const patch of [

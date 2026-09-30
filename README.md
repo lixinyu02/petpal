@@ -1,25 +1,26 @@
 # 小伴 PetPal
 
-可以聊天、陪伴和使用真实 Codex CLI 的个人伙伴。**0.9.0** 新增直接触碰伙伴、小手抚摸动画与更安静的界面，并修复执行电脑断网恢复和离线队列清理。Web、Android、Windows 与 Ubuntu 共用 React 界面；Node 个人服务负责账号、模型连接、图片、历史和 Agent 任务。支持 Chat Completions / Responses、图片聊天、可授权的 Agent 工作台、CosyVoice 朗读，以及二次元伙伴和 3D 小猫。
+可以聊天、陪伴和使用真实 Codex CLI 的个人伙伴。**0.9.1** 修复 Windows 重复启动的解压竞争，增加启动提示、脱敏错误日志和推荐的免安装 ZIP；Android / Ubuntu 沿用 0.9.0。Web、Android、Windows 与 Ubuntu 共用 React 界面；Node 个人服务负责账号、模型连接、图片、历史和 Agent 任务。支持 Chat Completions / Responses、图片聊天、可授权的 Agent 工作台、CosyVoice 朗读，以及二次元伙伴和 3D 小猫。
 
-| 平台 | Chat 与图片 | Agent 执行位置 | 0.9.0 交付形式 |
+| 平台 | Chat 与图片 | Agent 执行位置 | 交付形式 |
 | --- | --- | --- | --- |
 | Web | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | Web 构建 / 自部署源码 |
 | Android | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | 开发签名 APK，versionCode 11 |
-| Windows | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | x64 便携 EXE |
+| Windows | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | 0.9.1 x64 ZIP / 便携 EXE |
 | Ubuntu | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | x64 / arm64 `.tar.gz` |
 
 桌面包包含 Electron、Node 运行时、Codex **0.143.0** 和 OpenCLI **1.8.8**，无需另装 Node/npm。手机和网页上的 Agent 在所选电脑执行，不会因此获得手机本地其他 App 的控制能力。**旧 v0.7.0 桌面包没有同账号电脑注册功能，需要升级桌面客户端；更新网页不能替换旧客户端里的执行器。** 使用方法见 [执行电脑](docs/execution-hosts.md)，历史发布的验收范围见 [0.7.0 验收](docs/acceptance-0.7.md)。
 
 ## 下载与开始使用
 
-源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。[0.9.0 发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.0) 对应文件：
+源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。[Windows 0.9.1 发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.1)，其他平台保留 [0.9.0 发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.0)：
 
-- [Windows x64 便携 EXE](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Windows-x64.exe)：下载后直接运行，没有独立安装器，未商业签名。
+- [Windows x64 ZIP（推荐）](https://github.com/lixinyu02/petpal/releases/download/v0.9.1/PetPal-0.9.1-Windows-x64.zip)：Windows 10 / 11 x64，完整解压到本地新文件夹，再双击 `PetPal.exe`。不要在 ZIP 内运行或单独移动 EXE，无需安装 Node.js / Git。
+- [Windows x64 便携 EXE](https://github.com/lixinyu02/petpal/releases/download/v0.9.1/PetPal-0.9.1-Windows-x64.exe)：无需独立安装，每次先解压内置工具，看到启动提示后请等待，勿重复双击。Windows 包暂未商业签名。
 - [Ubuntu x64](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Ubuntu-x64.tar.gz) / [Ubuntu arm64](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Ubuntu-arm64.tar.gz)：解压后运行 `./start-petpal.sh`；目标机 GUI 尚未验收。
 - [Android 开发签名 APK](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Android-debug.apk)：版本 0.9.0 / versionCode 11，沿用 0.8.0 的开发签名；尚未实机验收，不是应用商店正式签名包。
 - [Web 静态包](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Web.zip)：需配合同版本 Node 后端。
-- [源码归档](https://github.com/lixinyu02/petpal/archive/refs/tags/v0.9.0.zip)：GitHub 按发布标签提供，包含前后端和原生壳源码，可按锁文件重建。
+- [源码归档](https://github.com/lixinyu02/petpal/archive/refs/tags/v0.9.1.zip)：GitHub 按发布标签提供，包含前后端和原生壳源码，可按锁文件重建。Windows 使用 `npm run desktop:win`，构建隔离前端并生成 EXE / ZIP，不覆盖运行中的 `dist`。
 
 以 Release 实际文件、校验摘要及验收说明为准。登录后的「下载」页从本项目 GitHub Releases 读取真实发布文件，显示平台、架构、版本、稳定 / 预览渠道和开发签名标记；不存在的包不会显示下载按钮，网络失败可以重试。
 

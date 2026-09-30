@@ -22,11 +22,30 @@ async function hash(file) { const h = createHash('sha256'); for await (const chu
 async function exists(file) { try { await access(file); return true; } catch { return false; } }
 async function walk(dir) { const files = []; for (const item of await readdir(dir, { withFileTypes: true })) { const file = path.join(dir, item.name); if (item.isDirectory()) files.push(...await walk(file)); else if (item.isFile()) files.push(file); else throw new Error(`Unsupported source entry: ${file}`); } return files.sort(); }
 
-if (process.argv.includes('--help')) { console.log('Usage: node scripts/windows-native-verify.mjs [portable.exe] [7za.exe]\nExtracts into a fresh .tools/windows-vXX-readback-* directory; writes versioned evidence. No browser or music commands.'); process.exit(0); }
+if (process.argv.includes('--help')) { console.log('Usage: node scripts/windows-native-verify.mjs [portable.exe] [7za.exe] [--dist-dir directory --receipt file.json]\n--receipt writes a new independent receipt and refuses to overwrite it. An isolated --dist-dir requires --receipt.\nLegacy calls retain the version-series receipt. Extraction always uses a fresh directory; PETPAL_WINDOWS_READBACK_ROOT selects its parent. No browser or music commands.'); process.exit(0); }
+const positional = [], cli = {};
+for (let index = 2; index < process.argv.length; index++) {
+  const argument = process.argv[index];
+  if (argument === '--dist-dir' || argument === '--receipt') {
+    assert.ok(!Object.hasOwn(cli, argument), `Duplicate option: ${argument}`);
+    const value = process.argv[++index];
+    assert.ok(value && !value.startsWith('--'), `Missing value: ${argument}`);
+    cli[argument] = value;
+  } else {
+    assert.ok(!argument.startsWith('--'), `Unknown option: ${argument}`);
+    positional.push(argument);
+  }
+}
+assert.ok(positional.length <= 2, 'Expected only portable.exe and 7za.exe positional arguments');
+assert.ok(!cli['--dist-dir'] || cli['--receipt'], '--dist-dir requires --receipt to preserve existing release evidence');
 assert.equal(process.platform, 'win32', 'Windows verification requires Windows');
-const executable = path.resolve(process.argv[2] || path.join(root, `releases/desktop/PetPal-${version}-Windows-x64.exe`));
+const executable = path.resolve(positional[0] || path.join(root, `releases/desktop/PetPal-${version}-Windows-x64.exe`));
+const distDirectory = path.resolve(cli['--dist-dir'] || path.join(root, 'dist'));
+const receiptPath = path.resolve(cli['--receipt'] || path.join(root, `evidence/native/windows-${series}-asar-verification.json`));
+if (cli['--receipt']) assert.ok(!await exists(receiptPath), `Independent receipt already exists: ${receiptPath}`);
+assert.ok(await exists(path.join(distDirectory, 'index.html')), `Missing frontend index: ${distDirectory}`);
 assert.ok(await exists(executable), `Missing final executable: ${executable}`);
-let sevenZip = process.argv[3];
+let sevenZip = positional[1];
 if (!sevenZip) {
   const cache = path.join(process.env.LOCALAPPDATA || '', 'electron-builder', 'Cache', '7zip@1.0.0');
   if (await exists(cache)) for (const dir of (await readdir(cache)).sort()) {
@@ -68,12 +87,16 @@ for (const file of packedPaths) {
   assert.ok(!/(?:^|\/)(?:\.data|\.tools|\.preview|evidence|private)(?:\/|$)|(?:^|\/)\.env(?:\.|$)|^server\/data(?:\/|$)/i.test(file), `Private/development data in package: ${file}`);
   assert.ok(!/^node_modules\/@openai\/codex-(?:linux|darwin)-/.test(file), `Wrong platform Codex package: ${file}`);
 }
-for (const directory of ['dist', 'server']) for (const absolute of await walk(path.join(root, directory))) {
+for (const absolute of await walk(distDirectory)) {
+  const file = `dist/${path.relative(distDirectory, absolute).split(path.sep).join('/')}`;
+  await compare(file, false, absolute);
+}
+for (const absolute of await walk(path.join(root, 'server'))) {
   const file = relative(absolute);
   if (file.startsWith('server/data/') || /(?:^|\/)\.env|\.test\./.test(file)) continue;
   await compare(file, file.startsWith('server/native/'));
 }
-for (const file of ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'desktop/updates.mjs', 'desktop/executor.mjs', 'package.json']) await compare(file);
+for (const file of ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/remote-http.cjs', 'desktop/updates.mjs', 'desktop/executor.mjs', 'package.json']) await compare(file);
 for (const file of ['desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs']) assert.ok(compared.has(file), `Required executor module missing: ${file}`);
 for (const file of ['server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex-config.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1']) assert.ok(compared.has(file), `Required assistant module missing: ${file}`);
 const metadata = JSON.parse(packedBytes('package.json'));
@@ -133,8 +156,7 @@ assert.equal(runtime.electron, sourcePackage.devDependencies.electron, 'Final El
 const opencliEntry = path.join(`${archive}.unpacked`, 'node_modules/@jackwener/opencli/dist/src/main.js');
 const opencliVersion = (await run(nativeExe, [opencliEntry, '--version'], { ...options, timeout: 15000, env })).stdout.trim();
 assert.match(opencliVersion, /(?:^|\s)1\.8\.8(?:\s|$)/, 'Final bundled OpenCLI version');
-const receipt = { executable: relative(executable), version, bytes: (await stat(executable)).size, sha256: await hash(executable), extraction: 'Final portable EXE -> NSIS app-64.7z -> payload/resources/app.asar and unpacked members', extractionDirectory: relative(extraction), asarSha256: await hash(archive), electron: runtime.electron, node: runtime.node, opencliVersion, opencliDependencyPackages: [...packages].map(([packedRoot, entry]) => ({ packedRoot, sourceRoot: relative(entry.sourceDirectory), name: entry.name, version: entry.version })), filesCompared: files.length, webFilesCompared: files.filter(file => file.path.startsWith('dist/')).length, nativeHelperCompared: compared.has('server/native/music-windows.ps1'), files, realApiCalled: false, browserActionExecuted: false, musicActionExecuted: false, deviceMediaRuntimeVerified: false };
-const receiptPath = path.join(root, `evidence/native/windows-${series}-asar-verification.json`);
+const receipt = { executable: relative(executable), version, bytes: (await stat(executable)).size, sha256: await hash(executable), distDirectory: relative(distDirectory), extraction: 'Final portable EXE -> NSIS app-64.7z -> payload/resources/app.asar and unpacked members', extractionDirectory: relative(extraction), asarSha256: await hash(archive), electron: runtime.electron, node: runtime.node, opencliVersion, opencliDependencyPackages: [...packages].map(([packedRoot, entry]) => ({ packedRoot, sourceRoot: relative(entry.sourceDirectory), name: entry.name, version: entry.version })), filesCompared: files.length, webFilesCompared: files.filter(file => file.path.startsWith('dist/')).length, nativeHelperCompared: compared.has('server/native/music-windows.ps1'), startupDiagnosticsCompared: compared.has('desktop/startup-diagnostics.cjs'), files, realApiCalled: false, browserActionExecuted: false, musicActionExecuted: false, deviceMediaRuntimeVerified: false };
 await mkdir(path.dirname(receiptPath), { recursive: true });
-await writeFile(receiptPath, JSON.stringify(receipt, null, 2));
+await writeFile(receiptPath, JSON.stringify(receipt, null, 2), { flag: cli['--receipt'] ? 'wx' : 'w' });
 console.log(JSON.stringify({ ...receipt, files: undefined, receiptPath: relative(receiptPath) }, null, 2));
