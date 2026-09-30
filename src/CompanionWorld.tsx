@@ -3,7 +3,7 @@ import { ArrowUpRight, AudioLines, Check, Loader2, MessageCircle, Mic, Monitor, 
 import BrandMark from './BrandMark';
 import CompanionScene from './avatar/CompanionScene';
 import MessageMarkdown from './MessageMarkdown';
-import { useCompanion, chooseCompanion, hydrateCompanion } from './avatar/preference';
+import { useCompanion, useCompanionCatEnabled, chooseCompanion, hydrateCompanion } from './avatar/preference';
 import { type CompanionKind, type State, type User } from './api';
 import type { PetAction } from './pet/behavior';
 import { useVoiceConversation } from './voice/useVoiceConversation';
@@ -20,6 +20,7 @@ export default function CompanionWorld() {
   const [providerId, setProviderId] = useState('');
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [kind] = useCompanion();
+  const [catEnabled] = useCompanionCatEnabled();
   const [syncNote, setSyncNote] = useState('');
   const selectionRevision = useRef(0);
   const [action, setAction] = useState<PetAction>('idle');
@@ -31,6 +32,7 @@ export default function CompanionWorld() {
   const voiceLabels = {idle:'语音聊天',starting:'正在连接…',listening:'正在聆听',recognizing:'正在识别…',thinking:'正在思考…',speaking:`${name}在回应`,error:'语音聊天已暂停'};
   const hasCaptions = Boolean(voice.transcript || voice.reply || voice.listening);
   useEffect(() => { if (action === 'sleep') voice.stop(); }, [action, voice.stop]);
+  useEffect(() => { voice.stop();setAction('idle');setReady(false); }, [kind]);
   useEffect(() => { if (captions.current) captions.current.scrollTop = captions.current.scrollHeight; }, [voice.transcript, voice.reply]);
   async function choose(next: CompanionKind) {
     if (kind === next) return;
@@ -58,7 +60,7 @@ export default function CompanionWorld() {
     </header>
     <section className="companion-space" aria-label="伙伴陪伴空间" data-action={action}>
       <div className="companion-intro"><span className="companion-presence"><i/>{action === 'sleep' ? '安心睡着，也在陪你' : '在你身边'}</span><h1>{name}</h1></div>
-      <div className="companion-switch" role="group" aria-label="选择陪伴角色"><button aria-pressed={kind === 'anime'} onClick={() => choose('anime')}>二次元伙伴</button><button aria-pressed={kind === 'cat'} onClick={() => choose('cat')}>3D 小猫</button></div>
+      {catEnabled&&<div className="companion-switch" role="group" aria-label="选择陪伴角色"><button aria-pressed={kind === 'anime'} onClick={() => choose('anime')}>二次元伙伴</button><button aria-pressed={kind === 'cat'} onClick={() => choose('cat')}>3D 小猫</button></div>}
       <div className="companion-stage"><div className="companion-aura" aria-hidden="true"/><div className="companion-floor"/><CompanionScene key={kind} kind={kind} performanceInput={voiceOpen ? voice.performanceInput : undefined} onReady={() => setReady(true)} onState={state => setAction(state.action)}/></div>
       {voiceOpen ? <section className="companion-voice-panel" aria-label="伙伴语音聊天" aria-describedby="companion-voice-help">
         <div className="voice-conversation-heading"><span role="status">{voice.phase === 'starting' || voice.phase === 'recognizing' || voice.phase === 'thinking' ? <Loader2 size={15} className="spin" aria-hidden="true"/> : voice.speaking ? <AudioLines size={16} aria-hidden="true"/> : <Mic size={15} aria-hidden="true"/>} {voiceLabels[voice.phase]}</span><button aria-label="关闭语音聊天" onClick={() => {voice.stop();setVoiceOpen(false);}}><X size={16} aria-hidden="true"/></button></div>

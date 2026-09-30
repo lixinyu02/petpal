@@ -1,5 +1,7 @@
 import { registerPlugin } from '@capacitor/core';
 import type { CompanionKind } from '../api';
+import { readCompanion, readCompanionCatEnabled } from '../avatar/preference';
+import { effectiveCompanionKind } from '../avatar/cat-capability.mjs';
 
 export type OverlayOptions = { companionKind?: CompanionKind };
 export type OverlayStatus = { permission: boolean; running: boolean; companionKind: CompanionKind };
@@ -16,5 +18,5 @@ export const PetOverlay = registerPlugin<PetOverlayPlugin>('PetOverlay');
 
 /** Native side repeats this enum validation before constructing its local asset URL. */
 export function showPet(options: OverlayOptions = {}) {
-  return PetOverlay.showPet({ companionKind: options.companionKind === 'cat' ? 'cat' : 'anime' });
+  return PetOverlay.showPet({ companionKind: effectiveCompanionKind(options.companionKind??readCompanion(),readCompanionCatEnabled()) });
 }
