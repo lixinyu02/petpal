@@ -2,7 +2,7 @@
 
 - Date: 2026-09-30
 - Complexity: L2
-- Status: in progress
+- Status: complete
 
 ## Background
 
@@ -17,6 +17,10 @@
 issue-57 将共享披露面板与权限字段的基础样式归属到组件，避免首页依赖工作台懒加载的 CSS。保留权限值、账号授权和对话执行边界，修复选择器在弹层内的宽度、布局和移动尺寸。Chrome 使用隔离账号冷启动复现、窄屏和键盘测试；独立构建后保留下载目录部署。
 
 issue-58 先检查生产失败记录、上游模型与协议，再确定最小修复。不能将模糊 Codex turn 失败直接归因于模型，也不自动降级到其他模型或撤销权限。图片能力需同时核对模型配置与实际 Responses/Codex 输入路径；真实验证限定只读短任务，在隔离会话中运行，不覆盖其他账号配置和历史。失败原因和实际验证边界记录到验收文档。
+
+实际定位为 macOS 的 CLIProxyAPI 8.0.4 进程缺少本地网络许可：宿主 curl 可达上游，该进程的两次对应请求均报 no route to host。用户允许当前版本后，同源 Responses 与真实 CLI 恢复。保留 HTTPS 域名和证书校验，未替换模型、网关或凭据。
+
+移除前后端按 Qwen 型号强制禁图的规则，图片能力以管理员布尔配置为准，明确 false 仍拒绝含图输入。通过管理 API 仅将现有两条 Qwen 连接的 supportsImages 设为 true。Codex 增加固定的网络不可达、上游异常、连接中断提示，不回传原始 RPC 诊断或记录 stderr。已验证隔离附件上传、真实 CLI 图像输入和 Chat 图片响应，以及公网 test 的 Chat→Agent；当前客户端包保持原版本，本次上线网页与后端。
 
 ## Risks and verification
 

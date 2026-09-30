@@ -2,7 +2,7 @@ import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { streamProvider, normalizeBaseUrl, normalizeReasoningEffort, REASONING_EFFORTS } from '../server/providers.mjs';
+import { streamProvider, normalizeBaseUrl, normalizeReasoningEffort, normalizeSupportsImages, REASONING_EFFORTS } from '../server/providers.mjs';
 
 async function fixture(t, handler) {
   const server = http.createServer(handler);
@@ -12,6 +12,43 @@ async function fixture(t, handler) {
 }
 const model = (baseUrl, protocol = 'chat-completions') => ({ baseUrl, protocol, model: 'fixture-model', apiKey: 'private-test-key' });
 const input = { messages: [{ role: 'user', content: 'Hello' }], persona: 'Helpful cat' };
+
+test('image capability accepts explicit booleans and defaults to true without a model-name override', () => {
+  for (const model of ['fixture-model', 'halogen-qwen3.8-flash-next']) {
+    assert.equal(normalizeSupportsImages(undefined, model), true);
+    assert.equal(normalizeSupportsImages(true, model), true);
+    assert.equal(normalizeSupportsImages(false, model), false);
+    for (const value of [null, 0, 1, '', 'true', 'false', [], {}, new Boolean(true)]) assert.throws(() => normalizeSupportsImages(value, model), /图片能力须为布尔值/);
+  }
+});
+
+for (const protocol of ['chat-completions', 'responses']) test(`${protocol} Qwen image capability controls real requests while false still accepts text`, async t => {
+  const requests = [];
+  const baseUrl = await fixture(t, async (req, res) => {
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    requests.push({ path: req.url, body: JSON.parse(raw) });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(protocol === 'responses' ? { status: 'completed', output_text: 'Qwen fixture reply' } : { choices: [{ message: { content: 'Qwen fixture reply' }, finish_reason: 'stop' }] }));
+  });
+  const provider = { ...model(baseUrl, protocol), model: 'halogen-qwen3.8-flash-next' };
+  const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jrV8AAAAASUVORK5CYII=';
+  const messages = [{ role: 'user', content: 'Inspect this image', images: [{ dataUrl }] }];
+  for (const supportsImages of [true, undefined]) {
+    assert.equal((await streamProvider({ provider: { ...provider, supportsImages }, messages })).text, 'Qwen fixture reply');
+    const request = requests.at(-1);
+    assert.equal(request.path, protocol === 'responses' ? '/v1/responses' : '/v1/chat/completions'); assert.equal(request.body.model, provider.model);
+    assert.deepEqual((protocol === 'responses' ? request.body.input : request.body.messages)[0].content, protocol === 'responses'
+      ? [{ type: 'input_text', text: 'Inspect this image' }, { type: 'input_image', image_url: dataUrl }]
+      : [{ type: 'text', text: 'Inspect this image' }, { type: 'image_url', image_url: { url: dataUrl } }]);
+  }
+  const count = requests.length;
+  await assert.rejects(streamProvider({ provider: { ...provider, supportsImages: false }, messages }), { status: 400 });
+  await assert.rejects(streamProvider({ provider: { ...provider, supportsImages: 'true' }, messages }), /图片能力须为布尔值/);
+  assert.equal(requests.length, count, 'invalid or disabled image capability must reject before upstream I/O');
+  assert.equal((await streamProvider({ ...input, provider: { ...provider, supportsImages: false } })).text, 'Qwen fixture reply');
+  assert.equal(requests.length, count + 1);
+  assert.equal((protocol === 'responses' ? requests.at(-1).body.input : requests.at(-1).body.messages).find(message => message.role === 'user').content, 'Hello');
+});
 
 test('reasoning efforts are explicit supported values and missing means service default', () => {
   assert.equal(normalizeReasoningEffort(undefined), '');

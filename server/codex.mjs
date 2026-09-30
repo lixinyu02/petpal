@@ -44,9 +44,15 @@ const safeText = (value) => String(value ?? '')
 
 function protocolError(method, error, apiMode = false) {
   const source = String(error?.message ?? '');
+  const info = error?.codexErrorInfo;
+  const httpStatus = error?.httpStatusCode ?? info?.httpStatusCode ?? info?.httpConnectionFailed?.httpStatusCode ?? info?.responseStreamConnectionFailed?.httpStatusCode ?? info?.responseStreamDisconnected?.httpStatusCode;
+  const disconnected = info && typeof info === 'object' && ['responseStreamDisconnected', 'responseStreamConnectionFailed', 'responseTooManyFailedAttempts'].some(key => Object.hasOwn(info, key));
   let message = `Codex ${method} 失败`;
-  if (/auth|login|unauthorized|401/i.test(source)) message += apiMode ? '：请检查桌面助手的 API Key 与 Responses 服务配置' : '：请在这台电脑运行 codex login 完成登录';
-  else if (/rate.limit|quota|429/i.test(source)) message += '：额度或速率受限，请稍后重试';
+  if (/no route to host|network (?:is )?unreachable|\b(?:EHOSTUNREACH|ENETUNREACH|ENOTFOUND|EAI_AGAIN)\b|no such host|(?:DNS|name resolution|lookup address).*(?:fail|error)/i.test(source)) message += '：模型服务网络不可达，请检查网关到上游的连接';
+  else if (info === 'unauthorized' || /\b(?:auth|authentication|login|unauthorized|unauthenticated|401)\b/i.test(source)) message += apiMode ? '：请检查桌面助手的 API Key 与 Responses 服务配置' : '：请在这台电脑运行 codex login 完成登录';
+  else if (info === 'usageLimitExceeded' || /rate.limit|quota|429/i.test(source)) message += '：额度或速率受限，请稍后重试';
+  else if (info === 'serverOverloaded' || info === 'internalServerError' || (Number.isInteger(httpStatus) && httpStatus >= 500 && httpStatus <= 599) || /\b(?:HTTP(?:\/[\d.]+)?|status(?:\s+code)?)\s*[:=]?\s*5\d{2}\b/i.test(source)) message += '：模型上游服务暂时异常，请稍后重试或检查网关';
+  else if (disconnected || /\b(?:ECONNRESET|ECONNABORTED|EPIPE|ETIMEDOUT)\b|connection (?:reset|closed|aborted)|stream (?:disconnected|interrupted)|(?:unexpected|premature) (?:EOF|end of (?:file|stream))|timed? out|request timeout/i.test(source)) message += '：模型连接中断，请检查网络后重新提交';
   else if (/model.*(?:not|invalid|support)/i.test(source)) message += '：当前模型不可用，请检查 Codex 模型配置';
   else if (/sandbox/i.test(source)) message += '：所选沙箱不可用，请检查执行主机的 Codex 沙箱设置';
   else if (typeof error?.code === 'number') message += `（代码 ${error.code}）`;

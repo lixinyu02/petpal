@@ -4,7 +4,6 @@ const MAX_OUTPUT_CHARS = 2 * 1024 * 1024;
 export const REASONING_EFFORTS = Object.freeze(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 export function normalizeSupportsImages(value, model = '') {
   if (value !== undefined && typeof value !== 'boolean') throw new Error('图片能力须为布尔值。');
-  if (String(model).toLowerCase() === 'halogen-qwen3.8-flash-next') return false;
   return value ?? true;
 }
 export function assertImageSupport(provider, messages) {

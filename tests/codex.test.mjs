@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { CodexBridge, resolveCodexCommand, resolveBundledCodex } from '../server/codex.mjs';
 
 const fixture = String.raw`
@@ -16,6 +17,19 @@ const notify = (method,params) => send({method,params});
 let initialized = false, threadNumber = 0, turnNumber = 0, pendingStart = null;
 const active = new Map();
 const approvals = new Map();
+const privateDiagnostic = ' Headers: Authorization: Bearer nonstandard-diagnostic-fixture-secret; Cookie: private-cookie; X-Api-Key: private-header-key; raw-provider-details';
+const diagnostics = {
+  route: {message:'dial tcp 192.0.2.40:8731: connect: no route to host'+privateDiagnostic},
+  unreachable: {message:'connect ENETUNREACH'+privateDiagnostic},
+  dns: {message:'DNS lookup failed'+privateDiagnostic},
+  http: {message:'unexpected status 502 Bad Gateway'+privateDiagnostic},
+  structuredHttp: {message:'upstream failed'+privateDiagnostic,codexErrorInfo:{httpConnectionFailed:{httpStatusCode:503}}},
+  overloaded: {message:'provider rejected request'+privateDiagnostic,codexErrorInfo:'serverOverloaded'},
+  reset: {message:'connection reset by peer (ECONNRESET)'+privateDiagnostic},
+  timeout: {message:'request timed out'+privateDiagnostic},
+  disconnected: {message:'provider rejected request'+privateDiagnostic,codexErrorInfo:{responseStreamDisconnected:{httpStatusCode:null}}},
+  generic: {message:'provider rejected request'+privateDiagnostic},
+};
 function complete(threadId,turnId,status='completed') {
   notify('turn/completed',{threadId,turn:{id:turnId,status}});
   active.delete(threadId);
@@ -55,6 +69,15 @@ createInterface({input:process.stdin}).on('line',line=>{
  if(m.method==='turn/start'){
    const threadId=p.threadId,turnId='turn-'+(++turnNumber),prompt=p.input[0].text;
    active.set(threadId,turnId);
+   if(typeof prompt==='string'&&prompt.startsWith('diagnostic:')){
+     const [,kind,delivery]=prompt.split(':'),error=diagnostics[kind];
+     if(delivery==='rpc'){send({id:m.id,error});active.delete(threadId);return;}
+     notify('turn/started',{threadId,turn:{id:turnId,status:'inProgress'}});
+     reply(m,{turn:{id:turnId,status:'inProgress'}});
+     if(delivery==='notification')notify('error',{threadId,turnId,error,willRetry:false});
+     notify('turn/completed',{threadId,turn:{id:turnId,status:'failed',error}});
+     active.delete(threadId);return;
+   }
    if(prompt==='early-approval'){
      pendingStart={message:m,turnId};
      const id='approve-'+turnId;approvals.set(id,{threadId,turnId});
@@ -91,12 +114,13 @@ createInterface({input:process.stdin}).on('line',line=>{
 });
 `;
 
-async function setup(t, mode = 'normal') {
+async function setup(t, mode = 'normal', apiMode = false) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-codex-test-'));
   const file = path.join(directory, 'fixture.mjs');
   const log = path.join(directory, 'rpc.jsonl');
   await writeFile(file, fixture);
-  const bridge = new CodexBridge({ workspaceRoot: path.join(directory, 'work'), command: [process.execPath, file, log, mode] });
+  const bridge = new CodexBridge({ workspaceRoot: path.join(directory, 'work'), command: [process.execPath, file, log, mode],
+    ...(apiMode ? { dataDir: directory, config: { mode: 'api', baseUrl: 'https://fixture.invalid/v1', model: 'fixture-model', apiKey: 'nonstandard-diagnostic-fixture-secret', reasoningEffort: 'none', revision: randomUUID() } } : {}) });
   t.after(async () => { await bridge.close(); await rm(directory, { recursive: true, force: true }); });
   const messages = async () => (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse);
   // Stdio writes enqueue messages; a fixture reply proves it consumed all preceding lines.
@@ -316,6 +340,26 @@ test('failed turns expose useful auth hint without raw diagnostics', { timeout: 
   const { bridge } = await setup(t);
   await assert.rejects(bridge.run({ prompt: 'failure' }), error => /codex login/.test(error.message) && !/supersecret/.test(error.message));
   assert.equal((await bridge.status()).activeRuns, 0);
+});
+
+for (const delivery of ['rpc', 'notification', 'completion']) test(`${delivery} failures classify network, upstream and disconnect errors without exposing diagnostics`, { timeout: 10_000 }, async t => {
+  const { bridge } = await setup(t, 'normal', true);
+  const network = '：模型服务网络不可达，请检查网关到上游的连接';
+  const upstream = '：模型上游服务暂时异常，请稍后重试或检查网关';
+  const disconnected = '：模型连接中断，请检查网络后重新提交';
+  for (const [kind, hint] of [['route', network], ['unreachable', network], ['dns', network], ['http', upstream], ['structuredHttp', upstream], ['overloaded', upstream], ['reset', disconnected], ['timeout', disconnected], ['disconnected', disconnected], ['generic', '']]) {
+    const events = [];
+    await assert.rejects(bridge.run({ prompt: `diagnostic:${kind}:${delivery}`, onEvent: (type, value) => events.push({ type, value }) }), error => {
+      assert.equal(error.message, `Codex ${delivery === 'rpc' ? 'turn/start' : 'turn'} 失败${hint}`);
+      assert.doesNotMatch(error.stack, /nonstandard-diagnostic|private-cookie|private-header-key|raw-provider-details|192\.0\.2\.40|Authorization|Bearer/);
+      assert.equal(error.cause, undefined);
+      return true;
+    });
+    const status = await bridge.status();
+    assert.equal(status.activeRuns, 0);
+    assert.doesNotMatch(JSON.stringify({ events, status }), /nonstandard-diagnostic|private-cookie|private-header-key|raw-provider-details|Authorization|Bearer/);
+  }
+  assert.equal((await bridge.run({ prompt: 'after classified failure' })).text, '你好，小猫！');
 });
 
 test('child crash cleans runs and later request can start a fresh child', { timeout: 10_000 }, async (t) => {

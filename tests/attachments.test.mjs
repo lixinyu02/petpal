@@ -35,7 +35,7 @@ async function fixture(t, { bridge } = {}) {
   await listenFixture(upstream);
   const calls = [], steers = [];
   const codex = bridge ?? { async status() { return { available: true }; }, run(args) { return new Promise((resolve, reject) => { calls.push({ args, resolve, reject }); args.onEvent('turn', { turnId: `image-turn-${calls.length}` }); args.signal.addEventListener('abort', () => reject(args.signal.reason), { once: true }); }); }, async steer(args) { steers.push(args); return { turnId: args.expectedTurnId }; }, async close() { for (const call of calls) call.reject(new Error('Fixture close')); } };
-  let app = await createPetServer({ dataDir: directory, token: bootstrap, codex });
+  let app = await createPetServer({ dataDir: directory, token: bootstrap, codex, codexFactory: () => codex });
   await listenFixture(app.server);
   const base = () => `http://127.0.0.1:${app.server.address().port}`;
   const request = (route, { token = bootstrap, method = 'GET', body, raw, mimeType = 'image/png' } = {}) => fetch(base() + '/api' + route, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': raw !== undefined ? mimeType : 'application/json' }, ...(raw !== undefined ? { body: raw } : body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -46,7 +46,7 @@ async function fixture(t, { bridge } = {}) {
   const member = async name => { const created = await json('/admin/users', { method: 'POST', body: { username: name, password: 'isolated-attachment-password', agentAccess: 'full' } }); assert.equal(created.status, 201); const login = await json('/auth/login', { method: 'POST', token: '', body: { username: name, password: 'isolated-attachment-password' } }); assert.equal(login.status, 200); return { user: created.data.user, token: login.data.token }; };
   t.after(async () => { await app.close(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve)); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-attachments-'))); await rm(directory, { recursive: true, force: true }); });
   return { directory, base, request, json, upload, provider, create, member, received, calls, steers,
-    restart: async () => { await app.close(); app = await createPetServer({ dataDir: directory, token: bootstrap, codex }); await listenFixture(app.server); },
+    restart: async () => { await app.close(); app = await createPetServer({ dataDir: directory, token: bootstrap, codex, codexFactory: () => codex }); await listenFixture(app.server); },
   };
 }
 
@@ -112,14 +112,61 @@ for (const protocol of ['chat-completions', 'responses']) test(`${protocol} send
   await f.restart(); const restored = (await f.json(`/conversations/${chat.id}`)).data; assert.deepEqual(restored.messages[0].attachments, [image]);
 });
 
-test('text-only model switching and sends reject before discarding image history', async t => {
-  const f = await fixture(t), vision = await f.provider('responses'), text = await f.provider('responses', { model: 'halogen-qwen3.8-flash-next', supportsImages: true });
-  assert.equal(text.supportsImages, false); const chat = await f.create(vision.id), image = await f.upload();
+for (const protocol of ['chat-completions', 'responses']) test(`${protocol} Qwen explicit image capability survives saves and restart and sends owned bytes`, async t => {
+  const f = await fixture(t), provider = await f.provider(protocol, { model: 'halogen-qwen3.8-flash-next', supportsImages: true });
+  assert.equal(provider.supportsImages, true);
+  for (const supportsImages of [false, true]) {
+    const saved = await f.json('/providers', { method: 'POST', body: { id: provider.id, supportsImages } });
+    assert.equal(saved.status, 200); assert.equal(saved.data.supportsImages, supportsImages);
+  }
+  const renamed = await f.json('/providers', { method: 'POST', body: { id: provider.id, name: 'Qwen image connection' } });
+  assert.equal(renamed.status, 200); assert.equal(renamed.data.supportsImages, true);
+  await f.restart();
+  assert.equal((await f.json('/state')).data.providers.find(item => item.id === provider.id).supportsImages, true);
+  const chat = await f.create(provider.id), image = await f.upload();
+  const response = await f.request(`/conversations/${chat.id}/messages`, { method: 'POST', body: { attachmentIds: [image.id] } });
+  assert.equal(response.status, 200); assert.match(await response.text(), /event: done/);
+  assert.equal(f.received.length, 1); assert.equal(f.received[0].body.model, provider.model);
+  const messages = protocol === 'responses' ? f.received[0].body.input : f.received[0].body.messages;
+  assert.deepEqual(messages.find(message => message.role === 'user').content, protocol === 'responses'
+    ? [{ type: 'input_image', image_url: `data:image/png;base64,${picture.toString('base64')}` }]
+    : [{ type: 'image_url', image_url: { url: `data:image/png;base64,${picture.toString('base64')}` } }]);
+  assert.deepEqual((await f.json(`/conversations/${chat.id}`)).data.messages[0].attachments, [image]);
+});
+
+test('explicit text-only Qwen capability survives save/restart and rejects switching and sends before discarding image history', async t => {
+  const f = await fixture(t), vision = await f.provider('responses'), text = await f.provider('responses', { model: 'halogen-qwen3.8-flash-next', supportsImages: false });
+  assert.equal(text.supportsImages, false);
+  const saved = await f.json('/providers', { method: 'POST', body: { id: text.id, name: 'Existing text-only connection' } });
+  assert.equal(saved.status, 200); assert.equal(saved.data.supportsImages, false);
+  await f.restart(); assert.equal((await f.json('/state')).data.providers.find(item => item.id === text.id).supportsImages, false);
+  const chat = await f.create(vision.id), image = await f.upload();
   await (await f.request(`/conversations/${chat.id}/messages`, { method: 'POST', body: { content: 'Inspect', attachmentIds: [image.id] } })).text();
   assert.equal((await f.json(`/conversations/${chat.id}`, { method: 'PATCH', body: { providerId: text.id } })).status, 400);
   const unchanged = (await f.json(`/conversations/${chat.id}`)).data; assert.equal(unchanged.providerId, vision.id); assert.deepEqual(unchanged.messages[0].attachments, [image]);
   const textChat = await f.create(text.id); assert.equal((await f.json(`/conversations/${textChat.id}/messages`, { method: 'POST', body: { attachmentIds: [image.id] } })).status, 400);
   assert.equal((await f.json(`/conversations/${textChat.id}`)).data.messages.length, 0); assert.equal(f.received.length, 1);
+});
+
+test('Qwen Agent image submission honors persisted true and false capability before executing owned paths', async t => {
+  const f = await fixture(t), provider = await f.provider('responses', { model: 'halogen-qwen3.8-flash-next', supportsImages: true });
+  const text = await f.provider('responses', { model: provider.model, supportsImages: false });
+  const configured = await f.json('/codex/config', { method: 'PATCH', body: { mode: 'api', baseUrl: provider.baseUrl, model: provider.model } });
+  assert.equal(configured.status, 200); await f.restart();
+  const chat = await f.create(null, bootstrap, 'codex'), image = await f.upload(), route = `/conversations/${chat.id}/agent/submit`;
+  const denied = await f.json(route, { method: 'POST', body: { submissionId: randomUUID(), providerId: text.id, attachmentIds: [image.id] } });
+  assert.equal(denied.status, 400); assert.match(denied.data.error, /仅支持文本/);
+  assert.equal(f.calls.length, 0); assert.equal((await f.json(`/conversations/${chat.id}`)).data.messages.length, 0);
+  const accepted = await f.json(route, { method: 'POST', body: { submissionId: randomUUID(), providerId: provider.id, attachmentIds: [image.id] } });
+  assert.equal(accepted.status, 200); await until(() => f.calls.length === 1);
+  assert.equal(f.calls[0].args.model, provider.model); assert.equal(f.calls[0].args.prompt, '');
+  assert.equal(f.calls[0].args.images.length, 1);
+  assert.equal(path.dirname(f.calls[0].args.images[0].path), path.join(f.directory, 'attachments'));
+  assert.deepEqual(await readFile(f.calls[0].args.images[0].path), picture);
+  f.calls[0].resolve({ text: 'Qwen Agent image fixture reply' });
+  const completed = await until(async () => { const current = (await f.json(`/conversations/${chat.id}`)).data; return current.agent.run?.status === 'completed' && current; });
+  assert.deepEqual(completed.messages[0].attachments, [image]); assert.equal(completed.messages.at(-1).content, 'Qwen Agent image fixture reply');
+  assert.equal(f.received.length, 0, 'Agent fixture does not make a Chat provider request');
 });
 
 test('Agent run, steer, queued edits and restart use owned paths and retain image metadata', async t => {

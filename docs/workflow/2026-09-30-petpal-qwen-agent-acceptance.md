@@ -2,6 +2,8 @@
 
 日期：2026-09-30。范围：issue-47，Agent 模型选择及纯文本输入限制。
 
+历史记录：下文为 issue-47 当时的配置及验收结论。模型后来已支持图片，issue-58 移除了型号强制禁图；当前能力及网关恢复验收见 [首页选择器与 Qwen 兼容验收](2026-09-30-petpal-home-agent-compat-acceptance.md)。
+
 ## 交付
 
 新增 `CLIProxyAPI · Qwen3.8 Flash Agent`，精确模型为 `halogen-qwen3.8-flash-next`。它通过现有 Codex 网关的同源 Responses 接口执行任务，显式使用 `reasoning.effort=none`，避免空值继承全局 GPT 的 max。owner 可用，test 已追加模型授权；原 GPT 默认、原生 Qwen Chat 连接、账号 Agent 权限等级及历史记录保留。私有连接配置通过管理 API 持久化，不写入公开源码。

@@ -120,8 +120,7 @@ export default function App() {
   const hostBusy=agentRunning||agentUnknown||!!conversation?.agent?.queue.length;
   const selectedCodex=useMemo(()=>selectedHost?.kind==='desktop'?{...state.codex,...selectedHost.codex}:state.codex,[state.codex,selectedHost?.kind,selectedHost?.codex]);
   const activeAgentProvider=state.providers.find(item=>item.id===activeProviderId);
-  const activeAgentModel=(agentRunning?conversation!.agent!.run!.model:activeAgentProvider?.model||selectedCodex.model)||'';
-  const agentSupportsImages=activeAgentProvider?.supportsImages!==false&&activeAgentModel.toLowerCase()!=='halogen-qwen3.8-flash-next';
+  const agentSupportsImages=activeAgentProvider?.supportsImages!==false;
   const canSendAgent=!!selectedHost?.online&&!!selectedCodex.available&&!hostsError&&!agentUnknown;
   const shownApprovals=currentMode==='codex'?conversation?.agent?.approvals||[]:approvals;
   const chatScroll=useChatScroll({scrollRef,conversationId:conversation?.id||'',active:ready&&view==='chat'&&!petOnly,messages:conversation?.messages,approvalKey:shownApprovals.map(item=>item.id).join(',')});

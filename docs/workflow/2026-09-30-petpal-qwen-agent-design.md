@@ -4,6 +4,8 @@
 - Complexity: L1
 - Status: complete
 
+历史记录：下文保留 issue-47 的原始设计。图片能力与网关连接后续在 issue-58 更新，当前行为见 [首页选择器与 Qwen Agent 兼容修复](2026-09-30-petpal-home-agent-compat-design.md)。
+
 ## 目标与发现
 
 用户希望在 Agent 使用 Qwen3.8 Flash。现有模型 ID 是 `halogen-qwen3.8-flash-next`，已存在原生 Halogen Chat 连接；Agent 仅接受与管理员 Codex 服务同源的 Responses 模型，不能只改筛选规则而把请求和密钥送往不同服务。
