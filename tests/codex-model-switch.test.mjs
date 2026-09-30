@@ -53,11 +53,13 @@ test('real bundled CLI sends assigned turn models through transport and releases
   await attemptOverride(); assert.equal(requests.length, 1);
   const second = await bridge.run({ prompt: 'Reply with confirmation only, without tools.', threadId: first.threadId, model: 'gpt-6-sol', effort: 'high', signal: AbortSignal.timeout(15000) });
   assert.equal(second.text, 'confirmed gpt-6-sol');
-  assert.deepEqual(requests.map(request => request.body.model), ['gpt-6.1-sol', 'gpt-6-sol']);
+  const qwen = await bridge.run({ prompt: 'Reply with confirmation only, without tools.', threadId: first.threadId, model: 'halogen-qwen3.8-flash-next', effort: 'none', signal: AbortSignal.timeout(15000) });
+  assert.equal(qwen.text, 'confirmed halogen-qwen3.8-flash-next');
+  assert.deepEqual(requests.map(request => request.body.model), ['gpt-6.1-sol', 'gpt-6-sol', 'halogen-qwen3.8-flash-next']);
+  assert.deepEqual(requests.map(request => request.body.reasoning.effort), ['high', 'high', 'none']);
   for (const request of requests) {
     assert.equal(request.path, '/v1/responses');
     assert.equal(request.authorization, `Bearer ${config.apiKey}`);
-    assert.equal(request.body.reasoning.effort, 'high');
   }
   assert.deepEqual(config, before);
 });
