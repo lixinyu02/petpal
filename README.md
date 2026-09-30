@@ -1,11 +1,11 @@
 # 小伴 PetPal
 
-可以聊天、陪伴和使用真实 Codex CLI 的个人伙伴。**0.9.1** 修复 Windows 重复启动的解压竞争，增加启动提示、脱敏错误日志和推荐的免安装 ZIP；Android / Ubuntu 沿用 0.9.0。Web、Android、Windows 与 Ubuntu 共用 React 界面；Node 个人服务负责账号、模型连接、图片、历史和 Agent 任务。支持 Chat Completions / Responses、图片聊天、可授权的 Agent 工作台、CosyVoice 朗读，以及二次元伙伴和 3D 小猫。
+可以聊天、陪伴和使用真实 Codex CLI 的个人伙伴。Android **0.9.2 试用版**新增后台 Agent 任务提醒，已通过独立 API 36 模拟器的真实任务完成、通知点击后重新登录打开会话及注销清理验收。Windows 继续使用修复启动问题的 0.9.1，Ubuntu 沿用 0.9.0。Web、Android、Windows 与 Ubuntu 共用 React 界面；Node 个人服务负责账号、模型连接、图片、历史和 Agent 任务。支持 Chat Completions / Responses、图片聊天、可授权的 Agent 工作台、CosyVoice 朗读，以及二次元伙伴和 3D 小猫。
 
 | 平台 | Chat 与图片 | Agent 执行位置 | 交付形式 |
 | --- | --- | --- | --- |
 | Web | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | Web 构建 / 自部署源码 |
-| Android | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | 开发签名 APK，versionCode 11 |
+| Android | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | 0.9.2 开发签名试用 APK，versionCode 12 |
 | Windows | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | 0.9.1 x64 ZIP / 便携 EXE |
 | Ubuntu | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | x64 / arm64 `.tar.gz` |
 
@@ -13,16 +13,18 @@
 
 ## 下载与开始使用
 
-源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。[Windows 0.9.1 发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.1)，其他平台保留 [0.9.0 发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.0)：
+源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。[Android 0.9.2 预发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.2)、[Windows 0.9.1 发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.1)，Ubuntu 等旧包保留 [0.9.0 发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.0)：
 
 - [Windows x64 ZIP（推荐）](https://github.com/lixinyu02/petpal/releases/download/v0.9.1/PetPal-0.9.1-Windows-x64.zip)：Windows 10 / 11 x64，完整解压到本地新文件夹，再双击 `PetPal.exe`。不要在 ZIP 内运行或单独移动 EXE，无需安装 Node.js / Git。
 - [Windows x64 便携 EXE](https://github.com/lixinyu02/petpal/releases/download/v0.9.1/PetPal-0.9.1-Windows-x64.exe)：无需独立安装，每次先解压内置工具，看到启动提示后请等待，勿重复双击。Windows 包暂未商业签名。
 - [Ubuntu x64](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Ubuntu-x64.tar.gz) / [Ubuntu arm64](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Ubuntu-arm64.tar.gz)：解压后运行 `./start-petpal.sh`；目标机 GUI 尚未验收。
-- [Android 开发签名 APK](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Android-debug.apk)：版本 0.9.0 / versionCode 11，沿用 0.8.0 的开发签名；尚未实机验收，不是应用商店正式签名包。
+- [Android 0.9.2 试用 APK](https://github.com/lixinyu02/petpal/releases/download/v0.9.2/PetPal-0.9.2-Android-debug.apk) / [服务器下载](https://magicdatou.top:44318/downloads/PetPal-0.9.2-Android-debug.apk)：versionCode 12，沿用此前开发签名；API 36 模拟器通知链路已验收，实体手机仍需分别验证，不是应用商店正式签名包。SHA-256：`bfa3a099c35fa10985871872da6d3ba9c2c89bfd562fd0e646304c4ead522aac`。
 - [Web 静态包](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Web.zip)：需配合同版本 Node 后端。
-- [源码归档](https://github.com/lixinyu02/petpal/archive/refs/tags/v0.9.1.zip)：GitHub 按发布标签提供，包含前后端和原生壳源码，可按锁文件重建。Windows 使用 `npm run desktop:win`，构建隔离前端并生成 EXE / ZIP，不覆盖运行中的 `dist`。
+- [源码归档](https://github.com/lixinyu02/petpal/archive/refs/tags/v0.9.2.zip)：GitHub 按发布标签提供，包含前后端和原生壳源码，可按锁文件重建。Windows 使用 `npm run desktop:win`，构建隔离前端并生成 EXE / ZIP，不覆盖运行中的 `dist`。
 
 以 Release 实际文件、校验摘要及验收说明为准。登录后的「下载」页从本项目 GitHub Releases 读取真实发布文件，显示平台、架构、版本、稳定 / 预览渠道和开发签名标记；不存在的包不会显示下载按钮，网络失败可以重试。
+
+旧 Android 0.9.0 APK 不包含后台任务提醒，需要升级至 0.9.2；网页升级不会给旧 APK 增加原生通知服务。后台通知需要配套新版后端，验收范围见 [Android 后台任务通知](docs/workflow/2026-10-01-petpal-android-notifications-issues.md)。
 
 进入应用后先连接并登录个人服务。电脑客户端登录同一公共服务账号后自动登记为执行电脑；Web、Android 和桌面版都在 Agent 的「执行电脑」下拉框选择目标。选择电脑保持当前账号、模型和中央聊天历史，不会切换整套后端或要求重新登录。主账号在「连接与设置 → 电脑助手」配置中央 Responses 地址、模型与密钥；成员使用管理员分配的模型和 Agent 权限。中央服务器原有的本机 Codex 登录模式继续保留。
 
@@ -109,7 +111,15 @@ OpenCLI 网页工具另需官方 Chrome Browser Bridge 扩展和明确选择的�
 
 ## Android 与多端连接
 
-Android 是 Capacitor 原生应用，内置共享界面；手机不运行 Codex 二进制，Agent 由同账号选择的执行电脑或中央服务器运行。「设备与 Codex」中的「开启悬浮伙伴」请求系统悬浮窗权限；返回应用后再次点击开启，通知栏可随时停止。悬浮窗只加载 APK 内的当前角色资源，无原生 JS 桥或网络回退，不会自动开启悬浮权限或开机常驻。
+Android 是 Capacitor 原生应用，内置共享界面；手机不运行 Codex 二进制，Agent 由同账号选择的执行电脑或中央服务器运行。「连接与设置 → 设备连接」中的「开启悬浮伙伴」请求系统悬浮窗权限；返回应用后再次点击开启，通知栏可随时停止。悬浮窗只加载 APK 内的当前角色资源，无原生 JS 桥或网络回退，不会自动开启悬浮权限或开机常驻。
+
+Android 0.9.2 在「连接与设置 → 账号 → 后台任务提醒」折叠区域提供通知功能。先登录可信 HTTPS 服务，在应用前台点击「开启后台提醒」并允许系统通知。独立原生前台服务长轮询当前账号的任务事件，任务仍由 Agent 中选定的远程电脑执行。后台提醒与悬浮伙伴是独立开关。
+
+常驻通知和设置内的「停止提醒」都可停止监听。首次开启以当前事件位置为基线，不回放旧任务；已启用期间断网会从保存的位置补收，最多保留 500 条 / 30 天。通知仅含任务状态，设备凭据只能读取/确认提醒及撤销自身，以 Android Keystore 加密保存。点击后验证同一服务、账号和会话归属，直接 Agent 打开任务对话，Chat 派发任务返回父 Chat；若需要重新登录，匹配身份后再打开，通知凭据不会替代聊天登录。直接 Agent 的需登录点击流程已在 API 36 模拟器实测通过，Chat 父对话定位由后端/controller 测试覆盖。
+
+恢复后若显示「已停止，需要重新开启」，请手动点击「重新开启」；「正在启动」表示服务尚在启动，不需要重复点击。「系统设置」打开小伴的系统应用设置页，再由用户检查通知权限或电池限制，并不会自动申请省电豁免。退出、换账号、服务切换、权限失效或登录到期会撤销监听，通知凭据不会替代聊天登录。
+
+这采用直接连接个人 HTTPS 后端的前台服务，不依赖 Google 或厂商推送账号。系统强制停止应用、重启设备或厂商省电限制后不保证继续接收，重新打开界面也不会自动开启已停止的监听。没有自动开机启动、唤醒锁或自动电池豁免。specialUse 用途是用户开启的持续任务提醒，未来商店上架需另行满足其声明和审核要求。
 
 Android 使用 HTTPS WebView，禁止混合内容和明文 HTTP；0.7.0 原生远程请求支持流式回复、认证图片上传与音频字节。部署到手机可访问的可信 HTTPS 地址，在连接窗口填写服务地址并登录；主机 owner 也可使用配对凭据。Web 跨来源部署需把访问 Origin 加入精确名单，反向代理需保持 SSE 不缓冲：
 
@@ -128,7 +138,7 @@ PETPAL_ALLOWED_ORIGINS=https://localhost,https://pet.example.com
 
 两种发布身份的公钥不能交叉使用。切换来源、清单地址、仓库或公钥会改变配置 revision，须重新检查；同公钥的防回滚序号记录会保留。Windows 下载并校验后打开新版便携程序，保留原 EXE；Ubuntu 定位校验后的归档，由用户解压启动；Android 核对 APK 包名、签名与版本后交系统安装器；Web 仅在当前站点已部署新版时提供刷新。发布流程与签名命令见 [更新与发布](docs/updates.md)。
 
-**本轮先上线网页与后端，未重打原生客户端。** 服务器上的 Windows、Ubuntu 与 Android 包只是原发布文件的镜像；新版来源选择和原生下载支持要等后续客户端新版发布，不能把网页升级视为旧安装包已经获得该功能。
+服务器更新源最初只上线网页与后端。Android 0.9.2 包含新版来源选择和原生下载支持；Windows 与 Ubuntu 以各自安装包的版本为准，网页升级不会改变旧包的原生能力。
 
 ## 环境变量
 
@@ -153,7 +163,7 @@ node scripts/linux-package.mjs
 npm run android:sync
 ```
 
-Android APK 构建：Windows 使用 `scripts/build-android.ps1`，Linux 使用 `scripts/build-android.sh`；要求 JDK 21 和 Android SDK，0.7.0 输出 debug APK。Ubuntu 两架构 portable 包的构建与逐字节校验见 [Ubuntu 打包](docs/linux-packaging.md)。`npm run desktop:linux` 是另行配置的 AppImage / deb 构建入口，本轮交付格式为 `.tar.gz`。X11、Wayland 与 ARM64 图形 / 桌宠行为需要分别实机确认。
+Android APK 构建：Windows 使用 `scripts/build-android.ps1`，Linux 使用 `scripts/build-android.sh`；要求 JDK 21 和 Android SDK，输出 debug APK。脚本默认单独构建 `.data/android-web-build`，不覆盖已部署的 `dist`；文件名和界面版本取自 Android `versionName`。PowerShell 的 `-WebDirectory` / `-OutputDirectory` 可指定验收目录，已有同名不同内容 APK 会拒绝覆盖。Ubuntu 两架构 portable 包的构建与逐字节校验见 [Ubuntu 打包](docs/linux-packaging.md)。`npm run desktop:linux` 是另行配置的 AppImage / deb 构建入口，本轮交付格式为 `.tar.gz`。X11、Wayland 与 ARM64 图形 / 桌宠行为需要分别实机确认。
 
 项目结构：`src/` 共享前端；`src/avatar/` 双角色选择与 2D 渲染；`src/pet/` 3D 小猫与行为；`public/avatars/` 原创角色资源；`server/` 认证、持久化、图片、模型协议与 Codex 进程；`desktop/` Electron；`android/` Android 与悬浮服务；`tests/` 自动测试；`evidence/` 本地验收结果（不纳入 Git）。
 
@@ -164,6 +174,8 @@ Android APK 构建：Windows 使用 `scripts/build-android.ps1`，Linux 使用 `
 历史0.7.0 后端已有真实 `gpt-6-luna` Responses 文字与单图请求成功，以及真实 Codex CLI 只读 + 询问任务完成的证据；本机与可信 HTTPS 入口返回相同服务实例，匿名语音、图片、下载和 Agent 请求均被拒绝。后续版本已接通共享ASR和CosyVoice3情绪语气，当前证据以对应 workflow 验收为准。
 
 Windows 最终便携 EXE 的资源、内置 CLI 和窗口 smoke 结果以本版验收文档为准，不沿用旧版结论。Ubuntu x64 / arm64 是跨平台打包与归档 / ELF 审计，尚无目标机 GUI 运行证据；Android 0.7.0 / code 9 是开发签名包，尚无手机实机验收。真实麦克风、摄像头、物理音频与各平台桌宠效果需在目标设备验证。本轮未对 RK3566 板卡安装、烧录或重启。
+
+Android 0.9.2 最终 APK 已通过独立 API 36 模拟器的直接 Agent 设备链路：真实 Qwen/Codex 任务退后台完成、设备凭据加密、系统通知可见、实际系统点击启动 Activity、重新登录后验证并打开任务对话，以及注销后的原生清理和服务端撤销。失败任务、Chat 父对话、切换 scope、去重与恢复另由后端/controller/native 测试覆盖。该结论不扩展为 Android 13～15、实体手机、厂商省电、长期电池表现或全部冷启动/断网/切账号设备矩阵通过。Node 自动测试、原生单元测试、APK 审计与设备实测分别记录。
 
 参考：[OpenAI App Server](https://developers.openai.com/codex/app-server)、[Responses streaming](https://developers.openai.com/api/docs/guides/streaming-responses)。
 

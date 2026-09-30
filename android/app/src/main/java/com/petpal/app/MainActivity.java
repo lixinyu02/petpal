@@ -17,6 +17,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(PetOverlayPlugin.class);
         registerPlugin(PetUpdaterPlugin.class);
+        registerPlugin(PetTaskNotificationsPlugin.class);
         super.onCreate(savedInstanceState);
         // Capacitor normally uses an origin-scoped, main-frame WebMessageListener.
         // Remove its possible legacy JS-interface fallback, which has no frame origin.
@@ -25,13 +26,23 @@ public class MainActivity extends BridgeActivity {
         secureUpdaterBridge = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
             && !getBridge().getConfig().isUsingLegacyBridge() && getBridge().getConfig().getServerUrl() == null;
         getBridge().getWebView().setWebChromeClient(new LocalMediaChromeClient(getBridge()));
+        captureTaskNavigation(getIntent());
         openRequestedChat(getIntent());
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        setIntent(intent);
+        captureTaskNavigation(intent);
         openRequestedChat(intent);
+    }
+
+    private void captureTaskNavigation(Intent intent) {
+        if (intent == null || !PetTaskNotificationService.OPEN.equals(intent.getAction())) return;
+        String tag = intent.getStringExtra(PetTaskNotificationService.TAG_EXTRA), epoch = intent.getStringExtra(PetTaskNotificationService.EPOCH_EXTRA);
+        intent.removeExtra(PetTaskNotificationService.TAG_EXTRA); intent.removeExtra(PetTaskNotificationService.EPOCH_EXTRA); intent.setAction(null);
+        try { TaskNotificationState.capture(this, tag, epoch); } catch (Exception ignored) { }
     }
 
     private void openRequestedChat(Intent intent) {

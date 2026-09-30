@@ -11,6 +11,7 @@ import { Capacitor } from '@capacitor/core';
 import { PetOverlay as NativeOverlay, showPet } from './platform/overlay';
 import LoginGate from './auth/LoginGate';
 import { isPassiveNativeOverlay } from './auth/overlay-entry.mjs';
+import { mountTaskNotificationSession, taskNotificationSession } from './platform/task-notification-session';
 const App = lazy(() => import('./App'));
 const CompanionWorld = lazy(() => import('./CompanionWorld'));
 const PetOverlay = lazy(() => import('./pet/PetOverlay'));
@@ -21,6 +22,15 @@ function SessionRoot(){
   const epoch=useSyncExternalStore(subscribeSession,getSessionEpoch,getSessionEpoch);
   const [catEnabled]=useCompanionCatEnabled(),ownerIdentity=getIdentity();
   const[ready,setReady]=useState(overlay);
+  const notification=useSyncExternalStore(taskNotificationSession.subscribe,taskNotificationSession.snapshot,taskNotificationSession.snapshot);
+  useEffect(()=>overlay?undefined:mountTaskNotificationSession(),[]);
+  useEffect(()=>{
+    const target=notification.navigation,identity=getIdentity();
+    if(overlay||params.has('chat')||!target||target.epoch!==getSessionEpoch()||target.instanceId!==identity?.instanceId||target.userId!==identity?.userId)return;
+    const query=new URLSearchParams({chat:'1',conversation:target.conversation.id,mode:target.conversation.mode});
+    taskNotificationSession.takeNavigation();
+    location.assign(`${location.pathname}?${query.toString()}`);
+  },[notification.navigation,epoch]);
   useEffect(()=>{if(overlay)return;let alive=true;void initConnection(Capacitor.getPlatform()==='android'||window.petpal?'https://magicdatou.top:44318':'').finally(()=>{if(alive)setReady(true);}).catch(()=>{});return()=>{alive=false;};},[]);
   useEffect(()=>{const change=()=>{if(Capacitor.isNativePlatform())void NativeOverlay.stop().catch(()=>{});};window.addEventListener('petpal:session-change',change);return()=>window.removeEventListener('petpal:session-change',change);},[]);
   useEffect(()=>{

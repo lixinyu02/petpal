@@ -26,6 +26,31 @@ test('real API wrapper account-switch and native restore behavior',async t=>{
   install('window',window);install('location',{hash:'',pathname:'/',search:''});install('history',{replaceState(){}});
   install('sessionStorage',{getItem:key=>disk.get(key)??null,setItem:(key,value)=>disk.set(key,value),removeItem:key=>disk.delete(key)});
   try{
+    await t.test('notification lifecycle distinguishes initial restoration from real logout, identity and 401 changes',async()=>{
+      disk.clear();delete window.petpal;
+      const reasons=[],listener=event=>reasons.push(event.detail?.reason);window.addEventListener('petpal:session-change',listener);
+      try{
+        const api=await freshApi();await api.initConnection('https://pet.example');assert.deepEqual(reasons,['restore']);
+        api.setConnection({url:'https://pet.example',token:'member'});assert.equal(reasons.at(-1),'change');
+        install('fetch',async()=>json({instanceId:'host-one',user:{id:'user-one'}}));await api.api('/auth/me');assert.equal(reasons.at(-1),'change');
+        install('fetch',async()=>json({instanceId:'host-one',user:{id:'user-two'}}));await api.api('/auth/me');assert.equal(reasons.at(-1),'identity');
+        install('fetch',async()=>json({error:'expired'},401));await assert.rejects(api.api('/state'),/expired/);assert.equal(reasons.at(-1),'change');
+        api.logout();assert.equal(reasons.at(-1),'change');
+        disk.set('petpal.connection',JSON.stringify({url:'https://pet.example',token:'restored',credentialKind:'session',target:'remote'}));
+        const restored=await freshApi();await restored.initConnection();assert.equal(reasons.at(-1),'restore');
+      }finally{window.removeEventListener('petpal:session-change',listener);disk.clear();}
+    });
+    await t.test('cold-start authentication preserves pending native taps until verified account reconciliation',async()=>{
+      disk.clear();delete window.petpal;const reasons=[],listener=event=>reasons.push(event.detail?.reason);window.addEventListener('petpal:session-change',listener);
+      try{
+        const api=await freshApi();await api.initConnection('https://pet.example');
+        install('fetch',async()=>json({token:'new-session',user:{id:'user-one'}}));await api.login('https://pet.example','member','password123');assert.equal(reasons.at(-1),'authenticate');
+        install('fetch',async()=>json({instanceId:'host-one',user:{id:'user-one'}}));await api.api('/auth/me');assert.equal(reasons.at(-1),'authenticate');
+        install('fetch',async()=>json({token:'other-session',user:{id:'user-two'}}));await api.login('https://pet.example','other','password123');assert.equal(reasons.at(-1),'change','a known-account switch invalidates immediately');
+        api.logout();
+        await api.login('https://different.example','other','password123');assert.equal(reasons.at(-1),'change','changing servers invalidates even without known identity');
+      }finally{window.removeEventListener('petpal:session-change',listener);disk.clear();}
+    });
     await t.test('late JSON and 401 from old credentials cannot update identity or log out new account',async()=>{
       const api=await freshApi();api.setConnection({url:'https://a.example',token:'old'});
       const release=deferred(),entered=deferred();let sent;

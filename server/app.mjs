@@ -24,6 +24,7 @@ import { createChatAssistant, normalizeChatAssistant } from './chat-assistant.mj
 import { mountMusicMcpRoutes } from './music-mcp-routes.mjs';
 import { mountComputerUseMcpRoutes } from './computer-use-mcp-routes.mjs';
 import { MODEL_REQUEST_BYTES } from './model-request-limits.mjs';
+import { createNotificationService } from './notifications.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const now = () => new Date().toISOString();
@@ -167,11 +168,12 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     asr.revoke(predicate);
     executors.revoke(predicate);
     const agentStopped = agentTasks.revoke(predicate);
+    const notificationsStopped = notifications.revoke(predicate);
     const stoppedProbes = [...probes].filter(predicate);
     for (const probe of stoppedProbes) probe.controller.abort(new DOMException('账号权限已变更。', 'AbortError'));
     const tasks = [...active.values()].filter(predicate);
     for (const task of tasks) task.controller.abort(new DOMException('登录或模型权限已撤销。', 'AbortError'));
-    await Promise.all([agentStopped, chatAssistant.revoke(predicate), ...[...tasks, ...stoppedProbes].map(task => task.done)]);
+    await Promise.all([agentStopped, notificationsStopped, chatAssistant.revoke(predicate), ...[...tasks, ...stoppedProbes].map(task => task.done)]);
   };
   const resolveAgentModel = (userId, providerId) => {
     const user = state.users.find(item => item.id === userId); if (!user) throw failure(401, '账号不可用。');
@@ -218,6 +220,11 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     requireCodex(user);
   };
   const executors = createExecutors({ ...executorsOptions, store, authorizeSession: authorizeExecutorSession, authorizeEntry: authorizeAgentEntry, readAttachment: imageAttachments.read, getConfig: () => state.codexConfig, redact: redactCodex });
+  const notifications = createNotificationService({ store, authorize: auth => {
+    const identity = authorizeAgentIdentity(auth); requireCodex(identity.user);
+    const issued = auth.bootstrap ? 0 : Date.parse(state.sessions.find(session => session.tokenHash === auth.sessionHash).createdAt);
+    return { ...identity, sourceCreatedAt: Number.isFinite(issued) ? issued : 0 };
+  } });
   const agentTasks = createAgentTasks({ store, active, approvals, getBridge: entry => entry?.hostId && entry.hostId !== 'central' ? new RemoteCodexBridge(executors, entry) : bridge, redact: redactCodex, resolveModel: resolveAgentModel, resolveImages: imageAttachments.images, resolveHost: executors.target,
     authorize: entry => { const expiresAt = authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId ?? 'central'); return expiresAt; },
     authorizeRemoval: entry => authorizeAgentIdentity(entry.auth).expiresAt,
@@ -263,6 +270,20 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (user.disabled || user.password !== savedPassword || !state.sessions.includes(session)) throw failure(401, '登录凭据已撤销，请重新登录。');
     res.json({ token: sessionToken, user: visibleUser(user) });
   });
+  // Native background credentials are deliberately excluded from session auth.
+  app.get('/api/notifications/device/feed', async (req, res) => {
+    const controller = new AbortController(); const close = () => { if (!res.writableEnded) controller.abort(); }; res.once('close', close);
+    try { const result = await notifications.feed(req.headers.authorization, req.query, controller.signal); if (!res.destroyed) res.json(result); }
+    finally { res.off('close', close); }
+  });
+  app.post('/api/notifications/device/ack', async (req, res) => {
+    if (Object.keys(req.query).length) throw failure(400, '通知确认不接受查询字段。');
+    res.json(await notifications.ack(req.headers.authorization, req.body));
+  });
+  app.delete('/api/notifications/device', async (req, res) => {
+    if (Object.keys(req.query).length || Object.keys(req.body).length) throw failure(400, '通知撤销不接受附加字段。');
+    res.json(await notifications.removeSelf(req.headers.authorization));
+  });
   app.use('/api', (req, res, next) => {
     const auth = req.headers.authorization;
     if (!auth?.startsWith('Bearer ') || auth.length > 4103) return res.status(401).json({ error: '登录凭据无效或未填写。' });
@@ -274,6 +295,14 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     req.user = user; req.sessionHash = hash; req.bootstrap = bootstrap; next();
   });
   const executorAuth = req => ({ userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap });
+  app.post('/api/notifications/devices', async (req, res) => {
+    if (Object.keys(req.query).length) throw failure(400, '通知设备注册不接受查询字段。');
+    requireCodex(req.user); res.status(201).json(await notifications.register(executorAuth(req), req.body));
+  });
+  app.delete('/api/notifications/devices/:deviceId', async (req, res) => {
+    if (Object.keys(req.query).length || Object.keys(req.body).length) throw failure(400, '通知设备撤销不接受附加字段。');
+    res.json(await notifications.remove(executorAuth(req), req.params.deviceId));
+  });
   app.get('/api/agent/hosts', async (req, res) => {
     requireCodex(req.user); const hosts = executors.list(req.user.id); hosts[0] = { ...hosts[0], codex: await userCodexStatus(req.user) }; requireCurrentAuth(req); res.json({ hosts });
   });
@@ -834,7 +863,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     for (const probe of probes) probe.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     for (const task of active.values()) task.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     if (configSwap) await configSwap.catch(() => {});
-    const results = await Promise.allSettled([chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
+    const results = await Promise.allSettled([notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
     let saveError;
     try { await store.queue; } catch (error) { saveError = error; }
     finally { server.closeAllConnections(); await httpClosed; }

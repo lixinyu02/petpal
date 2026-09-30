@@ -16,7 +16,7 @@ import { useAttachments, AttachmentInput, AttachmentDrafts, MessageImages } from
 import './workspace.css';
 import { ConnectionDialog } from './auth/LoginGate';
 import UpdatesSettings from './UpdatesSettings';
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { ArrowDown, ArrowRight, ArrowUp, ArrowUpRight, AudioLines, Download, ListOrdered, CornerDownRight, Check, ChevronDown, CircleHelp, Code2, Coffee, Globe2, History, Link2, Loader2, Menu, MessageCircle, Monitor, MoreHorizontal, PawPrint, Pencil, Plug, Plus, RefreshCw, Settings2, ShieldCheck, Sparkles, Square, Sun, Terminal, Trash2, Unplug, UserRound, Volume2, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { PetOverlay as Overlay, showPet } from './platform/overlay';
@@ -40,8 +40,9 @@ import MusicMcpSettings from './MusicMcpSettings';
 import ComputerUseSettings from './ComputerUseSettings';
 import {nativeComputerUse} from './platform/computer-use';
 import { nativeMusicMcp } from './platform/music-mcp';
+import { taskNotificationSession } from './platform/task-notification-session';
 import { reasoningEfforts } from './desktop-settings.mjs';
-import { api, getConnection, getSessionEpoch, initConnection, connectWithToken, login, isSessionChanged, SessionChangedError, streamMessage, type AgentHost, type AgentPermissions as Permissions, type AgentSubmission, type Connection, type Conversation, type Message, type NativeExecutorStatus, type Provider, type ReasoningEffort, type State } from './api';
+import { api, getConnection, getIdentity, getSessionEpoch, initConnection, connectWithToken, login, isSessionChanged, SessionChangedError, streamMessage, type AgentHost, type AgentPermissions as Permissions, type AgentSubmission, type Connection, type Conversation, type Message, type NativeExecutorStatus, type Provider, type ReasoningEffort, type State } from './api';
 
 const emptyState: State = { settings: { petName: '小伴', companionKind: 'anime', persona: '你是用户温柔、机灵的个人 AI 伙伴。用自然简洁的中文回应，认真倾听；不知道的事情坦诚说明。' }, providers: [], conversations: [], codex: {} };
 type Approval = { id: string; kind: string; description: string };
@@ -49,6 +50,7 @@ const dateFormatter=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric'}
 
 export default function App() {
   const accountEpoch = useRef(getSessionEpoch()).current;
+  const taskNotifications=useSyncExternalStore(taskNotificationSession.subscribe,taskNotificationSession.snapshot,taskNotificationSession.snapshot);
   const [companionKind] = useCompanion();
   const [state, setState] = useState<State>(emptyState);
   const [ready, setReady] = useState(false);
@@ -216,6 +218,14 @@ export default function App() {
     void poll();return()=>{controller.abort();if(timer)clearTimeout(timer);};
   },[connected,state.user?.canUseCodex,hostScope,hostRefresh,currentMode]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 3800); return () => clearTimeout(timer); }, [notice]);
+  useEffect(()=>{
+    const target=taskNotifications.navigation,identity=getIdentity();
+    if(!ready||!target||target.epoch!==accountEpoch||getSessionEpoch()!==accountEpoch||target.instanceId!==identity?.instanceId||target.userId!==identity?.userId)return;
+    if(busy||agentRunning||agentSubmitting||unconfirmed||switchingModel){setNotice('收到任务结果，当前回复结束后打开。');return;}
+    taskNotificationSession.takeNavigation();
+    setState({...target.state,conversations:target.state.conversations.map(item=>item.id===target.conversation.id?target.conversation:item)});
+    historySelection.current.select(target.conversation);setView('chat');setMobileNav(false);setNotice('已打开任务结果。');
+  },[taskNotifications.navigation,accountEpoch,ready,busy,agentRunning,agentSubmitting,unconfirmed,switchingModel]);
   useEffect(()=>{if(companionPanelOpen)setCompanionPanelMounted(true);},[companionPanelOpen]);
   useEffect(()=>watchCompanionBreakpoint(window.matchMedia('(max-width: 960px)'),()=>setCompanionPanelMounted(true)),[]);
   useEffect(() => {

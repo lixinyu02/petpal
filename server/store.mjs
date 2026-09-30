@@ -7,6 +7,7 @@ import { validateStoredAttachments, normalizeAttachmentIds } from './attachments
 import { restoreAgentState } from './agent-tasks.mjs';
 import { validateExecutionHosts } from './executors.mjs';
 import { restoreAssistantTasks } from './chat-assistant.mjs';
+import { validateStoredNotifications } from './notifications.mjs';
 
 export const isCompanionKind = value => value === 'anime' || value === 'cat';
 
@@ -93,20 +94,28 @@ export class JsonStore {
         if (message.status === 'streaming') { message.status = 'error'; message.error = '服务上次退出时回复尚未完成，可以重新发送。'; changed = true; }
       }
     }
+    if (validateStoredNotifications(state)) changed = true;
     if (changed) await this.save();
     return this;
   }
 
-  save() {
+  save(operation) {
     // Capture the state now. Serial atomic replacements prevent older writes winning.
-    const contents = `${JSON.stringify(this.state, null, 2)}\n`;
+    const captured = JSON.stringify(this.state);
     const task = this.queue.catch(() => {}).then(async () => {
+      // Extensions merge against their last committed data inside this queue.
+      // An unrelated concurrent save cannot capture an undurable event or
+      // overwrite a newly committed feed with an older in-memory copy.
+      const snapshot = JSON.parse(captured);
+      this.notificationPersistence?.prepare(snapshot, operation);
+      const contents = `${JSON.stringify(snapshot, null, 2)}\n`;
       const temporary = `${this.file}.${randomBytes(8).toString('hex')}.tmp`;
       try {
         const handle = await open(temporary, 'wx', 0o600);
         try { await handle.writeFile(contents, 'utf8'); await handle.sync(); } finally { await handle.close(); }
         await rename(temporary, this.file);
         await chmod(this.file, 0o600).catch(error => { if (process.platform !== 'win32') throw error; });
+        this.notificationPersistence?.commit(snapshot.notifications);
       } finally { await unlink(temporary).catch(() => {}); }
     });
     this.queue = task;

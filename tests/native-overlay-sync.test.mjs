@@ -41,6 +41,7 @@ function fixture({native=true,enabled=true,href='https://app.example/?chat=1&set
     '@capacitor/core':{Capacitor:{isNativePlatform:()=>native,getPlatform:()=>native?'android':'web'}},
     './platform/useViewport':{useViewport:()=>{}},'./api':api,'./avatar/preference':preference,
     './platform/overlay':{PetOverlay:nativeOverlay,showPet:async options=>{shown.push(options.companionKind);}},
+    './platform/task-notification-session':{mountTaskNotificationSession:()=>()=>{},taskNotificationSession:{subscribe:()=>()=>{},snapshot:()=>({status:null,busy:false,error:'',navigation:null}),takeNavigation:()=>null}},
     './auth/LoginGate':{default:Symbol('LoginGate'),__esModule:true},'./auth/overlay-entry.mjs':{isPassiveNativeOverlay},
     'lucide-react':{Cat:Symbol('Cat')},
   };

@@ -70,7 +70,7 @@ export function normalizeServerUrl(value:string) {
   if(url){const parsed=new URL(url);if(!['http:','https:'].includes(parsed.protocol)||parsed.username||parsed.password||parsed.search||parsed.hash)throw new Error('服务地址须为 HTTP(S) 地址，不能包含凭据或查询参数。');}
   return url;
 }
-export function setConnection(next:Connection,credentialKind:CredentialKind=next.token?'pairing':'none',target?:'local'|'remote') {
+export function setConnection(next:Connection,credentialKind:CredentialKind=next.token?'pairing':'none',target?:'local'|'remote',reason:'change'|'restore'|'authenticate'='change') {
   const connection={url:normalizeServerUrl(next.url),token:next.token.trim()};
   executorScope=null;
   executorPendingScope=null;executorRevision++;
@@ -80,7 +80,7 @@ export function setConnection(next:Connection,credentialKind:CredentialKind=next
   identity=null;requests.replace(connection);
   try{const saved={...connection,credentialKind,target:executionTarget};sessionStorage.setItem('petpal.connection',JSON.stringify(saved));sessionStorage.setItem(`petpal.connection.${executionTarget}`,JSON.stringify(saved));}catch{}
   try{window.speechSynthesis?.cancel();}catch{}
-  window.dispatchEvent(new Event('petpal:session-change'));notify();
+  window.dispatchEvent(Object.assign(new Event('petpal:session-change'),{detail:{reason}}));notify();
 }
 function acceptIdentity(value:{instanceId?:string;user?:User}) {
   if(!value.instanceId||!value.user?.id)return;
@@ -104,7 +104,10 @@ function acceptIdentity(value:{instanceId?:string;user?:User}) {
     });
   }
   if(identity?.instanceId===value.instanceId&&identity.userId===value.user.id)return;
-  identity={instanceId:value.instanceId,userId:value.user.id};notify();
+  const changed=!!identity;
+  identity={instanceId:value.instanceId,userId:value.user.id};
+  if(changed)window.dispatchEvent(Object.assign(new Event('petpal:session-change'),{detail:{reason:'identity'}}));
+  notify();
 }
 export function initConnection(defaultUrl = '') {
   initialization ??= (async()=>{
@@ -113,10 +116,10 @@ export function initConnection(defaultUrl = '') {
     if(token){setConnection({url:native?.url||'',token});history.replaceState(null,'',location.pathname+location.search);return getConnection();}
     try{const saved=sessionStorage.getItem('petpal.connection');if(saved){const parsed=JSON.parse(saved);if(typeof parsed.url==='string'&&typeof parsed.token==='string'){
       const restored=restoreTargetConnection(parsed,native);
-      if(restored){setConnection(restored.connection,restored.credentialKind,restored.target);return getConnection();}
+      if(restored){setConnection(restored.connection,restored.credentialKind,restored.target,'restore');return getConnection();}
     }}}catch{try{sessionStorage.removeItem('petpal.connection');}catch{}}
-    if(native)setConnection({url:defaultUrl || native.url,token:''});
-    else if(defaultUrl)setConnection({url:defaultUrl,token:''});
+    if(native)setConnection({url:defaultUrl || native.url,token:''},'none',undefined,'restore');
+    else if(defaultUrl)setConnection({url:defaultUrl,token:''},'none',undefined,'restore');
     return getConnection();
   })();
   return initialization.then(()=>getConnection());
@@ -195,11 +198,11 @@ export async function apiSpeechStream(text:string, signal:AbortSignal, handlers:
 export async function connectWithToken(next:Connection) {
   const url=normalizeServerUrl(next.url),token=next.token.trim();if(!token)throw new Error('请输入配对令牌。');
   const request=requests.begin();
-  try{const response=await connectionFetch(`${url}/api/auth/me`,{headers:{Authorization:`Bearer ${token}`},signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.instanceId!=='string'||!data.instanceId||typeof data.user?.id!=='string'||!data.user.id)throw new Error('服务身份响应无效。');setConnection({url,token},'pairing');acceptIdentity(data);}finally{request.close();}
+  try{const response=await connectionFetch(`${url}/api/auth/me`,{headers:{Authorization:`Bearer ${token}`},signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.instanceId!=='string'||!data.instanceId||typeof data.user?.id!=='string'||!data.user.id)throw new Error('服务身份响应无效。');const reason=!identity&&request.connection.url===url?'authenticate':'change';setConnection({url,token},'pairing',undefined,reason);acceptIdentity(data);}finally{request.close();}
 }
 export async function login(urlValue:string,username:string,password:string) {
   const url=normalizeServerUrl(urlValue),request=requests.begin();
-  try{const response=await connectionFetch(`${url}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim(),password}),signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.token!=='string'||!data.token)throw new Error('登录响应缺少会话凭据。');setConnection({url,token:data.token},'session');}finally{request.close();}
+  try{const response=await connectionFetch(`${url}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim(),password}),signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.token!=='string'||!data.token)throw new Error('登录响应缺少会话凭据。');const reason=!identity&&request.connection.url===url?'authenticate':'change';setConnection({url,token:data.token},'session',undefined,reason);}finally{request.close();}
 }
 export function logout() {
   const previous=getConnection();setConnection({url:previous.url,token:''});

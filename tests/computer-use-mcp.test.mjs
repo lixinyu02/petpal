@@ -42,11 +42,15 @@ for await (const line of readline.createInterface({input:process.stdin})) {
    send({isError:mode==='tool-error',content:[{type:'text',text:JSON.stringify({name:message.params.name,arguments:message.params.arguments})}]});
  }
 }`;
-async function harness(t, { directory, scope = 'account-one', mode = 'normal', tools = fixtureTools, enabled = true, ...options } = {}) {
+async function harness(t, { directory, scope = 'account-one', mode = 'normal', tools = fixtureTools, enabled = true, withoutCompatibleNative = false, ...options } = {}) {
   const ownDirectory = !directory; directory ||= await mkdtemp(path.join(os.tmpdir(), 'petpal-computer-mcp-'));
   const transports = [], parameters = [], events = path.join(directory, `${scope}.events.jsonl`);
   const manager = new ComputerUseMcpManager({ dataDir: directory, scope, platform: 'win32', arch: 'x64', versions: runtime, env: sourceEnv, connectTimeoutMs: 3000, callTimeoutMs: 2500, closeTimeoutMs: 5500,
     transportFactory: params => { parameters.push(params); const transport = new StdioClientTransport({ ...params, command: process.execPath, args: ['--input-type=module', '-e', fixture, events, mode, JSON.stringify(tools)] }); transports.push(transport); return transport; }, ...options });
+  // Exercise upstream requirements independently of verified compatibility
+  // artifacts present in the developer/package checkout. Other tests retain
+  // the real native receipt and ELF/hash discovery path.
+  if (withoutCompatibleNative) manager._compatibleNative = async () => null;
   t.after(async () => { await manager.close(); if (ownDirectory) await rm(directory, { recursive: true, force: true }); });
   const initial = await manager.config(); if (enabled) await manager.configure({ revision: initial.revision, enabled: true });
   const readEvents = async () => { try { return (await readFile(events, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); } catch (error) { if (error.code === 'ENOENT') return []; throw error; } };
@@ -143,10 +147,10 @@ test('screenshots use bounded defaults; width, quality and zoom regions cannot e
 });
 
 test('Linux upstream glibc 2.39 gate and missing interactive session are truthful without spawning', async t => {
-  const incompatible = await harness(t, { platform: 'linux', arch: 'arm64', glibcVersion: '2.35' });
+  const incompatible = await harness(t, { platform: 'linux', arch: 'arm64', glibcVersion: '2.35', withoutCompatibleNative: true });
   const status = await incompatible.manager.status(); assert.equal(status.readiness.nativeCompatible, false); assert.equal(status.readiness.minimumGlibc, '2.39'); assert.match(status.message, /glibc 2\.39/);
   await assert.rejects(incompatible.manager.connect(), { code: 'native_incompatible' }); assert.equal(incompatible.parameters.length, 0);
-  const headless = await harness(t, { platform: 'linux', arch: 'arm64', glibcVersion: '2.39', env: {} });
+  const headless = await harness(t, { platform: 'linux', arch: 'arm64', glibcVersion: '2.39', env: {}, withoutCompatibleNative: true });
   assert.equal((await headless.manager.status()).readiness.interactiveDesktop, false); await assert.rejects(headless.manager.connect(), { code: 'desktop_unavailable' }); assert.equal(headless.parameters.length, 0);
 });
 
