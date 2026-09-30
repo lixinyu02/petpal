@@ -3,6 +3,7 @@ import { restoreTargetConnection } from './auth/connection-targets.mjs';
 import type { DesktopUpdates } from './platform/updates';
 import { createRequestScope, SessionChangedError } from './auth/request-scope.mjs';
 import { readSpeechStream, type SpeechStreamHandlers } from './avatar/speech-stream.mjs';
+import { normalizeSpeechEmotion, type SpeechEmotion } from './avatar/speech-emotion.mjs';
 export { SessionChangedError };
 export type AgentAccess = 'none'|'workspace'|'full';
 export type AgentPermissions = { access:'read-only'|'workspace-write'|'full-access'; approval:'ask'|'auto'|'review' };
@@ -32,7 +33,7 @@ export type State = { instanceId?:string; user?:User; settings: { petName: strin
 export type Connection = { url: string; token: string };
 export type VoiceConnectionFields = {baseUrl:string;model:string;hasApiKey?:boolean;apiKey?:string;clearApiKey?:boolean};
 export type VoiceConfig = {
-  tts:VoiceConnectionFields & {mode:'system'|'remote'|'cosyvoice';voice:string;speed:number};
+  tts:VoiceConnectionFields & {mode:'system'|'remote'|'cosyvoice';voice:string;speed:number;emotion:'original'|'auto'|'neutral'|'happy'|'sad'|'angry'|'gentle';emotionIntensity:'natural'|'strong'};
   asr:VoiceConnectionFields & {mode:'disabled'|'browser'|'remote';language:string};
   runtime?:{tts:string;asr:string;remoteConfiguredOnly:boolean};
 };
@@ -157,13 +158,30 @@ export async function apiBlob(path:string, options:RequestInit = {}):Promise<Blo
     const blob=await response.blob();request.assertCurrent();return blob;
   }finally{request.close();}
 }
+/** Keep optional speaking intention paired with the audio and its auth snapshot. */
+export async function apiSpeechAudio(text:string, signal:AbortSignal):Promise<{blob:Blob;emotion:SpeechEmotion|null}> {
+  const request=requests.begin(signal);
+  try {
+    request.assertCurrent();
+    const response=await connectionFetch(`${request.connection.url}/api/voice/synthesize`,{
+      method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${request.connection.token}`},body:JSON.stringify({text}),signal:request.signal,
+    });
+    request.assertCurrent();
+    if(!response.ok){await responseJson(response,request);throw new Error('音频请求失败。');}
+    const fields=['x-petpal-speech-emotion','x-petpal-speech-intensity','x-petpal-speech-source'].map(name=>response.headers.get(name));
+    let emotion:SpeechEmotion|null;
+    try { emotion=normalizeSpeechEmotion(fields.every(value=>value===null)?null:{emotion:fields[0],intensity:fields[1],source:fields[2]}); }
+    catch(error){void response.body?.cancel().catch(()=>{});throw error;}
+    const blob=await response.blob();request.assertCurrent();return {blob,emotion};
+  }finally{request.close();}
+}
 /** Keep the credential snapshot and cancellation scope alive until playback consumes the stream. */
 export async function apiSpeechStream(text:string, signal:AbortSignal, handlers:SpeechStreamHandlers):Promise<void> {
   const request=requests.begin(signal);
   try {
     request.assertCurrent();
     const response=await connectionFetch(`${request.connection.url}/api/voice/synthesize/stream`,{
-      method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${request.connection.token}`},
+      method:'POST',headers:{'Content-Type':'application/json',Accept:'application/x-petpal-speech-v2+ndjson',Authorization:`Bearer ${request.connection.token}`},
       body:JSON.stringify({text}),signal:request.signal,
     });
     request.assertCurrent();

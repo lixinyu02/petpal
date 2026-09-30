@@ -10,6 +10,19 @@ const response=frames=>new Response(encode(frames),{headers:{'content-type':'app
 const handlers={onFormat(){},onAudio(){}};
 const deferred=()=>{let resolve;const promise=new Promise(yes=>{resolve=yes;});return{promise,resolve};};
 
+test('PCM format carries only validated optional upstream emotion and keeps legacy frames compatible', async () => {
+  const metadata = { emotion: 'neutral', intensity: 'natural', source: 'rules' }, formats = [];
+  await readSpeechStream(response([{ ...format, emotion: metadata }, audio([1, 2]), end(2)]), { ...handlers, onFormat: value => formats.push(value) });
+  assert.deepEqual(formats[0].emotion, metadata); assert.equal(Object.isFrozen(formats[0].emotion), true);
+  await readSpeechStream(response([format, audio([1, 2]), end(2)]), { ...handlers, onFormat: value => formats.push(value) });
+  assert.equal(Object.hasOwn(formats[1], 'emotion'), false);
+  for (const emotion of [{ ...metadata, intensity: 'custom' }, { ...metadata, source: 'sound' }, { ...metadata, emotion: 'original' },
+    { ...metadata, extra: true }, { emotion: 'happy' }]) {
+    await assert.rejects(readSpeechStream(response([{ ...format, emotion }, audio([1, 2]), end(2)]), handlers), /语音流/);
+  }
+  await assert.rejects(readSpeechStream(response([{ ...format, emotion: metadata, future: true }, audio([1, 2]), end(2)]), handlers), /语音流/);
+});
+
 test('PCM framing incrementally delivers odd audio chunks before upstream completion',async()=>{
   let controller;const chunks=[],formats=[];
   const source=new Response(new ReadableStream({start(value){controller=value;}}),{headers:{'content-type':'application/x-ndjson'}});

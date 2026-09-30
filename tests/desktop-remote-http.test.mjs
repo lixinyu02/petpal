@@ -86,6 +86,16 @@ test('binary upload/download preserves bytes without forwarding a Cookie or addi
   assert.equal(f.events.at(-1).type, 'end');
 });
 
+test('speech negotiation and finite emotion headers survive the native bridge without unrelated headers', async t => {
+  const f = fixture(t, { fetchImpl: async (_url, init) => {
+    assert.equal(init.headers.accept, 'application/x-petpal-speech-v2+ndjson');
+    return new Response(Buffer.from([1, 2]), { headers: { 'content-type': 'audio/wav', 'x-petpal-speech-emotion': 'happy', 'x-petpal-speech-intensity': 'strong', 'x-petpal-speech-source': 'choice', 'x-private-key': 'hidden', 'set-cookie': 'private' } });
+  } });
+  await f.manager.request(f.event, input({ headers: { Accept: 'application/x-petpal-speech-v2+ndjson' } }));
+  assert.deepEqual({ ...f.events[0].headers }, { 'content-type': 'audio/wav', 'x-petpal-speech-emotion': 'happy', 'x-petpal-speech-intensity': 'strong', 'x-petpal-speech-source': 'choice' });
+  assert.equal(f.events.at(-1).type, 'end');
+});
+
 test('real HTTP redirect is rejected before a credential can reach another origin', async t => {
   let leaked = 0;
   const other = await serve(t, (_req, res) => { leaked++; res.end('wrong host'); });

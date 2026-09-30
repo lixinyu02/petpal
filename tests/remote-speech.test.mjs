@@ -67,6 +67,40 @@ const assertReleased = (h, index = 0) => {
   for (const event of ['onplaying', 'onpause', 'onwaiting', 'onstalled', 'onended', 'onerror', 'ontimeupdate', 'onloadedmetadata']) assert.equal(audio[event] ?? null, null);
 };
 
+test('WAV emotion metadata stays silent until playback and clears on waiting, pause, end and stop', async () => {
+  const h = harness(), metadata = { emotion: 'gentle', intensity: 'natural', source: 'rules' };
+  h.controller.speak(request()); await h.synth(0, { blob: audioBlob(), emotion: metadata });
+  assert.equal(h.controller.snapshot().emotion, null);
+  metadata.emotion = 'angry'; await h.play();
+  assert.deepEqual(h.controller.snapshot().emotion, { emotion: 'gentle', intensity: 'natural', source: 'rules' });
+  assert.equal(Object.isFrozen(h.controller.snapshot().emotion), true);
+  h.audios[0].onwaiting(); assert.equal(h.controller.snapshot().emotion, null);
+  h.audios[0].onplaying(); assert.equal(h.controller.snapshot().emotion.emotion, 'gentle');
+  h.audios[0].pause(); assert.equal(h.controller.snapshot().emotion, null);
+  h.audios[0].paused = false; h.audios[0].onplaying(); assert.equal(h.controller.snapshot().emotion.emotion, 'gentle');
+  h.audios[0].onended(); assert.equal(h.controller.snapshot().emotion, null);
+  h.controller.stop(); assert.equal(h.controller.snapshot().emotion, null); assertReleased(h);
+});
+
+test('WAV cancellation drops late synthesis metadata and fails invalid metadata before play', async () => {
+  const h = harness(), metadata = { emotion: 'happy', intensity: 'strong', source: 'manual' };
+  h.controller.speak(request()); h.controller.stop();
+  await h.synth(0, { blob: audioBlob(), emotion: metadata });
+  assert.equal(h.controller.snapshot().emotion, null); assert.equal(h.audios[0].played, 0); assertReleased(h);
+  h.controller.speak(request('next')); await h.synth(1, { blob: audioBlob(), emotion: { ...metadata, source: 'unknown' } });
+  assert.equal(h.audios[1].played, 0); assert.equal(h.controller.snapshot().emotion, null);
+  assert.match(h.controller.snapshot().error, /朗读语气/); assertReleased(h, 1);
+});
+
+test('WAV legacy Blob playback has no upstream expression and a rejected late play never restores metadata', async () => {
+  const h = harness(); h.controller.speak(request()); await h.synth(); await h.play();
+  assert.equal(h.controller.snapshot().emotion, null); h.controller.stop();
+  h.controller.speak(request('selected')); await h.synth(1, { blob: audioBlob(), emotion: { emotion: 'sad', intensity: 'natural', source: 'choice' } });
+  const captured = h.audios[1].onplaying; h.controller.stop();
+  await h.play(1); captured(); assert.equal(h.controller.snapshot().emotion, null); assert.equal(h.audios[1].audibleStarts, 0);
+  assertReleased(h, 1);
+});
+
 test('remote audio remains pending until real playback and reports estimated media progress', async () => {
   const h = harness();
   assert.equal(h.controller.speak(request()), true);

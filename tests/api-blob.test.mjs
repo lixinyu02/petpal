@@ -10,6 +10,7 @@ const source=await fs.readFile(new URL('../src/api.ts',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText
   .replaceAll("'./auth/native-fetch'",JSON.stringify(nativeUrl))
   .replaceAll("'./avatar/speech-stream.mjs'",JSON.stringify(new URL('../src/avatar/speech-stream.mjs',import.meta.url).href))
+  .replaceAll("'./avatar/speech-emotion.mjs'",JSON.stringify(new URL('../src/avatar/speech-emotion.mjs',import.meta.url).href))
   .replaceAll("'./auth/connection-targets.mjs'",JSON.stringify(new URL('../src/auth/connection-targets.mjs',import.meta.url).href))
   .replaceAll("'./auth/request-scope.mjs'",JSON.stringify(new URL('../src/auth/request-scope.mjs',import.meta.url).href));
 let moduleId=0;
@@ -67,6 +68,27 @@ test('authenticated audio API fences credentials and binary data across account 
       install('fetch',async()=>new Response('{"error":"请先配置参考声音"}',{status:409,headers:{'Content-Type':'application/json'}}));
       await assert.rejects(api.apiBlob('/voice/synthesize',{method:'POST'}),/参考声音/);
     });
+    await t.test('audio and its finite speaking intention return together without credential overrides',async()=>{
+      const api=await freshApi();api.setConnection({url:'https://pet.example',token:'current'});let sent;
+      install('fetch',async(url,options)=>{sent={url,options};return new Response('WAV',{headers:{'content-type':'audio/wav','x-petpal-speech-emotion':'happy','x-petpal-speech-intensity':'strong','x-petpal-speech-source':'choice'}});});
+      const result=await api.apiSpeechAudio('你好',new AbortController().signal);
+      assert.equal(sent.options.headers.Authorization,'Bearer current');assert.deepEqual(JSON.parse(sent.options.body),{text:'你好'});
+      assert.deepEqual(result.emotion,{emotion:'happy',intensity:'strong',source:'choice'});assert.equal(await result.blob.text(),'WAV');
+      install('fetch',async()=>new Response('old WAV'));assert.equal((await api.apiSpeechAudio('你好',new AbortController().signal)).emotion,null);
+      let cancelled=false;
+      install('fetch',async()=>new Response(new ReadableStream({cancel(){cancelled=true;}}),{headers:{'x-petpal-speech-emotion':'happy'}}));
+      await assert.rejects(api.apiSpeechAudio('你好',new AbortController().signal));assert.equal(cancelled,true);
+    });
+    await t.test('a late WAV with emotion cannot enter a replacement account or outlive cancellation',async()=>{
+      for(const action of ['account','stop']){
+        const api=await freshApi();api.setConnection({url:'',token:'old'});
+        const reading=deferred(),late=deferred(),controller=new AbortController();let signal;
+        install('fetch',async(_url,options)=>{signal=options.signal;return{ok:true,headers:new Headers({'x-petpal-speech-emotion':'sad','x-petpal-speech-intensity':'natural','x-petpal-speech-source':'rules'}),blob:()=>{reading.resolve();return late.promise;}};});
+        const pending=api.apiSpeechAudio('你好',controller.signal);await reading.promise;
+        if(action==='account')api.setConnection({url:'',token:'new'});else controller.abort();
+        late.resolve(new Blob(['old account audio']));await assert.rejects(pending,action==='account'?api.SessionChangedError:{name:'AbortError'});assert.equal(signal.aborted,true);
+      }
+    });
     await t.test('stream holds the old credential scope while consumer is waiting and drops late audio on account switch',async()=>{
       const api=await freshApi();api.setConnection({url:'https://pet.example',token:'old'});
       const consuming=deferred(),release=deferred();let sent,output=0,cancelled=false;
@@ -79,6 +101,7 @@ test('authenticated audio API fences credentials and binary data across account 
       await consuming.promise;
       assert.equal(sent.url,'https://pet.example/api/voice/synthesize/stream');
       assert.equal(sent.options.headers.Authorization,'Bearer old');assert.equal(sent.options.signal.aborted,false);
+      assert.equal(sent.options.headers.Accept,'application/x-petpal-speech-v2+ndjson');
       api.setConnection({url:'https://pet.example',token:'new'});release.resolve();await rejected;
       assert.equal(sent.options.signal.aborted,true);assert.equal(output,1);assert.equal(cancelled,true);assert.equal(api.getConnection().token,'new');
     });

@@ -31,7 +31,7 @@ function harness(options = {}) {
   });
   const move = at => { const delta = at - time; for (const context of contexts) if (context.state === 'running' && !context.frozen) context.currentTime += delta / 1000; time = at; };
   return { controller, contexts, requests, states, timers,
-    async start(input = request()) { assert.equal(controller.speak(input), true); await flush(); if (requests.length) requests.at(-1).handlers.onFormat(format); },
+    async start(input = request(), selectedFormat = format) { assert.equal(controller.speak(input), true); await flush(); if (requests.length) requests.at(-1).handlers.onFormat(selectedFormat); },
     async audio(bytes, index = requests.length - 1) { await requests[index].handlers.onAudio(bytes); await flush(); },
     async end(index = requests.length - 1) { requests[index].resolve(); await flush(); },
     advance(milliseconds) {
@@ -47,6 +47,37 @@ function assertReleased(h, index = 0) {
   for (const node of context.sources) { assert.equal(node.connected, false); assert.equal(node.onended, null); }
   assert.equal(h.timers.size, 0);
 }
+
+test('stream expression metadata follows actual playback, clears during underrun and is restored for the same task', async () => {
+  const metadata = { emotion: 'happy', intensity: 'strong', source: 'choice' }, h = harness();
+  await h.start(request(), { ...format, emotion: metadata });
+  assert.equal(h.controller.snapshot().emotion, null);
+  metadata.emotion = 'sad';
+  await h.audio(pcm(5760)); assert.equal(h.controller.snapshot().emotion, null);
+  h.advance(80); assert.deepEqual(h.controller.snapshot().emotion, { emotion: 'happy', intensity: 'strong', source: 'choice' });
+  assert.equal(Object.isFrozen(h.controller.snapshot().emotion), true);
+  h.advance(240); assert.equal(h.controller.snapshot().active, false); assert.equal(h.controller.snapshot().emotion, null);
+  await h.audio(pcm(5760)); h.advance(80); assert.equal(h.controller.snapshot().emotion.emotion, 'happy');
+  await h.end(); h.advance(300); assert.equal(h.controller.snapshot().ended, true); assert.equal(h.controller.snapshot().emotion, null);
+});
+
+test('stream stop and failure discard emotion and captured format callbacks cannot revive an old task', async () => {
+  const selectedFormat = { ...format, emotion: { emotion: 'sad', intensity: 'natural', source: 'manual' } }, h = harness();
+  await h.start(request(), selectedFormat); await h.audio(pcm(5760)); h.advance(80);
+  const lateFormat = h.requests[0].handlers.onFormat;
+  h.controller.stop(); assert.equal(h.controller.snapshot().emotion, null);
+  assert.throws(() => lateFormat(selectedFormat), { name: 'AbortError' }); await h.end(); assert.equal(h.controller.snapshot().emotion, null);
+  await h.start(request('replacement')); await h.audio(pcm(5760)); h.advance(80); assert.equal(h.controller.snapshot().emotion, null);
+  h.requests[1].reject(new Error('failed')); await flush(); assert.equal(h.controller.snapshot().emotion, null);
+  assert.equal(h.controller.snapshot().active, false); assert.match(h.controller.snapshot().error, /failed/);
+});
+
+test('stream playback rejects injected invalid emotion metadata before accepting any audio', async () => {
+  const h = harness(); h.controller.speak(request()); await flush();
+  assert.throws(() => h.requests[0].handlers.onFormat({ ...format, emotion: { emotion: 'happy', intensity: 'custom', source: 'rules' } }), /朗读语气/);
+  await assert.rejects(h.requests[0].handlers.onAudio(pcm(100)), /格式/);
+  h.controller.stop(); assert.equal(h.controller.snapshot().emotion, null); assertReleased(h);
+});
 
 test('PCM starts before synthesis EOF after prebuffering and uses one continuous 24kHz audio clock', async () => {
   const h = harness(); await h.start();

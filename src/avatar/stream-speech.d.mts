@@ -1,7 +1,8 @@
 import type { SpeechRequest, SpeechState } from './speech.mjs';
+import type { SpeechEmotion } from './speech-emotion.mjs';
 
 export type StreamingSpeechState = SpeechState & { audioLevel: number; buffering: boolean; streaming: boolean };
-export type StreamingSpeechFormat = { format: 'pcm_s16le'; sampleRate: 24000; channels: 1 };
+export type StreamingSpeechFormat = { format: 'pcm_s16le'; sampleRate: 24000; channels: 1; emotion?: SpeechEmotion | null };
 export type StreamingSpeechHandlers = {
   onFormat(format: StreamingSpeechFormat): void | Promise<void>;
   onAudio(bytes: Uint8Array): void | Promise<void>;

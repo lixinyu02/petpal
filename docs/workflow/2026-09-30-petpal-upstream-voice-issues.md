@@ -8,12 +8,12 @@
 
 - Goal: 适配 ASR / CosyVoice3 情绪控制并完成真实语音验收。
 - Ordering rule: Complete issues in sequence.
-- Current status: issue-55 done，issue-56 todo。
+- Current status: issue-55 / issue-56 done。
 
 ## Issue List
 
 - [x] issue-55 后台协议和账号情绪配置
-- [ ] issue-56 播放表情联动、设置与实际上线验收
+- [x] issue-56 播放表情联动、设置与实际上线验收
 
 ## issue-55
 
@@ -33,6 +33,6 @@
 - 范围: 共同播放状态、人物、紧凑语音设置、回归、Chrome、独立构建、受控网页/后台部署。
 - 依赖: issue-55
 - 验收标准: 同一份合成语气驱动实际播放表情；停止/缓冲/账号切换无残留；生产下载保留，公网验收清晰区分听感/真机边界。
-- 状态: todo
-- 验证方式: 前端契约测试、完整回归、Chrome真实播放、ASR→Chat→TTS串行闭环、公网hash。
-- commit: pending
+- 状态: done
+- 验证方式: 完整916/916、TypeScript/独立构建通过；Chrome实际开心/中性口型与结束/取消、412×960通过；真实ASR→Chat→TTS完成；受控重启state不变、下载保留、30文件公网hash及新旧流式协商通过。自审账号epoch取消、严格元信息白名单、neutral覆盖和原生头透传通过。详见acceptance。
+- commit: feat(issue-56): link CosyVoice emotion to playback and avatar

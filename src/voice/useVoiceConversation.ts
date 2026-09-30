@@ -60,7 +60,7 @@ export function useVoiceConversation(options:{allowed:boolean;scope:string;provi
   useEffect(()=>{if(!options.allowed||options.enabled===false)stop();},[options.allowed,options.enabled,stop]);
   useEffect(()=>{stop();setAssistantTasks([]);taskConversationId.current='';},[options.providerId,stop]);
   const performanceInput:PerformanceInput=state.phase==='speaking'?{
-    utteranceId:speech.utteranceId,text:speech.text,phase:'speaking',speech:{active:speech.active,charIndex:speech.charIndex,ended:speech.ended,audioLevel:speech.audioLevel},
+    utteranceId:speech.utteranceId,text:speech.text,phase:'speaking',speech:{active:speech.active,charIndex:speech.charIndex,ended:speech.ended,audioLevel:speech.audioLevel,emotion:speech.emotion},
   }:{utteranceId:'voice-conversation',text:state.transcript,phase:state.phase==='thinking'?'thinking':state.phase==='listening'||state.phase==='recognizing'?'listening':state.phase==='error'?'error':'idle'};
   return {...state,start,stop,interrupt,finishUtterance,performanceInput,speechState:speech,assistantTasks,updateAssistantTasks,listening:state.phase==='listening',recognizing:state.phase==='recognizing',thinking:state.phase==='thinking',speaking:state.phase==='speaking'};
 }

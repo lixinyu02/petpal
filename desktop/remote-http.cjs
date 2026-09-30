@@ -3,7 +3,7 @@
 const REMOTE_LIMITS = Object.freeze({ concurrency: 8, requestBytes: 16 * 1024 ** 2, responseBytes: 64 * 1024 ** 2, chunkBytes: 64 * 1024, headerBytes: 16 * 1024, headerTimeoutMs: 30000, synthesisTimeoutMs: 190000, idleTimeoutMs: 120000, ackTimeoutMs: 30000 });
 const methods = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const requestHeaders = new Set(['authorization', 'content-type', 'accept', 'accept-language']);
-const responseHeaders = new Set(['content-type', 'content-length', 'content-disposition', 'cache-control', 'etag', 'last-modified', 'retry-after']);
+const responseHeaders = new Set(['content-type', 'content-length', 'content-disposition', 'cache-control', 'etag', 'last-modified', 'retry-after', 'x-petpal-speech-emotion', 'x-petpal-speech-intensity', 'x-petpal-speech-source']);
 const requestId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 
 function validateRemoteRequest(input, limits = REMOTE_LIMITS) {

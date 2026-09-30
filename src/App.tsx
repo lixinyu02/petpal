@@ -132,7 +132,7 @@ export default function App() {
   const todayKey=new Date().toDateString();
   const todayLabel=useMemo(()=>dateFormatter.format(new Date()),[todayKey]);
   const performanceInput: PerformanceInput = mood === 'sleep' ? { utteranceId: 'sleep', text: '', phase: 'idle' } : speech.playing
-    ? { utteranceId: speech.utteranceId, text: speech.text, phase: 'speaking', speech: { active: speech.active, charIndex: speech.charIndex, ended: speech.ended, audioLevel:speech.audioLevel } }
+    ? { utteranceId: speech.utteranceId, text: speech.text, phase: 'speaking', speech: { active: speech.active, charIndex: speech.charIndex, ended: speech.ended, audioLevel:speech.audioLevel, emotion:speech.emotion } }
     : { ...responsePerformance, ...(speech.enabled ? { speech: { active: false, charIndex: 0, ended: true } } : {}) };
 
   const updateChatTasks=useCallback((updated:Conversation)=>{

@@ -11,6 +11,7 @@ const source=await fs.readFile(new URL('../src/api.ts',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText
   .replaceAll("'./auth/native-fetch'",JSON.stringify(nativeUrl))
   .replaceAll("'./avatar/speech-stream.mjs'",JSON.stringify(new URL('../src/avatar/speech-stream.mjs',import.meta.url).href))
+  .replaceAll("'./avatar/speech-emotion.mjs'",JSON.stringify(new URL('../src/avatar/speech-emotion.mjs',import.meta.url).href))
   .replaceAll("'./auth/connection-targets.mjs'",JSON.stringify(new URL('../src/auth/connection-targets.mjs',import.meta.url).href))
   .replaceAll("'./auth/request-scope.mjs'",JSON.stringify(new URL('../src/auth/request-scope.mjs',import.meta.url).href));
 const freshApi=()=>import(`data:text/javascript;base64,${Buffer.from(compiled+`\n// module ${++moduleId}`).toString('base64')}`);

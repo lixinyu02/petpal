@@ -1,6 +1,7 @@
 // Remote synthesis is injected by the authenticated API layer; this module owns only playback.
+import { normalizeSpeechEmotion } from './speech-emotion.mjs';
 export const REMOTE_SPEECH_TEXT_LIMIT = 1000;
-const emptyState = () => ({ utteranceId: '', text: '', active: false, pending: false, charIndex: 0, ended: true, progressBasis: 'none', voiceName: '', error: '' });
+const emptyState = () => ({ utteranceId: '', text: '', active: false, pending: false, charIndex: 0, ended: true, progressBasis: 'none', voiceName: '', error: '', emotion: null });
 const audioEvents = ['onplaying', 'onpause', 'onwaiting', 'onstalled', 'onended', 'onerror', 'ontimeupdate', 'onloadedmetadata'];
 
 export function createRemoteSpeechController(options = {}) {
@@ -39,12 +40,12 @@ export function createRemoteSpeechController(options = {}) {
     generation++;
     const job = current; current = null;
     release(job);
-    publish({ active: false, pending: false, ended: true, progressBasis: 'none' });
+    publish({ active: false, pending: false, ended: true, progressBasis: 'none', emotion: null });
   }
   const fail = (job, message) => {
     if (!valid(job)) return;
     current = null; release(job);
-    publish({ active: false, pending: false, ended: true, progressBasis: 'none', error: message });
+    publish({ active: false, pending: false, ended: true, progressBasis: 'none', error: message, emotion: null });
   };
   const deadline = (job, delay, message) => {
     if (job.timeout !== null) unschedule(job.timeout);
@@ -59,7 +60,7 @@ export function createRemoteSpeechController(options = {}) {
       index = Math.max(index, Math.min(job.text.length - 1, Math.floor(Math.max(0, audio.currentTime) / audio.duration * job.text.length)));
       if (/^[\uDC00-\uDFFF]$/.test(job.text[index] ?? '')) index--;
     }
-    publish({ active, pending: job.buffering, charIndex: Math.max(state.charIndex, index), progressBasis: 'estimated' });
+    publish({ active, pending: job.buffering, charIndex: Math.max(state.charIndex, index), progressBasis: 'estimated', emotion: active ? job.emotion : null });
   };
   const tick = job => {
     job.tick = null;
@@ -82,8 +83,11 @@ export function createRemoteSpeechController(options = {}) {
         if (!valid(job)) { silence(audio); return; }
       }
       stage = 'synthesis';
-      const blob = await options.requestAudio(job.text, job.abort.signal);
+      const result = await options.requestAudio(job.text, job.abort.signal);
       if (!valid(job)) return;
+      const wrapped = result && typeof result === 'object' && Object.hasOwn(result, 'blob');
+      const blob = wrapped ? result.blob : result;
+      job.emotion = normalizeSpeechEmotion(wrapped ? result.emotion : null);
       if (!blob || !Number.isFinite(blob.size) || blob.size <= 0) { fail(job, '远程语音服务返回了空音频，请重试。'); return; }
       job.url = createObjectURL(blob);
       audio.onplaying = () => { if (valid(job)) { job.buffering = false; progress(job); } };
@@ -98,7 +102,7 @@ export function createRemoteSpeechController(options = {}) {
       audio.onended = () => {
         if (!valid(job)) return;
         current = null; release(job);
-        publish({ active: false, pending: false, ended: true, charIndex: job.text.length, progressBasis: 'estimated' });
+        publish({ active: false, pending: false, ended: true, charIndex: job.text.length, progressBasis: 'estimated', emotion: null });
       };
       audio.onerror = () => fail(job, '生成的语音未能播放，请检查音频设备后重试。');
       audio.src = job.url;
@@ -135,7 +139,7 @@ export function createRemoteSpeechController(options = {}) {
       publish({ ...emptyState(), error: `这条回复超过远程朗读的 ${REMOTE_SPEECH_TEXT_LIMIT} 字符上限，请先让小伴概括后再朗读。` }); return false;
     }
     if (typeof options.requestAudio !== 'function') { publish({ ...emptyState(), error: '尚未配置远程语音服务。' }); return false; }
-    const job = { token: ++generation, text, abort: new AbortController(), audio: null, url: '', tick: null, timeout: null, accepted: false, buffering: false, released: false };
+    const job = { token: ++generation, text, abort: new AbortController(), audio: null, url: '', tick: null, timeout: null, accepted: false, buffering: false, released: false, emotion: null };
     current = job;
     publish({ ...emptyState(), utteranceId, text, pending: true, ended: false, voiceName: '远程语音' });
     if (!valid(job)) return false;

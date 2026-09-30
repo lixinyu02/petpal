@@ -10,6 +10,67 @@ const run = (controller, seconds, options) => {
 const input = (text, extra = {}) => ({ utteranceId: 'reply-1', text, phase: 'speaking', ...extra });
 const mouthActive = frames => frames.some(frame => frame.mouthOpen > .05);
 
+test('upstream neutral overrides happy text and the speaking warm base without stopping articulation', () => {
+  const controller = createAvatarPerformance(), text = '太好了，今天真的很开心。';
+  const speech = { active: true, charIndex: 0, audioLevel: .5 };
+  controller.setInput(input(text, { speech })); assert.equal(run(controller, .3).at(-1).expression, 'happy');
+  controller.setInput(input(text, { speech: { ...speech, emotion: { emotion: 'neutral', intensity: 'natural', source: 'rules' } } }));
+  const frames = run(controller, 3), pose = frames.at(-1);
+  assert.equal(pose.expression, 'neutral'); assert.equal(pose.gesture, 'none'); assert.ok(pose.smileAmount < .001);
+  assert.ok(pose.warmAmount < .001); assert.equal(mouthActive(frames), true);
+});
+
+test('upstream selection maps each voice emotion, persists through stationary boundaries and suppresses contrary text gestures', () => {
+  const text = '太好了，今天真的很开心。';
+  for (const [emotion, expression] of Object.entries({ happy: 'happy', sad: 'sad', angry: 'pout', gentle: 'tender' })) {
+    const controller = createAvatarPerformance();
+    controller.setInput(input(text, { speech: { active: true, charIndex: 0, audioLevel: .5, emotion: { emotion, intensity: 'natural', source: 'manual' } } }));
+    const pose = run(controller, 4).at(-1);
+    assert.equal(pose.expression, expression); assert.equal(pose.gesture, 'none'); assert.ok(pose.expressionAmount > .8); assert.ok(pose.mouthOpen > 0);
+  }
+});
+
+test('strong upstream expressions are visibly stronger while reduced motion still permits facial expression and mouth', () => {
+  for (const [emotion, channel] of [['happy', 'smileAmount'], ['sad', 'sadAmount'], ['angry', 'poutAmount']]) {
+    const poses = ['natural', 'strong'].map(intensity => {
+      const controller = createAvatarPerformance();
+      controller.setInput(input('普通的一句话。', { speech: { active: true, charIndex: 0, audioLevel: .5, emotion: { emotion, intensity, source: 'choice' } } }));
+      return run(controller, 1, { reducedMotion: true }).at(-1);
+    });
+    assert.ok(poses[1][channel] > poses[0][channel] + .1); assert.ok(poses[0].mouthOpen > 0); assert.equal(poses[1].voiceEnergy, 0);
+  }
+});
+
+test('upstream emotion is ignored before playback, on buffering, ended, hidden and reset, without leaking into legacy replies', () => {
+  const controller = createAvatarPerformance(), text = '普通的一句话。';
+  const speech = { active: true, charIndex: 0, audioLevel: .5, emotion: { emotion: 'sad', intensity: 'natural', source: 'manual' } };
+  controller.setInput(input(text, { speech: { ...speech, active: false } })); assert.equal(run(controller, .3).at(-1).expression, 'neutral');
+  controller.setInput(input(text, { speech })); assert.equal(run(controller, .3).at(-1).expression, 'sad');
+  controller.setInput(input(text, { speech: { ...speech, active: false } })); const buffered = controller.step(.025);
+  assert.equal(buffered.expression, 'neutral'); assert.equal(buffered.mouthOpen, 0);
+  controller.setInput(input(text, { speech })); assert.equal(controller.step(.025).expression, 'sad');
+  controller.setInput(input(text, { speech: { ...speech, ended: true } })); assert.equal(controller.step(.025).expression, 'neutral');
+  controller.setInput(input(text, { speech })); assert.equal(controller.step(.025, { hidden: true }).expression, 'neutral');
+  controller.reset(); assert.equal(controller.step(.025).expression, 'neutral');
+  controller.setInput(input('太好了，今天真的很开心。', { utteranceId: 'legacy', speech: { active: true, charIndex: 0, audioLevel: .5 } }));
+  assert.equal(run(controller, .5).at(-1).expression, 'happy');
+});
+
+test('invalid upstream emotion cannot silently become a local expression', () => {
+  const controller = createAvatarPerformance();
+  assert.throws(() => controller.setInput(input('好开心', { speech: { active: true, charIndex: 0, emotion: { emotion: 'happy', intensity: 'custom', source: 'rules' } } })), /朗读语气/);
+  assert.equal(controller.step(.025).expression, 'neutral');
+});
+
+test('touch reactions respect upstream sad and angry speech even before the first rendered frame', () => {
+  for (const [emotion, expression] of [['sad', 'sad'], ['angry', 'pout']]) {
+    const controller = createAvatarPerformance();
+    controller.setInput(input('普通的一句话。', { speech: { active: true, charIndex: 0, audioLevel: .5, emotion: { emotion, intensity: 'natural', source: 'manual' } } }));
+    controller.react({ id: `pet-${emotion}`, kind: 'pet' });
+    const pose = run(controller, .3).at(-1); assert.equal(pose.expression, expression); assert.equal(pose.gesture, 'settle'); assert.equal(pose.smileAmount, 0);
+  }
+});
+
 test('streaming PCM energy controls mouth even between text boundaries and closes in silence or buffering',()=>{
   const controller=createAvatarPerformance();
   const speech={active:true,charIndex:0,ended:false,audioLevel:.7};

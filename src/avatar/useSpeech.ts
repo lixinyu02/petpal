@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, apiBlob, apiSpeechStream, getConnection, getIdentity, getSessionEpoch, isSessionChanged, type VoiceConfig } from '../api';
+import { api, apiSpeechAudio, apiSpeechStream, getConnection, getIdentity, getSessionEpoch, isSessionChanged, type VoiceConfig } from '../api';
 import { createDevicePreferences } from '../media/device-preferences.mjs';
 import { createSpeechController, selectSpeechVoice, type SpeechState } from './speech.mjs';
 import { createRemoteSpeechController } from './remote-speech.mjs';
@@ -45,7 +45,7 @@ export function useSpeech(allowed: boolean, scope = 'guest') {
           try{return preferences.read().speakerId;}finally{preferences.dispose();}
         };
         if(available)controller.current = useStream ? createStreamingSpeechController({keepAlive:true,requestStream:apiSpeechStream,createContext:()=>new AudioContext({latencyHint:'interactive'}),getSpeakerId,onState}) : createRemoteSpeechController({
-            requestAudio:(text,signal)=>apiBlob('/voice/synthesize',{method:'POST',body:JSON.stringify({text}),signal}),
+            requestAudio:apiSpeechAudio,
             createAudio:()=>new Audio(),createObjectURL:blob=>URL.createObjectURL(blob),revokeObjectURL:url=>URL.revokeObjectURL(url),getSpeakerId,onState,
           });
       } else if(mode === 'system') {

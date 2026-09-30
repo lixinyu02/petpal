@@ -1,4 +1,6 @@
 import type { SpeechRequest, SpeechState } from './speech.mjs';
+import type { SpeechEmotion } from './speech-emotion.mjs';
+export type SpeechAudio = { blob: Blob; emotion?: SpeechEmotion | null };
 
 /** Each call must return a new element; cancelled elements remain permanently muted. */
 export type RemoteSpeechAudio = Pick<HTMLAudioElement,
@@ -10,7 +12,7 @@ export type RemoteSpeechAudio = Pick<HTMLAudioElement,
 };
 export const REMOTE_SPEECH_TEXT_LIMIT: number;
 export function createRemoteSpeechController(options?: {
-  requestAudio?: (text: string, signal: AbortSignal) => Promise<Blob>;
+  requestAudio?: (text: string, signal: AbortSignal) => Promise<Blob | SpeechAudio>;
   createAudio?: () => RemoteSpeechAudio;
   createObjectURL?: (blob: Blob) => string;
   revokeObjectURL?: (url: string) => void;

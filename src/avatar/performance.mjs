@@ -2,6 +2,7 @@
 import { detectAvatarEmotion as emotion, emotionAtSpeechBoundary as emotionAtBoundary } from './emotion.mjs';
 import { createAvatarGestures, gestureAtSpeechBoundary } from './gestures.mjs';
 import { createAvatarMicroacting } from './microacting.mjs';
+import { normalizeSpeechEmotion, emotionExpression } from './speech-emotion.mjs';
 const PHASES = new Set(['idle', 'listening', 'thinking', 'speaking', 'error']);
 const REACTIONS = new Set(['pet', 'greet', 'wake']);
 const MAX_STEP = .1, MAX_BACKLOG_SECONDS = 4.8, MAX_BACKLOG_UNITS = 64, MAX_INCREMENT_CHARS = 192;
@@ -58,6 +59,7 @@ function cue(character) {
 export function createAvatarPerformance() {
   let output = neutral(), input = { utteranceId: '', text: '', phase: 'idle' };
   let queue = [], current = null, hidden = false, external = false, externalActive = false, externalIndex = -1, externalAudio = null;
+  let externalEmotion = null, externalExpression = null;
   let emotionKind = null, emotionRemaining = 0, motionTime = 0, blinkAt = 3.1, blinkRemaining = 0, blinkNumber = 0;
   let reaction = null, winkAge = null, winkCooldown = 0, motionReduced = false, sleeping = false;
   const gestures=createAvatarGestures();
@@ -90,6 +92,7 @@ export function createAvatarPerformance() {
   function setInput(next) {
     if (!next || typeof next.utteranceId !== 'string' || typeof next.text !== 'string' || !PHASES.has(next.phase)) throw new TypeError('Invalid avatar performance input.');
     if (next.speech !== undefined && (!next.speech || typeof next.speech.active !== 'boolean' || typeof next.speech.charIndex !== 'number')) throw new TypeError('Invalid speech boundary input.');
+    const suppliedEmotion = normalizeSpeechEmotion(next.speech?.emotion);
     removeMicro();
     if(next.phase!=='idle'||next.speech?.active&&!next.speech.ended)clearMicro();
     const changed = next.utteranceId !== input.utteranceId;
@@ -105,10 +108,12 @@ export function createAvatarPerformance() {
     rememberLength(next.utteranceId, next.text.length);
     external = next.speech !== undefined;
     externalActive = external && next.speech.active && !next.speech.ended;
+    externalEmotion = externalActive && next.phase === 'speaking' ? suppliedEmotion : null;
+    externalExpression = emotionExpression(externalEmotion);
     externalAudio = external && Number.isFinite(next.speech.audioLevel) ? (externalActive ? clamp(next.speech.audioLevel) : 0) : null;
     if(next.phase!=='speaking'||!externalActive||externalAudio===null||externalAudio<=.025)output.voiceEnergy=0;
     externalIndex = external && Number.isFinite(next.speech.charIndex) ? clamp(Math.floor(next.speech.charIndex), 0, next.text.length) : -1;
-    if(gestureFromSpeech&&(changed||rewritten))clearGestures(false);
+    if(gestureFromSpeech&&(changed||rewritten||externalEmotion))clearGestures(false);
     if(hidden||sleeping||motionReduced||(wasSpeaking&&next.phase!=='speaking')||(next.phase==='speaking'&&external&&(!externalActive||externalIndex<0||externalIndex>=next.text.length)))clearGestures();
     let boundaryAdvanced = false;
     if (next.phase !== 'speaking' || hidden || sleeping) { clearMouth(); emotionKind = null; emotionRemaining = 0; }
@@ -127,7 +132,8 @@ export function createAvatarPerformance() {
       if (priorExternal) clearMouth();
       if (appended) enqueue(appended);
     }
-    if (!hidden && !sleeping && next.phase === 'speaking' && (external ? boundaryAdvanced : appended)) {
+    if (externalEmotion) { emotionKind = null; emotionRemaining = 0; }
+    else if (!hidden && !sleeping && next.phase === 'speaking' && (external ? boundaryAdvanced : appended)) {
       const value = external ? emotionAtBoundary(next.text, externalIndex) : emotion(next.text.slice(-160));
       if (value) { emotionKind = value; emotionRemaining = 2.1; }
       else if (external) { emotionKind = null; emotionRemaining = 0; }
@@ -136,7 +142,7 @@ export function createAvatarPerformance() {
     // between estimated character boundaries. Energy never selects an emotion.
     if(externalActive&&externalAudio>.025&&emotionKind)emotionRemaining=Math.max(emotionRemaining,.4);
     const cueAdvanced=external?externalActive&&(changed||!priorExternal||!priorActive||!wasSpeaking||externalIndex>priorIndex):Boolean(appended);
-    if(next.phase==='speaking'&&cueAdvanced){
+    if(next.phase==='speaking'&&cueAdvanced&&!externalEmotion){
       const cue=gestureAtSpeechBoundary(next.text,external?externalIndex:next.text.length-1);
       if(cue&&gestures.trigger(`speech:${next.utteranceId}:${cue.sentenceStart}`,cue.gesture,!hidden&&!sleeping&&!motionReduced))gestureFromSpeech=true;
     }
@@ -152,7 +158,7 @@ export function createAvatarPerformance() {
     if (hidden || sleeping&&event.kind!=='wake') return false;
     if(event.kind==='wake')sleeping=false;
     // During a sad/serious line a touch remains gentle instead of forcing joy.
-    const negative=NEGATIVE_EXPRESSIONS.has(emotionKind??output.expression);
+    const negative=NEGATIVE_EXPRESSIONS.has(externalExpression??emotionKind??output.expression);
     const tenderPet=event.kind==='pet'&&!negative&&petNumber%2===1;
     const gesture=negative?'settle':event.kind==='pet'?(tenderPet?'sway':'tilt'):event.kind==='greet'?'nod':'settle';
     const started=gestures.trigger(`reaction:${event.id}`,gesture,!motionReduced&&!(input.phase==='speaking'&&external&&!externalActive));
@@ -177,6 +183,7 @@ export function createAvatarPerformance() {
     if (hidden || sleeping) {
       clearMicro();
       externalAudio = null;
+      externalEmotion = externalExpression = null;
       clearGestures();
       clearMouth(); emotionKind = null; emotionRemaining = 0; blinkRemaining = 0; reaction = null; winkAge = null;
       output = neutral();
@@ -212,9 +219,12 @@ export function createAvatarPerformance() {
       winkCooldown = Math.max(0, winkCooldown - elapsed);
       if (reaction) { reaction.age += elapsed; if (reaction.age >= reaction.duration) reaction = null; }
       const base = input.phase === 'thinking' ? 'thoughtful' : input.phase === 'listening' ? 'curious' : input.phase === 'error' ? 'concerned' : output.speaking ? 'warm' : 'neutral';
-      const selected = emotionRemaining > 0 ? emotionKind : base;
+      const authoritative = input.phase === 'speaking' && externalActive ? externalExpression : null;
+      const selected = authoritative ?? (emotionRemaining > 0 ? emotionKind : base);
       const vivid=['happy','shy','sad','downcast','excited','smug','pout','relieved','determined','hesitant','sleepy','expectant','aggrieved','tender'].includes(selected);
-      const amount = selected === 'neutral' ? 0 : emotionRemaining > 0 ? (vivid ? (externalAudio!==null ? .86+.1*output.voiceEnergy : .9) : .85) : .4;
+      const amount = selected === 'neutral' ? 0 : authoritative
+        ? (externalEmotion.intensity === 'strong' && ['happy', 'sad', 'angry'].includes(externalEmotion.emotion) ? .98 : .82 + .08 * output.voiceEnergy)
+        : emotionRemaining > 0 ? (vivid ? (externalAudio!==null ? .86+.1*output.voiceEnergy : .9) : .85) : .4;
       const negative=NEGATIVE_EXPRESSIONS.has(selected);
       const reactionAmount = reaction&&!negative ? reaction.amount * clamp((reaction.duration - reaction.age) / .55) : 0;
       const face = expressions[selected], response = expressions[reaction?.expression ?? 'neutral'];
@@ -253,6 +263,6 @@ export function createAvatarPerformance() {
     }
     return { ...output };
   }
-  function reset() { resetPose(); input = { utteranceId: '', text: '', phase: 'idle' }; external = externalActive = false; externalIndex = -1; externalAudio = null; hidden = sleeping = false; }
+  function reset() { resetPose(); input = { utteranceId: '', text: '', phase: 'idle' }; external = externalActive = false; externalIndex = -1; externalAudio = null; externalEmotion = externalExpression = null; hidden = sleeping = false; }
   return { setInput, react, step, reset };
 }

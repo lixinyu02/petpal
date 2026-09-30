@@ -1,8 +1,9 @@
 // The authenticated transport validates NDJSON; this player owns bounded PCM playback.
+import { normalizeSpeechEmotion } from './speech-emotion.mjs';
 export const STREAM_SPEECH_TEXT_LIMIT = 1000;
 const RATE = 24000, FRAME = 2880, PREBUFFER = 5760, MAX_BUFFER = RATE * 3;
 const AUDIO_LIMIT = 20 * 1024 * 1024, CHUNK_LIMIT = 24576, START_LEAD = 0.035;
-const emptyState = () => ({ utteranceId: '', text: '', active: false, pending: false, charIndex: 0, ended: true, progressBasis: 'none', voiceName: '', error: '', audioLevel: 0, buffering: false, streaming: false });
+const emptyState = () => ({ utteranceId: '', text: '', active: false, pending: false, charIndex: 0, ended: true, progressBasis: 'none', voiceName: '', error: '', audioLevel: 0, buffering: false, streaming: false, emotion: null });
 const cancelled = () => Object.assign(new Error('语音播放已取消。'), { name: 'AbortError' });
 
 export function createStreamingSpeechController(options = {}) {
@@ -71,12 +72,12 @@ export function createStreamingSpeechController(options = {}) {
     generation++;
     const job = current; current = null; release(job);
     const idle = warm; warm = null; closeHolder(idle);
-    publish({ active: false, pending: false, ended: true, progressBasis: 'none', audioLevel: 0, buffering: false, streaming: false });
+    publish({ active: false, pending: false, ended: true, progressBasis: 'none', audioLevel: 0, buffering: false, streaming: false, emotion: null });
   }
   const fail = (job, message) => {
     if (!valid(job)) return;
     current = null; release(job);
-    publish({ active: false, pending: false, ended: true, progressBasis: 'none', error: message, audioLevel: 0, buffering: false, streaming: false });
+    publish({ active: false, pending: false, ended: true, progressBasis: 'none', error: message, audioLevel: 0, buffering: false, streaming: false, emotion: null });
   };
   const finish = job => {
     if (!valid(job)) return;
@@ -85,7 +86,7 @@ export function createStreamingSpeechController(options = {}) {
       warm = job.holder; job.holder = null;
     }
     current = null; release(job);
-    publish({ active: false, pending: false, ended: true, charIndex: job.text.length, progressBasis: 'estimated', audioLevel: 0, buffering: false, streaming: false });
+    publish({ active: false, pending: false, ended: true, charIndex: job.text.length, progressBasis: 'estimated', audioLevel: 0, buffering: false, streaming: false, emotion: null });
   };
   const take = (job, count) => {
     const result = new Float32Array(count);
@@ -113,7 +114,7 @@ export function createStreamingSpeechController(options = {}) {
     const duration = job.inputEnded ? job.samples / RATE : Math.max(job.text.length / 5, job.samples / RATE);
     let index = Math.min(job.text.length - 1, Math.floor(rendered / RATE / Math.max(duration, 0.001) * job.text.length));
     if (/^[\uDC00-\uDFFF]$/.test(job.text[index] ?? '')) index--;
-    publish({ active, pending: !active, charIndex: Math.max(state.charIndex, index, 0), progressBasis: 'estimated', audioLevel, buffering: !active && job.samples > 0, streaming: !job.inputEnded });
+    publish({ active, pending: !active, charIndex: Math.max(state.charIndex, index, 0), progressBasis: 'estimated', audioLevel, buffering: !active && job.samples > 0, streaming: !job.inputEnded, emotion: active ? job.emotion : null });
   };
   const pump = job => {
     if (!valid(job) || !job.ready) return;
@@ -212,6 +213,7 @@ export function createStreamingSpeechController(options = {}) {
         onFormat(format) {
           if (!valid(job)) throw cancelled();
           if (job.format || format?.format !== 'pcm_s16le' || format.sampleRate !== RATE || format.channels !== 1) throw new Error('流式音频格式不受支持。');
+          job.emotion = normalizeSpeechEmotion(format.emotion);
           job.format = true;
         },
         onAudio: bytes => ingest(job, bytes),
@@ -251,7 +253,7 @@ export function createStreamingSpeechController(options = {}) {
     try { holder = idle && !idle.closed && idle.context.state !== 'closed' ? idle : makeHolder(); }
     catch { closeHolder(idle); publish({ ...emptyState(), error: '当前环境无法播放流式语音，请检查音频设备后重试。' }); return false; }
     const time = now();
-    const job = { token: ++generation, text, holder, abort: new AbortController(), tick: null, wake: null, released: false, createdAt: time, stage: 'unlock', stageAt: time, lastDataAt: time, lastClock: holder.context.currentTime, clockAt: time, ready: false, speaker: '', deviceListener: null, format: false, receiving: false, inputEnded: false, carry: null, bytes: 0, samples: 0, rendered: 0, queue: [], queued: 0, sources: [], nextStart: 0, playing: false };
+    const job = { token: ++generation, text, holder, abort: new AbortController(), tick: null, wake: null, released: false, createdAt: time, stage: 'unlock', stageAt: time, lastDataAt: time, lastClock: holder.context.currentTime, clockAt: time, ready: false, speaker: '', deviceListener: null, format: false, emotion: null, receiving: false, inputEnded: false, carry: null, bytes: 0, samples: 0, rendered: 0, queue: [], queued: 0, sources: [], nextStart: 0, playing: false };
     current = job;
     publish({ ...emptyState(), utteranceId, text, pending: true, ended: false, voiceName: 'CosyVoice', streaming: true });
     if (!valid(job)) { release(job); return false; }

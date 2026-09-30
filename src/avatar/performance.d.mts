@@ -1,3 +1,4 @@
+import type { SpeechEmotion } from './speech-emotion.mjs';
 export type PerformancePhase = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
 export type AvatarExpression = 'neutral' | 'warm' | 'curious' | 'thoughtful' | 'surprised' | 'shy' | 'happy' | 'playful' | 'concerned' | 'sad' | 'downcast' | 'excited' | 'smug' | 'pout' | 'relieved' | 'determined' | 'hesitant' | 'sleepy' | 'expectant' | 'aggrieved' | 'tender';
 export type AvatarGesture = 'none' | 'nod' | 'shake' | 'tilt' | 'shy' | 'bounce' | 'recoil' | 'settle' | 'leanIn' | 'shrug' | 'bow' | 'peek' | 'sway' | 'doze';
@@ -9,7 +10,7 @@ export interface PerformanceInput {
   text: string;
   phase: PerformancePhase;
   /** UTF-16 text position from optional playback boundary events; not an audio phoneme measurement. */
-  speech?: { active: boolean; charIndex: number; ended?: boolean; /** PCM energy envelope, not phoneme recognition. */ audioLevel?:number };
+  speech?: { active: boolean; charIndex: number; ended?: boolean; /** PCM energy envelope, not phoneme recognition. */ audioLevel?:number; /** Upstream-selected expression, only applied during actual playback. */ emotion?: SpeechEmotion | null };
 }
 export interface AvatarPerformanceSnapshot {
   expression: AvatarExpression;

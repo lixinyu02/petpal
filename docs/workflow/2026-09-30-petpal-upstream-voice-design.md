@@ -2,7 +2,7 @@
 
 - Date: 2026-09-30
 - Complexity: L2
-- Status: draft
+- Status: implemented and deployed; native packages unchanged
 
 ## Background
 

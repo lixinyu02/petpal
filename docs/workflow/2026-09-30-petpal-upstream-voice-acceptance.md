@@ -27,4 +27,14 @@ CosyVoice3实际 capabilities 明确支持 instruct2；auto/显式预设不混�
 
 ## 前端和上线
 
-issue-56 待完成：共同播放状态、人物表情、紧凑设置、完整回归、Chrome以及受控部署。不能以后台API结果替代实际浏览器播放或原生真机验收。
+issue-56 已完成并上线。完整回归916/916、TypeScript和独立Vite构建通过；构建保留既有较大分块警告，本轮没有扩大资源优化范围。
+
+Chrome隔离环境实际合成并播放同一句正文：开心语气时canvas为happy / speaking=true / playback-progress且mouthOpen>0；中性语气覆盖正文中的开心表达，canvas为neutral且嘴型继续跟随播放。自然结束与主动停止后均回到idle / speaking=false / mouthOpen=0。设置再次读取保持已保存的值；从强烈切换中性自动归一到natural并禁用强度选择。准确412×960 CSS viewport下document/body宽度均为412，两个选择框位于屏幕内；测试后清除临时尺寸覆盖。
+
+真实ASR→GPT-6 Luna→分句CosyVoice闭环完成：合成输入识别为“你好，小拜，请告诉我，二加三等于多少？”，回答“二加三等于五。”；ASR结束到done210.8ms，LLM首delta2831ms，首TTS1057ms，输入结束到首音4266ms。名字误识保留在回执中，不宣称识别完全准确；此测试没有写入生产聊天。
+
+受控重启前确认没有运行中的Chat、Agent、ASR和TTS；已有1条暂停队列保持暂停。原服务PID/启动时间/命令一致后备份私有state；重启后state逐字节SHA256不变，2账号、5模型和28会话保留。新后台PID231164监听原4318端口。静态部署30文件逐一SHA256读回，HTML最后原子切换，保留旧hash资源和回退入口；Windows0.9.1 EXE/ZIP的长度、mtime和SHA256与原baseline一致。本轮未重打原生包。
+
+公网https://magicdatou.top:44318/在正常TLS验证下health200；state、voice、ASR配置/创建和两种synthesize匿名请求全部401。30个部署文件公网内容hash完全一致，ASR config/protocol核对成功、busy=false。新版Accept实际收到happy/natural/rules情绪；旧Accept实际取得精确旧format/audio/end，两次均147840bytes并正常end，首段分别1086ms和952ms。
+
+正式Chrome test账号已读取新设置并实际达到“CosyVoice边生成边播放”状态，主动停止后回到就绪；未保存任何生产账号设置改动。截图public-voice-settings.png和结构回执保存在ignored evidence目录。参数、实际播放及合成字节证明接口与联动可用，不能替代主观听感、物理麦克风或Android/Ubuntu真机验收；自动语气是文本规则，不是声音情绪识别。

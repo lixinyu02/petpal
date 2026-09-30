@@ -1,5 +1,6 @@
+import type { SpeechEmotion } from './speech-emotion.mjs';
 export type SpeechProgressBasis = 'none' | 'boundary' | 'estimated';
-export type SpeechState = { utteranceId: string; text: string; active: boolean; pending: boolean; charIndex: number; ended: boolean; progressBasis: SpeechProgressBasis; voiceName: string; error: string };
+export type SpeechState = { utteranceId: string; text: string; active: boolean; pending: boolean; charIndex: number; ended: boolean; progressBasis: SpeechProgressBasis; voiceName: string; error: string; emotion?: SpeechEmotion | null };
 export type SpeechRequest = { utteranceId: string; text: string; language?: string };
 export const SPEECH_SEGMENT_LIMIT: number;
 export function speechLanguage(text: string, preferred?: string): string;

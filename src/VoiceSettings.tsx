@@ -7,7 +7,7 @@ import AsrSettings from './AsrSettings';
 import './voice-settings.css';
 
 type CosyDraft = {baseUrl:string;referenceText:string;apiKey:string;clearApiKey:boolean};
-const clean = (value:VoiceConfig):VoiceConfig => ({...value,tts:{...value.tts,apiKey:'',clearApiKey:false},asr:{...value.asr,apiKey:'',clearApiKey:false}});
+const clean = (value:VoiceConfig):VoiceConfig => ({...value,tts:{...value.tts,emotion:value.tts.emotion??'auto',emotionIntensity:value.tts.emotionIntensity??'natural',apiKey:'',clearApiKey:false},asr:{...value.asr,apiKey:'',clearApiKey:false}});
 const cosyDraft = (value:CosyVoiceConfig):CosyDraft => ({baseUrl:value.baseUrl,referenceText:value.referenceText,apiKey:'',clearApiKey:false});
 const changed = () => window.dispatchEvent(new Event('petpal:voice-settings-change'));
 const defaultPreviewText='你好，我是小伴。今天也一起慢慢来吧。';
@@ -86,7 +86,17 @@ export default function VoiceSettings({connected,scope='guest'}:{connected:boole
     {config&&<form onSubmit={save}>
       <fieldset disabled={busy||!connected} className="voice-config-block"><legend><Volume2 size={19}/>TTS · 让小伴说话</legend>
         <label>朗读引擎<select aria-label="朗读引擎" value={config.tts.mode} onChange={event=>update('tts',{mode:event.target.value,...(event.target.value==='cosyvoice'?{speed:Math.min(2,Math.max(.5,config.tts.speed))}:{})})}><option value="system">设备本地语音</option><option value="cosyvoice">CosyVoice 参考声音</option><option value="remote">通用远程 TTS（预备配置）</option></select></label>
-        {config.tts.mode==='system'?<p className="field-help">可用音色由设备提供，使用系统默认扬声器。保存后在首页开启「语音朗读」，或在聊天页开启「自动朗读回复」。</p>:config.tts.mode==='cosyvoice'?<><label>CosyVoice 语速<input aria-label="CosyVoice 语速" type="number" min="0.5" max="2" step="0.05" required value={config.tts.speed} onChange={event=>update('tts',{speed:Number(event.target.value)})}/></label><p className="field-help">1.0 倍速支持流式播放，收到首段就开始朗读；其他语速使用完整合成。每次最多 1000 个字符。音频使用本账号选择的扬声器，不依赖本地中文语音包。</p></>:<>{remoteFields('tts')}<div className="voice-fields-pair"><label>音色 ID<input maxLength={160} value={config.tts.voice} placeholder="服务商音色 ID，可留空" onChange={event=>update('tts',{voice:event.target.value})}/></label><label>语速<input type="number" min="0.25" max="4" step="0.05" required value={config.tts.speed} onChange={event=>update('tts',{speed:Number(event.target.value)})}/></label></div></>}
+        {config.tts.mode==='system'?<p className="field-help">可用音色由设备提供，使用系统默认扬声器。保存后在首页开启「语音朗读」，或在聊天页开启「自动朗读回复」。</p>:config.tts.mode==='cosyvoice'?<>
+          <label>CosyVoice 语速<input aria-label="CosyVoice 语速" type="number" min="0.5" max="2" step="0.05" required value={config.tts.speed} onChange={event=>update('tts',{speed:Number(event.target.value)})}/></label>
+          <div className="voice-fields-pair voice-emotion-fields">
+            <label>朗读语气<select aria-label="朗读语气" value={config.tts.emotion} onChange={event=>update('tts',{emotion:event.target.value,...(['original','neutral','gentle'].includes(event.target.value)?{emotionIntensity:'natural'}:{})})}>
+              <option value="auto">自动 · 跟随朗读内容</option><option value="original">原声复刻</option><option value="neutral">自然平稳</option><option value="happy">开心</option><option value="sad">伤心</option><option value="angry">生气</option><option value="gentle">轻柔安抚</option>
+            </select></label>
+            <label>情绪程度<select aria-label="情绪程度" value={config.tts.emotionIntensity} disabled={['original','neutral','gentle'].includes(config.tts.emotion)} onChange={event=>update('tts',{emotionIntensity:event.target.value})}><option value="natural">自然</option><option value="strong">强烈</option></select></label>
+          </div>
+          <p className="field-help">自动根据文字选择语气，播放时人物表情跟随同一语气。强烈适用于开心、伤心、生气；自然与轻柔保持适度。情绪语气需要支持指令的 CosyVoice3 服务，原声复刻保留参考音色的原有表现。</p>
+          <p className="field-help">1.0 倍速收到首段就开始朗读；其他语速等待完整合成。每次最多 1000 个字符，使用本账号选择的扬声器。</p>
+        </>:<>{remoteFields('tts')}<div className="voice-fields-pair"><label>音色 ID<input maxLength={160} value={config.tts.voice} placeholder="服务商音色 ID，可留空" onChange={event=>update('tts',{voice:event.target.value})}/></label><label>语速<input type="number" min="0.25" max="4" step="0.05" required value={config.tts.speed} onChange={event=>update('tts',{speed:Number(event.target.value)})}/></label></div></>}
       </fieldset>
       <details className="voice-legacy-asr"><summary>其他识别引擎的预备配置</summary><fieldset disabled={busy||!connected} className="voice-config-block"><legend><Mic size={19}/>其他 ASR</legend>
         <label>计划使用的识别引擎<select value={config.asr.mode} onChange={event=>update('asr',{mode:event.target.value})}><option value="disabled">暂不配置语音识别</option><option value="browser">浏览器识别（预备配置）</option><option value="remote">远程 ASR（预备配置）</option></select></label>

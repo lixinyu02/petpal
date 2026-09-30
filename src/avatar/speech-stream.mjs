@@ -1,5 +1,6 @@
 // Authenticated application framing around CosyVoice's raw PCM. A clean HTTP EOF
 // alone is not an application completion marker.
+import { normalizeSpeechEmotion } from './speech-emotion.mjs';
 const FRAME_LIMIT = 36 * 1024, AUDIO_LIMIT = 20 * 1024 * 1024, CHUNK_LIMIT = 24576;
 const invalid = () => new Error('语音流格式无效或连接提前结束，请重新播放。');
 const fields = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
@@ -24,8 +25,10 @@ export async function readSpeechStream(response, { signal, assertCurrent = () =>
       throw new Error(frame.message);
     }
     if (frame.type === 'format') {
-      if (formatted || !fields(frame, ['type', 'format', 'sampleRate', 'channels']) || frame.format !== 'pcm_s16le' || frame.sampleRate !== 24000 || frame.channels !== 1) throw invalid();
-      formatted = true; await onFormat?.({ format: frame.format, sampleRate: frame.sampleRate, channels: frame.channels });
+      const keys = ['type', 'format', 'sampleRate', 'channels', ...(Object.hasOwn(frame, 'emotion') ? ['emotion'] : [])];
+      if (formatted || !fields(frame, keys) || frame.format !== 'pcm_s16le' || frame.sampleRate !== 24000 || frame.channels !== 1) throw invalid();
+      let emotion; try { emotion = normalizeSpeechEmotion(frame.emotion); } catch { throw invalid(); }
+      formatted = true; await onFormat?.({ format: frame.format, sampleRate: frame.sampleRate, channels: frame.channels, ...(emotion ? { emotion } : {}) });
     } else if (frame.type === 'audio') {
       if (!formatted || !fields(frame, ['type', 'data']) || typeof frame.data !== 'string' || !frame.data.length || frame.data.length > CHUNK_LIMIT * 4 / 3 || !/^[A-Za-z0-9+/]+={0,2}$/.test(frame.data) || frame.data.length % 4) throw invalid();
       let raw; try { raw = atob(frame.data); } catch { throw invalid(); }
