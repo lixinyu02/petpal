@@ -90,6 +90,33 @@ test('bounded request bodies/model/encoding are rejected before upstream fetch',
   assert.equal(f.requests.length,0);
 });
 
+test('per-run model authorization permits only currently granted overrides with unchanged upstream credentials',async t=>{
+  const activeModels=new Set(),f=await fixture(t,{authorizeModel:model=>activeModels.has(model)});
+  const body=JSON.stringify({model:'assigned-model',stream:true,input:[]});
+  assert.ok((await f.request({body})).status>=400);assert.equal(f.requests.length,0);
+  activeModels.add('assigned-model');
+  const response=await f.request({body});assert.equal(response.status,200);await response.text();
+  assert.equal(f.requests.length,1);assert.equal(JSON.parse(f.requests[0].init.body).model,'assigned-model');
+  assert.equal(f.requests[0].url,`${config.baseUrl}/responses`);assert.equal(f.requests[0].init.headers.Authorization,`Bearer ${config.apiKey}`);
+  assert.ok((await f.request({body:JSON.stringify({model:'unassigned-model',stream:true})})).status>=400);
+  activeModels.delete('assigned-model');
+  assert.ok((await f.request({body})).status>=400);assert.equal(f.requests.length,1);
+});
+
+test('model authorization requires explicit synchronous true and cannot bypass private token or malformed-body checks',async t=>{
+  let authorizations=0;
+  const f=await fixture(t,{authorizeModel:()=>{authorizations++;return true;}}),body=JSON.stringify({model:'assigned-model',stream:true});
+  assert.ok((await f.request({body,headers:{Authorization:'Bearer invalid'}})).status>=400);
+  for(const model of [null,42,{},[]])assert.ok((await f.request({body:JSON.stringify({model,stream:true})})).status>=400);
+  assert.equal(authorizations,0);assert.equal(f.requests.length,0);
+  for(const value of [false,undefined,'true',Promise.resolve(true)]){
+    const denied=await fixture(t,{authorizeModel:()=>value});
+    assert.ok((await denied.request({body})).status>=400);assert.equal(denied.requests.length,0);
+  }
+  const throws=await fixture(t,{authorizeModel:()=>{throw new Error('private authorization detail');}});
+  const response=await throws.request({body});assert.ok(response.status>=400);assert.doesNotMatch(await response.text(),/private authorization detail/);assert.equal(throws.requests.length,0);
+});
+
 test('SSE parser handles UTF-8 chunk boundaries but rejects invalid JSON, truncation, oversized output and trailing corruption',async t=>{
   const content=simplified().map(frame).join(''),bytes=new TextEncoder().encode(content);
   const f=await fixture(t,{fetch:()=>new Response(new ReadableStream({start(controller){for(let i=0;i<bytes.length;i+=3)controller.enqueue(bytes.subarray(i,i+3));controller.close();}}),{headers:{'Content-Type':'text/event-stream'}})});

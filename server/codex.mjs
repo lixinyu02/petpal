@@ -220,7 +220,8 @@ export class CodexBridge {
     let child;
     try {
       if (this.apiMode) {
-        transport = await createCodexTransport({ config: this.config });
+        transport = await createCodexTransport({ config: this.config, authorizeModel: model =>
+          [...this.runs.values()].some(run => run.model === model && run.child === this.child && !run.aborted && !run.settled && !run.finishing) });
         if (this.closed) throw new Error('Codex 后台已关闭');
         this.transport = transport;
         // Only the loopback credential reaches Codex. Preserve this.config for
@@ -544,7 +545,7 @@ export class CodexBridge {
       const completion = new Promise((yes, no) => { resolve = yes; reject = no; });
       // A notification can finish a turn before the turn/start response arrives.
       completion.catch(() => {});
-      run = { threadId: actualId, conversationId, permissions, turnId: null, text: '', onEvent, resolve, reject, completion, signal,
+      run = { threadId: actualId, conversationId, model, permissions, turnId: null, text: '', onEvent, resolve, reject, completion, signal,
         aborted: false, settled: false, interrupting: false, items: new Map(), streamedItems: new Set(), dynamicCalls: new Map(), toolTasks: new Set(), child: this.child };
       run.onAbort = () => { run.aborted = true; this._interrupt(run); };
       signal?.addEventListener('abort', run.onAbort, { once: true });

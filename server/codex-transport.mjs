@@ -168,8 +168,9 @@ async function relaySse(body,write,signal,resetIdle,limits){
 }
 
 /** API-mode-only owned loopback endpoint. Upstream URL and credentials never come from a request. */
-export async function createCodexTransport({config,fetchImpl=fetch,requestTimeoutMs=180000,idleTimeoutMs=30000,limits:overrides={}}={}){
+export async function createCodexTransport({config,fetchImpl=fetch,authorizeModel,requestTimeoutMs=180000,idleTimeoutMs=30000,limits:overrides={}}={}){
   if(config?.mode!=='api'||typeof config.baseUrl!=='string'||typeof config.model!=='string'||typeof config.apiKey!=='string')throw new Error('Codex API transport 需要已验证的 API 配置。');
+  if(authorizeModel!==undefined&&typeof authorizeModel!=='function')throw new Error('Codex transport 模型授权回调无效。');
   const upstream=new URL(`${config.baseUrl.replace(/\/$/,'')}/responses`);
   if(!['http:','https:'].includes(upstream.protocol)||upstream.username||upstream.password||upstream.search||upstream.hash)throw new Error('Codex API transport 地址无效。');
   const model=config.model,upstreamKey=config.apiKey,apiKey=randomBytes(32).toString('hex'),expected=Buffer.from(`Bearer ${apiKey}`),limits={...DEFAULTS,...overrides};
@@ -198,7 +199,9 @@ export async function createCodexTransport({config,fetchImpl=fetch,requestTimeou
       const chunks=[];let size=0;
       for await(const chunk of req){signal.throwIfAborted();resetIdle();size+=chunk.length;if(size>limits.requestBytes)throw invalid();chunks.push(chunk);}
       let body;try{body=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));}catch{throw invalid();}
-      if(!object(body)||body.stream!==true||body.model!==model)throw invalid();
+      // The configured model remains the default. Other models must be
+      // explicitly authorized by an active bridge run, never by the request.
+      if(!object(body)||body.stream!==true||typeof body.model!=='string'||(body.model!==model&&authorizeModel?.(body.model)!==true))throw invalid();
       signal.throwIfAborted();resetIdle();
       const response=await signalRace(fetchImpl(upstream.href,{method:'POST',redirect:'manual',credentials:'omit',signal,headers:{'Content-Type':'application/json',Accept:'text/event-stream','Accept-Encoding':'identity',...(upstreamKey?{Authorization:`Bearer ${upstreamKey}`}:{})},body:JSON.stringify(body)}),signal);
       if(response.status!==200||response.redirected||!response.body||!/^text\/event-stream(?:\s*;|$)/i.test(response.headers.get('content-type')||'')){
