@@ -1,5 +1,13 @@
 # CosyVoice 情绪控制能力核对
 
+> 2026-09-30 晚间更新：下文保留为早间 0.1.0 接口的历史调查。当前实际模型已升级 CosyVoice3，OpenAPI 为 1.0.0，明确支持 instruct2 情绪控制；当前适配以 [上游语音更新设计](workflow/2026-09-30-petpal-upstream-voice-design.md) 和对应验收文档为准。
+
+当前 `/api/tts/stream` 在 instruct2 下支持 emotion（auto/neutral/happy/sad/angry/gentle）和 emotion_intensity（natural/strong），继续使用参考音频；`/api/tts/emotion` 可预览选择。自动模式是保守文本规则 2.0；强烈仅适用开心、伤心、生气，轻柔与中性为 natural。流式通过 X-TTS-Emotion/Source/Intensity/Reason/Policy 响应头返回说话意图，不测量生成声音。原始 PCM 没有结束帧，需对照 X-Request-ID 和 status recent 的 succeeded 回执。流式仍只支持 1 倍速，非1倍速继续 Gradio 完整 WAV 的自然语言控制模式。
+
+本轮直接中性合成已返回 119,040 bytes（2.48 秒 PCM），其 request_id 与 succeeded 状态一致，首输出 1.231 秒。参数或字节差异仍不证明主观听感。私有新协议快照及试听材料保存在 Git 忽略的 evidence/voice-upstream-20260930。
+
+## 历史调查（早间接口）
+
 核对日期：2026-09-30。只读取当前服务的 OpenAPI、Gradio 元数据与状态，以及小伴的现有适配代码；没有发起合成、上传音色或修改配置。
 
 **当前小伴使用的 PCM 流式接口没有声明情绪或指令参数。本轮可以让人物表情与朗读内容、播放状态和实际音量同步，但不能宣称声音已经按开心、伤心、难过、兴奋或害羞切换语气。**

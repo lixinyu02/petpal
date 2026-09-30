@@ -8,7 +8,7 @@ const badRequest = action => assert.throws(action, error => error.status === 400
 test('voice defaults are independent and public metadata does not enable remote runtimes', () => {
   const first = defaultVoiceSettings(), second = defaultVoiceSettings();
   assert.deepEqual(first, {
-    tts: { mode: 'system', baseUrl: '', model: '', voice: '', speed: 1, apiKey: '' },
+    tts: { mode: 'system', baseUrl: '', model: '', voice: '', speed: 1, apiKey: '', emotion: 'auto', emotionIntensity: 'natural' },
     asr: { mode: 'disabled', baseUrl: '', model: '', language: 'zh-CN', apiKey: '' },
   });
   first.tts.voice = 'changed'; assert.equal(second.tts.voice, '');
@@ -91,6 +91,23 @@ test('a rejected second section never mutates previously saved first-section dat
   const before = structuredClone(previous);
   badRequest(() => patchVoiceSettings(previous, { tts: { voice: 'changed', apiKey: 'replaced-key' }, asr: { mode: 'remote' } }));
   assert.deepEqual(previous, before);
+});
+
+test('legacy accounts receive automatic emotion defaults and only finite presets persist per user', () => {
+  const old = { tts: { mode: 'cosyvoice', speed: 1, apiKey: 'private' } };
+  assert.equal(publicVoiceSettings(old).tts.emotion, 'auto');
+  assert.equal(publicVoiceSettings(old).tts.emotionIntensity, 'natural');
+  for (const emotion of ['original', 'auto', 'neutral', 'happy', 'sad', 'angry', 'gentle']) {
+    const saved = patchVoiceSettings(old, { tts: { emotion, emotionIntensity: 'strong' } });
+    assert.equal(saved.tts.emotion, emotion);
+    assert.equal(saved.tts.emotionIntensity, ['original', 'neutral', 'gentle'].includes(emotion) ? 'natural' : 'strong');
+    assert.equal(old.tts.emotion, undefined);
+    assert.equal(JSON.stringify(publicVoiceSettings(saved)).includes('private'), false);
+  }
+  for (const emotion of ['', 'manual', 'shy', null, [], 1, 'happy\n']) badRequest(() => patchVoiceSettings(old, { tts: { emotion } }));
+  for (const emotionIntensity of ['', 'custom', null, 1]) badRequest(() => patchVoiceSettings(old, { tts: { emotionIntensity } }));
+  badRequest(() => patchVoiceSettings(old, { asr: { emotion: 'happy' } }));
+  badRequest(() => patchVoiceSettings(old, { asr: { emotionIntensity: 'strong' } }));
 });
 
 test('CosyVoice uses shared service without user URLs or models and validates its narrower speed range', () => {

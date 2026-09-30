@@ -7,6 +7,7 @@ import http from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createPetServer } from '../server/app.mjs';
 import { listenFixture } from './helpers/loopback.mjs';
+import { asrFixtureResponse } from './fixtures/asr-upstream.mjs';
 
 class Socket extends EventTarget {
   constructor() { super(); this.readyState = 0; this.bufferedAmount = 0; this.sent = []; queueMicrotask(() => { if (this.readyState === 0) { this.readyState = 1; this.dispatchEvent(new Event('open')); } }); }
@@ -20,7 +21,7 @@ async function fixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-asr-http-')), sockets = [];
   const app = await createPetServer({ dataDir: directory, token: 'asr-owner-fixture', codex: { async status() { return { available: false }; }, async close() {} }, asrOptions: {
     webSocketFactory(url) { assert.equal(url, 'ws://127.0.0.1:40000/ws/asr'); const socket = new Socket(); sockets.push(socket); return socket; },
-    fetchImpl: async () => new Response(JSON.stringify({ ok: true })),
+    fetchImpl: async url => asrFixtureResponse(url),
   } });
   await listenFixture(app.server);
   const base = `http://127.0.0.1:${app.server.address().port}/api`;

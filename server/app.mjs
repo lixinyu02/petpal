@@ -98,6 +98,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
+      res.setHeader('Access-Control-Expose-Headers', 'X-PetPal-Speech-Emotion,X-PetPal-Speech-Intensity,X-PetPal-Speech-Source');
       if (req.method === 'OPTIONS') return res.sendStatus(204);
     }
     next();
@@ -412,8 +413,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     res.on('close', () => { if (!res.writableEnded) controller.abort(); });
     try {
       requireCurrentAuth(req);
-      const audio = await cosyvoice.synthesize({ userId: req.user.id, text: req.body.text, speed: req.user.voice.tts.speed, signal: controller.signal });
+      const preferences = publicVoiceSettings(req.user.voice).tts;
+      const audio = await cosyvoice.synthesize({ userId: req.user.id, text: req.body.text, speed: preferences.speed, emotion: preferences.emotion, emotionIntensity: preferences.emotionIntensity, signal: controller.signal });
       requireCurrentAuth(req); controller.signal.throwIfAborted();
+      if (audio.speechEmotion) res.set({ 'X-PetPal-Speech-Emotion': audio.speechEmotion.emotion, 'X-PetPal-Speech-Intensity': audio.speechEmotion.intensity, 'X-PetPal-Speech-Source': audio.speechEmotion.source });
       res.status(200).set({ 'Content-Type': 'audio/wav', 'Content-Length': String(audio.length), 'Cache-Control': 'no-store', 'Content-Disposition': 'inline; filename="speech.wav"' }).send(audio);
     } catch (error) { const safe = safeCosyVoiceError(error); if (!res.destroyed) res.status(safe.status).json({ error: safe.message }); }
     finally { probes.delete(probe); finish(); }
@@ -421,6 +424,9 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.post('/api/voice/synthesize/stream', async (req, res) => {
     if (Object.keys(req.body).some(key => key !== 'text') || typeof req.body.text !== 'string') throw failure(400, '语音合成只接受 text 字段。');
     if (req.user.voice.tts.mode !== 'cosyvoice') throw failure(409, '请先为当前账号选择并保存 CosyVoice 朗读。');
+    // Released clients validate the original format frame with exact fields.
+    // Only clients requesting v2 receive the optional speaking-intent metadata.
+    const emotionFrames = (req.get('Accept') || '').split(',').some(value => value.trim() === 'application/x-petpal-speech-v2+ndjson');
     const controller = new AbortController(); let finish, terminalSent = false;
     const done = new Promise(resolve => { finish = resolve; });
     const probe = { controller, done, userId: req.user.id, sessionHash: req.sessionHash, mode: 'voice' }; probes.add(probe);
@@ -442,7 +448,9 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
         res.once('drain', drain); res.once('close', closed); res.once('error', failed); signal.addEventListener('abort', cancelled, { once: true });
         try {
           authorize();
-          const writable = res.write(JSON.stringify(frame) + '\n');
+          const { emotion: _legacyEmotion, ...legacyFormat } = frame;
+          const payload = frame.type === 'format' && !emotionFrames ? legacyFormat : frame;
+          const writable = res.write(JSON.stringify(payload) + '\n');
           if (frame.type === 'end' || frame.type === 'error') terminalSent = true;
           if (writable) drain();
         } catch (error) { failed(error); }
@@ -450,7 +458,8 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     };
     try {
       requireCurrentAuth(req);
-      await cosyvoice.synthesizeStream({ userId: req.user.id, text: req.body.text, speed: req.user.voice.tts.speed, signal: controller.signal, onFrame: sendFrame });
+      const preferences = publicVoiceSettings(req.user.voice).tts;
+      await cosyvoice.synthesizeStream({ userId: req.user.id, text: req.body.text, speed: preferences.speed, emotion: preferences.emotion, emotionIntensity: preferences.emotionIntensity, signal: controller.signal, onFrame: sendFrame });
       if (!res.destroyed && !res.writableEnded) res.end();
     } catch (error) {
       const safe = safeCosyVoiceError(error);

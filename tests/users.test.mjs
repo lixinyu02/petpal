@@ -241,11 +241,13 @@ test('members see only assigned models and private settings/history; identity bo
 test('voice credentials and selected settings stay per user and every public projection excludes secrets', async t => {
   const { request, readState, member, provider, directory } = await setup(t);
   const p = await provider(); const a = await member('alice', [p.id]), b = await member('bob');
-  const settings = { tts: { mode: 'remote', baseUrl: 'https://voice.example/v1', model: 'voice-model', voice: 'warm', apiKey: 'alice-private-voice-key' }, asr: { mode: 'remote', baseUrl: 'https://asr.example/v1', model: 'asr-model', language: 'zh-CN', apiKey: 'alice-private-asr-key' }, userId: b.user.id };
+  const settings = { tts: { mode: 'remote', baseUrl: 'https://voice.example/v1', model: 'voice-model', voice: 'warm', apiKey: 'alice-private-voice-key', emotion: 'happy', emotionIntensity: 'strong' }, asr: { mode: 'remote', baseUrl: 'https://asr.example/v1', model: 'asr-model', language: 'zh-CN', apiKey: 'alice-private-asr-key' }, userId: b.user.id };
   const saved = await request('/voice', { token: a.token, method: 'PATCH', body: settings });
   assert.equal(saved.status, 200); const voice = await saved.json();
   assert.equal(voice.tts.hasApiKey, true); assert.equal(voice.tts.apiKey, undefined); assert.equal(voice.runtime.remoteConfiguredOnly, true);
   const bob = await (await request('/voice', { token: b.token })).json(); assert.equal(bob.tts.mode, 'system'); assert.equal(bob.tts.hasApiKey, false);
+  assert.equal(voice.tts.emotion, 'happy'); assert.equal(voice.tts.emotionIntensity, 'strong');
+  assert.equal(bob.tts.emotion, 'auto'); assert.equal(bob.tts.emotionIntensity, 'natural');
   assert.equal((await request('/voice', { token: a.token, method: 'PATCH', body: { tts: { baseUrl: 'https://other.example/v1', apiKey: '' } } })).status, 400);
   const texts = [JSON.stringify(await readState(a.token)), JSON.stringify(await readState()), JSON.stringify(voice), await (await request('/admin/users')).text()];
   for (const text of texts) for (const secret of [password, a.token, b.token, 'fixture-provider-private-key', 'alice-private-voice-key', 'alice-private-asr-key', '"password":', '"salt":', '"tokenHash":']) assert.equal(text.includes(secret), false, secret);
@@ -253,6 +255,7 @@ test('voice credentials and selected settings stay per user and every public pro
   assert.equal(disk.includes(password), false); assert.equal(disk.includes(a.token), false);
   const users = JSON.parse(disk).users;
   assert.equal(users.find(user => user.id === a.user.id).voice.tts.apiKey, 'alice-private-voice-key');
+  assert.equal(users.find(user => user.id === a.user.id).voice.tts.emotion, 'happy');
   assert.notEqual(users.find(user => user.id === a.user.id).password.salt, users.find(user => user.id === b.user.id).password.salt);
 });
 

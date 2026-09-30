@@ -27,6 +27,7 @@ function transport({ override, hold = false, stream = false } = {}) {
   return { calls, entered, get cancelled() { return cancelled; }, fetchImpl: async (url, init) => {
     calls.push({ url, init });
     const custom = await override?.(url, init); if (custom) return custom;
+    if (url.endsWith('/api/tts/capabilities')) return new Response('{}', { status: 404 });
     if (url.endsWith('/upload')) return json([uploadPath]);
     if (url.endsWith('/call/generate_audio')) { sessionHash = JSON.parse(init.body).session_hash ?? jobId; return json({ event_id: jobId }); }
     if (url.endsWith(`/${jobId}`)) {
@@ -83,13 +84,14 @@ test('shared configuration and references are private, revision guarded, atomic 
 
 test('Gradio call uploads private PCM and pins ten zero-shot inputs, then returns verified WAV bytes', async t => {
   const f = await fixture(t); assert.deepEqual(await f.run({ speed: 1.3 }), wav());
-  assert.equal(f.upstream.calls.length, 4);
+  assert.equal(f.upstream.calls.length, 5);
   for (const { init } of f.upstream.calls) { assert.equal(init.redirect, 'error'); assert.equal(init.credentials, 'omit'); assert.equal(init.headers.get('authorization'), 'Bearer fixture-key'); }
-  const upload = f.upstream.calls[0].init.body.get('files'); assert.equal(upload.name, 'reference.wav'); assert.deepEqual(Buffer.from(await upload.arrayBuffer()), wav());
-  const request = JSON.parse(f.upstream.calls[1].init.body);
+  assert.equal(f.upstream.calls[0].url, `${baseUrl}/api/tts/capabilities`);
+  const upload = f.upstream.calls[1].init.body.get('files'); assert.equal(upload.name, 'reference.wav'); assert.deepEqual(Buffer.from(await upload.arrayBuffer()), wav());
+  const request = JSON.parse(f.upstream.calls[2].init.body);
   assert.deepEqual(request.data, ['你好，这是小伴。', '3s极速复刻', '', '这是参考声音。', { path: uploadPath, meta: { _type: 'gradio.FileData' } }, null, '', 0, false, 1.3]);
   assert.equal(Object.hasOwn(request, 'session_hash'), false);
-  assert.equal(f.upstream.calls[3].url, `${baseUrl}/gradio_api/file=${audioPath}`);
+  assert.equal(f.upstream.calls[4].url, `${baseUrl}/gradio_api/file=${audioPath}`);
 });
 
 test('malformed input, missing config and modified reference make zero upstream requests', async t => {
@@ -107,7 +109,7 @@ test('only same-origin Gradio cache WAV outputs may be downloaded', () => {
 
 test('Gradio completed stream is bound to the returned event ID and validated by real bytes', async t => {
   const f = await fixture(t, { stream: true }); assert.deepEqual(await f.run(), wav());
-  assert.equal(f.upstream.calls[3].url, `${baseUrl}/gradio_api/stream/${jobId}/1234567/21/playlist-file`);
+  assert.equal(f.upstream.calls[4].url, `${baseUrl}/gradio_api/stream/${jobId}/1234567/21/playlist-file`);
   assert.equal(f.upstream.calls.some(call => call.url.endsWith('.m3u8')), false);
   for (const mime of ['audio/mpeg', 'audio/wav']) {
     const bad = await fixture(t, { stream: true, override: url => url.endsWith('/playlist-file') && new Response(Buffer.from('ID3-not-a-wave'), { headers: { 'Content-Type': mime } }) });
@@ -141,7 +143,7 @@ test('Gradio 5.4 root URL alias never changes the canonical download destination
     for (const url of [alias, new URL(alias).pathname]) {
       const f = await fixture(t, { override: route => route.endsWith(`/${jobId}`) && new Response(event('complete', [{ ...item, url }]), { headers: { 'Content-Type': 'text/event-stream' } }) });
       assert.deepEqual(await f.run(), wav());
-      assert.equal(f.upstream.calls[3].url, canonical.replace('playlist.m3u8', 'playlist-file'));
+      assert.equal(f.upstream.calls[4].url, canonical.replace('playlist.m3u8', 'playlist-file'));
     }
     for (const url of [alias + '?x=1', alias + '#x', alias.replace('/gradio_a/', '/different/'), alias.replace(baseUrl, 'https://evil.test'), alias.replace('http://', 'http://user:pass@'), alias.replace('/gradio_a/', '/foo/../gradio_a/'), alias.replace('/gradio_a/', '/%67radio_a/'), alias.replace('audio.wav', 'other.wav').replace('/123/', '/124/')]) {
       assert.throws(() => cosyVoiceAudioUrl({ ...item, url }, baseUrl, jobId), { status: 502 });
@@ -152,11 +154,11 @@ test('Gradio 5.4 root URL alias never changes the canonical download destination
 test('invalid event IDs and an audio stream from another request are rejected before download', async t => {
   for (const value of ['fixture-event', '../other', 'a'.repeat(33), 'A'.repeat(32), null]) {
     const f = await fixture(t, { override: url => url.endsWith('/call/generate_audio') && json({ event_id: value }) });
-    await assert.rejects(f.run(), { status: 502 }); assert.equal(f.upstream.calls.length, 2);
+    await assert.rejects(f.run(), { status: 502 }); assert.equal(f.upstream.calls.length, 3);
   }
   const otherPath = `${'f'.repeat(32)}/123/21/playlist.m3u8`;
   const f = await fixture(t, { override: url => url.endsWith(`/${jobId}`) && new Response(event('complete', [{ path: otherPath, url: `${baseUrl}/gradio_api/stream/${otherPath}`, is_stream: true }]), { headers: { 'Content-Type': 'text/event-stream' } }) });
-  await assert.rejects(f.run(), { status: 502 }); assert.equal(f.upstream.calls.length, 3);
+  await assert.rejects(f.run(), { status: 502 }); assert.equal(f.upstream.calls.length, 4);
 });
 
 test('Gradio null error, truncation, oversized bodies, redirects and forged output all fail closed', async t => {

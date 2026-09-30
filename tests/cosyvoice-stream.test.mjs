@@ -47,6 +47,7 @@ function transport(factory) {
   const calls = [];
   return { calls, fetchImpl: async (url, init) => {
     calls.push({ url, init });
+    if (url.endsWith('/api/tts/capabilities')) return new Response('{}', { status: 404 });
     if (url.endsWith('/api/tts/stream')) return factory(calls.length, init);
     const cache = '/tmp/gradio/' + 'a'.repeat(64), id = '1'.repeat(32);
     if (url.endsWith('/upload')) return json([`${cache}/reference.wav`]);
@@ -75,8 +76,9 @@ check('PCM yields before EOF, preserves odd network chunks, bounds frames and pi
   const audio = frames.filter(frame => frame.type === 'audio').map(frame => Buffer.from(frame.data, 'base64'));
   assert.deepEqual(audio.map(chunk => chunk.length), [3, COSYVOICE_STREAM_CHUNK, 4, 1]);
   assert.deepEqual(Buffer.concat(audio), original); assert.deepEqual(frames.at(-1), { type: 'end', bytes: original.length });
-  assert.equal(f.upstream.calls.length, 1);
-  const call = f.upstream.calls[0]; assert.equal(call.url, baseUrl + '/api/tts/stream');
+  assert.equal(f.upstream.calls.length, 2);
+  assert.equal(f.upstream.calls[0].url, baseUrl + '/api/tts/capabilities');
+  const call = f.upstream.calls[1]; assert.equal(call.url, baseUrl + '/api/tts/stream');
   assert.equal(call.init.redirect, 'error'); assert.equal(call.init.credentials, 'omit'); assert.equal(call.init.headers.get('authorization'), 'Bearer fixture-private-key');
   assert.deepEqual([...call.init.body.keys()].sort(), ['tts_text', 'mode', 'prompt_text', 'seed', 'prompt_wav'].sort());
   assert.equal(call.init.body.get('mode'), 'zero_shot'); assert.equal(call.init.body.get('seed'), '0');

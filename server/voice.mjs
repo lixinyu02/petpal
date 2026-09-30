@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 
 const FIELDS = {
-  tts: ['mode', 'baseUrl', 'model', 'voice', 'speed', 'apiKey'],
+  tts: ['mode', 'baseUrl', 'model', 'voice', 'speed', 'apiKey', 'emotion', 'emotionIntensity'],
   asr: ['mode', 'baseUrl', 'model', 'language', 'apiKey'],
 };
 const invalid = message => Object.assign(new Error(message), { status: 400 });
@@ -10,7 +10,7 @@ const record = value => value !== null && typeof value === 'object' && !Array.is
 
 export function defaultVoiceSettings() {
   return {
-    tts: { mode: 'system', baseUrl: '', model: '', voice: '', speed: 1, apiKey: '' },
+    tts: { mode: 'system', baseUrl: '', model: '', voice: '', speed: 1, apiKey: '', emotion: 'auto', emotionIntensity: 'natural' },
     asr: { mode: 'disabled', baseUrl: '', model: '', language: 'zh-CN', apiKey: '' },
   };
 }
@@ -94,6 +94,15 @@ export function patchVoiceSettings(previous, body) {
       }
       next.speed = patch.speed;
     }
+    if (own(patch, 'emotion')) {
+      if (section !== 'tts' || !['original', 'auto', 'neutral', 'happy', 'sad', 'angry', 'gentle'].includes(patch.emotion)) throw invalid('朗读语气须为支持的情绪预设。');
+      next.emotion = patch.emotion;
+    }
+    if (own(patch, 'emotionIntensity')) {
+      if (section !== 'tts' || !['natural', 'strong'].includes(patch.emotionIntensity)) throw invalid('朗读情绪程度须为 natural 或 strong。');
+      next.emotionIntensity = patch.emotionIntensity;
+    }
+    if (section === 'tts' && ['original', 'neutral', 'gentle'].includes(next.emotion)) next.emotionIntensity = 'natural';
     if (own(patch, 'clearApiKey') && typeof patch.clearApiKey !== 'boolean') throw invalid(`${label} clearApiKey 必须是布尔值。`);
     const replacement = own(patch, 'apiKey') ? textField(patch.apiKey, `${label} API Key`, 8192) : '';
     if (/\s/u.test(replacement)) throw invalid(`${label} API Key 不可包含空白。`);

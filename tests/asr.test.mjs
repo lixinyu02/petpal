@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createAsrService, validateAsrAudio, ASR_AUDIO } from '../server/asr.mjs';
+import { ASR_UPSTREAM_CONFIG, ASR_UPSTREAM_PROTOCOL, asrFixtureResponse } from './fixtures/asr-upstream.mjs';
 
 export class MockSocket extends EventTarget {
   constructor({ open = true, close = true } = {}) { super(); this.readyState = 0; this.bufferedAmount = 0; this.sent = []; this.autoClose = close; if (open) queueMicrotask(() => this.open()); }
@@ -68,11 +69,35 @@ test('ASR options precede PCM; partials are cumulative, only explicit done succe
 });
 
 test('partial followed by 1006 is incomplete and upstream errors never expose private details', async t => {
-  const f = await fixture(t), s = await f.start(); f.audio(s);
+  const f = await fixture(t, { errorCloseTimeoutMs: 10 }), s = await f.start(); f.audio(s);
   s.ws.message({ text: '部分内容', chunks: 1 }); f.service.end(s.id, auth); s.ws.closed(1006);
   assert.equal(s.res.frames().at(-1).code, 'incomplete'); assert.ok(!s.res.frames().some(x => x.type === 'done'));
   const next = await f.start(); next.ws.message({ error: 'secret internal error http://private/path' });
+  await delay(20);
   assert.equal(next.res.frames().at(-1).type, 'error'); assert.ok(!next.res.output.includes('secret')); assert.ok(!next.res.output.includes('http://private'));
+});
+
+test('an empty upstream error fails even when text and done look successful', async t => {
+  const f = await fixture(t, { errorCloseTimeoutMs: 10 }), s = await f.start(); f.audio(s); f.service.end(s.id, auth);
+  s.ws.message({ error: '', text: '必须忽略', chunks: 1, done: true });
+  s.ws.message({ text: '也不能继续完成', chunks: 1, done: true });
+  await delay(20);
+  assert.equal(s.res.frames().at(-1).code, 'upstream_error');
+  assert.ok(!s.res.frames().some(frame => frame.type === 'done' || frame.text?.includes('必须忽略')));
+  assert.equal(f.service.publicConfig().busy, false);
+});
+
+test('an error frame then close 1013 remains busy and stops forwarding new audio', async t => {
+  const f = await fixture(t), s = await f.start();
+  s.ws.message({ error: 'ASR is busy; retry after the current session.' });
+  assert.throws(() => f.audio(s), { code: 'upstream_error' });
+  assert.throws(() => f.service.end(s.id, auth), { code: 'upstream_error' });
+  assert.equal(f.service.publicConfig().busy, true);
+  assert.equal(s.ws.sent.length, 1);
+  s.ws.closed(1013);
+  assert.equal(s.res.frames().at(-1).code, 'busy');
+  assert.equal(f.service.publicConfig().busy, false);
+  assert.ok(!s.res.output.includes('retry after'));
 });
 
 test('busy and duplicate SSE do not steal another active slot; upstream 1013 is reported as busy', async t => {
@@ -166,11 +191,75 @@ test('terminal cache expires and only one explicit successful final result can b
 });
 
 test('health probing does not open an ASR socket and hides upstream bodies and errors', async t => {
-  let calls = 0;
-  const f = await fixture(t, { fetchImpl: async url => { calls++; assert.equal(url, 'http://127.0.0.1:40000/healthz'); return new Response(JSON.stringify({ ok: true, private: 'secret' })); } });
-  const result = await f.service.test(auth); assert.equal(result.ok, true); assert.equal(calls, 1); assert.equal(f.sockets.length, 0); assert.ok(!JSON.stringify(result).includes('secret'));
+  const routes = [];
+  const f = await fixture(t, { fetchImpl: async url => { routes.push(new URL(url).pathname); return asrFixtureResponse(url); } });
+  const result = await f.service.test(auth); assert.equal(result.ok, true); assert.deepEqual(routes, ['/healthz', '/config', '/api/protocol']); assert.equal(f.sockets.length, 0); assert.ok(!JSON.stringify(result).includes('secret'));
+  assert.equal(result.configVerified, true); assert.equal(result.protocolVerified, true); assert.equal(result.protocolVersion, 1);
   const bad = await fixture(t, { fetchImpl: async () => { throw new Error('sensitive url and secret'); } });
   await assert.rejects(bad.service.test(auth), error => error.status === 502 && !error.message.includes('secret'));
+});
+
+test('only optional discovery 404 is legacy; HTTP errors and malformed bodies fail closed', async t => {
+  const legacy = await fixture(t, { fetchImpl: async url => asrFixtureResponse(url, { legacy: true }) });
+  const result = await legacy.service.test(auth);
+  assert.equal(result.ok, true); assert.equal(result.configVerified, false); assert.equal(result.protocolVerified, false);
+  assert.equal(result.audio.maxSeconds, 60); assert.equal(legacy.sockets.length, 0);
+  for (const status of [401, 429, 500]) {
+    const failed = await fixture(t, { fetchImpl: async url => new URL(url).pathname === '/healthz' ? asrFixtureResponse(url) : new Response('private upstream body', { status }) });
+    await assert.rejects(failed.service.test(auth), error => error.status === 502 && !error.message.includes('private'));
+  }
+  const malformed = await fixture(t, { fetchImpl: async url => new URL(url).pathname === '/healthz' ? asrFixtureResponse(url) : new Response('not JSON secret') });
+  await assert.rejects(malformed.service.test(auth), { code: 'upstream_error' });
+});
+
+test('discovery rejects PCM and end-protocol drift without changing state or opening recognition', async t => {
+  for (const change of [{ sample_rate: 16000 }, { audio_format: 'pcm_s16le' }, { channels: 2 }, { max_session_seconds: 20 }]) {
+    const f = await fixture(t, { fetchImpl: async url => new URL(url).pathname === '/config' ? Response.json({ ...ASR_UPSTREAM_CONFIG, ...change }) : asrFixtureResponse(url) });
+    const previous = structuredClone(f.store.state);
+    await assert.rejects(f.service.test(auth), { code: 'incompatible_audio' });
+    assert.deepEqual(f.store.state, previous); assert.equal(f.sockets.length, 0);
+  }
+  for (const mutate of [value => { value.version = 2; }, value => { value.audio.bytes_per_sample = 2; }, value => { value.client_messages[2].literal = 'flush'; }, value => { value.server_messages.final_example.done = false; }]) {
+    const changed = structuredClone(ASR_UPSTREAM_PROTOCOL); mutate(changed);
+    const f = await fixture(t, { fetchImpl: async url => new URL(url).pathname === '/api/protocol' ? Response.json(changed) : asrFixtureResponse(url) });
+    await assert.rejects(f.service.test(auth), { code: 'incompatible_protocol' }); assert.equal(f.sockets.length, 0);
+  }
+});
+
+test('discovery health reports an occupied upstream without reserving its session', async t => {
+  const f = await fixture(t, { fetchImpl: async url => asrFixtureResponse(url, { active: true }) });
+  const result = await f.service.test(auth); assert.equal(result.busy, true); assert.equal(f.service.publicConfig().busy, false); assert.equal(f.sockets.length, 0);
+});
+
+test('discovery bodies are bounded and redirects cannot masquerade as legacy 404', async t => {
+  const large = await fixture(t, { fetchImpl: async url => new URL(url).pathname === '/config' ? Response.json({ ...ASR_UPSTREAM_CONFIG, private: 'x'.repeat(17000) }) : asrFixtureResponse(url) });
+  await assert.rejects(large.service.test(auth), { code: 'upstream_error' });
+  const redirected = await fixture(t, { fetchImpl: async url => {
+    if (new URL(url).pathname === '/healthz') return asrFixtureResponse(url);
+    const response = new Response('private redirect', { status: 404 }); Object.defineProperty(response, 'redirected', { value: true }); return response;
+  } });
+  await assert.rejects(redirected.service.test(auth), { code: 'upstream_error' });
+});
+
+test('revocation during discovery cancels its body and prevents later requests', async t => {
+  let f, cancelled = false, calls = 0;
+  f = await fixture(t, { fetchImpl: async () => {
+    calls++; f.identities.delete('login-a');
+    return new Response(new ReadableStream({ cancel() { cancelled = true; } }));
+  } });
+  await assert.rejects(f.service.test(auth), { code: 'auth_expired' });
+  assert.equal(calls, 1); assert.equal(cancelled, true); assert.equal(f.sockets.length, 0);
+});
+
+test('discovery timeout cancels a stalled body and releases the probe', async t => {
+  let stalled = true, cancelled = false;
+  const f = await fixture(t, { testTimeoutMs: 5, fetchImpl: async url => {
+    if (!stalled) return asrFixtureResponse(url);
+    return new Response(new ReadableStream({ cancel() { cancelled = true; } }));
+  } });
+  await Promise.all([assert.rejects(f.service.test(auth), { code: 'upstream_error' }), delay(20)]);
+  assert.equal(cancelled, true); stalled = false;
+  assert.equal((await f.service.test(auth)).ok, true);
 });
 
 test('cancel during connection terminates the pending handshake before any options or PCM can be sent', async t => {

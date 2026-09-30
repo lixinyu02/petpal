@@ -10,6 +10,26 @@ const failure = (status, message, code = 'asr_error') => new AsrError(status, me
 export const safeAsrError = error => error instanceof AsrError ? error : failure(502, '识别服务未能完成请求，请稍后重试。', 'upstream_error');
 const unavailable = () => failure(401, '识别所属登录已失效，请重新登录。', 'auth_expired');
 const timer = (callback, ms) => { const value = setTimeout(callback, ms); value.unref?.(); return value; };
+const busy = () => failure(429, '识别服务忙，请稍后再试。', 'busy');
+const upstreamFailure = () => failure(502, '识别服务未能完成音频处理。', 'upstream_error');
+const positive = value => typeof value === 'number' && Number.isFinite(value) && value > 0;
+const integer = value => Number.isSafeInteger(value) && value > 0;
+
+function compatibleConfig(value) {
+  return object(value) && value.sample_rate === ASR_AUDIO.sampleRate && value.audio_format === ASR_AUDIO.format && value.channels === ASR_AUDIO.channels
+    && positive(value.chunk_seconds) && positive(value.window_seconds) && value.window_seconds >= value.chunk_seconds
+    && integer(value.max_session_seconds) && value.max_session_seconds >= ASR_AUDIO.maxSeconds && integer(value.max_concurrent_sessions);
+}
+function compatibleProtocol(value) {
+  const audio = value?.audio, messages = value?.client_messages, server = value?.server_messages;
+  return object(value) && value.version === 1 && value.transport === 'websocket' && value.path === '/ws/asr'
+    && object(audio) && audio.format === ASR_AUDIO.format && audio.sample_rate === ASR_AUDIO.sampleRate && audio.channels === ASR_AUDIO.channels && audio.bytes_per_sample === 4 && audio.container === null
+    && Array.isArray(messages) && messages.some(message => message?.order === 1 && message.frame_type === 'text' && message.format === 'json')
+    && messages.some(message => message?.order === 2 && message.frame_type === 'binary' && message.repeatable === true)
+    && messages.some(message => message?.order === 3 && message.frame_type === 'text' && message.literal === 'end')
+    && object(server) && server.busy_close_code === 1013 && typeof server.partial_example?.text === 'string' && Number.isSafeInteger(server.partial_example.chunks)
+    && server.final_example?.done === true && typeof server.final_example.text === 'string' && Number.isSafeInteger(server.final_example.chunks);
+}
 
 export function validateAsrAudio(bytes) {
   if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > ASR_AUDIO.maxFrameBytes || bytes.length % 4) throw failure(400, '音频块须为最多一秒的 24 kHz 单声道 float32 PCM。', 'invalid_audio');
@@ -23,7 +43,7 @@ export function validateAsrAudio(bytes) {
 /** One shared upstream slot; all capabilities remain bound to the creating login. */
 export function createAsrService({ store, authorizeSession, webSocketFactory = url => new WebSocket(url, { perMessageDeflate: false, maxPayload: MAX_MESSAGE, handshakeTimeout: connectTimeoutMs }), fetchImpl = globalThis.fetch, now = Date.now,
   connectTimeoutMs = 8000, attachTimeoutMs = 8000, idleTimeoutMs = 8000, endTimeoutMs = 30000, timeoutMs = 120000,
-  authPollMs = 1000, drainTimeoutMs = 5000, closeTimeoutMs = 5000, terminalCacheMs = 5000, testTimeoutMs = 5000, rateLimit = 30 } = {}) {
+  authPollMs = 1000, drainTimeoutMs = 5000, closeTimeoutMs = 5000, errorCloseTimeoutMs = 500, terminalCacheMs = 5000, testTimeoutMs = 5000, rateLimit = 30 } = {}) {
   const state = store.state;
   state.asrConfig ??= { baseUrl: '', apiKey: '', revision: randomUUID() };
   try {
@@ -106,7 +126,7 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = u
   const finish = (session, error = null) => {
     if (session.terminal) return;
     session.terminal = error ? { type: 'error', error: safeAsrError(error).message, code: safeAsrError(error).code } : { type: 'done', text: session.text, chunks: session.chunks, done: true };
-    for (const key of ['connectTimer', 'attachTimer', 'idleTimer', 'endTimer', 'totalTimer', 'expiryTimer']) clear(session, key);
+    for (const key of ['connectTimer', 'attachTimer', 'idleTimer', 'endTimer', 'totalTimer', 'expiryTimer', 'errorTimer']) clear(session, key);
     clearInterval(session.authTimer);
     session.upload = null;
     closeSocket(session);
@@ -121,6 +141,7 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = u
     if (!session || session.auth.userId !== auth.userId || session.auth.sessionHash !== auth.sessionHash || session.auth.bootstrap !== auth.bootstrap) throw failure(404, '识别会话不存在或不属于当前登录。', 'not_found');
     try { current(session); } catch (error) { finish(session, error); throw error; }
     if (!terminal && session.terminal) throw failure(409, '识别会话已结束，请重新开始。', 'session_ended');
+    if (!terminal && session.upstreamError) throw upstreamFailure();
     return session;
   };
   const renewIdle = session => { clear(session, 'idleTimer'); session.idleTimer = timer(() => finish(session, failure(408, '没有及时收到音频，请重新开始。', 'audio_timeout')), idleTimeoutMs); };
@@ -155,8 +176,17 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = u
         try {
           current(session);
           if (typeof event.data !== 'string' || Buffer.byteLength(event.data) > MAX_MESSAGE || ++session.messages > 512) throw failure(502, '识别服务返回的数据无效。', 'invalid_response');
+          if (session.upstreamError) return;
           let value; try { value = JSON.parse(event.data); } catch { throw failure(502, '识别服务返回的数据无效。', 'invalid_response'); }
-          if (!object(value) || value.error) throw failure(502, '识别服务未能完成音频处理。', 'upstream_error');
+          if (!object(value)) throw upstreamFailure();
+          if (Object.hasOwn(value, 'error')) {
+            // An empty string is still an upstream error. The documented busy
+            // response sends an error frame before closing with 1013; retain
+            // that close code without allowing any more audio or transcripts.
+            session.upstreamError = true;
+            session.errorTimer = timer(() => finish(session, upstreamFailure()), errorCloseTimeoutMs);
+            return;
+          }
           if (typeof value.text !== 'string' || value.text.length > MAX_TEXT || /[\u0000-\u0008\u000b-\u001f\u007f]/u.test(value.text) || !Number.isSafeInteger(value.chunks) || value.chunks < session.chunks || value.chunks > MAX_FRAMES || (value.done !== undefined && typeof value.done !== 'boolean')) throw failure(502, '识别服务返回的数据无效。', 'invalid_response');
           session.text = value.text; session.chunks = value.chunks; session.version++;
           if (value.done === true) {
@@ -168,7 +198,7 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = u
       session.ws.addEventListener('error', () => { if (!session.terminal) finish(session, failure(502, '识别服务连接失败，请稍后重试。', 'upstream_error')); });
       session.ws.addEventListener('close', event => {
         releaseSocket(session);
-        if (!session.terminal) finish(session, event.code === 1013 ? failure(429, '识别服务忙，请稍后再试。', 'busy') : failure(502, '识别连接提前结束，未收到完整结果。', 'incomplete'));
+        if (!session.terminal) finish(session, event.code === 1013 ? busy() : session.upstreamError ? upstreamFailure() : failure(502, '识别连接提前结束，未收到完整结果。', 'incomplete'));
       });
     } catch { releaseSocket(session); finish(session, failure(502, '无法连接识别服务。', 'upstream_error')); }
     return { id: session.id, ...ASR_AUDIO };
@@ -216,6 +246,7 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = u
   const end = (id, auth) => {
     const session = check(id, auth, { terminal: true });
     if (session.terminal?.type === 'error') throw failure(409, '识别会话已结束。', 'session_ended');
+    if (session.upstreamError) throw upstreamFailure();
     if (session.ended) return { ok: true };
     if (session.upload || !session.ready || !session.samples) throw failure(409, '请先发送完整音频块。', 'not_ready');
     try { session.ended = true; clear(session, 'idleTimer'); session.endTimer = timer(() => finish(session, failure(504, '识别服务未及时返回完整结果。', 'end_timeout')), endTimeoutMs); session.ws.send('end'); }
@@ -253,18 +284,32 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = u
     const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     const deadline = timer(() => controller.abort(), testTimeoutMs);
     try {
-      const url = `${config.baseUrl}/healthz`;
-      const response = await fetchImpl(url, { signal: combined, redirect: 'error', credentials: 'omit' });
+      const readJson = async (route, optional = false) => {
+        authorize(auth); combined.throwIfAborted();
+        const url = `${config.baseUrl}${route}`;
+        const response = await fetchImpl(url, { signal: combined, redirect: 'error', credentials: 'omit' });
+        try { authorize(auth); combined.throwIfAborted(); }
+        catch (error) { void response.body?.cancel().catch(() => {}); throw error; }
+        if (response.redirected || response.url && response.url !== url) { void response.body?.cancel().catch(() => {}); throw new Error(); }
+        if (optional && response.status === 404) { void response.body?.cancel().catch(() => {}); return null; }
+        if (!response.ok || !response.body) { void response.body?.cancel().catch(() => {}); throw new Error(); }
+        const reader = response.body.getReader(), chunks = []; let size = 0;
+        const abort = () => { void reader.cancel().catch(() => {}); }; combined.addEventListener('abort', abort, { once: true });
+        try {
+          while (true) { const item = await reader.read(); authorize(auth); combined.throwIfAborted(); if (item.done) break; size += item.value.length; if (size > 16384) throw new Error(); chunks.push(Buffer.from(item.value)); }
+          const result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          if (!object(result) || state.asrConfig.revision !== config.revision) throw new Error();
+          return result;
+        } finally { combined.removeEventListener('abort', abort); void reader.cancel().catch(() => {}); reader.releaseLock(); }
+      };
+      const health = await readJson('/healthz');
+      if (health.ok === false || health.status === 'error') throw new Error();
+      const upstreamConfig = await readJson('/config', true);
+      if (upstreamConfig && !compatibleConfig(upstreamConfig)) throw failure(502, '识别服务音频格式或会话限制与当前客户端不兼容。', 'incompatible_audio');
+      const protocol = await readJson('/api/protocol', true);
+      if (protocol && !compatibleProtocol(protocol)) throw failure(502, '识别服务协议与当前客户端不兼容。', 'incompatible_protocol');
       authorize(auth); combined.throwIfAborted();
-      if (!response.ok || response.redirected || response.url && response.url !== url || !response.body) { void response.body?.cancel().catch(() => {}); throw new Error(); }
-      const reader = response.body.getReader(), chunks = []; let size = 0;
-      const abort = () => { void reader.cancel().catch(() => {}); }; combined.addEventListener('abort', abort, { once: true });
-      try {
-        while (true) { const item = await reader.read(); authorize(auth); combined.throwIfAborted(); if (item.done) break; size += item.value.length; if (size > 16384) throw new Error(); chunks.push(Buffer.from(item.value)); }
-        const result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        if (!object(result) || result.ok === false || result.status === 'error' || state.asrConfig.revision !== config.revision) throw new Error();
-      } finally { combined.removeEventListener('abort', abort); void reader.cancel().catch(() => {}); reader.releaseLock(); }
-      return { ok: true, revision: config.revision, busy: Boolean(slot), audio: { ...ASR_AUDIO } };
+      return { ok: true, revision: config.revision, busy: Boolean(slot) || health.active_session === true, audio: { ...ASR_AUDIO }, configVerified: Boolean(upstreamConfig), protocolVerified: Boolean(protocol), ...(protocol ? { protocolVersion: protocol.version } : {}) };
     } catch (error) { throw safeAsrError(error); }
     finally { clearTimeout(deadline); probes.delete(probe); }
   };
