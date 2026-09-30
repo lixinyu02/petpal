@@ -15,4 +15,14 @@ Date: 2026-09-30。基线 f423860，浏览器使用 Chrome 插件与 loopback �
 
 ## issue-51
 
-待完成 UI、图标及静态上线验收。
+- 工具栏、阅读区、输入区共用最大 920px 阅读列，消息列最大 860px；不更改滚动/flex/短屏高度约束。欢迎建议仍只预填，Chrome 确认点击后消息数为 0。
+- 统一 Sun/ArrowRight/ArrowUpRight/Sparkles 等线性 SVG，移除新对话的重复加号；语音、账号、更新设置补图标。三处品牌采用 favicon 同一猫脸 SVG，清除旧图标的背景/padding/旋转，sidebar 为 38px，首页 36px；装饰 SVG 对读屏隐藏。
+- coarse pointer 下模型关闭、刷新主机、账号等主要操作为 44×44px；768px 触屏 Chrome 实测通过。设置标签不折行，498px 容器可横向浏览 698px 标签条，各标签高 47px。
+- Chrome 最终构建验收实际 1280×800、412×960、412×560 和 768×960；无横向溢出，手机人物 WebGL 正常。短屏权限和模型弹层完整位于视口内；40 条长历史可键盘/滚轮阅读，返回最新入口正常。
+- 固定 4000 字合成流式回复完整保存，UTF-8 SHA-256 为 a14e8e42da1a2347b042ae967705ac98e713e8314586bc1b45eeca193e55f951，与预期一致；完成后朗读入口显示，停止保留已到正文并恢复输入。本轮没有调用真实 LLM/Agent/语音服务。
+- 最终 42/42 定向回归、TypeScript、Vite 构建、源码包边界检查通过；品牌 CSS 冲突在只读复核中修复并重新构建。Vite Three chunk >500KB 提示仍存在，依赖已经按需加载，不能由传输体积推断低配设备 FPS。
+- 30 个新静态文件逐文件 SHA-256 readback 成功；HTML 原子切换且保留回退副本。旧 assets/PNG 与下载目录保留，两份 Windows 0.9.1 镜像的长度、UTC 修改时间和 hash 均保持。后端 listener 仍为原 PID，没有重启。
+- 本机和 https://magicdatou.top:44318 health 200/ok，匿名 state 401；公网 30 个 HTML/JS/CSS/WebP/其他静态文件全部 200 且与构建 hash 一致。
+- 正式站点既有 test 登录仍有效；实际 412×960 人物帧计数增长、Chat/Agent 模式、可用模型、在线执行电脑与权限状态可见。截图为 public-desktop-final.jpg、public-mobile-final.jpg；未提交真实任务。
+
+本轮只上线网页，不重新制作 Windows/Ubuntu/Android 安装包，不视作四端实机或麦克风/摄像头/ASR/TTS 性能验收。当前收益来自资源传输、按需挂载及减少 React 非实时区域工作；没有证据需要全面 Rust 重写。

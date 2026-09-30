@@ -2,7 +2,7 @@
 
 - Date: 2026-09-30
 - Complexity: L1
-- Status: investigating / implementing
+- Status: complete
 - Baseline: f423860，接续 issue-48/49。
 
 ## 目标与取舍
