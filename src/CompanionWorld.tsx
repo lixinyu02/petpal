@@ -7,6 +7,7 @@ import { type CompanionKind, type State, type User } from './api';
 import type { PetAction } from './pet/behavior';
 import { useVoiceConversation } from './voice/useVoiceConversation';
 import './voice-conversation.css';
+import {ChatAssistantControls,ChatAssistantTasks,useChatAssistant} from './ChatAssistant';
 
 const words: Record<PetAction, string> = { idle: '我就在你旁边。', walk: '走两步，再回来陪你。', pet: '呼噜…这样就很舒服。', eat: '啊呜，谢谢你的零食。', sleep: '呼…陪你安静一会儿。', jump: '看到你，就有一点开心。' };
 const animeWords: Record<PetAction, string> = { idle: '今天也一起度过吧。', walk: '我就在这里，听你说。', pet: '嗯，感觉被温柔地照顾着。', eat: '谢谢你的点心。', sleep: '闭上眼睛，陪你安静一会儿。', jump: '嗨，我看到你啦。' };
@@ -23,7 +24,9 @@ export default function CompanionWorld() {
   const [action, setAction] = useState<PetAction>('idle');
   const [ready, setReady] = useState(false);
   const captions = useRef<HTMLDivElement>(null);
-  const voice = useVoiceConversation({allowed:!!user,scope:session?.instanceId && user ? `${session.instanceId}:${user.id}` : 'guest',providerId});
+  const voiceScope=session?.instanceId&&user?`${session.instanceId}:${user.id}`:'guest';
+  const chatAssistant=useChatAssistant({scope:voiceScope,allowed:!!user?.canUseCodex});
+  const voice = useVoiceConversation({allowed:!!user,scope:voiceScope,providerId,assistantSnapshot:chatAssistant.snapshot});
   const voiceLabels = {idle:'准备好就开始吧',starting:'正在连接声音…',listening:'我在听，说说你的想法',recognizing:'正在听懂这句话…',thinking:'让我想一想…',speaking:'小伴正在回应',error:'语音聊天已暂停'};
   useEffect(() => { if (action === 'sleep') voice.stop(); }, [action, voice.stop]);
   useEffect(() => { if (captions.current) captions.current.scrollTop = captions.current.scrollHeight; }, [voice.transcript, voice.reply]);
@@ -58,11 +61,13 @@ export default function CompanionWorld() {
       {voiceOpen ? <section className="companion-voice-panel" aria-label="伙伴语音聊天">
         <div className="voice-conversation-heading"><span role="status">{voice.phase === 'starting' || voice.phase === 'recognizing' || voice.phase === 'thinking' ? <Loader2 size={15} className="spin"/> : voice.speaking ? <AudioLines size={16}/> : <Mic size={15}/>} {voiceLabels[voice.phase]}</span><button aria-label="关闭语音聊天" onClick={() => {voice.stop();setVoiceOpen(false);}}><X size={16}/></button></div>
         <label className="voice-conversation-model">聊天模型<select aria-label="语音聊天模型" value={providerId} disabled={voice.active} onChange={event => setProviderId(event.target.value)}>{session?.providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
+        {user?.canUseCodex&&<ChatAssistantControls assistant={chatAssistant} allowed={!!user?.canUseCodex} user={user} providers={session?.providers.filter(provider=>session.codex.eligibleProviderIds?.includes(provider.id))||[]} disabled={voice.recognizing||voice.thinking||voice.speaking} compact/>}
         <div ref={captions} className="voice-conversation-captions" aria-label="语音对话字幕">
           {voice.transcript && <p className="voice-caption-user"><span>你</span>{voice.transcript}</p>}
           {voice.reply && <div className="voice-caption-reply"><span className="voice-caption-author">{name}</span><MessageMarkdown content={voice.reply} compact/></div>}
           {!voice.transcript && !voice.reply && <p className="voice-caption-empty">自然说话，停顿后会自动发送。回应时可打断继续说。</p>}
         </div>
+        <ChatAssistantTasks conversationId={voice.conversationId} tasks={voice.assistantTasks} onUpdate={voice.updateAssistantTasks}/>
         {voice.listening && <meter className="voice-input-level" aria-label="语音聊天麦克风电平" min={0} max={1} value={voice.level}/>}
         {voice.error && <p className="voice-conversation-error" role="alert">{voice.error} <a href="/?chat=1&settings=1">检查语音设置</a></p>}
         <div className="voice-conversation-actions">{voice.active ? <>

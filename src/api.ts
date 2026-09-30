@@ -16,7 +16,10 @@ export type AgentQueueEntry = { id:string; submissionId:string; revision:number;
 export type AgentRun = { id:string; submissionId:string; status:'running'|'stopping'|'completed'|'cancelled'|'error'|'unknown'; turnId:string|null; permissions:AgentPermissions; providerId:string|null; model:string; effort:string; startedAt:string; finishedAt?:string; error?:string;hostId?:string;hostName?:string };
 export type AgentSubmission = {submissionId:string;entryId:string;status:'queued'|'running'|'completed'|'cancelled'|'error'|'steered'|'uncertain';content?:string;createdAt?:string};
 export type AgentState = { revision:number; paused:boolean; queue:AgentQueueEntry[]; run:AgentRun|null; approvals:{id:string;kind:string;description:string}[]; submissions?:AgentSubmission[] };
-export type Conversation = { id: string; title: string; mode: 'chat' | 'codex'; providerId?: string; messages: Message[]; createdAt: string; updatedAt: string; agent?:AgentState;agentHostId?:string;threadHostId?:string };
+export type ChatAssistantConfig = {enabled:true;hostId:string;providerId:string|null;permissions:AgentPermissions};
+export type ChatAssistantRequest = {assistant?:ChatAssistantConfig;submissionId:string};
+export type AssistantTask = {id:string;conversationId?:string;hostId:string;hostName:string;status:'deciding'|'queued'|'running'|'completed'|'cancelled'|'error'|'unknown';message:string;createdAt:string;finishedAt?:string};
+export type Conversation = { id: string; title: string; mode: 'chat' | 'codex'; providerId?: string; messages: Message[]; createdAt: string; updatedAt: string; agent?:AgentState;agentHostId?:string;threadHostId?:string;assistantTasks?:AssistantTask[];backgroundParentId?:string };
 export type CodexStatus = { available?: boolean; running?: boolean; version?: string; authenticated?: boolean; error?: string; message?: string; workspaceRoot?: string; mode?:'host'|'api'; configured?:boolean; apiVerified?:boolean; eligibleProviderIds?:string[]; model?:string; reasoningEffort?:string; [key: string]: unknown };
 export type AgentHost = {id:string;name:string;kind:'central'|'desktop';platform:string;online:boolean;codex?:CodexStatus;lastSeenAt?:string;arch?:string};
 export type CodexConfig = { mode:'host'|'api'; baseUrl:string; model:string; reasoningEffort?:ReasoningEffort; hasApiKey:boolean; revision:string; protocol:'responses'; configured:boolean };
@@ -183,10 +186,10 @@ export function logout() {
   const previous=getConnection();setConnection({url:previous.url,token:''});
   if(previous.token){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4000);void connectionFetch(`${previous.url}/api/auth/logout`,{method:'POST',headers:{Authorization:`Bearer ${previous.token}`},signal:controller.signal}).catch(()=>{}).finally(()=>clearTimeout(timer));}
 }
-export async function streamMessage(id:string,content:string,signal:AbortSignal,onEvent:(event:StreamEvent)=>void,attachmentIds:string[] = []) {
+export async function streamMessage(id:string,content:string,signal:AbortSignal,onEvent:(event:StreamEvent)=>void,attachmentIds:string[] = [],assistantRequest?:ChatAssistantRequest) {
   const request=requests.begin(signal);let reader:ReadableStreamDefaultReader<Uint8Array>|undefined;
   try{
-    request.assertCurrent();const response=await connectionFetch(`${request.connection.url}/api/conversations/${encodeURIComponent(id)}/messages`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${request.connection.token}`},body:JSON.stringify({content,attachmentIds}),signal:request.signal});request.assertCurrent();
+    request.assertCurrent();const response=await connectionFetch(`${request.connection.url}/api/conversations/${encodeURIComponent(id)}/messages`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${request.connection.token}`},body:JSON.stringify({content,attachmentIds,...(assistantRequest?{assistant:assistantRequest.assistant,submissionId:assistantRequest.submissionId}:{})}),signal:request.signal});request.assertCurrent();
     if(!response.ok){await responseJson(response,request);return;}
     if(!response.body)throw new Error('当前环境不支持流式回复。');
     reader=response.body.getReader();const decoder=new TextDecoder();let buffer='',terminal=false;

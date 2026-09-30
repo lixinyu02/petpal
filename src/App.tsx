@@ -3,12 +3,14 @@ import MessageMarkdown from './MessageMarkdown';
 import { ModelPicker, ExecutionTarget, AgentOnboarding } from './WorkspaceControls';
 import AgentPermissions, { defaultAgentPermissions } from './AgentPermissions';
 import AgentQueue from './AgentQueue';
+import {ChatAssistantControls,ChatAssistantTasks,useChatAssistant} from './ChatAssistant';
+import {mergeAssistantTask,mergeChatAssistantConversation} from './chat-assistant-preferences.mjs';
 import { executionHostLock, readExecutionHost, resolveExecutionHostId, saveExecutionHost } from './execution-hosts.mjs';
 import { useAttachments, AttachmentInput, AttachmentDrafts, MessageImages } from './Attachments';
 import './workspace.css';
 import { ConnectionDialog } from './auth/LoginGate';
 import UpdatesSettings from './UpdatesSettings';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowUp, Download, ListOrdered, CornerDownRight, Check, ChevronDown, CircleHelp, Code2, Coffee, Copy, Globe2, History, Link2, Loader2, Menu, MessageCircle, Monitor, MoreHorizontal, PawPrint, Pencil, Plug, Plus, Settings2, ShieldCheck, Square, Terminal, Trash2, Unplug, Volume2, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { PetOverlay as Overlay, showPet } from './platform/overlay';
@@ -40,7 +42,7 @@ export default function App() {
   const [view, setView] = useState<'chat' | 'settings' | 'downloads'>(new URLSearchParams(location.search).has('settings') ? 'settings' : 'chat');
   const [settingsTab, setSettingsTab] = useState<'models'|'pet'|'desktop'|'accounts'|'voice'|'assistant'|'updates'>('models');
   const [mode, setMode] = useState<'chat' | 'codex'>(new URLSearchParams(location.search).get('mode') === 'codex' ? 'codex' : 'chat');
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(()=>new URLSearchParams(location.search).get('conversation'));
   const [providerId, setProviderId] = useState('');
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -88,6 +90,7 @@ export default function App() {
   const requestSequence = useRef(0);
   const petOnly = new URLSearchParams(location.search).get('pet') === '1';
   const conversation = state.conversations.find(c => c.id === selected);
+  const historyConversations = state.conversations.filter(c => !c.backgroundParentId);
   const provider = state.providers.find(p => p.id === (conversation?.providerId || providerId));
   const currentMode = conversation?.mode || mode;
   const agentRunning = currentMode==='codex' && (conversation?.agent?.run?.status==='running'||conversation?.agent?.run?.status==='stopping');
@@ -97,6 +100,7 @@ export default function App() {
   const activePermissions=agentRunning?conversation!.agent!.run!.permissions:permissions;
   const activeProviderId=agentRunning?conversation!.agent!.run!.providerId||'':agentProviderId;
   const hostScope=state.instanceId&&state.user?`${state.instanceId}:${state.user.id}`:'';
+  const chatAssistant=useChatAssistant({scope:hostScope,allowed:connected&&!!state.user?.canUseCodex,hostState:{hosts:agentHosts,loading:hostsLoading,error:hostsError,refresh:()=>setHostRefresh(value=>value+1)}});
   const localHostId=nativeExecutor?.state==='online'?nativeExecutor.hostId||'':'';
   const lockedHostId=executionHostLock(conversation?.agent,agentSubmissionRef.current);
   const selectedHostId=resolveExecutionHostId({requestedId:agentHostId,lockedId:lockedHostId,localHostId,defaultHostId});
@@ -109,6 +113,13 @@ export default function App() {
   const performanceInput: PerformanceInput = mood === 'sleep' ? { utteranceId: 'sleep', text: '', phase: 'idle' } : speech.playing
     ? { utteranceId: speech.utteranceId, text: speech.text, phase: 'speaking', speech: { active: speech.active, charIndex: speech.charIndex, ended: speech.ended, audioLevel:speech.audioLevel } }
     : { ...responsePerformance, ...(speech.enabled ? { speech: { active: false, charIndex: 0, ended: true } } : {}) };
+
+  const updateChatTasks=useCallback((updated:Conversation)=>{
+    setState(previous=>({...previous,conversations:previous.conversations.map(before=>{
+      if(before.id!==updated.id)return before;
+      return mergeChatAssistantConversation(before,updated,activeRef.current,busyRef.current);
+    })}));
+  },[]);
 
   function performancePhase(phase: PerformancePhase, text = '', utteranceId = '') {
     if (responseTimer.current) clearTimeout(responseTimer.current);
@@ -142,12 +153,16 @@ export default function App() {
     initConnection().then(async connection => {
       if (!connection.token) { if (alive) setConnected(false); return; }
       const next = await api<State>('/state');
-      if (alive && getSessionEpoch() === accountEpoch) { setState(next); await hydrateCompanion(next.settings.companionKind || 'anime').catch(() => {}); setProviderId(next.settings.defaultProviderId || next.providers[0]?.id || ''); setConnected(true); if(!next.user?.canUseCodex)setMode('chat'); if(!next.user?.isOwner)setAgentProviderId(next.codex.eligibleProviderIds?.[0]||''); }
+      if (alive && getSessionEpoch() === accountEpoch) { setState(next); await hydrateCompanion(next.settings.companionKind || 'anime').catch(() => {}); setProviderId(next.settings.defaultProviderId || next.providers[0]?.id || ''); setConnected(true); if(!next.user?.canUseCodex)setMode('chat'); if(!next.user?.isOwner)setAgentProviderId(next.codex.eligibleProviderIds?.[0]||'');
+        const linked=next.conversations.find(item=>item.id===new URLSearchParams(location.search).get('conversation'));
+        if(linked&&(linked.mode!=='codex'||next.user?.canUseCodex)){setSelected(linked.id);setMode(linked.mode);if(linked.mode==='codex'){setAgentHostId(linked.agent?.run?.hostId||linked.agentHostId||linked.threadHostId||'central');setAgentProviderId(linked.agent?.run?.providerId||(next.user?.isOwner?'':next.codex.eligibleProviderIds?.[0]||''));setPermissions(linked.agent?.run?.permissions||{...defaultAgentPermissions});}}
+        else setSelected(null);
+      }
     }).catch(e => { if (alive) setError(e.message); }).finally(() => { if (alive) setReady(true); });
     return () => { alive = false; };
   }, []);
   useEffect(()=>{
-    setAgentHostId(readExecutionHost(localStorage,hostScope));
+    setAgentHostId(conversation?.mode==='codex'?(conversation.agent?.run?.hostId||conversation.agentHostId||conversation.threadHostId||'central'):readExecutionHost(localStorage,hostScope));
     setAgentHosts([]);setDefaultHostId('');setNativeExecutor(null);setHostsError('');
   },[hostScope]);
   useEffect(()=>{
@@ -223,6 +238,8 @@ export default function App() {
 
     if (currentMode === 'chat' && !provider) { setView('settings'); setNotice('添加一个模型连接，就可以开始聊天了。'); return; }
     if(images.length&&provider?.supportsImages===false){setError('这个模型仅支持文字，请移除图片或切换模型。');return;}
+    const assistantSnapshot=chatAssistant.snapshot();
+    const assistantRequest=assistantSnapshot?{assistant:assistantSnapshot,submissionId:crypto.randomUUID()}:undefined;
     stopPresentation();
     busyRef.current = true; setBusy(true); setError(''); setApprovals([]); setStatus('正在想怎么回答你…');
     speech.prepare();
@@ -259,6 +276,7 @@ export default function App() {
           setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? { ...c, messages: c.messages.map(m => m.id === assistantId ? { ...m, content: m.content + (event.data.text || '') } : m) } : c) }));
         }
         if (event.type === 'status') { performancePhase('thinking', responseText, assistantId); setStatus(event.data.message || event.data.text || event.data.status || '正在处理中…'); }
+        if (event.type === 'task') { setState(s=>({...s,conversations:s.conversations.map(c=>c.id===target!.id?{...c,assistantTasks:mergeAssistantTask(c.assistantTasks||[],event.data.task)}:c)})); }
         if (event.type === 'approval') { performancePhase('thinking', responseText, assistantId); setApprovals(a => [...a.filter(item => item.id !== String(event.data.id)), { id: String(event.data.id), kind: event.data.kind || '操作请求', description: event.data.description || 'Codex 请求执行操作，请检查后决定。' }]); }
         if (event.type === 'error') { failed = true; performancePhase('error', responseText, assistantId); if (event.data.conversation?.messages?.at(-1)?.status !== 'cancelled') setError(event.data.message || '回复失败，请检查连接后重试。'); if (event.data.conversation) setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? event.data.conversation : c) })); }
         if (event.type === 'done') {
@@ -268,7 +286,7 @@ export default function App() {
           }
           if (!failed) finishResponse(responseText || finalReply?.content || '', assistantId, requestId);
         }
-      },images.map(item=>item.id));
+      },images.map(item=>item.id),assistantRequest);
     } catch (e) {
       if (getSessionEpoch() !== accountEpoch || isSessionChanged(e)) return;
       failed = true;
@@ -411,7 +429,7 @@ export default function App() {
         <button className={view === 'chat' ? 'active' : ''} onClick={() => openMode(currentMode)}><MessageCircle size={19}/>对话</button>
       </nav>
       <div className="history-heading"><span>最近的对话</span><History size={14}/></div>
-      <div className="history-list">{state.conversations.length === 0 ? <p className="history-empty">我们的故事，从一句你好开始。</p> : state.conversations.map(c => <div className={`history-row ${selected === c.id && view === 'chat' ? 'selected' : ''}`} key={c.id}><button className="history-item" title={c.title} onClick={() => selectChat(c)}>{c.mode === 'codex' ? <Terminal size={15}/> : <MessageCircle size={15}/>}<span>{c.title || '新对话'}</span></button><button disabled={busy} className="history-delete icon-button" aria-label={`删除对话 ${c.title}`} onClick={() => setDeleting(c.id)}><Trash2 size={13}/></button></div>)}</div>
+      <div className="history-list">{historyConversations.length === 0 ? <p className="history-empty">我们的故事，从一句你好开始。</p> : historyConversations.map(c => <div className={`history-row ${selected === c.id && view === 'chat' ? 'selected' : ''}`} key={c.id}><button className="history-item" title={c.title} onClick={() => selectChat(c)}>{c.mode === 'codex' ? <Terminal size={15}/> : <MessageCircle size={15}/>}<span>{c.title || '新对话'}</span></button><button disabled={busy} className="history-delete icon-button" aria-label={`删除对话 ${c.title}`} onClick={() => setDeleting(c.id)}><Trash2 size={13}/></button></div>)}</div>
       <div className="sidebar-bottom"><button className={`settings-link ${view==='downloads'?'active':''}`} onClick={()=>{setView('downloads');setMobileNav(false);}}><Download size={18}/>下载客户端</button>
         <button className={`settings-link ${view === 'settings' ? 'active' : ''}`} onClick={() => { if (busy) { setNotice('请先完成或停止当前回复。'); return; } setView('settings'); setMobileNav(false); }}><Settings2 size={18}/>连接与设置</button>
         <button className="host-status" onClick={() => { stopPresentation(); setConnectionOpen(true); }}><span className={`status-light ${connected ? 'online' : ''}`}/><span>{connected ? state.user?.displayName || '个人服务已连接' : '登录你的个人服务'}<small>{window.petpal ? '桌面 · 账号与执行电脑' : Capacitor.isNativePlatform() ? 'Android · 远程服务' : 'Web · 个人空间'}</small></span><ChevronDown size={14}/></button>
@@ -435,6 +453,7 @@ export default function App() {
               {currentMode==='codex'&&<ExecutionTarget hosts={agentHosts} value={selectedHostId} onChange={changeHost} disabled={busy||agentSubmitting||hostBusy||unconfirmed} loading={hostsLoading} error={hostsError} localHostId={localHostId} onRefresh={()=>setHostRefresh(value=>value+1)}/>}
               {currentMode==='chat' && provider?.supportsImages===false && <span className="workspace-mode-note">当前模型仅支持文字</span>}
             </div>
+            {currentMode==='chat'&&state.user?.canUseCodex&&<ChatAssistantControls assistant={chatAssistant} allowed={connected&&!!state.user?.canUseCodex} user={state.user} providers={agentProviders} disabled={busy||switchingModel}/>}
             {currentMode==='codex' && nativeExecutor?.state==='reconnecting' && <p className="execution-reconnect" role="status"><Loader2 size={13} className="spin"/>此电脑连接中断，正在重连。原任务保持暂停。</p>}
           </div>
           <div className="chat-scroll" ref={scrollRef} aria-live="polite" aria-busy={working}>
@@ -462,7 +481,7 @@ export default function App() {
             })}</div>}
             {shownApprovals.map(approval => <div className="approval" key={approval.id} tabIndex={-1}><ShieldCheck size={21}/><div><strong>Codex 请求你的确认</strong><p>{approval.description}</p><div className="button-row"><button className="secondary-button" onClick={() => approve(approval, 'decline')}>拒绝</button><button className="primary-button" onClick={() => approve(approval, 'accept')}>允许本次</button></div></div></div>)}
           </div>
-          <div className="composer-area">{error&&<div className="error-banner" role="alert"><span>{error}</span><button className="icon-button" aria-label="关闭错误提示" onClick={()=>setError('')}><X size={15}/></button></div>}{currentMode==='codex'&&conversation?.agent&&<AgentQueue key={conversation.id} conversationId={conversation.id} state={conversation.agent} hosts={agentHosts} refresh={()=>refreshConversation(conversation.id)} onNewConversation={()=>newChat('codex')}/>}<div className="composer-runtime">{currentMode==='codex'?<AgentPermissions value={activePermissions} onChange={setPermissions} user={state.user} disabled={agentRunning||agentUnknown||agentSubmitting||unconfirmed}/>:null}{working&&<div className="stream-status"><Loader2 size={12} className="spin"/>{currentMode==='codex'?(conversation?.agent?.run?.status==='stopping'?'正在停止…':shownApprovals.length?'等待你的确认':'Agent 正在执行'):status||'正在回复…'}{shownApprovals.length>0&&<button type="button" className="approval-jump" onClick={()=>{const target=scrollRef.current?.querySelector<HTMLElement>('.approval');target?.scrollIntoView({block:'nearest'});target?.focus({preventScroll:true});}}>查看请求 ({shownApprovals.length})</button>}</div>}</div><form className={`composer ${working?'composer-busy':''}`} onSubmit={send}>{unconfirmed&&<div className="unconfirmed-submission" role="status"><span>上次提交正在等待确认</span><button type="button" disabled={agentSubmitting} onClick={()=>void sendAgent()}>确认上次提交</button></div>}<AttachmentDrafts value={attachments}/><textarea ref={inputRef} aria-label="消息" placeholder={currentMode==='codex'?(agentRunning?'补充当前任务，或加入下一条任务…':'例如：帮我打开 QQ 音乐'):`和${state.settings.petName}说点什么…`} value={draft} onChange={e=>setDraft(e.target.value)} onPaste={e=>{const files=Array.from(e.clipboardData.files).filter(file=>file.type.startsWith('image/'));if(files.length){e.preventDefault();void attachments.upload(files);}}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={2} maxLength={20000} disabled={busy||agentSubmitting||unconfirmed}/><div className="composer-bottom"><div className="composer-tools"><AttachmentInput value={attachments} disabled={busy||agentSubmitting||unconfirmed||(currentMode==='chat'&&provider?.supportsImages===false)}/>{agentRunning&&<label className="agent-send-choice"><select aria-label="Agent 发送方式" value={sendChoice} onChange={e=>setSendChoice(e.target.value as 'steer'|'submit')}><option value="steer">追加到当前任务</option><option value="submit">排队，稍后执行</option></select></label>}</div><div className="composer-send-actions">{working&&<button className="send-button stop-button" type="button" aria-label="停止生成" onClick={()=>void stop()}><Square size={14}/></button>}{!busy&&<button className="send-button" aria-label={agentRunning?(sendChoice==='steer'?'追加指令':'加入队列'):'发送消息'} type="submit" disabled={(!draft.trim()&&!attachments.items.length)||switchingModel||agentSubmitting||unconfirmed||attachments.uploading||(currentMode==='codex'&&(!canSendAgent||(!state.user?.isOwner&&!agentProviderId)))||!!(agentRunning&&sendChoice==='steer'&&!conversation?.agent?.run?.turnId)}>{agentSubmitting?<Loader2 size={18} className="spin"/>:agentRunning?sendChoice==='steer'?<CornerDownRight size={18}/>:<ListOrdered size={18}/>:<ArrowUp size={21}/>}</button>}</div></div></form>
+          <div className="composer-area">{currentMode==='chat'&&<ChatAssistantTasks conversationId={conversation?.id} tasks={conversation?.assistantTasks} onUpdate={updateChatTasks}/>} {error&&<div className="error-banner" role="alert"><span>{error}</span><button className="icon-button" aria-label="关闭错误提示" onClick={()=>setError('')}><X size={15}/></button></div>}{currentMode==='codex'&&conversation?.agent&&<AgentQueue key={conversation.id} conversationId={conversation.id} state={conversation.agent} hosts={agentHosts} refresh={()=>refreshConversation(conversation.id)} onNewConversation={()=>newChat('codex')}/>}<div className="composer-runtime">{currentMode==='codex'?<AgentPermissions value={activePermissions} onChange={setPermissions} user={state.user} disabled={agentRunning||agentUnknown||agentSubmitting||unconfirmed}/>:null}{working&&<div className="stream-status"><Loader2 size={12} className="spin"/>{currentMode==='codex'?(conversation?.agent?.run?.status==='stopping'?'正在停止…':shownApprovals.length?'等待你的确认':'Agent 正在执行'):status||'正在回复…'}{shownApprovals.length>0&&<button type="button" className="approval-jump" onClick={()=>{const target=scrollRef.current?.querySelector<HTMLElement>('.approval');target?.scrollIntoView({block:'nearest'});target?.focus({preventScroll:true});}}>查看请求 ({shownApprovals.length})</button>}</div>}</div><form className={`composer ${working?'composer-busy':''}`} onSubmit={send}>{unconfirmed&&<div className="unconfirmed-submission" role="status"><span>上次提交正在等待确认</span><button type="button" disabled={agentSubmitting} onClick={()=>void sendAgent()}>确认上次提交</button></div>}<AttachmentDrafts value={attachments}/><textarea ref={inputRef} aria-label="消息" placeholder={currentMode==='codex'?(agentRunning?'补充当前任务，或加入下一条任务…':'例如：帮我打开 QQ 音乐'):`和${state.settings.petName}说点什么…`} value={draft} onChange={e=>setDraft(e.target.value)} onPaste={e=>{const files=Array.from(e.clipboardData.files).filter(file=>file.type.startsWith('image/'));if(files.length){e.preventDefault();void attachments.upload(files);}}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={2} maxLength={20000} disabled={busy||agentSubmitting||unconfirmed}/><div className="composer-bottom"><div className="composer-tools"><AttachmentInput value={attachments} disabled={busy||agentSubmitting||unconfirmed||(currentMode==='chat'&&provider?.supportsImages===false)}/>{agentRunning&&<label className="agent-send-choice"><select aria-label="Agent 发送方式" value={sendChoice} onChange={e=>setSendChoice(e.target.value as 'steer'|'submit')}><option value="steer">追加到当前任务</option><option value="submit">排队，稍后执行</option></select></label>}</div><div className="composer-send-actions">{working&&<button className="send-button stop-button" type="button" aria-label="停止生成" onClick={()=>void stop()}><Square size={14}/></button>}{!busy&&<button className="send-button" aria-label={agentRunning?(sendChoice==='steer'?'追加指令':'加入队列'):'发送消息'} type="submit" disabled={(!draft.trim()&&!attachments.items.length)||switchingModel||agentSubmitting||unconfirmed||attachments.uploading||(currentMode==='codex'&&(!canSendAgent||(!state.user?.isOwner&&!agentProviderId)))||!!(agentRunning&&sendChoice==='steer'&&!conversation?.agent?.run?.turnId)}>{agentSubmitting?<Loader2 size={18} className="spin"/>:agentRunning?sendChoice==='steer'?<CornerDownRight size={18}/>:<ListOrdered size={18}/>:<ArrowUp size={21}/>}</button>}</div></div></form>
             <div className="composer-footer">
               <div className="speech-controls">
                 <WorkspaceDisclosure className="speech-options" label="语音朗读选项" summary={<><Volume2 size={14}/><span>{speech.enabled ? '语音 · 自动朗读开' : '语音'}</span></>}>

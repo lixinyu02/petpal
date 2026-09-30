@@ -51,6 +51,7 @@ export function createVoiceConversation(options) {
   }
   async function answer(job,text){
     if(!valid(job))return;
+    const chatRequest=options.getChatRequest?.();
     const turn=new AbortController(),sequence=++job.sequence;job.turn=turn;
     const active=()=>valid(job)&&job.sequence===sequence&&!turn.signal.aborted;
     const splitter=createSentenceSplitter(180);let full='',terminal=false,piece=0;
@@ -73,7 +74,7 @@ export function createVoiceConversation(options) {
           full+=event.data.text;publish({reply:full});for(const sentence of splitter.push(event.data.text))queue.enqueue(sentence);
         }
         if(event.type==='done')terminal=true;
-      });
+      },chatRequest);
       if(!active())throw turn.signal.reason||cancelled();
       if(!terminal)throw new Error('回复连接提前断开，已停止语音。');
       for(const sentence of splitter.finish())queue.enqueue(sentence);

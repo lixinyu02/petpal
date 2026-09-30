@@ -13,7 +13,7 @@ function harness(options={}){
     unlock:async()=>{unlocks++;return true;},verify:async()=>{},stopSpeech(){outputStops++;},
     openAsr:async(signal,transcript)=>{const final=deferred(),session={signal,transcript,frames:[],ends:0,cancelled:0,final,async send(frame){this.frames.push(frame);},finish(){this.ends++;return final.promise;},cancel(){this.cancelled++;}};sessions.push(session);return session;},
     createChat:async(provider,signal)=>{chats.push({provider,signal});return 'conversation';},
-    streamChat:(id,text,signal,onEvent)=>{const pending=deferred();streams.push({id,text,signal,onEvent,...pending});return pending.promise;},
+    streamChat:(id,text,signal,onEvent,request)=>{const pending=deferred();streams.push({id,text,signal,onEvent,request,...pending});return pending.promise;},
     play:(text,id,signal)=>{const pending=deferred();plays.push({text,id,signal,...pending});return pending.promise;},...options,
   });
   return{machine,states,sessions,plays,chats,streams,feed(level=.05){callbacks.onFrame(new Float32Array(6000).fill(level),level);},error(error){callbacks.onError(error);},deny(){allowed=false;},expire(){current=false;},get counts(){return{captureStarts,captureStops,capturePauses,outputStops,unlocks};}};
@@ -33,6 +33,18 @@ test('one half-duplex turn cleans speaker labels, streams ordered sentences and 
   h.plays[1].resolve();assert.equal(await finishing,true);assert.equal(h.machine.snapshot().phase,'listening');assert.equal(h.counts.captureStarts,2);assert.equal(h.counts.unlocks,1);
   h.feed();await flush();const second=h.machine.finishUtterance();h.sessions[1].final.resolve('继续');await flush();assert.equal(h.chats.length,1);assert.equal(h.streams[1].id,'conversation');
   h.machine.stop();h.streams[1].resolve();await second;assert.equal(h.counts.captureStops,1);
+});
+
+test('voice background settings are captured before slow conversation creation and refreshed for each later sentence',async()=>{
+  const creating=deferred();let chosen='first-computer',sequence=0;
+  const h=harness({createChat:()=>creating.promise,getChatRequest:()=>({assistant:{enabled:true,hostId:chosen,providerId:'model',permissions:{access:'read-only',approval:'ask'}},submissionId:`request-${++sequence}`})});
+  await h.machine.start();h.feed();await flush();const first=h.machine.finishUtterance();h.sessions[0].final.resolve('打开播放器');await flush();
+  chosen='second-computer';creating.resolve('conversation');await flush();
+  assert.equal(h.streams[0].request.assistant.hostId,'first-computer');assert.equal(h.streams[0].request.submissionId,'request-1');
+  h.streams[0].onEvent({type:'done',data:{}});h.streams[0].resolve();await first;
+  h.feed();await flush();const second=h.machine.finishUtterance();h.sessions[1].final.resolve('继续');await flush();
+  assert.equal(h.streams[1].request.assistant.hostId,'second-computer');assert.equal(h.streams[1].request.submissionId,'request-2');
+  h.streams[1].onEvent({type:'done',data:{}});h.streams[1].resolve();await second;h.machine.dispose();
 });
 
 test('900ms pause automatically submits once; interrupt aborts old ASR and ignores late transcript',async()=>{

@@ -90,7 +90,7 @@ async function boundedJson(response) {
 }
 
 /** Stream one real provider request. Never fabricate completion on EOF. */
-export async function streamProvider({ provider, messages, persona = '', signal, onEvent, timeoutMs = 600000 }) {
+export async function streamProvider({ provider, messages, persona = '', signal, onEvent, onToolCall, timeoutMs = 600000 }) {
   const timeout = AbortSignal.timeout(timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   assertImageSupport(provider, messages);
@@ -105,6 +105,37 @@ export async function streamProvider({ provider, messages, persona = '', signal,
   const body = provider.protocol === 'responses'
     ? { model: provider.model, instructions: persona || undefined, input: history, stream: true, store: false, ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}) }
     : { model: provider.model, messages: [...(persona ? [{ role: 'system', content: persona }] : []), ...history], stream: true, ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}) };
+  if (onToolCall) {
+    const definition = { name: 'run_agent', description: '将当前用户要求的电脑或软件操作派发给后台 Agent。执行电脑、模型和权限由用户预先设置；工具只接收具体任务。派发成功不代表任务已经完成。普通聊天、能力问答、否定或引用的指令不要派发。', parameters: { type: 'object', properties: { task: { type: 'string', description: '用户要求 Agent 完成的任务，保留目标软件、歌曲名称等必要信息。' } }, required: ['task'], additionalProperties: false }, strict: true };
+    body.tools = [provider.protocol === 'responses' ? { type: 'function', ...definition } : { type: 'function', function: definition }];
+    body.parallel_tool_calls = false;
+    if (provider.protocol === 'responses') body.include = ['reasoning.encrypted_content'];
+  }
+  const first = await providerRequest({ provider, body, combined, onEvent });
+  if (!first.calls.length) return { text: first.text };
+  // Validate the whole completed response before any side effect. Neither
+  // fragmented arguments nor a second/malformed call can partially dispatch.
+  if (!onToolCall || first.calls.length !== 1) throw new Error('聊天模型返回了未授权或多个工具调用；没有派发 Agent。');
+  const call = first.calls[0];
+  if (call.name !== 'run_agent' || typeof call.id !== 'string' || !call.id || call.id.length > 200 || typeof call.arguments !== 'string' || call.arguments.length > 128000) throw new Error('Agent 工具调用格式无效；没有派发任务。');
+  let args;
+  try { args = JSON.parse(call.arguments); } catch { throw new Error('Agent 工具参数不是完整 JSON；没有派发任务。'); }
+  if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).length !== 1 || typeof args.task !== 'string' || !args.task.trim() || args.task.length > 32000) throw new Error('Agent 工具只接受有效的 task 文本；没有派发任务。');
+  combined.throwIfAborted();
+  const result = await onToolCall({ task: args.task.trim() });
+  combined.throwIfAborted();
+  const output = JSON.stringify(result);
+  if (typeof output !== 'string' || output.length > 128000) throw new Error('Agent 派发回执格式无效。');
+  onEvent?.('status', { message: '后台任务已提交，正在生成聊天回复。' });
+  const next = provider.protocol === 'responses'
+    ? { ...body, tool_choice: 'none', input: [...body.input, ...first.output, { type: 'function_call_output', call_id: call.id, output }] }
+    : { ...body, tool_choice: 'none', messages: [...body.messages, { role: 'assistant', content: first.text || null, tool_calls: [{ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } }] }, { role: 'tool', tool_call_id: call.id, content: output }] };
+  const second = await providerRequest({ provider, body: next, combined, onEvent });
+  if (second.calls.length) throw new Error('聊天模型重复请求工具调用，未重复派发任务。');
+  return { text: first.text + second.text };
+}
+
+async function providerRequest({ provider, body, combined, onEvent }) {
   const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream, application/json' };
   if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`;
   let response;
@@ -118,7 +149,9 @@ export async function streamProvider({ provider, messages, persona = '', signal,
     try { const data = await boundedJson(response); detail = safeMessage(data.error?.message ?? data.message ?? '', provider); } catch {}
     throw new Error(`模型服务 HTTP ${response.status}${detail ? `：${detail}` : '。请检查地址、密钥和模型权限。'}`);
   }
-  let text = ''; let completed = false;
+  let text = ''; let completed = false; let output = []; let finishReason;
+  const toolFragments = new Map();
+  let calls = [];
   const emit = chunk => {
     if (!chunk) return;
     if (typeof chunk !== 'string') throw new Error('模型服务文本字段格式无效。');
@@ -131,14 +164,21 @@ export async function streamProvider({ provider, messages, persona = '', signal,
     if (provider.protocol === 'responses') {
       if (data.status && data.status !== 'completed') throw new Error(`模型响应未完成（${safeMessage(data.status, provider)}）。`);
       emit(responseText(data));
+      output = Array.isArray(data.output) ? data.output : [];
+      calls = output.filter(item => item.type === 'function_call').map(item => ({ id: item.call_id, name: item.name, arguments: item.arguments }));
+      if (calls.length && data.status !== 'completed') throw new Error('模型工具响应未完成，没有派发任务。');
     } else {
       const choice = data.choices?.[0];
       if (!choice || !choice.message) throw new Error('Chat Completions 响应中缺少消息。');
       emit(choice.message.content ?? choice.message.refusal ?? '');
+      finishReason = choice.finish_reason;
+      if (choice.message.tool_calls !== undefined && !Array.isArray(choice.message.tool_calls)) throw new Error('模型工具调用格式无效。');
+      calls = (choice.message.tool_calls ?? []).map(item => ({ id: item.id, name: item.function?.name, arguments: item.function?.arguments }));
       if (choice.finish_reason === 'length') onEvent?.('status', { message: '模型达到输出长度限制。' });
     }
-    if (!text) throw new Error('模型服务没有返回可显示的文本。');
-    return { text };
+    if (calls.length && provider.protocol !== 'responses' && finishReason !== 'tool_calls') throw new Error('模型工具响应未完成，没有派发任务。');
+    if (!text && !calls.length) throw new Error('模型服务没有返回可显示的文本。');
+    return { text, calls, output };
   }
   if (!response.body) throw new Error('模型服务返回空响应流。');
   for await (const frame of parseEvents(response.body, combined)) {
@@ -153,7 +193,13 @@ export async function streamProvider({ provider, messages, persona = '', signal,
       const type = data.type ?? frame.event;
       if (type === 'response.output_text.delta') emit(data.delta);
       else if (type === 'response.refusal.delta') emit(data.delta);
-      else if (type === 'response.completed') { if (!text) emit(responseText(data.response ?? {})); completed = true; break; }
+      else if (type === 'response.completed') {
+        if (data.response?.status && data.response.status !== 'completed') throw new Error('模型工具响应未完成，没有派发任务。');
+        if (!text) emit(responseText(data.response ?? {}));
+        output = Array.isArray(data.response?.output) ? data.response.output : [];
+        calls = output.filter(item => item.type === 'function_call').map(item => ({ id: item.call_id, name: item.name, arguments: item.arguments }));
+        completed = true; break;
+      }
       else if (['response.failed', 'response.incomplete', 'response.cancelled'].includes(type)) {
         throw new Error(safeMessage(data.response?.error?.message ?? `模型响应未完成（${data.response?.incomplete_details?.reason ?? type}）。`, provider));
       }
@@ -161,17 +207,31 @@ export async function streamProvider({ provider, messages, persona = '', signal,
       const choice = data.choices?.[0];
       if (choice) {
         emit(choice.delta?.content ?? choice.delta?.refusal ?? '');
+        if (choice.delta?.tool_calls !== undefined) {
+          if (!Array.isArray(choice.delta.tool_calls)) throw new Error('模型工具流格式无效。');
+          for (const part of choice.delta.tool_calls) {
+            if (!Number.isSafeInteger(part.index) || part.index < 0 || part.index > 16) throw new Error('模型工具流序号无效。');
+            const item = toolFragments.get(part.index) ?? { id: '', name: '', arguments: '' };
+            for (const [key, value] of [['id', part.id], ['name', part.function?.name], ['arguments', part.function?.arguments]]) {
+              if (value !== undefined) { if (typeof value !== 'string') throw new Error('模型工具流字段无效。'); item[key] += value; }
+            }
+            if (item.arguments.length > 128000 || item.name.length > 200 || item.id.length > 200) throw new Error('模型工具流超过大小限制。');
+            toolFragments.set(part.index, item);
+          }
+        }
         if (choice.finish_reason) {
           completed = true;
+          finishReason = choice.finish_reason;
           if (choice.finish_reason === 'length') onEvent?.('status', { message: '模型达到输出长度限制。' });
-          if (choice.finish_reason === 'tool_calls' && !text) throw new Error('该模型返回工具调用；聊天模式当前只支持文本回复。');
         }
       }
     }
   }
   if (!completed) throw new Error('模型连接提前结束，回复未完成。请检查网络后重试。');
-  if (!text) throw new Error('模型服务没有返回可显示的文本。');
-  return { text };
+  if (provider.protocol !== 'responses') calls = [...toolFragments.values()];
+  if (calls.length && provider.protocol !== 'responses' && finishReason !== 'tool_calls') throw new Error('模型工具响应未完成，没有派发任务。');
+  if (!text && !calls.length) throw new Error('模型服务没有返回可显示的文本。');
+  return { text, calls, output };
 }
 
 export async function testProvider(provider, signal) {
