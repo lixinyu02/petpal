@@ -4,7 +4,7 @@ import BrandMark from './BrandMark';
 import CompanionScene from './avatar/CompanionScene';
 import MessageMarkdown from './MessageMarkdown';
 import { useCompanion, useCompanionCatEnabled, chooseCompanion, hydrateCompanion } from './avatar/preference';
-import { type CompanionKind, type State, type User } from './api';
+import { getSessionEpoch, type CompanionKind, type NativeExecutorStatus, type State, type User } from './api';
 import type { PetAction } from './pet/behavior';
 import { useVoiceConversation } from './voice/useVoiceConversation';
 import './voice-conversation.css';
@@ -17,6 +17,7 @@ export default function CompanionWorld() {
   const [name, setName] = useState('小伴');
   const [user, setUser] = useState<User>();
   const [session, setSession] = useState<State|null>(null);
+  const [nativeExecutor,setNativeExecutor]=useState<NativeExecutorStatus|null>(null);
   const [providerId, setProviderId] = useState('');
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [kind] = useCompanion();
@@ -28,6 +29,17 @@ export default function CompanionWorld() {
   const captions = useRef<HTMLDivElement>(null);
   const voiceScope=session?.instanceId&&user?`${session.instanceId}:${user.id}`:'guest';
   const chatAssistant=useChatAssistant({scope:voiceScope,allowed:!!user?.canUseCodex});
+  const localHostId=nativeExecutor?.state==='online'?nativeExecutor.hostId||'':'';
+  useEffect(()=>{
+    const executor=window.petpal?.executor,epoch=getSessionEpoch();let alive=true,timer:ReturnType<typeof setTimeout>|undefined;
+    setNativeExecutor(null);
+    if(!executor||!user?.canUseCodex||!session?.instanceId)return;
+    const poll=async()=>{
+      try{const status=await executor.status();if(alive&&epoch===getSessionEpoch())setNativeExecutor(status);}catch{}
+      finally{if(alive&&epoch===getSessionEpoch())timer=setTimeout(()=>void poll(),10000);}
+    };
+    void poll();return()=>{alive=false;if(timer)clearTimeout(timer);};
+  },[voiceScope,user?.canUseCodex]);
   const voice = useVoiceConversation({allowed:!!user,scope:voiceScope,providerId,assistantSnapshot:chatAssistant.snapshot});
   const voiceLabels = {idle:'语音聊天',starting:'正在连接…',listening:'正在聆听',recognizing:'正在识别…',thinking:'正在思考…',speaking:`${name}在回应`,error:'语音聊天已暂停'};
   const hasCaptions = Boolean(voice.transcript || voice.reply || voice.listening);
@@ -66,7 +78,7 @@ export default function CompanionWorld() {
         <div className="voice-conversation-heading"><span role="status">{voice.phase === 'starting' || voice.phase === 'recognizing' || voice.phase === 'thinking' ? <Loader2 size={15} className="spin" aria-hidden="true"/> : voice.speaking ? <AudioLines size={16} aria-hidden="true"/> : <Mic size={15} aria-hidden="true"/>} {voiceLabels[voice.phase]}</span><button aria-label="关闭语音聊天" onClick={() => {voice.stop();setVoiceOpen(false);}}><X size={16} aria-hidden="true"/></button></div>
         <div className="voice-conversation-toolbar">
           <label className="voice-conversation-model"><span>模型</span><select aria-label="语音聊天模型" value={providerId} disabled={voice.active} onChange={event => setProviderId(event.target.value)}>{session?.providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
-          {user?.canUseCodex&&<ChatAssistantControls assistant={chatAssistant} allowed={!!user?.canUseCodex} user={user} providers={session?.providers.filter(provider=>session.codex.eligibleProviderIds?.includes(provider.id))||[]} disabled={voice.recognizing||voice.thinking||voice.speaking} compact/>}
+          {user?.canUseCodex&&<ChatAssistantControls assistant={chatAssistant} allowed={!!user?.canUseCodex} user={user} providers={session?.providers.filter(provider=>session.codex.eligibleProviderIds?.includes(provider.id))||[]} disabled={voice.recognizing||voice.thinking||voice.speaking} localHostId={localHostId} onDownload={()=>location.assign('/?chat=1&downloads=1')} compact/>}
         </div>
         <p id="companion-voice-help" hidden>直接说话，停顿后自动发送。回应时可以打断。使用已选麦克风与扬声器，记录保存在当前账号。</p>
         <div ref={captions} className="voice-conversation-captions" aria-label="语音对话字幕" hidden={!hasCaptions}>

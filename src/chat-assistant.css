@@ -19,18 +19,18 @@
 .chat-assistant-dialog-heading>button:hover{background:#edf2e6}
 .chat-assistant-options{padding:12px 18px 18px;display:flex;flex-direction:column;gap:13px;min-height:0;min-width:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
 .chat-assistant-options>p{font-size:11px;line-height:1.6;color:#7b8872}
-.chat-assistant-target-row{display:flex;align-items:end;gap:4px;min-width:0}
-.chat-assistant-target-row>label{min-width:0;flex:1}
 .chat-assistant-options label:not(.chat-assistant-enable)>span{display:block;font-size:10px;margin-bottom:3px;color:#7d8976}
-.chat-assistant-target-row select{display:block;width:100%;max-width:100%;min-height:40px;border:1px solid #dfe6d7;border-radius:6px;background:#fcfdf9;padding:7px 8px;color:#3f654c;font-size:12px}
+.chat-assistant-options>.workspace-execution-target{width:100%;max-width:none;flex-shrink:0}
+.chat-assistant-options .workspace-host-picker>summary{min-height:48px}
 .chat-assistant-options .workspace-model-picker{min-width:0;width:100%}
 .chat-assistant-options .workspace-model-trigger{width:100%;min-height:44px;box-shadow:none}
 .chat-assistant-options .workspace-model-current{min-width:0;flex:1}
 .chat-assistant-options .workspace-model-current strong{max-width:none;font-size:12px}
 .chat-assistant-permissions .agent-permissions{padding:0}
 .chat-assistant-permissions .agent-permissions>summary{min-height:40px;padding:6px 0;justify-content:flex-start;max-width:max-content;font-size:12px}
-.chat-assistant-dialog .workspace-disclosure-content{z-index:100;max-height:calc(100dvh - 24px)}
-.chat-assistant-refresh{display:grid;place-items:center;min-height:40px;min-width:40px;border-radius:6px}
+.chat-assistant-dialog .workspace-disclosure-content{z-index:100;max-height:min(420px,calc(100dvh - 24px))}
+/* Keep fixed disclosures free of transformed containing blocks so opening a menu never grows the dialog. */
+.chat-assistant-dialog .workspace-host-picker>.workspace-disclosure-content{position:fixed;z-index:100;max-width:calc(100vw - 24px)}
 .chat-assistant-enable{display:flex;align-items:center;gap:10px;cursor:pointer;min-height:48px;font-size:12px;color:#406549;padding-bottom:10px;border-bottom:1px solid #e7ecdf}
 .chat-assistant-enable input{accent-color:#35674e;width:18px;height:18px;flex-shrink:0;margin:0}
 .chat-assistant-enable small{display:block;font-size:10px;line-height:1.6;color:#839177;margin-top:3px}

@@ -3,7 +3,7 @@
 - Date: 2026-09-30
 - Complexity: L1
 - Related design: 2026-09-30-petpal-remote-pc-design.md
-- Current status: issue-53 todo
+- Current status: issue-54 todo
 
 ## issue-52
 
@@ -23,9 +23,9 @@
 - 范围: Agent 与 Chat + Agent 主机入口、分组、在线状态与连接引导。
 - 依赖: issue-52
 - 验收标准: 同账号电脑易于辨认，离线不静默回退，任务期间锁定，手机版不拥挤且键盘可用。
-- 状态: todo
-- 验证方式: 主机偏好/渲染/隔离回归，Chrome 响应式操作。
-- commit: pending
+- 状态: done
+- 验证方式: 16 项 helper/主机偏好/Chat 快照回归、TypeScript、Vite build 通过；Chrome 1280×800、412×960 与 412×560，搜索刷新保留、重开清空、离线不回退、任务禁选、Chat 弹层焦点/Escape 通过。夹具电脑为模拟，未计为真实 PC。
+- commit: feat(issue-53): unify searchable execution computer selection
 
 ## issue-54
 

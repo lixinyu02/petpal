@@ -1,8 +1,8 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, CircleHelp, Cloud, Cpu, Loader2, Monitor, RefreshCw, Search, X } from 'lucide-react';
+import { Check, ChevronDown, Cloud, Cpu, Download, Loader2, LockKeyhole, Monitor, RefreshCw, Search, X } from 'lucide-react';
 import type { AgentHost, Provider } from './api';
-import { executionPlatform } from './execution-hosts.mjs';
+import { canSelectExecutionHost, executionHostChoices, groupExecutionHosts, type ExecutionHostChoice } from './execution-host-picker.mjs';
 import './workspace-controls.css';
 import WorkspaceDisclosure from './WorkspaceDisclosure';
 
@@ -98,30 +98,56 @@ export function ModelPicker({ providers, value, onChange, disabled = false, labe
   </div>;
 }
 
-export function ExecutionTarget({ hosts, value, onChange, disabled = false, loading = false, error = '', localHostId = '', onRefresh }: {
-  hosts: AgentHost[]; value: string; onChange(hostId: string): void; disabled?: boolean; loading?: boolean; error?: string; localHostId?: string; onRefresh?(): void;
-}) {
-  const id = useId(), selected = hosts.find(host => host.id === value);
-  const hasDesktop = hosts.some(host => host.kind === 'desktop' && host.online);
-  const legacyDesktop = typeof window !== 'undefined' && window.petpal && !window.petpal.executor;
-  return <div className="workspace-execution-target" aria-busy={loading}>
-    <div className="workspace-host-control" title={disabled ? '本次任务的执行电脑已固定' : undefined}>
-      {selected?.kind === 'central' ? <Cloud size={17} aria-hidden="true"/> : <Monitor size={17} aria-hidden="true"/>}
-      <label htmlFor={id}><span>执行电脑</span><select id={id} aria-label="执行电脑" value={value} disabled={disabled || (loading && !hosts.length)} onChange={event => {
-        if (hosts.some(host => host.id === event.target.value && host.online)) onChange(event.target.value);
-      }}>
-        {!selected && <option value={value} disabled>{value ? '此前选择的电脑 · 未连接' : loading ? '正在寻找执行电脑…' : '选择执行电脑'}</option>}
-        {hosts.map(host => <option key={host.id} value={host.id} disabled={!host.online}>{host.name}{host.id === localHostId ? ' · 此电脑' : ''} · {host.kind === 'central' ? '服务器' : executionPlatform(host.platform)} · {host.online ? '在线' : '离线'}</option>)}
-      </select></label>
-      {onRefresh && <button type="button" className="workspace-host-refresh" disabled={loading} aria-label="刷新执行电脑" onClick={onRefresh}>{loading ? <Loader2 size={14} className="spin"/> : <RefreshCw size={14}/>}</button>}
-      <WorkspaceDisclosure className="workspace-host-help" label="连接执行电脑帮助" summary={<CircleHelp size={15}/>}>
-        <h3>选择执行电脑</h3>
-        <p>{legacyDesktop ? '此客户端还没有执行器，请从「下载客户端」更新后重新登录。' : '在 Windows 或 Ubuntu 客户端登录同一账号，即可在这里选择它。客户端需要保持运行。'}</p>
-        <p>{disabled ? '本次任务的执行电脑已固定，完成后可以切换。' : '切换电脑后，账号与聊天记录仍保留在个人服务。'}</p>
-        {!hasDesktop && !loading && <p>目前没有已连接的桌面电脑。</p>}
-      </WorkspaceDisclosure>
-    </div>
-    {selected && !selected.online && <span className="workspace-target-host is-offline" role="status"><span className="workspace-target-dot"/>电脑已离线，请登录客户端后再发送</span>}
-    {error && <span className="workspace-target-error" role="alert">{error}</span>}
+type ExecutionHostPickerProps = {
+  hosts: AgentHost[]; value: string; onChange(hostId: string): void; disabled?: boolean; loading?: boolean; error?: string; localHostId?: string;
+  label?: string; lockReason?: string; onRefresh?(): void; onDownload?(): void;
+};
+
+/** Keep the popup inside its owning controls so dialog focus and ordinary Tab continue to work. */
+export function ExecutionHostPicker({hosts,value,onChange,disabled=false,loading=false,error='',localHostId='',label='执行电脑',lockReason='',onRefresh,onDownload}:ExecutionHostPickerProps) {
+  const id=useId(),[query,setQuery]=useState(''),container=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    const wrapper=container.current;if(!wrapper)return;
+    const opened=(event:Event)=>{const details=event.target;if(details instanceof HTMLDetailsElement&&details===wrapper.querySelector('details')&&details.open)setQuery('');};
+    wrapper.addEventListener('toggle',opened,true);return()=>wrapper.removeEventListener('toggle',opened,true);
+  },[]);
+  const choices=useMemo(()=>executionHostChoices(hosts,value,localHostId),[hosts,value,localHostId]);
+  const groups=useMemo(()=>groupExecutionHosts(choices,query),[choices,query]);
+  const selected=choices.find(choice=>choice.id===value),hasDesktop=hosts.some(host=>host.kind==='desktop'&&host.online);
+  const legacyDesktop=typeof window!=='undefined'&&!!window.petpal&&!window.petpal.executor;
+  const unavailable=!!selected&&!selected.online;
+  const selectionLabel=selected?`${selected.name}${selected.disambiguator?` · ${selected.disambiguator}`:''}${selected.isLocal?' · 此电脑':''}${selected.missing?' · 未连接':!selected.online?' · 离线':''}`:loading?'正在寻找执行电脑…':'选择执行电脑';
+  function choose(choice:ExecutionHostChoice,event:MouseEvent<HTMLButtonElement>){
+    if(!canSelectExecutionHost(choice,disabled)||!hosts.some(host=>host.id===choice.id&&host.online))return;
+    const details=event.currentTarget.closest('details');if(details){details.open=false;details.querySelector('summary')?.focus({preventScroll:true});}
+    if(choice.id!==value)onChange(choice.id);
+  }
+  return <div ref={container} className="workspace-execution-target" aria-busy={loading}>
+    <WorkspaceDisclosure className="workspace-host-picker" label={`${label}：${selectionLabel}${disabled?'，暂时不能切换':''}`} summary={<>
+      {selected?.kind==='central'?<Cloud size={18} aria-hidden="true"/>:<Monitor size={18} aria-hidden="true"/>}
+      <span className="workspace-host-current"><small>{label}</small><strong title={selectionLabel}>{selectionLabel}</strong></span>
+      {selected&&<span className={`workspace-host-connection${unavailable?' is-offline':''}`} aria-hidden="true"/>}
+    </>}>
+      <div className="workspace-host-menu-heading"><h3>选择执行电脑</h3>{onRefresh&&<button type="button" className="workspace-host-refresh" disabled={loading} aria-label={`刷新${label}`} onClick={onRefresh}>{loading?<Loader2 size={17} className="spin" aria-hidden="true"/>:<RefreshCw size={17} aria-hidden="true"/>}</button>}</div>
+      <label className="workspace-host-search" htmlFor={`${id}-search`}><Search size={17} aria-hidden="true"/><input id={`${id}-search`} aria-label={`搜索${label}`} placeholder="搜索电脑名称或系统" value={query} onChange={event=>setQuery(event.target.value)} autoComplete="off" autoCorrect="off" spellCheck={false}/></label>
+      {disabled&&<p className="workspace-host-lock" role="status"><LockKeyhole size={15} aria-hidden="true"/><span>{lockReason||'本次任务的执行电脑已固定，完成后可以切换。'}</span></p>}
+      <div className="workspace-host-groups">
+        {groups.map(group=><section className="workspace-host-group" key={group.id} aria-labelledby={`${id}-${group.id}`}><h4 id={`${id}-${group.id}`}>{group.label}<span>{group.choices.length}</span></h4>
+          {group.choices.map(choice=><button type="button" className={`workspace-host-option${choice.id===value?' is-selected':''}`} key={choice.id} aria-pressed={choice.id===value} disabled={!canSelectExecutionHost(choice,disabled)} onClick={event=>choose(choice,event)}>
+            <span className="workspace-host-option-icon">{choice.kind==='central'?<Cloud size={17} aria-hidden="true"/>:<Monitor size={17} aria-hidden="true"/>}</span>
+            <span className="workspace-host-option-copy"><strong title={choice.name}>{choice.name}</strong><span>{choice.platformLabel}{choice.isLocal?' · 此电脑':''} · {choice.missing?'未连接':choice.online?'已连接':'离线'}{choice.disambiguator&&<> · {choice.disambiguator}</>}</span><small>{choice.note}</small></span>
+            <span className="workspace-host-selected">{choice.id===value&&<Check size={17} aria-label="已选中"/>}</span>
+          </button>)}
+        </section>)}
+        {!groups.length&&<p className="workspace-host-empty" role="status">{query.trim()?'没有匹配的电脑，试试名称或 Windows、Ubuntu。':loading?'正在寻找执行电脑…':'还没有可选的执行电脑。'}</p>}
+      </div>
+      {selected?.kind==='central'&&<p className="workspace-host-server-note">当前任务在服务器执行。操作 QQ 音乐等电脑软件时，请选择对应的桌面电脑。</p>}
+      {!hasDesktop&&!loading&&<div className="workspace-host-guide"><strong>连接你的电脑</strong><p>{legacyDesktop?'此客户端还没有执行器，请更新桌面客户端后重新登录。':'在 Windows 或 Ubuntu 客户端登录同一账号，并保持客户端运行，即可在这里选择它。'}</p>{onDownload&&<button type="button" onClick={onDownload}><Download size={16} aria-hidden="true"/>下载客户端</button>}</div>}
+      <p className="workspace-host-menu-footnote">切换执行电脑后，聊天记录保持不变。</p>
+    </WorkspaceDisclosure>
+    {unavailable&&<span className="workspace-target-host is-offline" role="status"><span className="workspace-target-dot"/>{selected?.missing?'此前选择的电脑尚未连接，选择会保留':'所选电脑已离线，请登录客户端后再发送'}</span>}
+    {error&&<span className="workspace-target-error" role="alert">{error}</span>}
   </div>;
 }
+
+export function ExecutionTarget(props:ExecutionHostPickerProps){return <ExecutionHostPicker {...props}/>;}

@@ -49,7 +49,7 @@ export default function App() {
   const [state, setState] = useState<State>(emptyState);
   const [ready, setReady] = useState(false);
   const [connected, setConnected] = useState(false);
-  const [view, setView] = useState<'chat' | 'settings' | 'downloads'>(new URLSearchParams(location.search).has('settings') ? 'settings' : 'chat');
+  const [view, setView] = useState<'chat' | 'settings' | 'downloads'>(new URLSearchParams(location.search).has('downloads') ? 'downloads' : new URLSearchParams(location.search).has('settings') ? 'settings' : 'chat');
   const [settingsTab, setSettingsTab] = useState<'models'|'pet'|'desktop'|'accounts'|'voice'|'assistant'|'updates'>('models');
   const [mode, setMode] = useState<'chat' | 'codex'>(new URLSearchParams(location.search).get('mode') === 'codex' ? 'codex' : 'chat');
   const [selected, setSelected] = useState<string | null>(()=>new URLSearchParams(location.search).get('conversation'));
@@ -484,12 +484,12 @@ export default function App() {
                 <button aria-label="Agent 执行任务" aria-pressed={currentMode==='codex'} disabled={!state.user?.canUseCodex} title={!state.user?.canUseCodex?'请联系管理员开通 Agent':undefined} onClick={()=>currentMode!=='codex'&&newChat('codex')}><Terminal size={16} aria-hidden="true"/>Agent<span>执行任务</span></button>
               </div>
               {currentMode==='chat'&&<ModelPicker providers={state.providers} value={conversation?.providerId||providerId} onChange={id=>void changeModel(id)} disabled={working||switchingModel||unconfirmed} label="Chat 模型" fallbackLabel="选择模型"/>}
-              {currentMode==='chat'&&state.user?.canUseCodex&&<ChatAssistantControls assistant={chatAssistant} allowed={connected&&!!state.user?.canUseCodex} user={state.user} providers={agentProviders} disabled={busy||switchingModel}/>}
+              {currentMode==='chat'&&state.user?.canUseCodex&&<ChatAssistantControls assistant={chatAssistant} allowed={connected&&!!state.user?.canUseCodex} user={state.user} providers={agentProviders} disabled={busy||switchingModel} localHostId={localHostId} onDownload={()=>setView('downloads')}/>}
               {currentMode==='codex'&&<AgentOnboarding codex={selectedCodex} user={state.user} host={selectedHost} hostLoading={hostsLoading} localHostId={localHostId} onConfigure={()=>{setSettingsTab('assistant');setView('settings');}}/>}
             </div>
             {currentMode==='codex'&&<div className="workspace-context-row has-execution-target">
               <ModelPicker providers={agentProviders} value={activeProviderId} onChange={id=>void changeModel(id)} disabled={working||agentUnknown||agentSubmitting||switchingModel||unconfirmed} label="Agent 模型" fallbackLabel={(agentRunning?conversation?.agent?.run?.model:state.codex.model)||'Codex 主机配置'} fallbackOption={state.user?.isOwner?{label:(agentRunning?conversation?.agent?.run?.model:state.codex.model)||'Codex 主机配置',description:'使用主机默认模型与推理强度'}:undefined}/>
-              <ExecutionTarget hosts={agentHosts} value={selectedHostId} onChange={changeHost} disabled={busy||agentSubmitting||hostBusy||unconfirmed} loading={hostsLoading} error={hostsError} localHostId={localHostId} onRefresh={()=>setHostRefresh(value=>value+1)}/>
+              <ExecutionTarget hosts={agentHosts} value={selectedHostId} onChange={changeHost} disabled={busy||agentSubmitting||hostBusy||unconfirmed} loading={hostsLoading} error={hostsError} localHostId={localHostId} lockReason={unconfirmed?'上次任务提交正在等待确认，执行电脑保持不变。':hostBusy?'正在执行或排队的任务已固定电脑，结束后可以切换。':'当前提交或回复完成后，可以切换执行电脑。'} onRefresh={()=>setHostRefresh(value=>value+1)} onDownload={()=>setView('downloads')}/>
             </div>}
             {currentMode==='codex' && nativeExecutor?.state==='reconnecting' && <p className="execution-reconnect" role="status"><Loader2 size={13} className="spin" aria-hidden="true"/>此电脑连接中断，正在重连。原任务保持暂停。</p>}
           </div>
@@ -550,7 +550,7 @@ function SettingsView({ state, connected, refresh, notice, connect, initialTab, 
     {tab === 'pet' && <form className="settings-section pet-settings" onSubmit={savePet}><div className="pet-settings-preview"><Cat interactive={false}/><span>独一无二的小伙伴</span></div><div className="pet-settings-form"><h2>认识你的小伴</h2><CompanionOptions/><label>伙伴的名字<input value={petName} maxLength={30} required onChange={e => setPetName(e.target.value)}/></label><label>性格与相处方式<textarea rows={7} value={persona} maxLength={4000} onChange={e => setPersona(e.target.value)}/></label><p className="field-help">作为陪伴聊天的系统提示词使用，下一条消息生效。</p><button className="primary-button" disabled={busy || !connected}><Check size={16} aria-hidden="true"/>保存个性</button></div></form>}
     {tab === 'desktop' && <div className="settings-section">
       <div className="section-title"><div><h2>你的设备</h2><p>电脑客户端登录同一账号后，可由 Web、Android 或其他电脑选择执行任务。</p></div><span className="device-badge">{window.petpal ? '桌面应用' : Capacitor.isNativePlatform() ? 'Android' : 'Web 浏览器'}</span></div>
-      <div className="device-row"><div><h3>桌面上的小猫</h3><p>{window.petpal ? '透明、置顶的小窗，拖动顶部即可移动，双击小猫返回聊天。' : Capacitor.isNativePlatform() ? '授权悬浮窗权限后，让小猫陪在其他应用旁。' : '使用 Windows 或 Ubuntu 桌面版，即可开启透明悬浮窗。'}</p></div>{window.petpal && <button className="secondary-button" onClick={() => window.petpal?.showPet()}>显示桌宠</button>}{Capacitor.isNativePlatform() && <button className="secondary-button" onClick={overlay}>{overlayRunning ? '收起悬浮伙伴' : '开启悬浮伙伴'}</button>}</div>
+      <div className="device-row"><div><h3>悬浮伙伴</h3><p>{window.petpal ? '透明、置顶的小窗，拖动顶部即可移动，双击伙伴返回聊天。' : Capacitor.isNativePlatform() ? '授权悬浮窗权限后，让伙伴陪在其他应用旁。' : '使用 Windows 或 Ubuntu 桌面版，即可开启透明悬浮窗。'}</p></div>{window.petpal && <button className="secondary-button" onClick={() => window.petpal?.showPet()}>显示桌宠</button>}{Capacitor.isNativePlatform() && <button className="secondary-button" onClick={overlay}>{overlayRunning ? '收起悬浮伙伴' : '开启悬浮伙伴'}</button>}</div>
       {state.user?.isOwner && <div className="device-row"><div><h3>Codex 与音乐控制</h3><p>在电脑助手中配置 Responses API、检测播放器，并连接 OpenCLI 浏览器工具。</p></div><button className="secondary-button" onClick={()=>setTab('assistant')}><Terminal size={15} aria-hidden="true"/>电脑助手设置</button></div>}
       <div className="about-app"><PawPrint size={20} aria-hidden="true"/><strong>小伴 PetPal</strong><span>Web / Android / Windows / Ubuntu</span></div>
     </div>}

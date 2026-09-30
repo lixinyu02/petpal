@@ -1,11 +1,10 @@
 import {useCallback,useEffect,useId,useLayoutEffect,useRef,useState,type CSSProperties} from 'react';
 import {createPortal} from 'react-dom';
-import {ArrowUpRight,Check,ChevronDown,Loader2,RefreshCw,Settings2,ShieldCheck,Square,Terminal,X} from 'lucide-react';
+import {ArrowUpRight,Check,ChevronDown,Loader2,Settings2,ShieldCheck,Square,Terminal,X} from 'lucide-react';
 import {api,getSessionEpoch,isSessionChanged,type AgentHost,type AgentPermissions as Permissions,type AssistantTask,type ChatAssistantConfig,type Conversation,type Provider,type User} from './api';
 import {chatAssistantTargetIssue,readChatAssistantPreferences,saveChatAssistantPreferences,snapshotChatAssistant,type ChatAssistantPreferences} from './chat-assistant-preferences.mjs';
-import {executionPlatform} from './execution-hosts.mjs';
 import AgentPermissions,{defaultAgentPermissions} from './AgentPermissions';
-import {ModelPicker} from './WorkspaceControls';
+import {ExecutionHostPicker,ModelPicker} from './WorkspaceControls';
 import './chat-assistant.css';
 
 const taskLabels={deciding:'正在安排',queued:'已排队',running:'执行中',completed:'已完成',error:'未完成',cancelled:'已取消',unknown:'状态待确认'};
@@ -50,7 +49,7 @@ export function useChatAssistant({scope,allowed,hostState}:{scope:string;allowed
   return {value,change,hosts,loading:hostState?.loading??loading,error:hostState?.error??error,refresh:hostState?.refresh??(()=>setRevision(previous=>previous+1)),snapshot};
 }
 
-export function ChatAssistantControls({assistant,allowed,user,providers,disabled=false,compact=false}:{assistant:ReturnType<typeof useChatAssistant>;allowed:boolean;user?:User;providers:Provider[];disabled?:boolean;compact?:boolean}) {
+export function ChatAssistantControls({assistant,allowed,user,providers,disabled=false,compact=false,localHostId='',onDownload}:{assistant:ReturnType<typeof useChatAssistant>;allowed:boolean;user?:User;providers:Provider[];disabled?:boolean;compact?:boolean;localHostId?:string;onDownload?():void}) {
   const id=useId(),{value,hosts}=assistant;
   const [open,setOpen]=useState(false),[placement,setPlacement]=useState<{layer:CSSProperties;panel:CSSProperties;sheet:boolean}>(),[ownedPortal,setOwnedPortal]=useState('');
   const trigger=useRef<HTMLButtonElement>(null),panel=useRef<HTMLElement>(null),body=useRef<HTMLDivElement>(null),heading=useRef<HTMLDivElement>(null),closeButton=useRef<HTMLButtonElement>(null);
@@ -142,14 +141,7 @@ export function ChatAssistantControls({assistant,allowed,user,providers,disabled
         <div ref={heading} className="chat-assistant-dialog-heading"><div><h2 id={`${id}-title`}>Chat + Agent</h2><p id={`${id}-description`}>需要操作电脑时交给后台 Agent，聊天继续。</p></div><button ref={closeButton} type="button" aria-label="关闭 Chat + Agent 设置" onClick={()=>setOpen(false)}><X size={18}/></button></div>
         <div ref={body} className="chat-assistant-options">
       <label className="chat-assistant-enable"><input type="checkbox" role="switch" aria-label="启用 Chat + Agent" checked={value.enabled} disabled={disabled||!allowed||(!value.enabled&&!!issue)} onChange={event=>assistant.change({...value,enabled:event.target.checked})}/><span>自动派发 Agent 任务<small>按下方设置执行，仅本次登录有效。</small></span></label>
-      <div className="chat-assistant-target-row">
-        <label htmlFor={`${id}-host`}><span>执行电脑</span><select id={`${id}-host`} aria-label="Chat + Agent 执行电脑" value={value.hostId} disabled={disabled||!allowed} onChange={event=>assistant.change({...value,hostId:event.target.value})}>
-          <option value="">请选择一台电脑</option>
-          {value.hostId&&!selected&&<option value={value.hostId} disabled>此前选择的电脑 · 未连接</option>}
-          {hosts.map(host=><option key={host.id} value={host.id} disabled={!host.online}>{host.name} · {host.kind==='central'?'服务器':executionPlatform(host.platform)} · {host.online?'在线':'离线'}</option>)}
-        </select></label>
-        <button type="button" className="chat-assistant-refresh" aria-label="刷新 Chat + Agent 电脑" disabled={assistant.loading||!allowed} onClick={assistant.refresh}>{assistant.loading?<Loader2 size={15} className="spin"/>:<RefreshCw size={15}/>}</button>
-      </div>
+      <ExecutionHostPicker hosts={hosts} value={value.hostId} label="Chat + Agent 执行电脑" disabled={disabled||!allowed} loading={assistant.loading} localHostId={localHostId} lockReason={!allowed?'请先登录并开通 Agent 权限。':'当前回复结束后，可以调整下一次任务的设置。'} onRefresh={allowed?assistant.refresh:undefined} onDownload={onDownload} onChange={hostId=>{if(!disabled&&allowed&&hosts.some(host=>host.id===hostId&&host.online))assistant.change({...value,hostId});}}/>
       <ModelPicker providers={providers} value={value.providerId} label="后台 Agent 模型" fallbackLabel={user?.isOwner?'主机默认模型':'选择 Agent 模型'} fallbackOption={user?.isOwner?{label:'主机默认模型',description:'使用执行主机的 Codex 配置'}:undefined} disabled={disabled||!allowed} onChange={providerId=>assistant.change({...value,providerId})}/>
       <div className="chat-assistant-permissions"><AgentPermissions value={value.permissions} user={user} disabled={disabled||!allowed} onChange={permissions=>assistant.change({...value,permissions})}/></div>
       {!allowed?<p className="chat-assistant-note">请先登录并开通 Agent 权限。</p>:assistant.error?<p className="chat-assistant-note is-error" role="status">{assistant.error}</p>:issue?<p className="chat-assistant-note" role="status">{issue}</p>:disabled?<p className="chat-assistant-note" role="status">当前回复结束后，可以调整下一次任务的设置。</p>:null}
