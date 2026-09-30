@@ -22,19 +22,6 @@
 .workspace-mode-row .agent-onboarding{flex:1 1 100%;margin:0;padding:10px 0;border-top:0;border-bottom:0}
 .workspace-mode-row .agent-onboarding-copy>p{font-size:12px}
 .workspace-mode-row .agent-onboarding-ready{margin-left:auto}
-.workspace-disclosure{position:relative;min-width:0;color:#5e735b}
-.workspace-disclosure>summary{display:flex;align-items:center;gap:7px;list-style:none;cursor:pointer;min-height:34px;padding:5px 7px;font-size:12px;line-height:1.5;border-radius:7px;white-space:nowrap}
-.workspace-disclosure>summary::-webkit-details-marker{display:none}
-.workspace-disclosure>summary:hover,.workspace-disclosure[open]>summary{background:#edf2e7;color:#355a42}
-.workspace-disclosure>summary:focus-visible{outline:2px solid #648d70;outline-offset:2px}
-.workspace-disclosure .disclosure-chevron{margin-left:auto;transition:transform .16s ease}
-.workspace-disclosure[open]>summary>.disclosure-chevron{transform:rotate(180deg)}
-.workspace-disclosure-content{position:absolute;z-index:40;top:calc(100% + 7px);right:0;width:320px;max-width:calc(100vw - 36px);max-height:min(420px,65dvh);overflow-y:auto;overscroll-behavior:contain;padding:17px;background:#fcfdf9;border:1px solid #dce5d6;border-radius:12px;box-shadow:0 10px 34px #203f2a20;animation:workspace-popover-in .14s ease-out;color:#52684e}
-.workspace-disclosure-content>h3{font-size:13px;line-height:1.6;color:#36573c;margin-bottom:10px}
-.workspace-disclosure-content>p{font-size:12px;line-height:1.8;margin:7px 0 0;white-space:normal}
-.workspace-disclosure-content .agent-onboarding-hint{display:flex;align-items:flex-start;gap:6px;color:#6d7b63}
-.workspace-disclosure-content .agent-onboarding-hint svg{margin-top:4px}
-.workspace-disclosure-content .agent-onboarding-configure{margin:14px 0 0;min-height:36px}
 .workspace-host-help{position:static}
 .workspace-host-help>summary{padding:0;min-width:28px;min-height:32px;justify-content:center}
 .workspace-host-help>summary>.disclosure-chevron{display:none}
@@ -42,12 +29,6 @@
 .app-shell .composer-area{padding-top:8px;padding-bottom:12px;position:relative;z-index:13}
 .composer-runtime{display:flex;align-items:center;justify-content:space-between;gap:6px 15px;flex-wrap:wrap;position:relative;z-index:2}
 .composer-runtime .agent-permissions{padding:0;margin:0 0 6px}
-.agent-permissions .workspace-disclosure-content{top:auto;bottom:calc(100% + 7px);left:0;right:auto;width:350px}
-.agent-permissions .agent-permission-fields{display:grid;gap:12px}
-.agent-permissions .agent-permission-fields label{display:flex;align-items:center;font-size:12px;gap:8px}
-.agent-permissions .agent-permission-fields label>span{display:inline}
-.agent-permissions .agent-permission-fields select{margin-left:auto;min-height:38px;max-width:160px;font-size:13px}
-.permission-divider{margin:0 7px;color:#98a28f}
 .composer-runtime .stream-status{margin:0 0 6px;padding:0 3px;max-height:none;min-height:30px;font-size:11px;flex-wrap:wrap;color:#617554;overflow:visible}
 .approval-jump{min-height:30px;color:#315a43;text-decoration:underline;text-underline-offset:3px;font-size:12px}
 .app-shell .composer{box-shadow:none;border-radius:13px}
@@ -114,7 +95,6 @@
  .workspace-host-help>summary{min-width:26px;min-height:34px}
  .workspace-mode-row .agent-onboarding{padding:5px 0}
  .workspace-mode-row .agent-onboarding-configure{margin-left:28px}
- .workspace-disclosure-content{padding:15px}
  .app-shell .composer-area{padding:6px 0 calc(8px + env(safe-area-inset-bottom,0px))}
  .app-shell .composer textarea{padding:11px 13px 4px;font-size:16px;line-height:1.55}
  .app-shell .composer-bottom{padding:0 8px 8px 10px}
@@ -129,7 +109,6 @@
  .agent-queue ol{max-height:120px}
  .agent-queue-actions button{width:38px;height:38px}
  .agent-queue-content textarea{font-size:16px}
- .agent-permissions .agent-permission-fields select{font-size:16px}
  .app-shell .message-text{font-size:14px}
 }
 @media(max-height:680px){
@@ -148,7 +127,6 @@
  .workspace.workspace-companion-visible .pet-panel-bottom{padding-top:12px}
  .workspace.workspace-companion-visible .quiet-note{display:none}
 }
-@media(prefers-reduced-motion:reduce){.workspace-disclosure-content{animation:none}.workspace-disclosure .disclosure-chevron{transition:none}}
 
 /* Shared portrait and keyboard layouts use the available CSS viewport, on every shell. */
 .app-shell .main-area,.app-shell .workspace,.app-shell .chat-area{min-height:0;min-width:0}

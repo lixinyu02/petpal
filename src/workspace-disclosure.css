@@ -1,0 +1,19 @@
+/* Shared by the companion home page and the independently loaded workspace. */
+.workspace-disclosure{position:relative;min-width:0;color:#5e735b}
+.workspace-disclosure>summary{display:flex;align-items:center;gap:7px;list-style:none;cursor:pointer;min-height:34px;padding:5px 7px;font-size:12px;line-height:1.5;border-radius:7px;white-space:nowrap}
+.workspace-disclosure>summary::-webkit-details-marker{display:none}
+.workspace-disclosure>summary:hover,.workspace-disclosure[open]>summary{background:#edf2e7;color:#355a42}
+.workspace-disclosure>summary:focus-visible{outline:2px solid #648d70;outline-offset:2px}
+.workspace-disclosure>summary>svg{flex-shrink:0}
+.workspace-disclosure .disclosure-chevron{margin-left:auto;transition:transform .16s ease}
+.workspace-disclosure[open]>summary>.disclosure-chevron{transform:rotate(180deg)}
+.workspace-disclosure:not([open])>.workspace-disclosure-content{display:none}
+.workspace-disclosure-content{position:absolute;z-index:40;top:calc(100% + 7px);right:0;width:320px;min-width:0;max-width:calc(100vw - 36px);max-height:min(420px,65dvh);overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding:17px;background:#fcfdf9;border:1px solid #dce5d6;border-radius:12px;box-shadow:0 10px 34px #203f2a20;animation:workspace-disclosure-in .14s ease-out;color:#52684e}
+.workspace-disclosure-content>h3{font-size:13px;line-height:1.6;color:#36573c;margin-bottom:10px}
+.workspace-disclosure-content>p{font-size:12px;line-height:1.8;margin:7px 0 0;white-space:normal;overflow-wrap:anywhere}
+.workspace-disclosure-content .agent-onboarding-hint{display:flex;align-items:flex-start;gap:6px;color:#6d7b63}
+.workspace-disclosure-content .agent-onboarding-hint svg{margin-top:4px}
+.workspace-disclosure-content .agent-onboarding-configure{margin:14px 0 0;min-height:36px}
+@keyframes workspace-disclosure-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:650px){.workspace-disclosure-content{padding:15px}.workspace-disclosure>summary{min-height:44px}}
+@media(prefers-reduced-motion:reduce){.workspace-disclosure-content{animation:none}.workspace-disclosure .disclosure-chevron{transition:none}}

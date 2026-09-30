@@ -37,7 +37,11 @@
 @media(max-width:480px){
  .companion-voice-panel { padding:0 2px; }
  .voice-conversation-model select { font-size:16px; }
- .voice-conversation-toolbar { gap:8px; }
+ .voice-conversation-toolbar { display:grid;grid-template-columns:minmax(0,1fr);gap:2px;padding-bottom:4px; }
+ .voice-conversation-toolbar>.chat-assistant-controls { width:100%; }
+ .voice-conversation-toolbar .chat-assistant-controls.is-compact .chat-assistant-trigger { width:100%;max-width:none; }
+ .voice-conversation-toolbar .chat-assistant-trigger-copy { flex:1; }
+ .voice-conversation-toolbar .chat-assistant-controls.is-compact .chat-assistant-trigger-copy>small { max-width:100%; }
  .voice-conversation-heading { font-size:14px; }
  .voice-conversation-captions { max-height:144px; }
  .voice-conversation-actions button { padding-inline:16px; }

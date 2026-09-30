@@ -54,17 +54,22 @@ export function ModelPicker({ providers, value, onChange, disabled = false, labe
   useEffect(() => { setActiveIndex(index => Math.min(index, Math.max(0, filtered.length - 1))); }, [filtered.length]);
   useLayoutEffect(() => {
     if (!open) return;
+    let frame = 0;
     const place = () => {
       const anchor = trigger.current?.getBoundingClientRect(); if (!anchor) return;
       const viewport = window.visualViewport, width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
       const offsetTop = viewport?.offsetTop || 0, offsetLeft = viewport?.offsetLeft || 0;
-      const menuWidth = Math.min(360, width - 24), below = height + offsetTop - anchor.bottom - 16, above = anchor.top - offsetTop - 16;
-      const opensAbove = below < 220 && above > below, maxHeight = Math.max(150, Math.min(430, opensAbove ? above : below));
-      setPlacement({ left: Math.max(offsetLeft + 12, Math.min(anchor.left, width + offsetLeft - menuWidth - 12)), top: opensAbove ? Math.max(offsetTop + 12, anchor.top - maxHeight - 8) : Math.max(offsetTop + 12, anchor.bottom + 8), width: menuWidth, maxHeight });
+      const gutter = 12, gap = 8, menuWidth = Math.min(360, Math.max(1, width - gutter * 2));
+      const below = height + offsetTop - anchor.bottom - gutter - gap, above = anchor.top - offsetTop - gutter - gap;
+      const opensAbove = below < 220 && above > below, available = opensAbove ? above : below;
+      const maxHeight = Math.max(1, Math.min(430, height - gutter * 2, available < 100 ? height - gutter * 2 : available));
+      const top = Math.max(offsetTop + gutter, Math.min(opensAbove ? anchor.top - maxHeight - gap : anchor.bottom + gap, offsetTop + height - gutter - maxHeight));
+      setPlacement({ left: Math.max(offsetLeft + gutter, Math.min(anchor.left, width + offsetLeft - menuWidth - gutter)), top, width: menuWidth, maxHeight });
     };
+    const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(place); };
     place(); search.current?.focus({ preventScroll: true });
-    window.addEventListener('resize', place); window.addEventListener('scroll', place, true); window.visualViewport?.addEventListener('resize', place);
-    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); window.visualViewport?.removeEventListener('resize', place); };
+    window.addEventListener('resize', schedule); window.addEventListener('scroll', schedule, true); window.visualViewport?.addEventListener('resize', schedule); window.visualViewport?.addEventListener('scroll', schedule);
+    return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', schedule); window.removeEventListener('scroll', schedule, true); window.visualViewport?.removeEventListener('resize', schedule); window.visualViewport?.removeEventListener('scroll', schedule); };
   }, [open]);
   useEffect(() => {
     if (!open) return;

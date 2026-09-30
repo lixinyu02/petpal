@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
+import './workspace-disclosure.css';
 
 /** Small settings stay beside their summary without moving the conversation. */
 export default function WorkspaceDisclosure({ label, summary, children, className = '' }: { label: string; summary: ReactNode; children: ReactNode; className?: string }) {
