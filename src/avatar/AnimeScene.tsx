@@ -7,6 +7,7 @@ import { loadAvatarImage, loadAvatarImages, type AvatarImageName } from './anime
 import { animeEmotionMix, animeMouthLayerMix } from './anime-emotion-render.mjs';
 import { animeHeadNodOffset, animePoseTransform, sampleAnimeShoulderWeight } from './anime-pose-render.mjs';
 import { sampleAnimeHairWeights, createAnimeHairMotion } from './anime-rig.mjs';
+import { createVisibleSceneLoop, updateSceneDataset } from './scene-loop.mjs';
 import { bindCompanionGestures, portraitCoordinates, portraitContains } from '../pet/interaction.mjs';
 import { createCompanionFeedback } from '../pet/gesture-feedback.mjs';
 import '../pet/gesture-feedback.css';
@@ -132,7 +133,8 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     const container = host.current;
     if (!container) return;
     let renderer: THREE.WebGLRenderer | undefined;
-    let disposed = false, gpuFailed = false, raf = 0, inView = true, loaded = false, last = 0, time = 0, frames = 0, ready = false, action: PetAction = 'idle', actionStart = 0, lastId = -1;
+    let disposed = false, gpuFailed = false, inView = true, loaded = false, last = 0, time = 0, frames = 0, ready = false, action: PetAction = 'idle', actionStart = 0, lastId = -1;
+    const frameLoop = createVisibleSceneLoop(now => frame(now));
     const abort = new AbortController();
     setFailure(''); setLoading(true); container.dataset.avatarMode = 'loading'; delete container.dataset.optionalEmotionUnavailable;
     const fallback = document.createElement('div'), fallbackModel = document.createElement('div');
@@ -262,8 +264,17 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       if (renderer && !gpuFailed) { try { renderer.setSize(width, height, false); } catch { useFallback('网格画面调整失败，已切换轻量角色。'); } }
     };
     const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(resize) : undefined; resizeObserver?.observe(container); window.addEventListener('resize', resize); resize();
-    const observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => { inView = entries[0]?.isIntersecting !== false; last = 0; if(!inView) performance.step(0,{hidden:true}); }) : undefined; observer?.observe(container);
-    const visibility = () => { last = 0; if(document.hidden) performance.step(0,{hidden:true}); }; document.addEventListener('visibilitychange', visibility);
+    const visibility = () => {
+      last = 0;
+      const visible = !document.hidden && inView;
+      if (!visible) {
+        performance.setInput(callbacks.current.performanceInput || localInput);
+        performance.step(0,{hidden:true});
+      }
+      frameLoop.setActive(visible);
+    };
+    const observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => { inView = entries[0]?.isIntersecting !== false; visibility(); }) : undefined; observer?.observe(container);
+    document.addEventListener('visibilitychange', visibility);
     const emitState = () => callbacks.current.onState?.({ action, x: 0, facing: 1, lookX: gazeX, lookY: gazeY, actionTime: time-actionStart, actionProgress: 0, jumpHeight: 0, speed: 0, autonomous: false, paused: false, autonomyPaused: media.matches });
     const interact = (next: PetInteraction, userGesture = false) => {
       if (action === 'sleep' && next !== 'wake' && next !== 'sleep') return;
@@ -295,7 +306,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     };
     let fallbackFrames = 0;
     const frame = (now: number) => {
-      if (disposed) return; raf = requestAnimationFrame(frame);
+      if (disposed) return;
       if (gpuFailed) releaseGpu();
       if (!loaded || document.hidden || !inView) {
         performance.setInput(callbacks.current.performanceInput || localInput); performance.step(0,{hidden:true}); last = 0; return;
@@ -349,8 +360,11 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
         try {
           renderer.render(scene,camera);
           if (!gpuFailed && !renderer.getContext().isContextLost()) {
-            canvas.dataset.renderFrames = String(++frames); canvas.style.visibility = 'visible'; canvas.removeAttribute('aria-hidden'); canvas.tabIndex = interactive ? 0 : -1;
-            fallback.style.visibility = 'hidden'; fallback.setAttribute('aria-hidden', 'true'); fallback.tabIndex = -1; container.dataset.avatarMode = 'webgl';
+            canvas.dataset.renderFrames = String(++frames);
+            if (container.dataset.avatarMode !== 'webgl') {
+              canvas.style.visibility = 'visible'; canvas.removeAttribute('aria-hidden'); canvas.tabIndex = interactive ? 0 : -1;
+              fallback.style.visibility = 'hidden'; fallback.setAttribute('aria-hidden', 'true'); fallback.tabIndex = -1; container.dataset.avatarMode = 'webgl';
+            }
           } else if (!gpuFailed) useFallback('网格绘图连接已暂停，已切换轻量角色。');
         } catch { useFallback('网格动画未能完成绘制，已切换轻量角色。'); }
       }
@@ -393,25 +407,24 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       const visible = gpuFailed ? fallback : canvas;
       unbindGestures.forEach(binding => binding.refresh());
       if (visible) {
-        visible.dataset.petAction = action; visible.dataset.blink = Math.max(uniforms.blinkLeft.value,uniforms.blinkRight.value).toFixed(2); visible.dataset.speaking = String(pose.speaking); visible.dataset.gazeX = gazeX.toFixed(2);
-        visible.dataset.expression=pose.expression; visible.dataset.mouthShape=pose.mouthShape; visible.dataset.mouthOpen=uniforms.mouth.value.toFixed(3); visible.dataset.speechSource=input.speech ? 'playback-progress' : 'text'; visible.dataset.phase=input.phase;
-        visible.dataset.blinkLeft=uniforms.blinkLeft.value.toFixed(3); visible.dataset.blinkRight=uniforms.blinkRight.value.toFixed(3);
-        visible.dataset.hairLeft=(gpuFailed ? 0 : hair.leftX).toFixed(5); visible.dataset.hairRight=(gpuFailed ? 0 : hair.rightX).toFixed(5); visible.dataset.smile=pose.smileAmount.toFixed(3);
-        visible.dataset.sadness=emotion.sadness.toFixed(3); visible.dataset.tears=emotion.tears.toFixed(3); visible.dataset.eyeSparkle=emotion.sparkle.toFixed(3); visible.dataset.eyeSmile=Math.max(emotion.blinkLeft-pose.blinkLeft,emotion.blinkRight-pose.blinkRight).toFixed(3);
-        visible.dataset.smug=emotion.smug.toFixed(3);visible.dataset.pout=emotion.pout.toFixed(3);visible.dataset.relief=emotion.relief.toFixed(3);visible.dataset.determined=emotion.determined.toFixed(3);
-        visible.dataset.hesitant=emotion.hesitant.toFixed(3);visible.dataset.sleepy=emotion.sleepy.toFixed(3);visible.dataset.expectant=emotion.expectant.toFixed(3);visible.dataset.aggrieved=emotion.aggrieved.toFixed(3);visible.dataset.tender=emotion.tender.toFixed(3);
-        visible.dataset.eyeScaleLeft=emotion.eyeScaleLeft.toFixed(3);visible.dataset.eyeScaleRight=emotion.eyeScaleRight.toFixed(3);
-        visible.dataset.shoulderLift=pose.shoulderLift.toFixed(3);visible.dataset.shoulderY=body.shoulderYPercent.toFixed(3);
-        visible.dataset.microExpression=pose.microExpression;visible.dataset.microProgress=pose.microProgress.toFixed(3);
-        visible.dataset.gesture=body.gesture;visible.dataset.gestureProgress=body.progress.toFixed(3);
-        visible.dataset.bodyX=body.xPercent.toFixed(3);visible.dataset.bodyY=body.yPercent.toFixed(3);visible.dataset.bodyRotation=body.rotationDegrees.toFixed(3);visible.dataset.bodyScale=body.scale.toFixed(4);
-        visible.dataset.headNodY=headNodPercent.toFixed(3);
+        updateSceneDataset(visible.dataset, {
+          petAction: action, blink: Math.max(uniforms.blinkLeft.value,uniforms.blinkRight.value).toFixed(2), speaking: String(pose.speaking), gazeX: gazeX.toFixed(2),
+          expression: pose.expression, mouthShape: pose.mouthShape, mouthOpen: uniforms.mouth.value.toFixed(3), speechSource: input.speech ? 'playback-progress' : 'text', phase: input.phase,
+          blinkLeft: uniforms.blinkLeft.value.toFixed(3), blinkRight: uniforms.blinkRight.value.toFixed(3),
+          hairLeft: (gpuFailed ? 0 : hair.leftX).toFixed(5), hairRight: (gpuFailed ? 0 : hair.rightX).toFixed(5), smile: pose.smileAmount.toFixed(3),
+          sadness: emotion.sadness.toFixed(3), tears: emotion.tears.toFixed(3), eyeSparkle: emotion.sparkle.toFixed(3), eyeSmile: Math.max(emotion.blinkLeft-pose.blinkLeft,emotion.blinkRight-pose.blinkRight).toFixed(3),
+          smug: emotion.smug.toFixed(3), pout: emotion.pout.toFixed(3), relief: emotion.relief.toFixed(3), determined: emotion.determined.toFixed(3),
+          hesitant: emotion.hesitant.toFixed(3), sleepy: emotion.sleepy.toFixed(3), expectant: emotion.expectant.toFixed(3), aggrieved: emotion.aggrieved.toFixed(3), tender: emotion.tender.toFixed(3),
+          eyeScaleLeft: emotion.eyeScaleLeft.toFixed(3), eyeScaleRight: emotion.eyeScaleRight.toFixed(3), shoulderLift: pose.shoulderLift.toFixed(3), shoulderY: body.shoulderYPercent.toFixed(3),
+          microExpression: pose.microExpression, microProgress: pose.microProgress.toFixed(3), gesture: body.gesture, gestureProgress: body.progress.toFixed(3),
+          bodyX: body.xPercent.toFixed(3), bodyY: body.yPercent.toFixed(3), bodyRotation: body.rotationDegrees.toFixed(3), bodyScale: body.scale.toFixed(4), headNodY: headNodPercent.toFixed(3),
+        });
       }
       // A shader failure never counts as a successful WebGL frame. DOM readiness requires its loaded image.
       if (!ready && (frames > 0 || fallbackFrames > 0)) { ready = true; callbacks.current.onReady?.(); emitState(); }
-    }; raf = requestAnimationFrame(frame);
+    }; visibility();
     return () => {
-      disposed = true; abort.abort(); performance.reset(); cancelAnimationFrame(raf); resizeObserver?.disconnect(); observer?.disconnect(); window.removeEventListener('resize', resize); document.removeEventListener('visibilitychange', visibility);
+      disposed = true; frameLoop.dispose(); abort.abort(); performance.reset(); resizeObserver?.disconnect(); observer?.disconnect(); window.removeEventListener('resize', resize); document.removeEventListener('visibilitychange', visibility);
       unbindGestures.forEach(unbind => unbind());
       feedback.dispose();
       releaseGpu(); geometry.dispose(); material.dispose(); canvas?.remove(); fallback.remove();

@@ -5,6 +5,7 @@ import { createPetBehavior } from './behavior';
 import type { PetAction, PetBehaviorState as PetSnapshot, PetInteraction } from './behavior';
 import { bindCompanionGestures } from './interaction.mjs';
 import { createCompanionFeedback } from './gesture-feedback.mjs';
+import { createVisibleSceneLoop } from '../avatar/scene-loop.mjs';
 import './gesture-feedback.css';
 
 export type PetCommand = { action: PetInteraction; id: number };
@@ -67,7 +68,8 @@ export default function PetScene({ command, compact = false, onState, onReady, o
     const media = matchMedia('(prefers-reduced-motion: reduce)');
     const controller = createPetBehavior({ bounds: compact ? [-0.15, 0.15] : [-0.35, 0.35], reducedMotion: media.matches, visible: !document.hidden });
     behavior.current = controller;
-    let inView = true, disposed = false, raf = 0, frames = 0, last = 0, time = 0, sentAt = -1, previousAction: PetAction | undefined, lastId = -1;
+    let inView = true, disposed = false, contextLost = false, frames = 0, last = 0, time = 0, sentAt = -1, previousAction: PetAction | undefined, lastId = -1;
+    const frameLoop = createVisibleSceneLoop(now => tick(now));
     const resize = () => {
       const width = Math.max(container.clientWidth, 1), height = Math.max(container.clientHeight, 1);
       const aspect = width / height, halfHeight = Math.max(1.87, 1.62 / aspect);
@@ -75,7 +77,11 @@ export default function PetScene({ command, compact = false, onState, onReady, o
       camera.updateProjectionMatrix(); renderer.setSize(width, height, false);
     };
     const resizeObserver = new ResizeObserver(resize); resizeObserver.observe(container); resize();
-    const visibility = () => { controller.setVisible(!document.hidden && inView); last = 0; };
+    const visibility = () => {
+      const visible = !document.hidden && inView;
+      controller.setVisible(visible); last = 0;
+      frameLoop.setActive(visible && !contextLost);
+    };
     const observer = new IntersectionObserver(entries => { inView = entries[0]?.isIntersecting !== false; visibility(); }); observer.observe(container);
     const reduced = () => controller.setReducedMotion(media.matches);
     media.addEventListener('change', reduced); document.addEventListener('visibilitychange', visibility);
@@ -98,11 +104,10 @@ export default function PetScene({ command, compact = false, onState, onReady, o
       onLeave: () => controller.clearPointer(),
       onFeedback: value => feedback.update(value, canvas),
     });
-    const lost = (event: Event) => { event.preventDefault(); unbindGestures(); setFailure('3D 画面暂时中断，点击重试即可重新唤起小猫。'); cancelAnimationFrame(raf); };
+    const lost = (event: Event) => { event.preventDefault(); contextLost = true; frameLoop.setActive(false); unbindGestures(); setFailure('3D 画面暂时中断，点击重试即可重新唤起小猫。'); };
     canvas.addEventListener('webglcontextlost', lost);
     const tick = (now: number) => {
       if (disposed) return;
-      raf = requestAnimationFrame(tick);
       if (document.hidden || !inView) { last = 0; return; }
       if (last && now - last < 1000 / 30) return;
       const dt = last ? Math.min((now - last) / 1000, 0.1) : 1 / 30; last = now; time += dt;
@@ -120,9 +125,9 @@ export default function PetScene({ command, compact = false, onState, onReady, o
       if (frames === 2) callbacks.current.onReady?.();
       if (state.action !== previousAction || time - sentAt > 0.5) { previousAction = state.action; sentAt = time; callbacks.current.onState?.(state); }
     };
-    raf = requestAnimationFrame(tick);
+    visibility();
     return () => {
-      disposed = true; cancelAnimationFrame(raf); observer.disconnect(); resizeObserver.disconnect();
+      disposed = true; frameLoop.dispose(); observer.disconnect(); resizeObserver.disconnect();
       document.removeEventListener('visibilitychange', visibility); media.removeEventListener('change', reduced);
       unbindGestures(); feedback.dispose(); canvas.removeEventListener('webglcontextlost', lost);
       cat.dispose(); floorGeometry.dispose(); floorMaterial.dispose(); bowlGeometry.dispose(); bowlMaterial.dispose(); foodGeometry.dispose(); foodMaterial.dispose(); key.shadow.map?.dispose();

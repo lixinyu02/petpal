@@ -1,5 +1,7 @@
 import DownloadsView from './DownloadsView';
-import MessageMarkdown from './MessageMarkdown';
+import ChatMessages from './ChatMessages';
+import {createChatDisplay,type ChatDisplay} from './chat-display.mjs';
+import {useChatScroll} from './useChatScroll';
 import { ModelPicker, ExecutionTarget, AgentOnboarding } from './WorkspaceControls';
 import AgentPermissions, { defaultAgentPermissions } from './AgentPermissions';
 import AgentQueue from './AgentQueue';
@@ -11,7 +13,7 @@ import './workspace.css';
 import { ConnectionDialog } from './auth/LoginGate';
 import UpdatesSettings from './UpdatesSettings';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowUp, Download, ListOrdered, CornerDownRight, Check, ChevronDown, CircleHelp, Code2, Coffee, Copy, Globe2, History, Link2, Loader2, Menu, MessageCircle, Monitor, MoreHorizontal, PawPrint, Pencil, Plug, Plus, Settings2, ShieldCheck, Square, Terminal, Trash2, Unplug, Volume2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Download, ListOrdered, CornerDownRight, Check, ChevronDown, CircleHelp, Code2, Coffee, Globe2, History, Link2, Loader2, Menu, MessageCircle, Monitor, MoreHorizontal, PawPrint, Pencil, Plug, Plus, Settings2, ShieldCheck, Square, Terminal, Trash2, Unplug, Volume2, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { PetOverlay as Overlay, showPet } from './platform/overlay';
 import { useCompanion, hydrateCompanion, readCompanion } from './avatar/preference';
@@ -82,6 +84,7 @@ export default function App() {
   const awakeRef = useRef(mood !== 'sleep');
   awakeRef.current = mood !== 'sleep';
   const abortRef = useRef<AbortController | null>(null);
+  const displayRef=useRef<ChatDisplay|null>(null);
   const busyRef = useRef(false);
   const switchingModelRef = useRef(false);
   const activeRef = useRef<string | null>(null);
@@ -113,6 +116,7 @@ export default function App() {
   const agentSupportsImages=activeAgentProvider?.supportsImages!==false&&activeAgentModel.toLowerCase()!=='halogen-qwen3.8-flash-next';
   const canSendAgent=!!selectedHost?.online&&!!selectedCodex.available&&!hostsError&&!agentUnknown;
   const shownApprovals=currentMode==='codex'?conversation?.agent?.approvals||[]:approvals;
+  const chatScroll=useChatScroll({scrollRef,conversationId:conversation?.id||'',active:ready&&view==='chat'&&!petOnly,messages:conversation?.messages,approvalKey:shownApprovals.map(item=>item.id).join(',')});
   const lastReply = conversation?.messages.slice().reverse().find(message => message.role === 'assistant' && message.status === 'complete' && message.content.trim());
   const performanceInput: PerformanceInput = mood === 'sleep' ? { utteranceId: 'sleep', text: '', phase: 'idle' } : speech.playing
     ? { utteranceId: speech.utteranceId, text: speech.text, phase: 'speaking', speech: { active: speech.active, charIndex: speech.charIndex, ended: speech.ended, audioLevel:speech.audioLevel } }
@@ -125,16 +129,16 @@ export default function App() {
     })}));
   },[]);
 
-  function performancePhase(phase: PerformancePhase, text = '', utteranceId = '') {
+  const performancePhase=useCallback((phase: PerformancePhase, text = '', utteranceId = '') => {
     if (responseTimer.current) clearTimeout(responseTimer.current);
     responseTimer.current = null;
     setResponsePerformance({ utteranceId, text, phase: document.hidden || !awakeRef.current ? 'idle' : phase });
-  }
-  function stopPresentation() { speech.stop(); performancePhase('idle'); }
-  function readReply(message: Message) {
+  },[]);
+  const stopPresentation=useCallback(()=>{speech.stop();performancePhase('idle');},[speech.stop,performancePhase]);
+  const readReply=useCallback((message:Message)=>{
     performancePhase('idle');
     speech.speak(message.content, `${message.id}-manual-${Date.now()}`);
-  }
+  },[performancePhase,speech.speak]);
   function finishResponse(text: string, utteranceId: string, requestId: number) {
     // Keep newly arrived text observable when React batches delta + done in one SSE read.
     // The renderer consumes each character once; this bounded tail only drains that queue.
@@ -195,12 +199,11 @@ export default function App() {
     };
     void poll();return()=>{controller.abort();if(timer)clearTimeout(timer);};
   },[connected,state.user?.canUseCodex,hostScope,hostRefresh,currentMode]);
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: busy ? 'instant' : 'smooth' }); }, [conversation?.messages, busy, approvals]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 3800); return () => clearTimeout(timer); }, [notice]);
   useEffect(() => {
     const hidden = () => { if (document.hidden) { if (responseTimer.current) clearTimeout(responseTimer.current); setResponsePerformance(previous => ({ ...previous, phase: 'idle' })); } };
     document.addEventListener('visibilitychange', hidden);
-    return () => { requestSequence.current++; abortRef.current?.abort(); if (responseTimer.current) clearTimeout(responseTimer.current); document.removeEventListener('visibilitychange', hidden); };
+    return () => { requestSequence.current++; displayRef.current?.close(); abortRef.current?.abort(); if (responseTimer.current) clearTimeout(responseTimer.current); document.removeEventListener('visibilitychange', hidden); };
   }, []);
   useEffect(() => { if (view !== 'chat' || companionKind !== 'anime' || connectionOpen) { if (responseTimer.current) clearTimeout(responseTimer.current); setResponsePerformance({ utteranceId: '', text: '', phase: 'idle' }); } }, [view, companionKind, connectionOpen]);
 
@@ -244,6 +247,7 @@ export default function App() {
     if(images.length&&provider?.supportsImages===false){setError('这个模型仅支持文字，请移除图片或切换模型。');return;}
     const assistantSnapshot=chatAssistant.snapshot();
     const assistantRequest=assistantSnapshot?{assistant:assistantSnapshot,submissionId:crypto.randomUUID()}:undefined;
+    chatScroll.latest();
     stopPresentation();
     busyRef.current = true; setBusy(true); setError(''); setApprovals([]); setStatus('正在想怎么回答你…');
     speech.prepare();
@@ -253,7 +257,7 @@ export default function App() {
     let assistantId = `pending-${Date.now()}`;
     let accepted = false;
     let responseText = '', finalReply: Message | undefined;
-    let failed = false;
+    let failed = false, display:ChatDisplay|undefined;
     performancePhase('thinking', '', assistantId);
     try {
       if (!target) {
@@ -265,19 +269,22 @@ export default function App() {
       const pending: Message[] = [...target.messages, { id: `user-${Date.now()}`, role: 'user', content,attachments:images }, { id: assistantId, role: 'assistant', content: '', status: 'streaming' }];
       setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? { ...c, title: c.messages.length ? c.title : content.slice(0, 32), messages: pending } : c) }));
       setDraft('');
+      display=createChatDisplay({isCurrent:()=>!controller.signal.aborted&&requestSequence.current===requestId&&getSessionEpoch()===accountEpoch,onText:delta=>{
+        setStatus('');
+        performancePhase('speaking',responseText,assistantId);
+        responseTimer.current=setTimeout(()=>{if(!controller.signal.aborted&&requestSequence.current===requestId&&getSessionEpoch()===accountEpoch)performancePhase('thinking',responseText,assistantId);},650);
+        setState(s=>({...s,conversations:s.conversations.map(c=>c.id===target!.id?{...c,messages:c.messages.map(m=>m.id===assistantId?{...m,content:m.content+delta}:m)}:c)}));
+      }});
+      displayRef.current=display;
       await streamMessage(target.id, content, controller.signal, event => {
         if (controller.signal.aborted || requestSequence.current !== requestId || getSessionEpoch() !== accountEpoch) return;
+        if(event.type!=='delta')display?.flush();
+        if(event.type==='done'||event.type==='error')display?.close();
         if (event.type === 'meta') {accepted = true;attachments.clear();}
         if (event.type === 'delta') {
           accepted = true;
-          setStatus('');
           const delta = typeof event.data.text === 'string' ? event.data.text : '';
-          if (delta) {
-            responseText += delta;
-            performancePhase('speaking', responseText, assistantId);
-            responseTimer.current = setTimeout(() => { if (!controller.signal.aborted && requestSequence.current === requestId && getSessionEpoch() === accountEpoch) performancePhase('thinking', responseText, assistantId); }, 650);
-          }
-          setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? { ...c, messages: c.messages.map(m => m.id === assistantId ? { ...m, content: m.content + (event.data.text || '') } : m) } : c) }));
+          if(delta){responseText+=delta;display?.push(delta);}
         }
         if (event.type === 'status') { performancePhase('thinking', responseText, assistantId); setStatus(event.data.message || event.data.text || event.data.status || '正在处理中…'); }
         if (event.type === 'task') { setState(s=>({...s,conversations:s.conversations.map(c=>c.id===target!.id?{...c,assistantTasks:mergeAssistantTask(c.assistantTasks||[],event.data.task)}:c)})); }
@@ -293,10 +300,12 @@ export default function App() {
       },images.map(item=>item.id),assistantRequest);
     } catch (e) {
       if (getSessionEpoch() !== accountEpoch || isSessionChanged(e)) return;
+      display?.flush();
       failed = true;
       performancePhase((e as Error).name === 'AbortError' ? 'idle' : 'error', responseText, assistantId);
       if ((e as Error).name !== 'AbortError') { setError((e as Error).message); if (!accepted) setDraft(content); }
     } finally {
+      display?.close();if(displayRef.current===display)displayRef.current=null;
       if (requestSequence.current === requestId && getSessionEpoch() === accountEpoch) {
         if (failed || controller.signal.aborted) performancePhase(controller.signal.aborted ? 'idle' : 'error', responseText, assistantId);
         try { await refresh(); } catch { setError(previous => previous || '暂时无法刷新会话，请检查服务连接。'); }
@@ -310,6 +319,7 @@ export default function App() {
   async function stop() {
     stopPresentation();
     const active = currentMode==='codex'?conversation?.id:activeRef.current;
+    displayRef.current?.close();
     abortRef.current?.abort();
     if (!active) return;
     setStatus('正在停止…');
@@ -377,6 +387,7 @@ export default function App() {
     if(!agentSubmissionRef.current&&images.length&&!agentSupportsImages){setError('这个 Agent 模型仅支持文字，请移除图片或切换模型。');return;}
     if(!agentSubmissionRef.current&&!canSendAgent){setError(agentUnknown?'这台电脑的执行状态尚未确认，请先检查原任务。':hostsError||(!selectedHost?.online?'所选电脑未在线，请在该电脑登录同一账号后重试。':'所选电脑的 Codex 尚未就绪，请检查客户端。'));return;}
     const submissionHostId=selectedHostId;
+    chatScroll.latest();
     agentSendLock.current=true;setAgentSubmitting(true);setError('');stopPresentation();speech.prepare();
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),40000);
     try{
@@ -461,31 +472,11 @@ export default function App() {
             </div>}
             {currentMode==='codex' && nativeExecutor?.state==='reconnecting' && <p className="execution-reconnect" role="status"><Loader2 size={13} className="spin"/>此电脑连接中断，正在重连。原任务保持暂停。</p>}
           </div>
-          <div className="chat-scroll" ref={scrollRef} aria-live="polite" aria-busy={working}>
-            {!conversation?.messages.length ? <div className="welcome"><div className="welcome-symbol">{currentMode === 'codex' ? <Terminal size={28}/> : <span className="mini-sun">✳</span>}</div><span className="eyebrow">{currentMode === 'codex' ? 'YOUR DESKTOP ASSISTANT' : 'A LITTLE COMPANY, EVERY DAY'}</span><h1>{currentMode === 'codex' ? <>说说任务，<br/>我们一起完成。</> : <>今天，<br/>也一起过吧。</>}</h1><p>{currentMode === 'codex' ? '在所选主机上操作文件、运行程序或使用浏览器。先选择适合这次任务的权限。' : `我是${state.settings.petName}。想聊的、想做的，慢慢告诉我。`}</p><div className="suggestions">{(currentMode === 'codex' ? [{ icon: Monitor, title: '看看音乐播放器', text: '请检查 QQ 音乐和网易云音乐的安装及媒体会话状态，暂不打开或播放。' }, { icon: Globe2, title: '连接音乐网页', text: '请检查 OpenCLI 和浏览器桥的状态，告诉我还需要完成哪些连接步骤。' }] : [{ icon: Coffee, title: '聊聊今天', text: '小伴，陪我聊聊今天吧。' }, { icon: Pencil, title: '把想法写下来', text: '我有一个还不成熟的想法，想和你一起梳理。' }]).map(item => <button key={item.title} onClick={() => chooseSuggestion(item.text)}><item.icon size={19}/><span>{item.title}</span><span className="suggestion-arrow">↗</span></button>)}</div>{!connected && <button className="inline-connect" onClick={() => setConnectionOpen(true)}><Link2 size={14}/>连接个人服务，开始第一段对话</button>}{connected && currentMode === 'chat' && !state.providers.length && <button className="inline-connect" onClick={() => setView('settings')}><Plus size={14}/>{state.user?.isOwner ? '添加模型连接，开始聊天' : '还没有可用模型，请联系管理员分配'}</button>}</div> : <div className="messages">{conversation.messages.map(message => {
-              const ownsSpeech = speech.utteranceId.startsWith(message.id + '-manual-') || speech.utteranceId.startsWith(message.id + '-auto-');
-              const isReading = ownsSpeech && speech.playing;
-              const canRead = message.role === 'assistant' && message.status === 'complete' && !!message.content.trim();
-              return <div key={message.id} className={`message message-${message.role}`}>
-                <span className={`message-avatar ${message.role === 'assistant' ? 'pet-avatar' : ''}`}>{message.role === 'assistant' ? <PawPrint size={16}/> : '我'}</span>
-                <div className="message-content">
-                  <div className="message-author">{message.role === 'assistant' ? state.settings.petName : '我'}{message.role === 'assistant' && <span>{currentMode === 'codex' ? 'Codex' : message.model || ''}</span>}</div>
-                  <MessageImages items={message.attachments}/>{message.steered&&<small className="steered-label"><CornerDownRight size={12}/>已追加到当前任务</small>}<div className="message-text">{(message.content ? message.role === 'assistant' ? <MessageMarkdown content={message.content}/> : message.content : null) || (working && message.role === 'assistant' ? <span className="typing-dots"><i/><i/><i/></span> : <span className="muted">{message.attachments?.length?'图片消息':message.status === 'cancelled' ? '已停止回复' : '未收到回复'}</span>)}</div>
-                  {message.status === 'error' && <small className="message-error">回复未完成</small>}
-                  {message.status === 'cancelled' && message.content && <small className="muted">已停止</small>}
-                  {message.role === 'assistant' && message.content && <div className="message-actions">
-                    <button type="button" className="copy-message" aria-label="复制回复" title="复制回复" disabled={busy} onClick={() => navigator.clipboard.writeText(message.content).then(() => setNotice('已复制回复')).catch(() => setNotice('当前环境无法访问剪贴板'))}><Copy size={13}/></button>
-                    {canRead && <button type="button" className={`message-read ${isReading ? 'message-read-active' : ''}`} aria-label={isReading ? '停止朗读这条回复' : '朗读这条回复'} aria-pressed={isReading} disabled={!isReading && (working || !speech.supported || mood === 'sleep')} title={mood === 'sleep' ? '唤醒小伴后可继续朗读' : !speech.supported ? speech.feedback : isReading ? '停止这条回复的语音' : '朗读这条回复'} onClick={() => isReading ? stopPresentation() : readReply(message)}>
-                      {isReading ? speech.pending ? <Loader2 size={14} className="spin"/> : <Square size={12}/> : <Volume2 size={14}/>}
-                      <span>{isReading ? speech.pending ? '准备语音中 · 停止' : '播放中 · 停止' : '朗读'}</span>
-                    </button>}
-                  </div>}
-                  {ownsSpeech && speech.error && <p className="message-speech-error" role="status">{speech.error}</p>}
-                </div>
-              </div>;
-            })}</div>}
+          <div className="chat-scroll" ref={scrollRef} onScroll={chatScroll.onScroll} aria-live="polite" aria-busy={working}><div className="chat-scroll-content" ref={chatScroll.contentRef}>
+            {!conversation?.messages.length ? <div className="welcome"><div className="welcome-symbol">{currentMode === 'codex' ? <Terminal size={28}/> : <span className="mini-sun">✳</span>}</div><span className="eyebrow">{currentMode === 'codex' ? 'YOUR DESKTOP ASSISTANT' : 'A LITTLE COMPANY, EVERY DAY'}</span><h1>{currentMode === 'codex' ? <>说说任务，<br/>我们一起完成。</> : <>今天，<br/>也一起过吧。</>}</h1><p>{currentMode === 'codex' ? '在所选主机上操作文件、运行程序或使用浏览器。先选择适合这次任务的权限。' : `我是${state.settings.petName}。想聊的、想做的，慢慢告诉我。`}</p><div className="suggestions">{(currentMode === 'codex' ? [{ icon: Monitor, title: '看看音乐播放器', text: '请检查 QQ 音乐和网易云音乐的安装及媒体会话状态，暂不打开或播放。' }, { icon: Globe2, title: '连接音乐网页', text: '请检查 OpenCLI 和浏览器桥的状态，告诉我还需要完成哪些连接步骤。' }] : [{ icon: Coffee, title: '聊聊今天', text: '小伴，陪我聊聊今天吧。' }, { icon: Pencil, title: '把想法写下来', text: '我有一个还不成熟的想法，想和你一起梳理。' }]).map(item => <button key={item.title} onClick={() => chooseSuggestion(item.text)}><item.icon size={19}/><span>{item.title}</span><span className="suggestion-arrow">↗</span></button>)}</div>{!connected && <button className="inline-connect" onClick={() => setConnectionOpen(true)}><Link2 size={14}/>连接个人服务，开始第一段对话</button>}{connected && currentMode === 'chat' && !state.providers.length && <button className="inline-connect" onClick={() => setView('settings')}><Plus size={14}/>{state.user?.isOwner ? '添加模型连接，开始聊天' : '还没有可用模型，请联系管理员分配'}</button>}</div> : <ChatMessages messages={conversation.messages} petName={state.settings.petName} mode={currentMode} working={working} busy={busy} sleeping={mood==='sleep'} speechId={speech.utteranceId} speechPlaying={speech.playing} speechPending={speech.pending} speechSupported={speech.supported} speechFeedback={speech.feedback} speechError={speech.error} onRead={readReply} onStop={stopPresentation} onNotice={setNotice}/>}
             {shownApprovals.map(approval => <div className="approval" key={approval.id} tabIndex={-1}><ShieldCheck size={21}/><div><strong>Codex 请求你的确认</strong><p>{approval.description}</p><div className="button-row"><button className="secondary-button" onClick={() => approve(approval, 'decline')}>拒绝</button><button className="primary-button" onClick={() => approve(approval, 'accept')}>允许本次</button></div></div></div>)}
-          </div>
+          </div></div>
+          {chatScroll.showLatest&&<button type="button" className="chat-latest-button" aria-label="回到最新消息" onClick={chatScroll.latest}><ArrowDown size={14}/><span>回到最新</span></button>}
           <div className="composer-area">{currentMode==='chat'&&<ChatAssistantTasks conversationId={conversation?.id} tasks={conversation?.assistantTasks} onUpdate={updateChatTasks}/>} {error&&<div className="error-banner" role="alert"><span>{error}</span><button className="icon-button" aria-label="关闭错误提示" onClick={()=>setError('')}><X size={15}/></button></div>}{currentMode==='codex'&&conversation?.agent&&<AgentQueue key={conversation.id} conversationId={conversation.id} state={conversation.agent} hosts={agentHosts} refresh={()=>refreshConversation(conversation.id)} onNewConversation={()=>newChat('codex')}/>}<div className="composer-runtime">{currentMode==='codex'?<AgentPermissions value={activePermissions} onChange={setPermissions} user={state.user} disabled={agentRunning||agentUnknown||agentSubmitting||unconfirmed}/>:null}{working&&<div className="stream-status"><Loader2 size={12} className="spin"/>{currentMode==='codex'?(conversation?.agent?.run?.status==='stopping'?'正在停止…':shownApprovals.length?'等待你的确认':'Agent 正在执行'):status||'正在回复…'}{shownApprovals.length>0&&<button type="button" className="approval-jump" onClick={()=>{const target=scrollRef.current?.querySelector<HTMLElement>('.approval');target?.scrollIntoView({block:'nearest'});target?.focus({preventScroll:true});}}>查看请求 ({shownApprovals.length})</button>}</div>}</div><form className={`composer ${working?'composer-busy':''}`} onSubmit={send}>{unconfirmed&&<div className="unconfirmed-submission" role="status"><span>上次提交正在等待确认</span><button type="button" disabled={agentSubmitting} onClick={()=>void sendAgent()}>确认上次提交</button></div>}<AttachmentDrafts value={attachments}/><textarea ref={inputRef} aria-label="消息" placeholder={currentMode==='codex'?(agentRunning?'补充当前任务，或加入下一条任务…':'例如：帮我打开 QQ 音乐'):`和${state.settings.petName}说点什么…`} value={draft} onChange={e=>setDraft(e.target.value)} onPaste={e=>{const files=Array.from(e.clipboardData.files).filter(file=>file.type.startsWith('image/'));if(files.length){e.preventDefault();if(currentMode==='codex'&&!agentSupportsImages){setError('这个 Agent 模型仅支持文字，请切换模型后再添加图片。');return;}void attachments.upload(files);}}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}} rows={2} maxLength={20000} disabled={busy||agentSubmitting||unconfirmed}/><div className="composer-bottom"><div className="composer-tools"><AttachmentInput value={attachments} disabled={busy||agentSubmitting||unconfirmed||(currentMode==='chat'?provider?.supportsImages===false:!agentSupportsImages)}/>{agentRunning&&<label className="agent-send-choice"><select aria-label="Agent 发送方式" value={sendChoice} onChange={e=>setSendChoice(e.target.value as 'steer'|'submit')}><option value="steer">追加到当前任务</option><option value="submit">排队，稍后执行</option></select></label>}</div><div className="composer-send-actions">{working&&<button className="send-button stop-button" type="button" aria-label="停止生成" onClick={()=>void stop()}><Square size={14}/></button>}{!busy&&<button className="send-button" aria-label={agentRunning?(sendChoice==='steer'?'追加指令':'加入队列'):'发送消息'} type="submit" disabled={(!draft.trim()&&!attachments.items.length)||switchingModel||agentSubmitting||unconfirmed||attachments.uploading||(currentMode==='codex'&&(!canSendAgent||(!state.user?.isOwner&&!agentProviderId)))||!!(agentRunning&&sendChoice==='steer'&&!conversation?.agent?.run?.turnId)}>{agentSubmitting?<Loader2 size={18} className="spin"/>:agentRunning?sendChoice==='steer'?<CornerDownRight size={18}/>:<ListOrdered size={18}/>:<ArrowUp size={21}/>}</button>}</div></div></form>
             <div className="composer-footer">
               <div className="speech-controls">
