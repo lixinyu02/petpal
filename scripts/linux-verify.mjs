@@ -12,6 +12,7 @@ if (!archive) throw new Error('Usage: node scripts/linux-verify.mjs <PetPal-Ubun
 const native = []; const failures = []; const frontend = []; const applicationSource = []; const seen = new Set(); let manifest; let count = 0;
 const requiredApplicationSource = ['server/app.mjs', 'server/auth.mjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/updates.mjs', 'desktop/updates.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/index.mjs', 'server/providers.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'NOTICE'];
 requiredApplicationSource.push('desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs');
+requiredApplicationSource.push('server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs');
 requiredApplicationSource.push('desktop/startup-diagnostics.cjs', 'server/music-mcp.mjs', 'server/music-mcp-routes.mjs',
   'server/native/music-mcp/netease/server.py', 'server/native/music-mcp/netease/LICENSE', 'server/native/music-mcp/netease/pyproject.toml', 'server/native/music-mcp/netease/PROVENANCE.json',
   'server/native/music-mcp/qqmusic/login.py', 'server/native/music-mcp/qqmusic/LICENSE', 'server/native/music-mcp/qqmusic/pyproject.toml', 'server/native/music-mcp/qqmusic/PROVENANCE.json',
@@ -21,7 +22,14 @@ const packageMetadata = new Map(), dependencyHashes = new Map(), launchers = new
 requiredApplicationSource.push('server/computer-use-mcp.mjs','server/computer-use-tool-names.mjs','server/computer-use-mcp-routes.mjs','server/dynamic-tool-output.mjs','server/model-request-limits.mjs');
 requiredApplicationSource.push('server/native/computer-use/LICENSE','server/native/computer-use/patches/linux-x11-window-geometry.patch');
 const computerPrefix='node_modules/@zavora-ai/computer-use-mcp/';
-const requiredOpencliFiles = ['package.json', 'LICENSE', 'cli-manifest.json', 'dist/src/main.js', 'dist/src/daemon.js', 'dist/src/browser/base-page.js'].map(name => `node_modules/@jackwener/opencli/${name}`);
+const requiredOpencliFiles = ['package.json', 'LICENSE', 'cli-manifest.json', 'dist/src/main.js', 'dist/src/daemon.js', 'dist/src/browser/base-page.js',
+  'dist/src/execution.js', 'dist/src/registry.js', 'dist/src/errors.js',
+  'clis/36kr/news.js', 'clis/arxiv/paper.js', 'clis/arxiv/recent.js', 'clis/arxiv/search.js', 'clis/arxiv/utils.js', 'clis/bbc/news.js',
+  'clis/github-trending/repos.js', 'clis/hackernews/read.js', 'clis/hackernews/search.js', 'clis/hackernews/top.js',
+  'clis/juejin/hot.js', 'clis/juejin/recommend.js', 'clis/juejin/utils.js', 'clis/mdn/search.js',
+  'clis/npm/package.js', 'clis/npm/search.js', 'clis/npm/utils.js', 'clis/steam/app.js', 'clis/steam/search.js', 'clis/steam/top-sellers.js', 'clis/steam/utils.js',
+  'clis/toutiao/hot.js', 'clis/toutiao/utils.js', 'clis/v2ex/hot.js', 'clis/v2ex/latest.js', 'clis/v2ex/topic.js',
+  'clis/wikipedia/search.js', 'clis/wikipedia/summary.js', 'clis/wikipedia/utils.js'].map(name => `node_modules/@jackwener/opencli/${name}`);
 const archivePrefix = path.basename(archive).replace(/\.tar\.gz$/, '');
 await tar.t({ file: archive, strict: true, onReadEntry(entry) {
   count++;

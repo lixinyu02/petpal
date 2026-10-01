@@ -24,6 +24,7 @@ const codexVersion = metadata.dependencies['@openai/codex'];
 const opencliVersion = metadata.dependencies['@jackwener/opencli'];
 const requiredApplicationSource = ['server/updates.mjs', 'desktop/updates.mjs', 'server/app.mjs', 'server/auth.mjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/index.mjs', 'server/providers.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'NOTICE'];
 requiredApplicationSource.push('server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs');
+requiredApplicationSource.push('server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs');
 requiredApplicationSource.push('server/computer-use-mcp.mjs','server/computer-use-tool-names.mjs','server/computer-use-mcp-routes.mjs','server/dynamic-tool-output.mjs','server/model-request-limits.mjs');
 requiredApplicationSource.push('server/native/computer-use/LICENSE','server/native/computer-use/patches/linux-x11-window-geometry.patch');
 requiredApplicationSource.push('desktop/startup-diagnostics.cjs', 'server/music-mcp.mjs', 'server/music-mcp-routes.mjs',
@@ -31,7 +32,14 @@ requiredApplicationSource.push('desktop/startup-diagnostics.cjs', 'server/music-
   'server/native/music-mcp/qqmusic/login.py', 'server/native/music-mcp/qqmusic/LICENSE', 'server/native/music-mcp/qqmusic/pyproject.toml', 'server/native/music-mcp/qqmusic/PROVENANCE.json',
   'server/native/music-mcp/qqmusic/src/mcp_qqmusic/__init__.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/__main__.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/server.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/format.py');
 const opencliPrefix = 'node_modules/@jackwener/opencli';
-const requiredOpencliFiles = ['package.json', 'LICENSE', 'cli-manifest.json', 'dist/src/main.js', 'dist/src/daemon.js', 'dist/src/browser/base-page.js'];
+const requiredOpencliFiles = ['package.json', 'LICENSE', 'cli-manifest.json', 'dist/src/main.js', 'dist/src/daemon.js', 'dist/src/browser/base-page.js',
+  'dist/src/execution.js', 'dist/src/registry.js', 'dist/src/errors.js',
+  'clis/36kr/news.js', 'clis/arxiv/paper.js', 'clis/arxiv/recent.js', 'clis/arxiv/search.js', 'clis/arxiv/utils.js', 'clis/bbc/news.js',
+  'clis/github-trending/repos.js', 'clis/hackernews/read.js', 'clis/hackernews/search.js', 'clis/hackernews/top.js',
+  'clis/juejin/hot.js', 'clis/juejin/recommend.js', 'clis/juejin/utils.js', 'clis/mdn/search.js',
+  'clis/npm/package.js', 'clis/npm/search.js', 'clis/npm/utils.js', 'clis/steam/app.js', 'clis/steam/search.js', 'clis/steam/top-sellers.js', 'clis/steam/utils.js',
+  'clis/toutiao/hot.js', 'clis/toutiao/utils.js', 'clis/v2ex/hot.js', 'clis/v2ex/latest.js', 'clis/v2ex/topic.js',
+  'clis/wikipedia/search.js', 'clis/wikipedia/summary.js', 'clis/wikipedia/utils.js'];
 if (![electronVersion, codexVersion, opencliVersion].every(version => /^\d+\.\d+\.\d+$/.test(version))) throw new Error('Electron, Codex and OpenCLI versions must be exact.');
 const requested = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const architectures = requested.length ? requested : ['x64', 'arm64'];

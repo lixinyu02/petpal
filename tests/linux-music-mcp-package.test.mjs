@@ -37,6 +37,12 @@ async function requiredSource(script){
     ||ts.isExpressionStatement(statement)&&ts.isCallExpression(statement.expression)&&statement.expression.expression.getText(parsed)==='requiredApplicationSource.push');
   return [...vm.runInNewContext(`${statements.map(statement=>statement.getText(parsed)).join('\n')}\nrequiredApplicationSource;`)];
 }
+async function requiredOpencliRuntime(){
+  const source=await readFile(path.join(root,'scripts/linux-verify.mjs'),'utf8');
+  const parsed=ts.createSourceFile('linux-verify.mjs',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
+  const declaration=parsed.statements.find(statement=>ts.isVariableStatement(statement)&&statement.declarationList.declarations.some(item=>item.name.getText(parsed)==='requiredOpencliFiles'));
+  return [...vm.runInNewContext(`${declaration.getText(parsed)}\nrequiredOpencliFiles;`)];
+}
 
 test('Linux package and independent verifier require the complete pinned music MCP sources',async()=>{
   const packagePolicy=await requiredSource('linux-package.mjs'),verifyPolicy=await requiredSource('linux-verify.mjs');
@@ -77,7 +83,8 @@ test('Linux archive audit rejects every missing or modified music MCP vendor mem
   const prefix='node_modules/@jackwener/opencli';
   const pkg={name:'@jackwener/opencli',version:'1.8.8',license:'Apache-2.0',engines:{node:'>=22'}};
   const opencliFiles=[];
-  for(const file of ['package.json','LICENSE','cli-manifest.json','dist/src/main.js','dist/src/daemon.js','dist/src/browser/base-page.js']){
+  for(const member of await requiredOpencliRuntime()){
+    const file=member.slice(prefix.length+1);
     const content=Buffer.from(file==='package.json'?JSON.stringify(pkg):`fixture ${file}`);
     await put(`resources/app/${prefix}/${file}`,content);opencliFiles.push({path:`${prefix}/${file}`,sha256:hash(content)});
   }
@@ -97,7 +104,7 @@ test('Linux archive audit rejects every missing or modified music MCP vendor mem
     catch(error){assert.equal(error.code,1,error.stderr);return {code:error.code,...JSON.parse(error.stdout)};}
   }
   const baseline=await verify();assert.equal(baseline.ok,true,baseline.failures.join('\n'));
-  for(const file of [...vendorFiles,'server/native/computer-use/patches/linux-x11-window-geometry.patch']){
+  for(const file of [...vendorFiles,'server/native/computer-use/patches/linux-x11-window-geometry.patch','server/opencli-manager.mjs','server/opencli-sites.mjs','server/opencli-worker.mjs','server/opencli-routes.mjs']){
     await t.test(`missing ${file}`,async()=>{
       await rm(path.join(app,file));
       try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Required application source missing: ${file}`));}
@@ -109,6 +116,11 @@ test('Linux archive audit rejects every missing or modified music MCP vendor mem
       finally{await put(`resources/app/${file}`,bytes.get(file));}
     });
   }
+  for(const file of ['dist/src/registry.js','clis/arxiv/utils.js'])await t.test(`missing OpenCLI query dependency ${file}`,async()=>{
+    await rm(path.join(app,prefix,file));
+    try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`OpenCLI required runtime/license absent: ${prefix}/${file}`));}
+    finally{await put(`resources/app/${prefix}/${file}`,Buffer.from(`fixture ${file}`));}
+  });
   await t.test('private credential files are outside the vendor distribution inventory',async()=>{
     const file='server/native/music-mcp/qqmusic/credential.json';await put(`resources/app/${file}`,'{"private":"fixture"}');
     const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Unexpected packaged music MCP member: ${file}`));
