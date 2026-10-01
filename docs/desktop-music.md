@@ -56,9 +56,13 @@ Linux shell 可使用 `PETPAL_CODEX_HTTP_ORIGINS='http://gateway.example:8080' n
 
 0.6.1 在普通模型连接和 Codex API 设置中增加「推理强度」。选「服务默认」时不覆盖服务设置；例如 `gpt-6-luna` 配合 `max` 会实际发送 Responses `reasoning.effort=max`，Codex 也会使用这一强度。支持的级别依模型与网关而定，错误会直接显示，不会悄悄降低强度。修改 Codex 模型或强度后新建工作对话，旧历史保留。
 
-0.6 可直接连接 CLIProxyAPI 的 Responses 端点。`management.html#/login` 是管理页面；模型连接应填写 API Base URL，例如 `http://gateway.example:8317/v1`。使用「API 密钥列表（api-keys）」中的客户端密钥，不使用管理登录密码或上游 OAuth 凭证。
+0.6 可直接连接 CLIProxyAPI 的 Responses 端点。`management.html#/login` 是管理页面；模型连接应填写 API Base URL，例如 `https://gateway.example:8317/v1`。使用「API 密钥列表（api-keys）」中的客户端密钥，不使用管理登录密码或上游 OAuth 凭证。
 
 先带客户端鉴权查询 `/v1/models`，选择该网关实际提供的文本模型，再分别配置普通聊天的 `Responses` 连接和「电脑助手」的 Codex API。网关公布模型名称不等于当前上游可用，须以非空实际回复确认。切换 Codex 后新建工作对话；原历史仍可查看。
+
+当前生产 CPA 地址为 `https://magicdatou.top:8317/v1`。Codex 与四个 CPA Responses 模型连接均使用这个地址；二者必须同步，才能继续在 Agent 模型菜单中选择。证书绑定域名，应使用匹配证书的域名，不直接填写局域网 IP，也不关闭证书验证。Chat Completions 与 Responses 都保留 HTTPS。
+
+登录中央服务的 Web / Android / PC 远程 Agent 经中央模型 relay 使用当前 CPA 配置，执行电脑不需要另存 CPA 上游密钥。PC 独立本机模式的模型配置仍独立保存，若曾自行填写旧 HTTP 地址，应在本机模型连接和 Codex 设置中一起更新；HTTPS 不需要配置 HTTP 例外。
 
 HTTP 部署须先把新 origin 追加至允许名单，再重启服务并保存新连接。在旧配置尚未切换时不要删除原 origin，否则启动验证会拒绝旧配置。源码服务和桌面版分别保存自己的连接；普通聊天默认模型也分别设置。切换前备份私人连接配置，不把密钥放进文档或发布包。
 
