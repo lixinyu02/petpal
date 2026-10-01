@@ -18,7 +18,7 @@ export default function AgentPermissions({ value, onChange, user, disabled=false
         <option value="ask">需要时询问</option><option value="review">自动审查</option><option value="auto">自动运行</option>
       </select></label>
     </div>
-    {value.access === 'full-access' && <p className="agent-permission-notice">完全访问可读写执行主机的文件并运行程序。只向可信账号授予此权限。</p>}
+    {value.access === 'full-access' && <p className="agent-permission-notice">完全访问可读写执行主机的文件并运行程序。Windows 管理员确认仍需在执行电脑上处理；只向可信账号授予此权限。</p>}
     {value.approval === 'auto' && <p className="agent-permission-notice">在所选范围内自动运行，不弹出操作确认；范围外的操作会被拒绝。</p>}
     {value.approval === 'review' && <p className="agent-permission-note">Codex 自动审查命令；音乐和浏览器等主机工具仍需要你确认。</p>}
     {disabled && <p className="agent-permission-note">本次任务的权限已固定，下次任务开始前可以调整。</p>}

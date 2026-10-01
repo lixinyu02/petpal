@@ -2,7 +2,7 @@
 
 - Date: 2026-10-02
 - Complexity: L1
-- Status: in_progress
+- Status: complete（软件启动链已测，游戏主界面等待本机 UAC 确认）
 
 ## 目标与方案
 
@@ -15,3 +15,11 @@
 ## 验证与上线
 
 验证账号隔离、归属、离线保存、清空和重启持久化，偏好优先级与 snapshot；真实 Chrome 的普通账号弹窗、保存和 412×960；真实 Chat 派发 Codex 打开国服无畏契约，核对工具执行、实际目标进程或窗口。若出现登录/UAC/更新等系统交互，如实记录所在阶段。上线前检查无活动任务，备份源码与私有状态，保留冻结客户端和更新清单。
+
+## 实测结果与系统权限边界
+
+真实 CPA Qwen Responses Chat 调用 run_agent，在已保存的中央 Windows 电脑派发真实 Codex 任务；工具轨迹确认 Start-Process 国服入口，拉起 launcher、WeGame、tcls_core 与 WeGame browser 窗口。用户观察到 UAC，游戏主进程和主界面未验证；后台任务结束并将结果回写父 Chat。通过 expectedTurnId 引导实际运行中的任务停止重试。
+
+只读 PE manifest 检查确认国服 launcher、WeGame 和 tcls_core 均为 requireAdministrator；当前执行器是交互会话中的普通权限进程。游戏本体虽 asInvoker，另有兼容性 RUNASADMIN，但改它无法解除启动链要求。因此不提供已验证的免 UAC 启动方式；保留本机系统确认，不改变程序签名、系统权限或公开后端身份。界面解释完全访问仍需本机管理员确认，Codex 指令明确遇到 UAC/安全桌面不再重试启动或唤醒，不将黑屏直接断言为休眠/DRM，不把启动器作为完成证据。
+
+网页和后端完成上线；账号默认跨刷新保留，普通账号实际保存已验收，原有 32 个会话及模型配置保留。本轮没有重新制作客户端安装包，因此旧客户端内置界面尚不包含账号默认保存按钮；四端共享的新源码与后端接口已就绪。
