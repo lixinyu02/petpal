@@ -28,7 +28,7 @@ export default function CompanionWorld() {
   const [ready, setReady] = useState(false);
   const captions = useRef<HTMLDivElement>(null);
   const voiceScope=session?.instanceId&&user?`${session.instanceId}:${user.id}`:'guest';
-  const chatAssistant=useChatAssistant({scope:voiceScope,allowed:!!user?.canUseCodex});
+  const chatAssistant=useChatAssistant({scope:voiceScope,allowed:!!user?.canUseCodex,defaultHostId:session?.settings.chatAssistantHostId,onSettingsChanged:settings=>setSession(previous=>previous?{...previous,settings}:previous)});
   const localHostId=nativeExecutor?.state==='online'?nativeExecutor.hostId||'':'';
   useEffect(()=>{
     const executor=window.petpal?.executor,epoch=getSessionEpoch();let alive=true,timer:ReturnType<typeof setTimeout>|undefined;

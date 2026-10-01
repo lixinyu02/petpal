@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {chatAssistantTargetIssue,mergeAssistantTask,mergeChatAssistantConversation,readChatAssistantPreferences,saveChatAssistantPreferences,snapshotChatAssistant} from '../src/chat-assistant-preferences.mjs';
+import {chatAssistantDefaultIssue,chatAssistantTargetIssue,mergeAssistantTask,mergeChatAssistantConversation,readChatAssistantPreferences,restoreChatAssistantPreferences,saveChatAssistantPreferences,snapshotChatAssistant} from '../src/chat-assistant-preferences.mjs';
 
 const storage=()=>{const entries=new Map();return{getItem:key=>entries.get(key)||null,setItem:(key,value)=>entries.set(key,value),entries};};
 const selected={hostId:'desk-one',providerId:'model-one',enabled:true,permissions:{access:'full-access',approval:'auto'}};
@@ -21,7 +21,29 @@ test('each turn takes a detached host, model and permission snapshot; disabled o
   assert.deepEqual(turn,{enabled:true,hostId:'desk-one',providerId:'model-one',permissions:{access:'full-access',approval:'auto'}});
   assert.equal(snapshotChatAssistant(selected,false),undefined);
   assert.equal(snapshotChatAssistant({...selected,enabled:false},true),undefined);
-  assert.equal(snapshotChatAssistant({...selected,hostId:''},true),undefined);
+  assert.throws(()=>snapshotChatAssistant({...selected,hostId:''},true),/默认执行电脑/);
+});
+
+test('account default overrides a stale browser target without persisting authority or changing other accounts',()=>{
+  const local=storage();saveChatAssistantPreferences(local,'server:alice',selected);
+  const restored=restoreChatAssistantPreferences(local,'server:alice','central');
+  assert.equal(restored.hostId,'central');assert.equal(restored.providerId,'model-one');
+  assert.equal(Object.hasOwn(restored,'enabled'),false);assert.equal(Object.hasOwn(restored,'permissions'),false);
+  assert.equal(restoreChatAssistantPreferences(local,'server:bob',null).hostId,'');
+  assert.equal(restoreChatAssistantPreferences(local,'server:alice',null).hostId,'desk-one');
+  assert.match(chatAssistantDefaultIssue(selected,''),/保存/);
+  assert.equal(chatAssistantDefaultIssue(selected,'desk-one'),'');
+});
+
+test('an enabled turn cannot use an unsaved candidate or silently switch away from an unavailable account default',()=>{
+  assert.throws(()=>snapshotChatAssistant(selected,true,undefined,''),/默认执行电脑/);
+  assert.throws(()=>snapshotChatAssistant(selected,true,undefined,'desk-two'),/默认执行电脑/);
+  assert.equal(snapshotChatAssistant({...selected,enabled:false},true,undefined,''),undefined);
+  const local=storage();saveChatAssistantPreferences(local,'server:alice',selected);
+  const restored=restoreChatAssistantPreferences(local,'server:alice','missing-desktop');
+  assert.equal(restored.hostId,'missing-desktop');
+  assert.match(chatAssistantTargetIssue(restored,[{id:'central',online:true}],[],true),/离线/);
+  assert.equal(snapshotChatAssistant({...selected,hostId:'missing-desktop'},true,undefined,'missing-desktop').hostId,'missing-desktop');
 });
 
 test('offline or missing targets are preserved and never rerouted to another online computer',()=>{

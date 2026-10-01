@@ -10,8 +10,9 @@ import { restoreAssistantTasks } from './chat-assistant.mjs';
 import { validateStoredNotifications } from './notifications.mjs';
 
 export const isCompanionKind = value => value === 'anime' || value === 'cat';
+const isChatAssistantHostId = value => value === null || typeof value === 'string' && (value === 'central' || /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value));
 
-export const defaultSettings = () => ({ petName: '小伴', companionKind: 'anime', persona: '你是小伴，一位温柔、好奇的个人 AI 伙伴。用自然简洁的中文陪伴用户，诚实回答问题，不假装已经执行没有执行的操作。', defaultProviderId: null });
+export const defaultSettings = () => ({ petName: '小伴', companionKind: 'anime', persona: '你是小伴，一位温柔、好奇的个人 AI 伙伴。用自然简洁的中文陪伴用户，诚实回答问题，不假装已经执行没有执行的操作。', defaultProviderId: null, chatAssistantHostId: null });
 const owner = () => ({ id: randomUUID(), username: 'owner', displayName: '主机管理员', role: 'admin', agentAccess: 'full', disabled: false, providerIds: [], password: null, voice: defaultVoiceSettings(), createdAt: new Date().toISOString() });
 const initialState = () => {
   const user = owner();
@@ -20,6 +21,8 @@ const initialState = () => {
 };
 
 export class JsonStore {
+  #chatAssistantHosts = null;
+
   constructor(directory) { this.directory = path.resolve(directory); this.file = path.join(this.directory, 'state.json'); this.queue = Promise.resolve(); }
 
   async init() {
@@ -73,6 +76,8 @@ export class JsonStore {
       if (settings.companionKind === undefined) { settings.companionKind = 'anime'; changed = true; }
       else if (!isCompanionKind(settings.companionKind)) throw new Error('本地 companionKind 无效，必须是 anime 或 cat；请保留文件并检查备份。');
       if (settings.defaultProviderId === undefined) { settings.defaultProviderId = null; changed = true; }
+      if (settings.chatAssistantHostId === undefined) { settings.chatAssistantHostId = null; changed = true; }
+      else if (!isChatAssistantHostId(settings.chatAssistantHostId)) throw new Error('本地 Chat + Agent 默认执行电脑格式无效。');
       if (!user.voice) { user.voice = defaultVoiceSettings(); changed = true; }
     }
     const principal = state.users.find(user => user.id === state.ownerId);
@@ -80,6 +85,10 @@ export class JsonStore {
     if (state.sessions.some(session => !ids.has(session.userId) || !/^[a-f0-9]{64}$/.test(session.tokenHash) || !Number.isFinite(session.expiresAt))) throw new Error('本地登录会话数据无效。');
     if (validateStoredAttachments(state)) changed = true;
     if (validateExecutionHosts(state)) changed = true;
+    for (const user of state.users) {
+      const id = (user.id === state.ownerId ? state.settings : user.settings).chatAssistantHostId;
+      if (id !== null && id !== 'central' && !state.executionHosts.some(host => host.id === id && host.userId === user.id)) throw new Error('本地 Chat + Agent 默认执行电脑归属无效。');
+    }
     for (const conversation of this.state.conversations) {
       if (!ids.has(conversation.userId)) throw new Error('本地会话缺少有效用户归属，已停止加载。');
       for (const hostId of [conversation.agentHostId, conversation.threadHostId, conversation.agent?.run?.hostId, ...(conversation.agent?.queue ?? []).map(entry => entry.hostId)]) {
@@ -95,8 +104,31 @@ export class JsonStore {
       }
     }
     if (validateStoredNotifications(state)) changed = true;
+    this.#chatAssistantHosts = new Map(state.users.map(user => [user.id, (user.id === state.ownerId ? state.settings : user.settings).chatAssistantHostId]));
     if (changed) await this.save();
     return this;
+  }
+
+  #prepareChatAssistantHosts(snapshot, action) {
+    for (const user of snapshot.users) {
+      const settings = user.id === snapshot.ownerId ? snapshot.settings : user.settings;
+      // Merge at queue execution, rather than capture time. Other saves may
+      // have captured the previous target while an explicit change was queued.
+      settings.chatAssistantHostId = this.#chatAssistantHosts?.has(user.id) ? this.#chatAssistantHosts.get(user.id) : settings.chatAssistantHostId ?? null;
+    }
+    if (action === undefined) return;
+    if (!action || typeof action !== 'object' || Array.isArray(action) || Object.keys(action).some(key => !['userId', 'hostId', 'authorize'].includes(key)) || typeof action.userId !== 'string' || !isChatAssistantHostId(action.hostId) || action.authorize !== undefined && typeof action.authorize !== 'function') throw new Error('默认执行电脑持久化操作无效。');
+    action.authorize?.();
+    const user = snapshot.users.find(item => item.id === action.userId);
+    if (!user || !this.state.users.some(item => item.id === action.userId) || action.hostId !== null && action.hostId !== 'central' && !snapshot.executionHosts.some(host => host.id === action.hostId && host.userId === action.userId)) throw new Error('默认执行电脑持久化归属无效。');
+    (user.id === snapshot.ownerId ? snapshot.settings : user.settings).chatAssistantHostId = action.hostId;
+  }
+
+  #commitChatAssistantHosts(snapshot) {
+    this.#chatAssistantHosts = new Map(snapshot.users.map(user => [user.id, (user.id === snapshot.ownerId ? snapshot.settings : user.settings).chatAssistantHostId]));
+    for (const user of this.state.users) {
+      if (this.#chatAssistantHosts.has(user.id)) (user.id === this.state.ownerId ? this.state.settings : user.settings).chatAssistantHostId = this.#chatAssistantHosts.get(user.id);
+    }
   }
 
   save(operation) {
@@ -107,6 +139,7 @@ export class JsonStore {
       // An unrelated concurrent save cannot capture an undurable event or
       // overwrite a newly committed feed with an older in-memory copy.
       const snapshot = JSON.parse(captured);
+      this.#prepareChatAssistantHosts(snapshot, operation?.chatAssistantDefaultHost);
       this.notificationPersistence?.prepare(snapshot, operation);
       const contents = `${JSON.stringify(snapshot, null, 2)}\n`;
       const temporary = `${this.file}.${randomBytes(8).toString('hex')}.tmp`;
@@ -114,6 +147,8 @@ export class JsonStore {
         const handle = await open(temporary, 'wx', 0o600);
         try { await handle.writeFile(contents, 'utf8'); await handle.sync(); } finally { await handle.close(); }
         await rename(temporary, this.file);
+        // Only an atomically replaced file can become the public default.
+        this.#commitChatAssistantHosts(snapshot);
         await chmod(this.file, 0o600).catch(error => { if (process.platform !== 'win32') throw error; });
         this.notificationPersistence?.commit(snapshot.notifications);
       } finally { await unlink(temporary).catch(() => {}); }

@@ -1,8 +1,8 @@
 import {useCallback,useEffect,useId,useLayoutEffect,useRef,useState,type CSSProperties} from 'react';
 import {createPortal} from 'react-dom';
-import {ArrowUpRight,Check,ChevronDown,Loader2,Settings2,ShieldCheck,Square,Terminal,X} from 'lucide-react';
-import {api,getSessionEpoch,isSessionChanged,type AgentHost,type AgentPermissions as Permissions,type AssistantTask,type ChatAssistantConfig,type Conversation,type Provider,type User} from './api';
-import {chatAssistantForHost,chatAssistantTargetIssue,readChatAssistantPreferences,saveChatAssistantPreferences,snapshotChatAssistant,type ChatAssistantPreferences} from './chat-assistant-preferences.mjs';
+import {ArrowUpRight,Check,ChevronDown,Loader2,Monitor,Settings2,ShieldCheck,Square,Terminal,X} from 'lucide-react';
+import {api,getSessionEpoch,isSessionChanged,type AgentHost,type AgentPermissions as Permissions,type AssistantTask,type ChatAssistantConfig,type Conversation,type Provider,type State,type User} from './api';
+import {chatAssistantDefaultIssue,chatAssistantForHost,chatAssistantTargetIssue,restoreChatAssistantPreferences,saveChatAssistantPreferences,snapshotChatAssistant,type ChatAssistantPreferences} from './chat-assistant-preferences.mjs';
 import AgentPermissions,{defaultAgentPermissions} from './AgentPermissions';
 import {ExecutionHostPicker,ModelPicker} from './WorkspaceControls';
 import ProjectDirectory from './ProjectDirectory';
@@ -14,16 +14,28 @@ type HostState={hosts:AgentHost[];loading:boolean;error:string;refresh():void};
 type AssistantSelection=ChatAssistantPreferences&{enabled:boolean;permissions:Permissions};
 const emptySelection:AssistantSelection={enabled:false,hostId:'',providerId:'',permissions:{...defaultAgentPermissions}};
 
-/** Autonomy is in memory for this authenticated page; only target preferences persist. */
-export function useChatAssistant({scope,allowed,hostState}:{scope:string;allowed:boolean;hostState?:HostState}) {
+/** The account remembers a target; autonomy and permissions remain session-only. */
+export function useChatAssistant({scope,allowed,hostState,defaultHostId,onSettingsChanged}:{scope:string;allowed:boolean;hostState?:HostState;defaultHostId?:string|null;onSettingsChanged?(settings:State['settings']):void}) {
   const epoch=getSessionEpoch();
-  const [selection,setSelection]=useState({scope:'',epoch,value:emptySelection});
+  const [selection,setSelection]=useState({scope:'',epoch,savedHostId:'',value:emptySelection});
+  const [savingDefault,setSavingDefault]=useState(false),[defaultError,setDefaultError]=useState('');
+  const saveSequence=useRef(0);
   const [remoteHosts,setRemoteHosts]=useState<AgentHost[]>([]),[loading,setLoading]=useState(false),[error,setError]=useState(''),[revision,setRevision]=useState(0);
   const value=selection.scope===scope&&selection.epoch===epoch?selection.value:emptySelection;
+  const savedHostId=selection.scope===scope&&selection.epoch===epoch?selection.savedHostId:'';
   useEffect(()=>{
     let storage:Storage|undefined;try{storage=localStorage;}catch{}
-    setSelection({scope,epoch,value:{...readChatAssistantPreferences(storage,scope),enabled:false,permissions:{...defaultAgentPermissions}}});
-  },[scope,epoch]);
+    const saved=defaultHostId||'';
+    saveSequence.current++;setSavingDefault(false);setDefaultError('');
+    setSelection(previous=>{
+      if(previous.scope===scope&&previous.epoch===epoch){
+        if(previous.savedHostId===saved)return previous;
+        const next=previous.value.hostId===saved?previous.value:chatAssistantForHost(previous.value,saved,storage,scope);
+        return {...previous,savedHostId:saved,value:{...next,enabled:previous.value.hostId===saved&&previous.value.enabled}};
+      }
+      return {scope,epoch,savedHostId:saved,value:{...restoreChatAssistantPreferences(storage,scope,defaultHostId),enabled:false,permissions:{...defaultAgentPermissions}}};
+    });
+  },[scope,epoch,defaultHostId]);
   useEffect(()=>{
     const disable=()=>setSelection(previous=>({...previous,value:{...previous.value,enabled:false}}));
     window.addEventListener('petpal:session-change',disable);return()=>window.removeEventListener('petpal:session-change',disable);
@@ -42,21 +54,37 @@ export function useChatAssistant({scope,allowed,hostState}:{scope:string;allowed
     void poll();return()=>{controller.abort();if(timer)clearTimeout(timer);};
   },[scope,allowed,!!hostState,revision,epoch]);
   const change=useCallback((next:AssistantSelection)=>{
+    if(savingDefault||epoch!==getSessionEpoch())return;
     let storage:Storage|undefined;try{storage=localStorage;}catch{}
     const normalized=next.hostId===value.hostId?next:chatAssistantForHost(next,next.hostId,storage,scope);
     saveChatAssistantPreferences(storage,scope,normalized);
-    setSelection({scope,epoch,value:{...normalized,enabled:allowed&&normalized.enabled}});
-  },[scope,epoch,allowed,value.hostId]);
+    setDefaultError('');
+    setSelection({scope,epoch,savedHostId,value:{...normalized,enabled:allowed&&normalized.enabled&&normalized.hostId===savedHostId}});
+  },[scope,epoch,allowed,value.hostId,savedHostId,savingDefault]);
+  const saveDefault=useCallback(async()=>{
+    if(!allowed||!scope||!value.hostId||savingDefault||epoch!==getSessionEpoch())return;
+    const chosen=value.hostId,sequence=++saveSequence.current;
+    setSavingDefault(true);setDefaultError('');
+    try{
+      const settings=await api<State['settings']>('/settings',{method:'PATCH',body:JSON.stringify({chatAssistantHostId:chosen})});
+      if(sequence!==saveSequence.current||epoch!==getSessionEpoch())return;
+      if(settings.chatAssistantHostId!==chosen)throw new Error('服务端尚不支持账号默认执行电脑，请更新后端。');
+      setSelection(previous=>previous.scope===scope&&previous.epoch===epoch?{...previous,savedHostId:chosen}:previous);
+      onSettingsChanged?.(settings);
+    }catch(cause){if(sequence===saveSequence.current&&epoch===getSessionEpoch()&&!isSessionChanged(cause))setDefaultError((cause as Error).message||'默认执行电脑未保存，请重试。');}
+    finally{if(sequence===saveSequence.current)setSavingDefault(false);}
+  },[scope,epoch,allowed,value.hostId,savingDefault,onSettingsChanged]);
   const hosts=hostState?.hosts??remoteHosts;
-  const snapshot=useCallback(():ChatAssistantConfig|undefined=>snapshotChatAssistant(value,allowed&&epoch===getSessionEpoch(),hosts),[value,allowed,epoch,hosts]);
-  return {value,change,hosts,loading:hostState?.loading??loading,error:hostState?.error??error,refresh:hostState?.refresh??(()=>setRevision(previous=>previous+1)),snapshot};
+  const snapshot=useCallback(():ChatAssistantConfig|undefined=>snapshotChatAssistant(value,allowed&&epoch===getSessionEpoch(),hosts,savedHostId),[value,allowed,epoch,hosts,savedHostId]);
+  return {value,change,hosts,savedHostId,saveDefault,savingDefault,loading:hostState?.loading??loading,error:defaultError||(hostState?.error??error),refresh:hostState?.refresh??(()=>setRevision(previous=>previous+1)),snapshot};
 }
 
 export function ChatAssistantControls({assistant,allowed,user,providers,disabled=false,compact=false,localHostId='',onDownload}:{assistant:ReturnType<typeof useChatAssistant>;allowed:boolean;user?:User;providers:Provider[];disabled?:boolean;compact?:boolean;localHostId?:string;onDownload?():void}) {
   const id=useId(),{value,hosts}=assistant;
   const [open,setOpen]=useState(false),[placement,setPlacement]=useState<{layer:CSSProperties;panel:CSSProperties;sheet:boolean}>(),[ownedPortal,setOwnedPortal]=useState('');
   const trigger=useRef<HTMLButtonElement>(null),panel=useRef<HTMLElement>(null),body=useRef<HTMLDivElement>(null),heading=useRef<HTMLDivElement>(null),closeButton=useRef<HTMLButtonElement>(null);
-  const selected=hosts.find(host=>host.id===value.hostId),issue=chatAssistantTargetIssue(value,hosts,providers,!!user?.isOwner)||projectDirectoryIssue(value.projectDirectory||'',selected);
+  disabled=disabled||assistant.savingDefault;
+  const selected=hosts.find(host=>host.id===value.hostId),issue=chatAssistantTargetIssue(value,hosts,providers,!!user?.isOwner)||chatAssistantDefaultIssue(value,assistant.savedHostId)||projectDirectoryIssue(value.projectDirectory||'',selected);
   const ownedPopup=()=>{
     const control=panel.current?.querySelector<HTMLElement>('.workspace-model-trigger[aria-controls]');
     const list=control?.getAttribute('aria-controls');
@@ -143,8 +171,9 @@ export function ChatAssistantControls({assistant,allowed,user,providers,disabled
       <section ref={panel} id={`${id}-dialog`} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} aria-owns={ownedPortal||undefined} tabIndex={-1} className={`chat-assistant-dialog${placement?.sheet?' is-sheet':''}`} style={placement?.panel}>
         <div ref={heading} className="chat-assistant-dialog-heading"><div><h2 id={`${id}-title`}>Chat + Agent</h2><p id={`${id}-description`}>需要操作电脑时交给后台 Agent，聊天继续。</p></div><button ref={closeButton} type="button" aria-label="关闭 Chat + Agent 设置" onClick={()=>setOpen(false)}><X size={18}/></button></div>
         <div ref={body} className="chat-assistant-options">
-      <label className="chat-assistant-enable"><input type="checkbox" role="switch" aria-label="启用 Chat + Agent" checked={value.enabled} disabled={disabled||!allowed||(!value.enabled&&!!issue)} onChange={event=>assistant.change({...value,enabled:event.target.checked})}/><span>自动派发 Agent 任务<small>按下方设置执行，仅本次登录有效。</small></span></label>
-      <ExecutionHostPicker hosts={hosts} value={value.hostId} label="Chat + Agent 执行电脑" disabled={disabled||!allowed} loading={assistant.loading} localHostId={localHostId} lockReason={!allowed?'请先登录并开通 Agent 权限。':'当前回复结束后，可以调整下一次任务的设置。'} onRefresh={allowed?assistant.refresh:undefined} onDownload={onDownload} onChange={hostId=>{if(!disabled&&allowed&&hosts.some(host=>host.id===hostId&&host.online))assistant.change({...value,hostId});}}/>
+      <ExecutionHostPicker hosts={hosts} value={value.hostId} label="默认执行电脑" disabled={disabled||!allowed} loading={assistant.loading} localHostId={localHostId} lockReason={!allowed?'请先登录并开通 Agent 权限。':'当前回复结束后，可以调整下一次任务的设置。'} onRefresh={allowed?assistant.refresh:undefined} onDownload={onDownload} onChange={hostId=>{if(!disabled&&allowed&&hosts.some(host=>host.id===hostId&&host.online))assistant.change({...value,hostId});}}/>
+      <div className="chat-assistant-default"><button type="button" disabled={disabled||!allowed||!selected||value.hostId===assistant.savedHostId} onClick={()=>void assistant.saveDefault()}>{assistant.savingDefault?<Loader2 size={14} className="spin"/>:value.hostId&&value.hostId===assistant.savedHostId?<Check size={14}/>:<Monitor size={14}/>}<span>{assistant.savingDefault?'正在保存…':value.hostId&&value.hostId===assistant.savedHostId?'已保存为账号默认':'设为默认执行电脑'}</span></button><small>开启后，聊天和语音派发的 Agent 任务在这台电脑执行。</small></div>
+      <label className="chat-assistant-enable"><input type="checkbox" role="switch" aria-label="启用 Chat + Agent" checked={value.enabled} disabled={disabled||!allowed||(!value.enabled&&!!issue)} onChange={event=>assistant.change({...value,enabled:event.target.checked})}/><span>自动派发 Agent 任务<small>按下方权限执行，仅本次登录有效。</small></span></label>
       <ProjectDirectory value={value.projectDirectory||''} onChange={projectDirectory=>assistant.change({...value,projectDirectory})} host={selected} user={user} disabled={disabled||!allowed} lockReason="当前回复结束后，可以调整下一次后台任务的项目目录。"/>
       <ModelPicker providers={providers} value={value.providerId} label="后台 Agent 模型" fallbackLabel={user?.isOwner?'主机默认模型':'选择 Agent 模型'} fallbackOption={user?.isOwner?{label:'主机默认模型',description:'使用执行主机的 Codex 配置'}:undefined} disabled={disabled||!allowed} onChange={providerId=>assistant.change({...value,providerId})}/>
       <div className="chat-assistant-permissions"><AgentPermissions value={value.permissions} user={user} disabled={disabled||!allowed} onChange={permissions=>assistant.change({...value,permissions})}/></div>

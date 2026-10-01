@@ -17,6 +17,14 @@ export function saveChatAssistantPreferences(storage, scope, value) {
   try { storage?.setItem(prefix+encodeURIComponent(scope),JSON.stringify({hostId:hostId(value.hostId),providerId:providerId(value.providerId)})); } catch {}
   saveProjectDirectory(storage,scope,hostId(value.hostId),value.projectDirectory||'');
 }
+export function restoreChatAssistantPreferences(storage, scope, defaultHostId) {
+  const value=readChatAssistantPreferences(storage,scope),saved=hostId(defaultHostId);
+  return saved?chatAssistantForHost(value,saved,storage,scope):value;
+}
+export function chatAssistantDefaultIssue(value, defaultHostId) {
+  if(!value.hostId)return '请先选择默认执行电脑。';
+  return value.hostId===defaultHostId?'':'请先将这台电脑保存为账号的默认执行电脑。';
+}
 export function chatAssistantTargetIssue(value, hosts, providers=[], owner=false) {
   const selected=hosts.find(host=>host.id===value.hostId);
   if (!value.hostId) return '先选择一台执行电脑。';
@@ -26,8 +34,10 @@ export function chatAssistantTargetIssue(value, hosts, providers=[], owner=false
   if (value.providerId&&!providers.some(item=>item.id===value.providerId)) return '此前选择的 Agent 模型已不可用，请重新选择。';
   return '';
 }
-export function snapshotChatAssistant(value, allowed, hosts) {
-  if (!allowed||!value.enabled||!hostId(value.hostId)) return undefined;
+export function snapshotChatAssistant(value, allowed, hosts, defaultHostId) {
+  if (!allowed||!value.enabled) return undefined;
+  if (!hostId(value.hostId)) throw new Error('请先选择默认执行电脑，再启用 Chat + Agent。');
+  if(defaultHostId!==undefined){const issue=chatAssistantDefaultIssue(value,defaultHostId);if(issue)throw new Error(issue);}
   const directory=projectDirectoryValue(value.projectDirectory);
   if(value.projectDirectory&&(typeof value.projectDirectory!=='string'||value.projectDirectory.length>4096||/[\x00-\x1f\x7f]/.test(value.projectDirectory)||directory!==value.projectDirectory.trim()))throw new Error('项目目录格式无效，请重新设置。');
   if(directory&&hosts){const issue=projectDirectoryIssue(directory,hosts.find(host=>host.id===value.hostId));if(issue)throw new Error(issue);}

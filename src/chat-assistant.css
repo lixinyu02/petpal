@@ -1,4 +1,9 @@
 .chat-assistant-controls{color:#667663;min-width:0;width:auto;font-size:12px;flex-shrink:0}
+.chat-assistant-default{display:flex;flex-direction:column;gap:5px;min-width:0}
+.chat-assistant-default>button{display:flex;align-items:center;justify-content:center;gap:6px;min-height:42px;width:100%;padding:8px 10px;border-radius:8px;border:1px solid #dae4d3;background:#edf2e8;color:#43664a;font-size:12px}
+.chat-assistant-default>button:disabled{background:#f4f6ef;color:#809076;cursor:default}
+.chat-assistant-default>button:focus-visible{outline:2px solid #66896b;outline-offset:2px}
+.chat-assistant-default>small{font-size:11px;line-height:1.6;color:#829175;overflow-wrap:anywhere}
 .chat-assistant-trigger{display:flex;align-items:center;gap:7px;min-height:44px;max-width:230px;padding:5px 8px;border-radius:8px;text-align:left;color:#708067;background:transparent}
 .chat-assistant-trigger:hover,.chat-assistant-trigger[aria-expanded=true]{background:#eef2e8;color:#41634d}
 .chat-assistant-trigger:focus-visible{outline:2px solid #66896b;outline-offset:-2px}

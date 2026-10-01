@@ -545,6 +545,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.get('/api/state', async (req, res) => { const value = await publicState(req.user); requireCurrentAuth(req); res.json(value); });
   app.patch('/api/settings', async (req, res) => {
     const patch = {};
+    let defaultHostOperation;
     if (req.body?.petName !== undefined) patch.petName = string(req.body.petName, '桌宠名字', 64);
     if (req.body?.persona !== undefined) patch.persona = string(req.body.persona, '陪伴设定', 16000);
     if (req.body?.companionKind !== undefined) {
@@ -556,7 +557,23 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       if (id) providerById(id, req.user);
       patch.defaultProviderId = id;
     }
-    Object.assign(settingsFor(req.user), patch); await store.save(); res.json(settingsFor(req.user));
+    if (Object.hasOwn(req.body ?? {}, 'chatAssistantHostId')) {
+      const id = req.body.chatAssistantHostId === '' ? null : req.body.chatAssistantHostId;
+      const authorizeDefaultHost = () => {
+        requireCurrentAuth(req);
+        if (id === null) return;
+        if (typeof id !== 'string' || id !== 'central' && !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id)) throw failure(400, '默认执行电脑必须是已登记的电脑或中央服务器。');
+        requireCodex(req.user);
+        // A saved target is a preference. Offline hosts remain selected, and
+        // choosing it never grants permission or starts a task.
+        executors.hostFor(req.user.id, id);
+      };
+      authorizeDefaultHost();
+      defaultHostOperation = { userId: req.user.id, hostId: id, authorize: authorizeDefaultHost };
+    }
+    Object.assign(settingsFor(req.user), patch);
+    await store.save(defaultHostOperation ? { chatAssistantDefaultHost: defaultHostOperation } : undefined);
+    requireCurrentAuth(req); res.json(settingsFor(req.user));
   });
   app.post('/api/providers', async (req, res) => {
     requireAdmin(req.user);

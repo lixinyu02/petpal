@@ -57,6 +57,7 @@ export default function App() {
   const taskNotifications=useSyncExternalStore(taskNotificationSession.subscribe,taskNotificationSession.snapshot,taskNotificationSession.snapshot);
   const [companionKind] = useCompanion();
   const [state, setState] = useState<State>(emptyState);
+  const chatAssistantDefaultRevision = useRef(0);
   const [ready, setReady] = useState(false);
   const [connected, setConnected] = useState(false);
   const [view, setView] = useState<'chat' | 'settings' | 'downloads'>(new URLSearchParams(location.search).has('downloads') ? 'downloads' : new URLSearchParams(location.search).has('settings') ? 'settings' : 'chat');
@@ -122,7 +123,7 @@ export default function App() {
   const activePermissions=agentRunning?conversation!.agent!.run!.permissions:permissions;
   const activeProviderId=agentRunning?conversation!.agent!.run!.providerId||'':agentProviderId;
   const hostScope=state.instanceId&&state.user?`${state.instanceId}:${state.user.id}`:'';
-  const chatAssistant=useChatAssistant({scope:hostScope,allowed:connected&&!!state.user?.canUseCodex,hostState:{hosts:agentHosts,loading:hostsLoading,error:hostsError,refresh:()=>setHostRefresh(value=>value+1)}});
+  const chatAssistant=useChatAssistant({scope:hostScope,allowed:connected&&!!state.user?.canUseCodex,defaultHostId:state.settings.chatAssistantHostId,onSettingsChanged:settings=>{chatAssistantDefaultRevision.current++;setState(previous=>({...previous,settings}));},hostState:{hosts:agentHosts,loading:hostsLoading,error:hostsError,refresh:()=>setHostRefresh(value=>value+1)}});
   const localHostId=nativeExecutor?.state==='online'?nativeExecutor.hostId||'':'';
   const lockedHostId=executionHostLock(conversation?.agent,agentSubmissionRef.current);
   const selectedHostId=resolveExecutionHostId({requestedId:agentHostId,lockedId:lockedHostId,localHostId,defaultHostId});
@@ -176,9 +177,12 @@ export default function App() {
 
   async function refresh() {
     if (getSessionEpoch() !== accountEpoch) throw new SessionChangedError();
+    const defaultRevision=chatAssistantDefaultRevision.current;
     const next = await api<State>('/state');
     if (getSessionEpoch() !== accountEpoch) throw new SessionChangedError();
-    setState(next); setConnected(true); await hydrateCompanion(next.settings.companionKind || 'anime').catch(() => {});
+    // A response requested before the successful write must not undo its target.
+    setState(previous=>({...next,settings:defaultRevision===chatAssistantDefaultRevision.current?next.settings:{...next.settings,chatAssistantHostId:previous.settings.chatAssistantHostId}}));
+    setConnected(true); await hydrateCompanion(next.settings.companionKind || 'anime').catch(() => {});
     setProviderId(previous => next.providers.some(p => p.id === previous) ? previous : next.settings.defaultProviderId || next.providers[0]?.id || '');
     return next;
   }
@@ -231,7 +235,8 @@ export default function App() {
     if(!ready||!target||target.epoch!==accountEpoch||getSessionEpoch()!==accountEpoch||target.instanceId!==identity?.instanceId||target.userId!==identity?.userId)return;
     if(busy||agentRunning||agentSubmitting||unconfirmed||switchingModel){setNotice('收到任务结果，当前回复结束后打开。');return;}
     taskNotificationSession.takeNavigation();
-    setState({...target.state,conversations:target.state.conversations.map(item=>item.id===target.conversation.id?target.conversation:item)});
+    // Notification snapshots may wait while a reply runs; keep this page's default.
+    setState(previous=>({...target.state,settings:{...target.state.settings,chatAssistantHostId:previous.settings.chatAssistantHostId},conversations:target.state.conversations.map(item=>item.id===target.conversation.id?target.conversation:item)}));
     historySelection.current.select(target.conversation);setView('chat');setMobileNav(false);setNotice('已打开任务结果。');
   },[taskNotifications.navigation,accountEpoch,ready,busy,agentRunning,agentSubmitting,unconfirmed,switchingModel]);
   useEffect(()=>{if(companionPanelOpen)setCompanionPanelMounted(true);},[companionPanelOpen]);
