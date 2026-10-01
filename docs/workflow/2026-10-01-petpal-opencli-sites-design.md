@@ -2,7 +2,7 @@
 
 - Date: 2026-10-01
 - Complexity: L2
-- Status: updated
+- Status: done
 
 ## Background
 
@@ -35,3 +35,21 @@
 ## Verification Plan
 
 固定清单和参数拒绝测试、关闭持久化/CAS、账号隔离、超时/输出/取消及共享daemon回归；API认证和可信IPC测试；生产Web build和Chrome412×960。用真实内置Codex注册动态工具、第三方模型、DesktopExecutor执行至少两个公开网站查询，并记录调用与读回；若扩展可用补浏览器测试。部署保留数据/下载与停止任务边界；新版Windows实际启动/包内查询、Ubuntu双架构完整归档与依赖审计。浏览器和包审计不代替UbuntuGUI验收。
+
+## Delivery and Verification
+
+2026-10-01已发布[v0.9.5预览版](https://github.com/lixinyu02/petpal/releases/tag/v0.9.5)，来源为`ddc1af06622b475492ae7c635abad3ba1da2d268`。Windows便携EXE/ZIP、Ubuntu x64/ARM64四个包及`release-manifest.json`、`SHA256SUMS.txt`六资产均核对正式URL、bytes及SHA256。四大包在draft阶段由四批Actions完成HTTPS镜像及GitHub完整字节读回，公开后复核同一asset ID和正式URL；没有在云端执行包，也没有在公开后重复全量下载四包。稳定版latest保持v0.9.1，Android沿用0.9.3，旧10项下载逐字节保持。
+
+生产`/api/downloads`匿名401、认证200，返回`stale=false/error=null`及四个0.9.5预览包。Chrome3登录test后选择Windows ZIP/EXE与Ubuntu两架构，下载URL与安装提示正确，Android0.9.3可选；首次显示仍优先稳定版。验收仅使用自建标签页，没有更改既有对话或发出生产Agent任务。临时转传分支以预期SHA lease精确清理，main未变。
+
+相关本地证据位于`evidence/opencli-sites-20261001/`：`actions-transfer/github-published-verification.json`、四项`*-cloud-verification.json`、`downloads-catalog-verification.json`、`downloads-ui-verification.json`、`published-downloads-x64.png`与`actions-transfer/temporary-branch-cleanup.json`。这些运行证据不进入公开源码。
+
+## Production Process Recovery
+
+转传期间原后端退出并导致HTTPS502；没有Node退出栈，不能依据相邻宿主日志断言原因。服务已恢复，在当前生产Windows服务器私有`.data`目录部署独立当前用户守护任务`PetPal backend current user`。它仅采用已确认的服务或恢复退出的自有进程，保留维护暂停标记；未知监听不接管，也不会自动处理HTTP卡死。守护没有打入桌面包或提交公开源码。
+
+实际空闲受控恢复时activeRuns/pendingApprovals/runningMessages均为0，后端PID252228退出后由独立守护恢复为254908；state与token字节保持，可信HTTPS、enabled/queryReady与12站23命令通过。证据为`service-guardian-verification.json`。这不覆盖活跃Agent崩溃、断电或长期稳定性。
+
+## Acceptance Limits
+
+真实Codex0.143.0/GPT-6.1 Sol通过选定DesktopExecutor调用包内OpenCLI查询npm与V2EX，其余10站为worker联网探测。后台和执行电脑共处Windows，没有跨物理主机证据。Qwen经局域网及HTTPS网关仍遇到模型连接中断。Ubuntu两包完成完整归档、依赖与原生模块审计，实际UbuntuGUI未运行；Browser Bridge实际操作亦未验收。Windows最终便携EXE真实启动及查询通过，但未签名。库存179个适配器命名空间、1366命令包含本地应用，不能将库存表述为全部网站已可访问。

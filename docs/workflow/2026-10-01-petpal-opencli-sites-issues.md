@@ -3,13 +3,13 @@
 - Date: 2026-10-01
 - Complexity: L2
 - Related design: 2026-10-01-petpal-opencli-sites-design.md
-- Current status: issue-67 in_progress
+- Current status: done
 
 ## Issue List
 
 - [x] issue-65 网站查询、默认开启、账号隔离与真实 Agent 验收
 - [x] issue-66 网页后端上线与 Windows/Ubuntu 新版交付
-- [ ] issue-67 GitHub 公开预览与云端完整读回
+- [x] issue-67 GitHub 公开预览与云端完整读回
 
 ## issue-65
 
@@ -31,7 +31,7 @@
 - 验收标准: 用户数据与下载保留，HTTPS读回；新版PC内置新入口，Windows实际启动查询，Ubuntu双架构审计；旧包能力边界明确。
 - 状态: done
 - 验证方式: 0.9.5后端/静态页面上线，可信HTTPS读回12站23查询及enabled:true；账号/聊天/暂停队列、通知集合与10项旧下载逐字节保留。工具版本及revision按既有门禁迁移，新Agent需新配置。Windows最终便携EXE实际启动smoke退出0、执行电脑在线、包内PetPal.exe/Manager/worker真实npm/V2EX查询通过、ZIP完整性通过；10832文件/11项已知私密值无命中。Ubuntu x64/ARM64各12527项完整tar审计，38项OpenCLI运行时/共享依赖、98文件193边静态闭包与23适配器导入通过，ELF62/183、GLIBC2.34；双包私密扫描通过，实际UbuntuGUI未验证。Linux缺失/修改包回归40项与源码扫描9项通过。Qwen经HTTPS网关补测仍上游中断，GPT验收保持通过。
-- commit: chore(issue-66): prepare verified OpenCLI desktop preview 0.9.5
+- commit: ddc1af0
 
 ## issue-67
 
@@ -40,8 +40,8 @@
 - 范围: 已验收桌面包的HTTPS下载镜像、GitHub预发布、manifest/checksums和完整云端读回；保持旧包与stable latest。
 - 依赖: issue-66 done
 - 验收标准: 四个大包和两项校验元数据完整公开，正式URL、字节数和SHA256一致；网页登录后下载目录出现新包；临时转传分支精确清理。
-- 状态: in_progress
-- 验证方式: pending
-- commit: pending
+- 状态: done
+- 验证方式: v0.9.5已公开为preview，source为ddc1af06622b475492ae7c635abad3ba1da2d268。Windows EXE/ZIP、Ubuntu x64/ARM64及manifest/checksums共6资产正式URL/bytes/SHA256一致；四大包在draft阶段由Actions完成镜像和GitHub完整字节读回，发布后核对同一asset ID与正式URL，未执行云端包。下载API匿名401/认证200，checkedAt=2026-10-01T07:03:15.441Z、stale=false/error=null；四0.9.5 preview、Android0.9.3和旧10下载保持。Chrome3登录test后逐项选择四桌面预览包，下载URL与安装提示正确；默认仍选稳定版，未改既有对话。临时转传分支经精确e56f6345990b87d58ac64e848fb3c17236fe5390 lease删除，main保持。独立生产守护空闲受控进程退出恢复通过，state/token逐字节保持；不覆盖HTTP卡死、活跃任务崩溃、断电或长期稳定性。UbuntuGUI、Browser Bridge实际操作和Qwen上游问题仍未验收通过。
+- commit: docs(issue-67): record OpenCLI preview release verification
 
 同一issue按独立文件并行实现，由root统一集成、审查、部署和提交。不触及RK3566实板、板用WSL或其他仓库。
