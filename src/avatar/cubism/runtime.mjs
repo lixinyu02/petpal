@@ -3,7 +3,7 @@ import { createCubismParameterBridge, cubismParameterTargets } from './parameter
 
 export const CUBISM_RUNTIME_ROOT = '/avatars/cubism-runtime/';
 export const CUBISM_CORE_URL = '/vendor/live2d/live2dcubismcore.min.js';
-const DEFAULT_MODEL = '/avatars/akari-cubism/akari.model3.json';
+const DEFAULT_MODEL = '/avatars/akari-cubism-v2/akari.model3.json';
 const FRAMEWORK_EXPORTS = ['CubismFramework', 'CubismModelSettingJson', 'CubismMoc', 'CubismUserModel', 'CubismMatrix44', 'CubismShaderManager_WebGL', 'releaseCubismContext'];
 let corePromise, modulePromise;
 const runtimes = new WeakMap();
@@ -139,6 +139,103 @@ async function loadTexture(gl, url, signal) {
   finally { image.onload = image.onerror = null; URL.revokeObjectURL(objectUrl); }
 }
 
+const ANGLES = ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX', 'ParamBodyAngleY', 'ParamBodyAngleZ'];
+const GAZE = ['ParamEyeBallX', 'ParamEyeBallY'];
+const EYELIDS = ['ParamEyeLOpen', 'ParamEyeROpen'];
+const FACE = ['ParamEyeLSmile', 'ParamEyeRSmile', 'ParamEyeBallForm', 'ParamBrowLY', 'ParamBrowRY', 'ParamBrowLAngle', 'ParamBrowRAngle', 'ParamCheek', 'ParamTear', 'ParamExcited', 'ParamSad', 'ParamShoulderY'];
+
+/** Owns frame composition independently of WebGL, using the official queues. */
+export function createCubismFrameController({ model, avatar, bridge, motions = new Map(), expressions = new Map() }) {
+  let expressionName = '', motionName = '', motionGroup = '', gestureName = 'none', muted = false, mouthForm = 0;
+  const motionRecords = new Map([...motions.entries()].map(([name, record]) => [record.motion, { ...record, group: name.slice(0, name.lastIndexOf('_')) }]));
+  const expressionRecords = new Map([...expressions.values()].map(record => [record.motion, record]));
+  // Capture neutral once. Persisting each animated frame into the next frame's
+  // baseline leaves interrupted sparse curves behind and recursively amplifies
+  // fades. Expressions and physics must also never enter that neutral baseline.
+  model.saveParameters();
+  const stop = manager => {
+    // The pinned Framework's stopAllMotions splices while iterating. A second
+    // crossfading entry can survive its first pass, so clear the bounded queue.
+    for (let pass = 0; pass < 64 && !manager.isFinished(); pass++) manager.stopAllMotions();
+  };
+  const active = (manager, records, fallback) => {
+    const entries = manager.getCubismMotionQueueEntries?.();
+    if (!entries) return manager.isFinished() || !fallback ? [] : [fallback];
+    return entries.map(entry => records.get(entry?.getCubismMotion?.())).filter(Boolean);
+  };
+  const startMotion = group => {
+    const chosen = [...motions.keys()].find(name => name.startsWith(`${group}_`));
+    if (muted || !chosen || chosen === motionName && !avatar._motionManager.isFinished()) return;
+    // startMotionPriority asks the outgoing queue entries to fade out. Stopping
+    // the queue here would discard their authored transition immediately.
+    avatar._motionManager.startMotionPriority(motions.get(chosen).motion, false, group === 'Idle' ? 1 : 3);
+    motionName = chosen; motionGroup = group;
+  };
+  return {
+    get motionGroup() { return motionGroup; },
+    update(dt, pose = {}, follow = {}, options = {}) {
+      const seconds = Math.max(0, Math.min(Number.isFinite(dt) ? dt : 0, .1));
+      const still = Boolean(options.hidden || options.sleeping || options.reducedMotion);
+      if (still) {
+        if (!muted) { stop(avatar._motionManager); stop(avatar._expressionManager); }
+        motionName = motionGroup = expressionName = ''; gestureName = 'none';
+      }
+      muted = still;
+      if (!still && pose.gesture !== gestureName) {
+        gestureName = pose.gesture;
+        // A user interaction must not be replaced by the performance controller's
+        // nod in the same frame. Consume that cue rather than replaying it later.
+        const interacting = (motionGroup === 'TapHead' || motionGroup === 'Greet') && !avatar._motionManager.isFinished();
+        if (!interacting && gestureName === 'nod') startMotion('Nod');
+        else if (!interacting && gestureName === 'shake') startMotion('Shake');
+      }
+      if (!still && avatar._motionManager.isFinished()) startMotion('Idle');
+      model.loadParameters();
+      if (!still) avatar._motionManager.updateMotion(model, seconds);
+      if (!still) {
+        const resolved = expressions.has(pose.expression) ? pose.expression : expressions.has('neutral') ? 'neutral' : '';
+        if (resolved !== expressionName) {
+          expressionName = resolved;
+          const expression = expressions.get(resolved);
+          if (expression) avatar._expressionManager.startMotion(expression.motion, false);
+          else stop(avatar._expressionManager);
+        }
+        avatar._expressionManager.updateMotion(model, seconds);
+      }
+      const motionLayers = still ? [] : active(avatar._motionManager, motionRecords, motionRecords.get(motions.get(motionName)?.motion));
+      const expressionLayers = still ? [] : active(avatar._expressionManager, expressionRecords, expressions.get(expressionName));
+      const own = new Set([...motionLayers, ...expressionLayers].flatMap(record => [...record.parameters]));
+      const reaction = motionLayers.find(record => record.group !== 'Idle')?.group || '';
+      const targets = cubismParameterTargets(pose, follow, { ...options, nativeMotion: reaction || motionGroup, nativeParameters: [...own], supportedParameters: bridge.supported });
+      bridge.apply(targets, {
+        additive: [...ANGLES, ...GAZE].filter(name => own.has(name)),
+        multiply: EYELIDS.filter(name => own.has(name)),
+        dominant: FACE.filter(name => own.has(name)),
+        preserve: own.has('ParamBreath') ? ['ParamBreath'] : [],
+      });
+      if (!still && avatar._physics) avatar._physics.evaluate(model, seconds);
+      if (avatar._pose) avatar._pose.updateParameters(model, seconds);
+      let form = targets.ParamMouthForm;
+      // Quiet smiles in real gesture/expression curves remain visible, but a
+      // speaking mouth belongs exclusively to the live articulation controller.
+      if (!still && !pose.speaking && own.has('ParamMouthForm')) {
+        const authored = bridge.read('ParamMouthForm');
+        if (Number.isFinite(authored) && Math.abs(authored) > Math.abs(form)) form = authored;
+      }
+      // Only categorical mouth shape needs this short transition. Gaze and
+      // emotion channels already have their own smoothing; blinking stays sharp.
+      mouthForm = still ? form : mouthForm + (form - mouthForm) * (1 - Math.exp(-seconds * 28));
+      bridge.apply({ ...targets, ParamMouthForm: mouthForm }, { mouthOnly: true });
+      model.update();
+    },
+    react(kind) {
+      if (muted) return;
+      const preferred = kind === 'pet' ? 'TapHead' : kind === 'greet' ? 'Greet' : 'Idle';
+      startMotion([...motions.keys()].some(name => name.startsWith(`${preferred}_`)) ? preferred : kind === 'wake' ? 'Idle' : 'Nod');
+    },
+  };
+}
+
 /** Uses real Cubism Core/Framework only. Missing runtime returns a rejected load for safe fallback. */
 export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, signal, compact = false }) {
   const document = canvas.ownerDocument, window = document.defaultView;
@@ -187,7 +284,16 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
       const buffer = await fetchCubismBytes(item.url, { signal, maxBytes: 256 * 1024 });
       const motion = avatar.loadExpression(buffer, buffer.byteLength, item.name);
       if (!motion) throw new Error(`Cubism expression could not load: ${item.name}`);
-      expressions.set(item.name, motion);
+      const json = parseJson(buffer);
+      expressions.set(item.name, { motion, parameters: new Set((json.Parameters || []).map(parameter => parameter.Id)) });
+    }
+    if (expressions.size && !expressions.has('neutral')) {
+      // An empty official expression fades named expressions back to the base
+      // face without inventing parameters or stopping their outgoing curves.
+      const buffer = new TextEncoder().encode(JSON.stringify({ Type: 'Live2D Expression', FadeInTime: .25, FadeOutTime: .25, Parameters: [] })).buffer;
+      const motion = avatar.loadExpression(buffer, buffer.byteLength, 'neutral');
+      if (!motion) throw new Error('Cubism neutral expression could not load.');
+      expressions.set('neutral', { motion, parameters: new Set() });
     }
     for (const item of resources.motions) {
       const buffer = await fetchCubismBytes(item.url, { signal, maxBytes: 1024 * 1024 });
@@ -221,54 +327,17 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
     // assumes 0..width and would incorrectly move this centered MOC off-screen.
     modelMatrix.setPosition(-(canvasInfo.CanvasWidth / 2 - canvasInfo.CanvasOriginX) / canvasInfo.PixelsPerUnit * authoredScale,
       -(canvasInfo.CanvasOriginY - canvasInfo.CanvasHeight / 2) / canvasInfo.PixelsPerUnit * authoredScale);
-    let expressionName = 'neutral', motionName = '', motionGroup = '', gestureName = 'none';
-    const startMotion = group => {
-      const chosen = [...motions.keys()].find(name => name.startsWith(`${group}_`));
-      if (!chosen || chosen === motionName && !avatar._motionManager.isFinished()) return;
-      avatar._motionManager.stopAllMotions();
-      avatar._motionManager.startMotionPriority(motions.get(chosen).motion, false, group === 'Idle' ? 1 : 3);
-      motionName = chosen; motionGroup = group;
-    };
+    const controller = createCubismFrameController({ model, avatar, bridge, motions, expressions });
     return {
       mocVersion, coreVersion: core.Version.csmGetVersion(), supportedParameters: bridge.supported,
-      get motionGroup() { return motionGroup; },
+      get motionGroup() { return controller.motionGroup; },
       update(dt, pose, follow, options = {}) {
         if (disposed || !initialized) return;
-        const seconds = Math.max(0, Math.min(Number.isFinite(dt) ? dt : 0, .1));
-        const still = options.hidden || options.sleeping || options.reducedMotion;
-        if (still) { avatar._motionManager.stopAllMotions(); avatar._expressionManager.stopAllMotions(); motionName = motionGroup = ''; expressionName = 'neutral'; gestureName = 'none'; }
-        else if (pose.gesture !== gestureName) {
-          gestureName = pose.gesture;
-          if (gestureName === 'nod') startMotion('Nod');
-          else if (gestureName === 'shake') startMotion('Shake');
-        }
-        if (!still && avatar._motionManager.isFinished()) startMotion('Idle');
-        const targets = cubismParameterTargets(pose, follow, { ...options, nativeMotion: motionGroup });
-        model.loadParameters();
-        if (!still) avatar._motionManager.updateMotion(model, seconds);
-        model.saveParameters();
-        if (!still && pose.expression !== expressionName) {
-          expressionName = pose.expression;
-          const expression = expressions.get(expressionName) || expressions.get('neutral');
-          avatar._expressionManager.stopAllMotions();
-          if (expression) avatar._expressionManager.startMotion(expression, false);
-        }
-        if (!still) avatar._expressionManager.updateMotion(model, seconds);
-        const own = !still ? motions.get(motionName)?.parameters : undefined;
-        // Authored motion angles and gaze add together; a motion owning Nod or
-        // Shake replaces that semantic cue, rather than applying it twice.
-        const additive = ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX', 'ParamBodyAngleY', 'ParamBodyAngleZ'].filter(name => own?.has(name));
-        const multiply = motionGroup !== 'Idle' && !still ? ['ParamEyeLOpen', 'ParamEyeROpen'].filter(name => own?.has(name)) : [];
-        bridge.apply(targets, { additive, multiply });
-        if (!still && avatar._physics) avatar._physics.evaluate(model, seconds);
-        bridge.apply(targets, { mouthOnly: true });
-        if (avatar._pose) avatar._pose.updateParameters(model, seconds);
-        model.update();
+        controller.update(dt, pose, follow, options);
       },
       react(kind) {
         if (disposed) return;
-        const preferred = kind === 'pet' ? 'TapHead' : kind === 'greet' ? 'Greet' : 'Idle';
-        startMotion([...motions.keys()].some(name => name.startsWith(`${preferred}_`)) ? preferred : kind === 'wake' ? 'Idle' : 'Nod');
+        controller.react(kind);
       },
       render() {
         if (disposed || gl.isContextLost()) throw new Error('Cubism WebGL context was lost.');

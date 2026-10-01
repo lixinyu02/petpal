@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "date": "2026-10-02",
+  "mode": "built-in image_gen edit with transparent_background=true",
+  "asset": "outputs/avatars/akari-cubism-v2/body-continuous.png",
+  "sha256": "301ecb2c7539fbde65a448f94dba7e6f3352ed26fa14416b65ba0cb03824f74c",
+  "width": 1133,
+  "height": 1388,
+  "originalGeneratedPixelsPreserved": true,
+  "postGenerationImageEdits": "None; exact generated output copied into the project. PSD layout and rig binding are separate authoring work.",
+  "inputRoles": [
+    {
+      "asset": "outputs/avatars/akari-cubism/reference.png",
+      "role": "Original adult Akari illustration; style, outfit, proportions and pose reference"
+    },
+    {
+      "asset": "outputs/avatars/akari-cubism/layers/neck.png",
+      "role": "Old separate neck fragment; diagnostic input, not a patch to paste"
+    },
+    {
+      "asset": "outputs/avatars/akari-cubism/layers/topwear.png",
+      "role": "Edit target for complete continuous neck and clothed body"
+    },
+    {
+      "asset": "User-provided browser screenshot, kept private",
+      "role": "Diagnostic input illustrating the neck/collar horizontal seam; its UI and background must not appear in the art"
+    }
+  ],
+  "prompts": [
+    {
+      "phase": "continuous body generation",
+      "text": "Use case: precise-object-edit. Asset type: a single continuous transparent body layer for an original Live2D avatar. Input images: Image 1 (reference.png) is the original adult Akari character and soft Japanese anime illustration style reference only. Image 2 (neck.png) illustrates the old separate neck layer; do NOT paste this fragment. Image 3 (topwear.png) is the editing target: rebuild it as one smoothly connected, complete neck/shoulders/clothed torso/arms/hands/skirt layer. Image 4 is a user screenshot documenting the bad horizontal neck/collar seam; do not include or copy its UI or background. Primary request: produce ONE continuous HEADLESS BODY asset of the same adult woman, directly front facing, starting at the neck top that will be covered behind her existing chin, ending at the same original skirt bottom. The neck, collarbones, upper chest and ruffled blouse neckline MUST be one seamless anatomical drawing, without a horizontal skin join, patch boundary, detached neck, rectangular skin patch or pasted-on cutout. Render graceful natural adult neck width and sloping shoulders; neck top is about 150 pixels above shoulder level. Keep the original outfit and pose: cream cable-knit cardigan with pale gold buttons, pale apricot ruffled neckline blouse with a long soft bow and small pearl buttons, grey-taupe belted gathered skirt with a small gold round buckle, both relaxed hands meeting delicately in front of the waist, sleeves and hands fully present. Preserve original body proportions and gentle warm detailed anime line art, cream/apricot/taupe palette, soft shading and knit detail. Composition/framing: compact portrait body-only cutout, approximately 840 wide by 1030 high in proportions; shoulder-to-skirt height about 890, no excessive blank margins, complete clothing silhouette and complete skirt bottom, nearly symmetrical relaxed front view. The open neck top is simply an unobtrusive under-chin occlusion edge intended to sit behind another layer, not an injury or anatomical cut surface. Keep neckline curves elegant and continuous, not a horizontal line across the skin. Constraints: genuine transparent alpha background, clean antialiased edges, one connected usable art layer; absolutely no head, face, hair, hat, new accessories, text, logo, watermark, scenery, solid background, checkerboard painted into pixels, outer glow or halo. Do not output a full character or multiple panels. Deliver only the single continuous body asset."
+    },
+    {
+      "phase": "targeted perimeter cleanup of the first generated asset",
+      "text": "Use case: precise-object-edit. This input is the completed original Live2D headless body layer. Make ONE targeted correction only: clean the transparent cutout perimeter. Remove all stray isolated white/red/yellow speckles and detached fragments floating outside the body, especially the fragment left of the neck near the top and fragments along the skirt hem and left sleeve. Remove the noisy white/red fringe while retaining a natural fine anime outline and smooth antialiased transparent edges. Keep the continuous neck/shoulders/collarbones/upper chest/ruffled blouse neckline exactly seamless, and preserve the same front-facing proportions, cream cable-knit cardigan, pale apricot bow blouse, taupe belted gathered skirt, two complete relaxed hands touching delicately in front of the waist, colors, line art and shading. Preserve every part of the main coherent body silhouette. Do not add a head, face, hair, background, glow, checkerboard pixels, new accessories or extra panels. The neck top is an ordinary under-chin occlusion edge for another layer. Output only one clean body layer with real transparent alpha background; opaque interior of the character and clean antialiased boundary. Keep the full body, neck top and skirt bottom in frame, same overall portrait framing."
+    }
+  ],
+  "qualityInspection": {
+    "neckChestCollarContinuous": true,
+    "headFaceHairAbsent": true,
+    "outfitHandsAndSkirtPresent": true,
+    "transparentAlphaPresent": true,
+    "connectedComponentsAtAlpha32": 1,
+    "subjectBoundsAtAlpha32": {
+      "minX": 20,
+      "minY": 1,
+      "maxX": 1112,
+      "maxY": 1373
+    },
+    "limitation": "A few low-alpha perimeter pixels remain visible on a black inspection background. Review the silhouette during authoring; no programmatic crop or paint edit was applied.",
+    "modelOrEditorAcceptance": "Not performed by this image generation task; composition, deformation and runtime validation remain separate."
+  }
+}

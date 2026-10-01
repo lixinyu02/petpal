@@ -1,0 +1,11 @@
+{
+  "width": 1024,
+  "height": 1536,
+  "body": {
+    "file": "body-continuous.png",
+    "source": [0, 0, 1133, 1388],
+    "target": [92, 489, 840, 1029]
+  },
+  "reusedLayers": "../akari-cubism/layout.json except neck/topwear",
+  "method": "Preserve original face/hair coordinates; continuous generated body covers the original lower body bounds without a rectangular neck overlap."
+}

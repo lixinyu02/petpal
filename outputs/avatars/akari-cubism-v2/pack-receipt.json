@@ -1,0 +1,238 @@
+{
+  "schema": 1,
+  "method": "Original face/hair layer reuse; generated continuous body; mechanical RGBA sampling and PSD encoding only",
+  "bodySha256": "301ecb2c7539fbde65a448f94dba7e6f3352ed26fa14416b65ba0cb03824f74c",
+  "psdSha256": "ff47f7fb5348877ea6972eae13f1067188aece2682b2a35b31a3c8e523ca291a",
+  "canvas": [
+    1024,
+    1536
+  ],
+  "layers": [
+    {
+      "name": "back hair",
+      "file": "../akari-cubism/layers/back hair.png",
+      "sha256": "d73b71edb497ad592ca125b47119374838273d60898fbb48bc7368fea9ffb51c",
+      "target": [
+        170,
+        14,
+        680,
+        744
+      ]
+    },
+    {
+      "name": "topwear",
+      "file": "body-continuous.png",
+      "sha256": "301ecb2c7539fbde65a448f94dba7e6f3352ed26fa14416b65ba0cb03824f74c",
+      "source": [
+        0,
+        0,
+        1133,
+        1388
+      ],
+      "target": [
+        92,
+        489,
+        840,
+        1029
+      ]
+    },
+    {
+      "name": "face",
+      "file": "../akari-cubism/layers/face.png",
+      "sha256": "8a288088863a5367dc7172a741488e0cde4d0db6a46d50ca82c4299c0223b1e8",
+      "target": [
+        329,
+        134,
+        366,
+        415
+      ]
+    },
+    {
+      "name": "blush",
+      "file": "../akari-cubism/layers/blush.png",
+      "sha256": "cc78c1c95bf58cc03268e9f5bc8988a18bd3b7060a64e44907eb19bec113ac2c",
+      "target": [
+        378,
+        400,
+        270,
+        54
+      ]
+    },
+    {
+      "name": "eyewhite-r",
+      "file": "../akari-cubism/layers/eyewhite-r.png",
+      "sha256": "3c8df15d386b4876042d9223757b0f46fe9ac3718534efa292cfe70a026b9bf2",
+      "target": [
+        376,
+        331,
+        110,
+        67
+      ]
+    },
+    {
+      "name": "eyewhite-l",
+      "file": "../akari-cubism/layers/eyewhite-l.png",
+      "sha256": "ac202b979c777c462132e3269848678e688b94e589ac23cdc6b159dfd0bfbf5e",
+      "target": [
+        540,
+        331,
+        110,
+        64
+      ]
+    },
+    {
+      "name": "irides-r",
+      "file": "../akari-cubism/layers/irides-r.png",
+      "sha256": "c4492aed104c6d954775c0b7d26e984f4bac96f67e6d4bedb7a1df116a26ba43",
+      "target": [
+        398,
+        330,
+        66,
+        63
+      ]
+    },
+    {
+      "name": "irides-l",
+      "file": "../akari-cubism/layers/irides-l.png",
+      "sha256": "9ebf96368884825d7569e2731ecc814fca1ca239b015934d2c1254d3d644d4e5",
+      "target": [
+        562,
+        330,
+        66,
+        61
+      ]
+    },
+    {
+      "name": "eyelash-r",
+      "file": "../akari-cubism/layers/eyelash-r.png",
+      "sha256": "c44bdceee67844acda0c944a2c50c4f15715b2c9e247f96d73829fd6dab53c70",
+      "target": [
+        366,
+        323,
+        130,
+        64
+      ]
+    },
+    {
+      "name": "eyelash-l",
+      "file": "../akari-cubism/layers/eyelash-l.png",
+      "sha256": "4edae0fcbb0581ba456bde722f48c303707e78ca3fb18e4f8e5007b8f527d56b",
+      "target": [
+        528,
+        323,
+        134,
+        63
+      ]
+    },
+    {
+      "name": "eye close-r",
+      "file": "../akari-cubism/layers/eye close-r.png",
+      "sha256": "075b1b1e969b782dcaf53921020e1acde704001123979363478c5e7505ea456a",
+      "target": [
+        366,
+        348,
+        130,
+        43
+      ]
+    },
+    {
+      "name": "eye close-l",
+      "file": "../akari-cubism/layers/eye close-l.png",
+      "sha256": "3aeed54d864bbb66cfd1cb4fc7910c8c1ccb9d65c0b3ad6b91347ad8cc725a96",
+      "target": [
+        528,
+        348,
+        134,
+        44
+      ]
+    },
+    {
+      "name": "tears",
+      "file": "../akari-cubism/layers/tears.png",
+      "sha256": "53b618c2b437f39ebba44f1b889c307b38f6ceabd7f7d9b88099d712ccfc8dc3",
+      "target": [
+        399,
+        376,
+        226,
+        29
+      ]
+    },
+    {
+      "name": "eyebrow-r",
+      "file": "../akari-cubism/layers/eyebrow-r.png",
+      "sha256": "bd40a6861228e827fd126f6c271fe06f478cf0b64b3b5fdd865fcb20dcc3ca3e",
+      "target": [
+        374,
+        292,
+        113,
+        40
+      ]
+    },
+    {
+      "name": "eyebrow-l",
+      "file": "../akari-cubism/layers/eyebrow-l.png",
+      "sha256": "b3d552bad815c19247b2d47a87cfda211eb1789e3456570fdb42d3013f514289",
+      "target": [
+        538,
+        292,
+        113,
+        36
+      ]
+    },
+    {
+      "name": "mouth open",
+      "file": "../akari-cubism/layers/mouth open.png",
+      "sha256": "ea1e4d1bdd6b32a89fa5ff9c5eb21f54a80b58ed2da0c9937308a39905560f50",
+      "target": [
+        476,
+        451,
+        72,
+        58
+      ]
+    },
+    {
+      "name": "nose",
+      "file": "../akari-cubism/layers/nose.png",
+      "sha256": "3454955f09c85754cd184bde8d708afe91be8061b334b33c7fb8b12d17e84011",
+      "target": [
+        506,
+        410,
+        13,
+        25
+      ]
+    },
+    {
+      "name": "mouth close",
+      "file": "../akari-cubism/layers/mouth close.png",
+      "sha256": "db3ea784b910ba6658a36d87e367908b7ed8d41939cd5022e7be7977b92f1f47",
+      "target": [
+        473,
+        474,
+        78,
+        21
+      ]
+    },
+    {
+      "name": "front hair 1",
+      "file": "../akari-cubism/layers/front hair 1.png",
+      "sha256": "8809fc3ba4f3b285b4e2d8a2602631c5f55f08dfd6ee0c1cb3ada341d25d9ee8",
+      "target": [
+        182,
+        4,
+        475,
+        518
+      ]
+    },
+    {
+      "name": "front hair 2",
+      "file": "../akari-cubism/layers/front hair 2.png",
+      "sha256": "891d0a660eb020efd3286032428425a430b72786053d68a7b0a24483c53c578a",
+      "target": [
+        552,
+        29,
+        262,
+        467
+      ]
+    }
+  ]
+}

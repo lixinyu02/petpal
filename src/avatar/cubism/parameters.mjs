@@ -3,29 +3,35 @@ const clamp = (value, low = -1, high = 1) => Math.min(high, Math.max(low, finite
 const unit = value => clamp(value, 0, 1);
 
 /** Renderer-independent intent. This is parameter control, not a fabricated MOC. */
-export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = false, hidden = false, reducedMotion = false, nativeMotion = '' } = {}) {
+export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = false, hidden = false, reducedMotion = false, nativeMotion = '', nativeParameters, supportedParameters } = {}) {
   const still = sleeping || hidden || reducedMotion;
+  const own = new Set(nativeParameters || []);
+  const reactionOwns = name => nativeMotion !== '' && nativeMotion !== 'Idle' && own.has(name);
   const blinkL = sleeping ? 1 : unit(pose.blinkLeft);
   const blinkR = sleeping ? 1 : unit(pose.blinkRight);
   const smile = unit(pose.smileAmount), sad = unit(Math.max(finite(pose.sadAmount), finite(pose.downcastAmount)));
   const quiet = sleeping || hidden || !pose.speaking;
   const mouthForm = quiet ? smile * .7 - sad * .35 : pose.mouthShape === 'O' ? -.65 : pose.mouthShape === 'E' ? .25 : 0;
+  const eyelid = 1 - unit(pose.eyeSmile) * .15 - unit(pose.sleepyAmount) * .38 - sad * .12;
+  // The bundled rig has eyebrow height, but no eyebrow angle. A small height
+  // difference keeps its asymmetric cues visible without a virtual parameter.
+  const browDifference = supportedParameters && !supportedParameters.includes('ParamBrowLAngle') && !supportedParameters.includes('ParamBrowRAngle') ? clamp(pose.browTilt) * .12 : 0;
   return {
-    ParamAngleX: still ? 0 : clamp(follow.headX) * 12 + (nativeMotion === 'Shake' ? 0 : clamp(pose.headShake) * 3),
-    ParamAngleY: still ? 0 : clamp(follow.headY) * 9 - (nativeMotion === 'Nod' ? 0 : clamp(pose.headNod) * 5),
-    ParamAngleZ: sleeping ? -5 : still ? 0 : clamp(follow.headTilt) * 8,
+    ParamAngleX: still ? 0 : clamp(follow.headX) * 12 + (nativeMotion === 'Shake' || reactionOwns('ParamAngleX') ? 0 : clamp(pose.headShake) * 3),
+    ParamAngleY: still ? 0 : clamp(follow.headY) * 9 - (nativeMotion === 'Nod' || reactionOwns('ParamAngleY') ? 0 : clamp(pose.headNod) * 5),
+    ParamAngleZ: sleeping ? -5 : still || reactionOwns('ParamAngleZ') ? 0 : clamp(follow.headTilt) * 8,
     ParamEyeBallX: still ? 0 : clamp(follow.gazeX),
     ParamEyeBallY: still ? 0 : clamp(follow.gazeY),
-    ParamBodyAngleX: still ? 0 : clamp(follow.bodyXPercent) * 4 + clamp(pose.bodyTurn) * 3,
-    ParamBodyAngleY: still ? 0 : clamp(pose.bodyLean) * 3,
-    ParamBodyAngleZ: still ? 0 : -clamp(follow.bodyRotationDegrees) * 3,
-    ParamEyeLOpen: hidden ? 1 : (1 - blinkL) * (1 - unit(pose.eyeSmile) * .15),
-    ParamEyeROpen: hidden ? 1 : (1 - blinkR) * (1 - unit(pose.eyeSmile) * .15),
+    ParamBodyAngleX: still ? 0 : clamp(follow.bodyXPercent) * 4 + (reactionOwns('ParamBodyAngleX') ? 0 : clamp(pose.bodyTurn) * 3),
+    ParamBodyAngleY: still || reactionOwns('ParamBodyAngleY') ? 0 : clamp(pose.bodyLean) * 3,
+    ParamBodyAngleZ: still || reactionOwns('ParamBodyAngleZ') ? 0 : -clamp(follow.bodyRotationDegrees) * 3,
+    ParamEyeLOpen: hidden ? 1 : (1 - blinkL) * eyelid,
+    ParamEyeROpen: hidden ? 1 : (1 - blinkR) * eyelid,
     ParamEyeLSmile: sleeping || hidden ? 0 : unit(pose.eyeSmile),
     ParamEyeRSmile: sleeping || hidden ? 0 : unit(pose.eyeSmile),
     ParamEyeBallForm: sleeping || hidden ? 0 : unit(pose.eyeSmile),
-    ParamBrowLY: hidden ? 0 : clamp(pose.browRaise) * .7,
-    ParamBrowRY: hidden ? 0 : clamp(pose.browRaise) * .7,
+    ParamBrowLY: hidden ? 0 : clamp(pose.browRaise) * .7 + browDifference,
+    ParamBrowRY: hidden ? 0 : clamp(pose.browRaise) * .7 - browDifference,
     ParamBrowLAngle: hidden ? 0 : clamp(pose.browTilt) * .7,
     ParamBrowRAngle: hidden ? 0 : -clamp(pose.browTilt) * .7,
     ParamCheek: sleeping || hidden ? 0 : unit(pose.blush),
@@ -54,14 +60,23 @@ export function createCubismParameterBridge(model, idManager) {
   }
   return {
     supported: [...bindings.keys()],
-    apply(targets, { mouthOnly = false, additive = [], multiply = [] } = {}) {
-      const additiveNames = new Set(additive), multiplyNames = new Set(multiply);
+    read(name) {
+      const binding = bindings.get(name);
+      return binding ? model.getParameterValueByIndex(binding.index) : undefined;
+    },
+    apply(targets, { mouthOnly = false, additive = [], multiply = [], dominant = [], preserve = [] } = {}) {
+      const additiveNames = new Set(additive), multiplyNames = new Set(multiply), dominantNames = new Set(dominant), preserveNames = new Set(preserve);
       for (const [name, binding] of bindings) {
         if (mouthOnly !== name.startsWith('ParamMouth')) continue;
+        if (preserveNames.has(name)) continue;
         if (!Number.isFinite(targets[name])) continue;
         let value = targets[name];
         if (additiveNames.has(name)) value += model.getParameterValueByIndex(binding.index);
         if (multiplyNames.has(name)) value *= model.getParameterValueByIndex(binding.index);
+        if (dominantNames.has(name)) {
+          const authored = model.getParameterValueByIndex(binding.index);
+          if (Number.isFinite(authored) && Math.abs(authored) > Math.abs(value)) value = authored;
+        }
         model.setParameterValueByIndex(binding.index, clamp(value, binding.low, binding.high));
       }
     },

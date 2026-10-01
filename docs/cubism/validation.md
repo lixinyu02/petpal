@@ -1,6 +1,21 @@
 # 原创 Cubism 网页验收
 
-日期：2026-10-01。此轮为共享前端与网页更新，0.9.6 客户端、版本、冻结 tag 和签名升级清单保持原状。
+## 当前 V2：2026-10-02
+
+- 修复源层中重复锁骨与横向领口拼接：一张连续颈肩／衣服／双手／裙底替代旧 neck 与 topwear，保留原脸与头发。20 层 PSD、22 drawables、20 个参数、3552 顶点，重新导出 MOC3 与图集；来源与重建见 [连续身体说明](akari-continuous-body.md)。
+- continuous-body profile 收小头部 XY、身体与 Z 旋转关键形；保留 classic 重建路径。新增 TapHead／Greet，改善 Idle／Nod／Shake、发梢物理及官方动作／表情淡入淡出；中性参数每帧恢复，停止／隐藏／休息时关闭嘴型、清空原生队列。
+- 官方 Core 6.0.1 一致性、损坏负例与 35 姿态检查通过；111 项相关回归、TypeScript 和隔离 Vite 构建通过。机械重新打包后的 PSD SHA-256 与已编译输入一致，PowerShell authoring 入口语法检查通过。未把 2026-10-01 的全套 1300 测试当作新模型的重跑结果。
+- Chrome 插件在严格同源 CSP 的真实 WebGL2 预览中验收了 412×960、完整人物显示、直接双击招呼、模拟口型、开心／害羞／难过／兴奋、停止闭嘴、休息与隐藏、减少动态、StrictMode／compact 重建、两实例及卸载、context loss／无 WebGL2 回退；横向内容宽度为 412。新版静态与说话截图未出现旧领口横线。
+- 网页静态资源已经先复制核对、再原子替换 index；44 个公网 HTML／两代模型／Framework／Core／shader／许可资源 SHA-256 读回全部匹配。后台 PID 34828 未变，账号状态与 token 字节、下载包大小／mtime、稳定更新清单均保持。旧模型和旧静态资源保留。
+- Chrome 实际访问公网 HTTPS、登录 test 后显示新版人物。正式首页的 layout viewport 为 412×960，横向内容宽度 412、人物画布 379×515.8125；正常桌面尺寸与窄屏截图均已保存。正式首页与私人预览的尺寸分别测量。
+
+此轮为网页体验更新，没有重打 0.9.6 客户端或修改升级清单。本轮预览口型使用模拟播放进度与能量输入，不能表述为新模型的真实 TTS／ASR 实测；旧版真实 TTS 证据见下方历史记录。官方 Editor 的 CMO3 打开／保存／再导出，以及 Android／Ubuntu／Windows 实机外观仍未验收。
+
+本轮私有检查记录位于忽略的 `evidence/cubism-20261002/`：regression.log、core-corrected.json、chrome-lifecycle.json、chrome-v2-*.jpg、chrome-public*.json、chrome-public-v2*.jpg、public-readback.json 与 deployment.json。
+
+## 历史 classic：2026-10-01
+
+以下为旧模型的历史验收。该轮为共享前端与网页更新，0.9.6 客户端、版本、冻结 tag 和签名升级清单保持原状。
 
 ## 已完成
 

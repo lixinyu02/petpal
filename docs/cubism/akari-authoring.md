@@ -1,5 +1,7 @@
 # Akari Cubism 资产来源与重建
 
+本文件记录 2026-10-01 的 classic 21 层模型及其原始导出；当前默认使用 V2 连续身体模型，重建流程见 [V2 作者说明](akari-continuous-body.md)。以下 classic 参数和哈希保留为历史依据。
+
 Akari 的美术由 PetPal 的 imagegen 流程生成，奶油白与浅橘配色延续原角色。模型由原创分层 PSD 编译生成；没有复制官方样例人物或第三方 MOC3。源 PNG、分层坐标、21 层 PSD 与机械打包说明在 [`outputs/avatars/akari-cubism`](../../outputs/avatars/akari-cubism/README.md)。
 
 ## 已验收与未验收
@@ -65,7 +67,7 @@ runner 使用冻结工具的公开 API，没有修改上游源文件。它先 in
      --require-emotions
    ```
 
-   检查当前发布模型可将第一个参数改为 `public/avatars/akari-cubism/akari.model3.json`，receipt 仍写 `.tools/`。只有 `status: pass` 表示检查通过。验证脚本不修改模型，官方 Core 在无文件／网络接口的 VM 中执行。
+   检查当前默认模型可将第一个参数改为 `public/avatars/akari-cubism-v2/akari.model3.json`；检查历史 classic 则使用 `public/avatars/akari-cubism/akari.model3.json`，receipt 仍写 `.tools/`。只有 `status: pass` 表示检查通过。验证脚本不修改模型，官方 Core 在无文件／网络接口的 VM 中执行。
 
 5. 在实际浏览器／设备上检查外观、动效、口型与情绪，再审核要更新的 runtime 文件。CMO3 如需供官方 Editor 继续编辑，应单独完成打开、保存与再导出验收。
 

@@ -1,0 +1,630 @@
+{
+  "version": 2,
+  "recordedAt": "2026-10-01T20:35:02.476Z",
+  "iterationDate": "2026-10-02",
+  "baseline": {
+    "commit": "f2e775177faa9cea5c9168b31f2f1591d5cf0d45",
+    "publishedDirectory": "public/avatars/akari-cubism",
+    "originalAuthoringProvenance": "docs/cubism/akari-authoring-provenance.json",
+    "compiler": "PSD2Live 2ac751fbb3ffdc8251a82e0d600d97afafafcaac with original Kotlin runner",
+    "compilerSourceChanged": false
+  },
+  "currentModel": {
+    "profile": "continuous-body",
+    "runtimeDirectory": "public/avatars/akari-cubism-v2",
+    "sourceDirectory": "outputs/avatars/akari-cubism-v2",
+    "documentation": "docs/cubism/akari-continuous-body.md",
+    "newMocAndTexture": true,
+    "originalFaceAndHairReused": true,
+    "legacyDirectoryPreserved": true
+  },
+  "artwork": {
+    "method": "Built-in imagegen transparent edit, then mechanical source-layer reuse, RGBA sampling, composition and PSD encoding",
+    "generationRecord": "outputs/avatars/akari-cubism-v2/body-continuous.imagegen.json",
+    "generatedBody": {
+      "width": 1133,
+      "height": 1388,
+      "postGenerationProgrammaticPainting": false,
+      "connectedComponentsAtAlpha32": 1,
+      "limitation": "A few low-alpha perimeter pixels remain; image checks do not establish model or Editor acceptance"
+    },
+    "canvas": [
+      1024,
+      1536
+    ],
+    "bodySource": [
+      0,
+      0,
+      1133,
+      1388
+    ],
+    "bodyTarget": [
+      92,
+      489,
+      840,
+      1029
+    ],
+    "psdSourceLayerCount": 20,
+    "removedSeparateLayer": "neck",
+    "continuousLayer": "topwear",
+    "sourceAssets": [
+      {
+        "path": "outputs/avatars/akari-cubism-v2/body-continuous.png",
+        "bytes": 1888552,
+        "sha256": "301ecb2c7539fbde65a448f94dba7e6f3352ed26fa14416b65ba0cb03824f74c"
+      },
+      {
+        "path": "outputs/avatars/akari-cubism-v2/body-continuous.imagegen.json",
+        "bytes": 5821,
+        "sha256": "0444ba8e7c201f465428dd0e25ed47f4135f6dcdfaf2543d756f93c9f840ecfa"
+      },
+      {
+        "path": "outputs/avatars/akari-cubism-v2/layout.json",
+        "bytes": 384,
+        "sha256": "591e1b9dee5eee2f86c01ec90bb0e041eba063ad515fa61d9bc25863dbd93714"
+      },
+      {
+        "path": "outputs/avatars/akari-cubism-v2/akari.psd",
+        "bytes": 7116632,
+        "sha256": "ff47f7fb5348877ea6972eae13f1067188aece2682b2a35b31a3c8e523ca291a"
+      },
+      {
+        "path": "outputs/avatars/akari-cubism-v2/akari.cmo3",
+        "bytes": 5130122,
+        "sha256": "9f17441b10cd29dbabf3c279b9ccfe090f6930061a31ae69eec116786da8d02a"
+      },
+      {
+        "path": "outputs/avatars/akari-cubism-v2/neutral-layout.png",
+        "bytes": 1606456,
+        "sha256": "4b19b827da7eae30035744312514108bf89079593ec88f8b1dcff4fd4c42fb78"
+      },
+      {
+        "path": "outputs/avatars/akari-cubism-v2/pack-receipt.json",
+        "bytes": 5485,
+        "sha256": "8aefc37e4b47f2665309ef7316e713c83ecb32a073dedbcfcb62f841f8ae6a3a"
+      }
+    ],
+    "reviewedBodyFilename": "body-continuous.png",
+    "bodyFilenameMismatchRejected": true
+  },
+  "authoring": {
+    "compiler": "PSD2Live 1.6.0",
+    "upstreamRepository": "https://github.com/tsunehimatoi/psd2live",
+    "upstreamCommit": "2ac751fbb3ffdc8251a82e0d600d97afafafcaac",
+    "sourceManifest": "scripts/authoring/psd2live-source-manifest.json",
+    "frozenSourceFileCount": 704,
+    "upstreamSourceChanged": false,
+    "toolchain": {
+      "jdk": 21,
+      "gradle": "9.8.0",
+      "kotlin": "2.4.10"
+    },
+    "profiles": {
+      "default": "classic",
+      "classic": {
+        "headTurnStrength": 0.55,
+        "bodyStrength": 0.65
+      },
+      "continuous-body": {
+        "headTurnStrength": 0.25,
+        "bodyStrength": 0.3,
+        "headZKeyformAngleMultiplier": 0.2,
+        "maximumAuthoredHeadZAngle": 6,
+        "requiredBodyLayer": "topwear",
+        "forbiddenLayer": "neck"
+      },
+      "inputPsdDefault": "Selected from classic or v2 source directory according to profile; explicit repository-local InputPsd allowed"
+    },
+    "sharedSettings": {
+      "atlasSize": 2048,
+      "meshSpacing": 48,
+      "upscale": 1
+    },
+    "keyformApi": [
+      "RigKeyformSetEdit",
+      "RigKeyformGeometryEdit",
+      "RigTargetRef"
+    ],
+    "headZPreserved": [
+      "pivot originX/originY",
+      "scale",
+      "neutral keyform angle and position",
+      "ParamAngleZ control range -30..30"
+    ],
+    "sourceScripts": [
+      {
+        "path": "scripts/authoring/pack-akari-continuous-body.mjs",
+        "bytes": 4534,
+        "sha256": "34a980170b4809fdadb50a8f901250d2f8c510db1cca71a7bfb6522446d98cba"
+      },
+      {
+        "path": "scripts/authoring/Build-AkariCubism.ps1",
+        "bytes": 6734,
+        "sha256": "b2e84910f441c64b04d5a0e5c32d5cb8d4088df28a4f5e3eda496707bc39c463"
+      },
+      {
+        "path": "scripts/authoring/cubism/src/main/kotlin/PetPalAuthoring.kt",
+        "bytes": 6268,
+        "sha256": "d2bff63e51d9504a773d0fa7c5cca58ef144822e73e627f0b5866f7cceb60399"
+      },
+      {
+        "path": "scripts/authoring/polish-akari-motions.mjs",
+        "bytes": 10470,
+        "sha256": "7708e590ed1d33e8005cc47c9308912d6c783d0648059676d7347e8026c049f1"
+      }
+    ],
+    "officialEditorOpened": false,
+    "officialEditorSaved": false,
+    "officialEditorReexported": false,
+    "cmo3Status": "Generated editable candidate; official Cubism Editor compatibility unverified; timestamp/GUID container is not promised byte reproducible"
+  },
+  "overlay": {
+    "sourcePath": "scripts/authoring/polish-akari-motions.mjs",
+    "sourceSha256": "7708e590ed1d33e8005cc47c9308912d6c783d0648059676d7347e8026c049f1",
+    "defaultDirectory": "public/avatars/akari-cubism-v2",
+    "implementation": "Original PetPal hand-authored restricted Bezier motion data and existing physics tuning",
+    "sequence": [
+      "Continuous body source PSD packing",
+      "Pinned PSD2Live export using continuous-body profile",
+      "Node motion/physics/model3 overlay",
+      "Official Core and Framework validation",
+      "Separate browser/device verification before publication"
+    ],
+    "touchedFileCount": 7,
+    "regeneratesMoc": false,
+    "regeneratesTexture": false,
+    "requiresCompleteMocTexturePair": true,
+    "verifiedProfiles": [
+      {
+        "name": "classic",
+        "mocSha256": "a48d4570dfd2fdb1f9d99afe94920759d78ac1cc016dfaf0f62c365ce0c307e0",
+        "textureSha256": "d7d3079b151d8508607af79d12d37b2f808a9b13b0f6acafb4927f745849d84b"
+      },
+      {
+        "name": "continuous-body",
+        "mocSha256": "29185d2b500ac0b2e1e15f2b053b3fd6444ba72e93a8b33a388f4da8edb04f0b",
+        "textureSha256": "e1f468582ecf6a000068128deaa74c2878ec2c01a2529d3c89ef307cc9d62020"
+      }
+    ]
+  },
+  "runtimeAssets": [
+    {
+      "path": "public/avatars/akari-cubism-v2/akari.2048/texture_00.png",
+      "bytes": 2446173,
+      "sha256": "e1f468582ecf6a000068128deaa74c2878ec2c01a2529d3c89ef307cc9d62020",
+      "baselinePath": "public/avatars/akari-cubism/akari.2048/texture_00.png",
+      "baselineSha256": "d7d3079b151d8508607af79d12d37b2f808a9b13b0f6acafb4927f745849d84b",
+      "unchangedFromBaseline": false
+    },
+    {
+      "path": "public/avatars/akari-cubism-v2/akari.blink.motion3.json",
+      "bytes": 1155,
+      "sha256": "399f91b7bfac0666f589ab7c6daace5e33e5c6d6e7c6e7ca4024b6db48a65110",
+      "baselinePath": "public/avatars/akari-cubism/akari.blink.motion3.json",
+      "baselineSha256": "399f91b7bfac0666f589ab7c6daace5e33e5c6d6e7c6e7ca4024b6db48a65110",
+      "unchangedFromBaseline": true
+    },
+    {
+      "path": "public/avatars/akari-cubism-v2/akari.cdi3.json",
+      "bytes": 4387,
+      "sha256": "45468418fd99f30b0c50c31e6ff50834976565c31a91f85160c3713633ecaa09",
+      "baselinePath": "public/avatars/akari-cubism/akari.cdi3.json",
+      "baselineSha256": "55feec9586e8a6b647d4cb8835649afc2b55d523480d9399e1513b5e146ce0ff",
+      "unchangedFromBaseline": false
+    },
+    {
+      "path": "public/avatars/akari-cubism-v2/akari.greet.motion3.json",
+      "bytes": 4365,
+      "sha256": "02ee153e2b05a37fc2a3a9ceeaa4c852b324e8b8476389c2ecf9a0b0fe6ba66c",
+      "addedInV2": true
+    },
+    {
+      "path": "public/avatars/akari-cubism-v2/akari.idle.motion3.json",
+      "bytes": 3885,
+      "sha256": "3cd08863b0cec9fb09aeffd8b3e9c31bd659211ffc77830485c0f246c65d741c",
+      "baselinePath": "public/avatars/akari-cubism/akari.idle.motion3.json",
+      "baselineSha256": "a32ca6a85d2ae68d5b71ba4d7a74db5ce35a5b634882bd0f83ce84363f597722",
+      "unchangedFromBaseline": false
+    },
+    {
+      "path": "public/avatars/akari-cubism-v2/akari.moc3",
+      "bytes": 172160,
+      "sha256": "29185d2b500ac0b2e1e15f2b053b3fd6444ba72e93a8b33a388f4da8edb04f0b",
+      "baselinePath": "public/avatars/akari-cubism/akari.moc3",
+      "baselineSha256": "a48d4570dfd2fdb1f9d99afe94920759d78ac1cc016dfaf0f62c365ce0c307e0",
+      "unchangedFromBaseline": false
+    },
+    {
+      "path": "public/avatars/akari-cubism-v2/akari.model3.json",
+      "bytes": 1348,
+      "sha256": "1a86806955ca56751a349866f840c897f2317aa84e2b4c76613364e231e43974",
+      "baselinePath": "public/avatars/akari-cubism/akari.model3.json",
+      "baselineSha256": "c6c415b919216cc82bed6c8f758e57306b71a27af92bcee9153b0eae9ae16560",
+      "unchangedFromBaseline": false
+    },
+    {
+      "path": "public/avatars/akari-cubism-v2/akari.nod.motion3.json",
+      "bytes": 1907,
+      "sha256": "fb454e5ee458ebe54267797b85b5522295560c3123db5fa3bc63e266ae35fb43",
+      "baselinePath": "public/avatars/akari-cubism/akari.nod.motion3.json",
+      "baselineSha256": "bfd9a247d5ec8479145c2dddfd5fdbf03e1c46df8d7460f07badd146c1e19418",
+      "unchangedFromBaseline": false
+    },
+    {
+      "path": "public/avatars/akari-cubism-v2/akari.physics3.json",
+      "bytes": 5904,
+      "sha256": "008c9e3ed6ce551bf42f1905df79c97de3558371a9da006b87bc908ac89d6999",
+      "baselinePath": "public/avatars/akari-cubism/akari.physics3.json",
+      "baselineSha256": "385846be2c653e6bf3eda4a4e49353ba7c8ea6051a0e88aa86b5e2db749b30e1",
+      "unchangedFromBaseline": false
+    },
+    {
+      "path": "public/avatars/akari-cubism-v2/akari.psd2live.json",
+      "bytes": 4165,
+      "sha256": "5052d8077ba787d2e0b4165fb1fa3348d1198fc4171c0952e9cce3b7246c5006",
+      "baselinePath": "public/avatars/akari-cubism/akari.psd2live.json",
+      "baselineSha256": "72c96c50516edeea92292e9ff09872ed37acbaec9048c0c6a2fd36efdf6399cd",
+      "unchangedFromBaseline": false
+    },
+    {
+      "path": "public/avatars/akari-cubism-v2/akari.shake.motion3.json",
+      "bytes": 1809,
+      "sha256": "e992662a7d6c714a83af824770eb115e7b4128e537b8d7918a2801c61749fce7",
+      "baselinePath": "public/avatars/akari-cubism/akari.shake.motion3.json",
+      "baselineSha256": "9714b72b47dba8e33b6b08d0f9e84c77309a6ce6c98d2a3815c3a59d69163b01",
+      "unchangedFromBaseline": false
+    },
+    {
+      "path": "public/avatars/akari-cubism-v2/akari.taphead.motion3.json",
+      "bytes": 4642,
+      "sha256": "c61c068e78b55c45b2bc9f482f922cfdecb8e124b7b05cdba8359ea32f7f4bd2",
+      "addedInV2": true
+    }
+  ],
+  "actualRig": {
+    "source": "Official Cubism Core 6.0.1 instantiated current continuous-body MOC3",
+    "mocVersion": 5,
+    "parameterCount": 20,
+    "drawables": 22,
+    "parts": 7,
+    "vertices": 3552,
+    "triangles": 4659,
+    "parameters": [
+      {
+        "id": "ParamAngleX",
+        "min": -45,
+        "max": 45,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamAngleY",
+        "min": -30,
+        "max": 30,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamAngleZ",
+        "min": -30,
+        "max": 30,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamBodyAngleX",
+        "min": -10,
+        "max": 10,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamBodyAngleY",
+        "min": -10,
+        "max": 10,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamBodyAngleZ",
+        "min": -10,
+        "max": 10,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamEyeLOpen",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "keyCount": 2
+      },
+      {
+        "id": "ParamEyeROpen",
+        "min": 0,
+        "max": 1,
+        "default": 1,
+        "keyCount": 2
+      },
+      {
+        "id": "ParamEyeBallX",
+        "min": -1,
+        "max": 1,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamEyeBallY",
+        "min": -1,
+        "max": 1,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamEyeBallForm",
+        "min": -1,
+        "max": 1,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamBrowLY",
+        "min": -1,
+        "max": 1,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamBrowRY",
+        "min": -1,
+        "max": 1,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamMouthForm",
+        "min": -1,
+        "max": 1,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamMouthOpenY",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamBreath",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamHairFront",
+        "min": -1,
+        "max": 1,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamHairBack",
+        "min": -1,
+        "max": 1,
+        "default": 0,
+        "keyCount": 3
+      },
+      {
+        "id": "ParamCheek",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "keyCount": 2
+      },
+      {
+        "id": "ParamTear",
+        "min": 0,
+        "max": 1,
+        "default": 0,
+        "keyCount": 2
+      }
+    ],
+    "missingBindings": [
+      "arms/hands/fingers",
+      "shoulder lift",
+      "separate smiling eyes",
+      "eyebrow angle"
+    ]
+  },
+  "validation": {
+    "officialCore": {
+      "status": "pass",
+      "version": "6.0.1",
+      "coreSha256": "8741f739779b5d5210872bd3d7d99f0f1e56e6c87409e7d26d6bb4b80aa1ef47",
+      "mocSha256": "29185d2b500ac0b2e1e15f2b053b3fd6444ba72e93a8b33a388f4da8edb04f0b",
+      "consistency": 1,
+      "corruptMagicNegativeControl": "rejected",
+      "sampledPoses": 35,
+      "emotionsRequired": true,
+      "scope": "Official Core consistency, actual model instantiation and sampled mesh/parameter execution; browser rendering and visual quality require separate acceptance."
+    },
+    "runtimeTests": {
+      "status": "pass",
+      "files": [
+        "tests/cubism-frame.test.mjs",
+        "tests/cubism-native-frame.test.mjs",
+        "tests/cubism-motion-assets.test.mjs"
+      ],
+      "officialFramework": "5-r.5 pinned official bundle",
+      "checks": [
+        "Actual current v2 motion composition",
+        "Stable neutral baseline and outgoing/current parameter ownership",
+        "TapHead and Greet take precedence over procedural nod",
+        "Expression and mouth form reset on motion exit",
+        "Stop, rest and hidden state close speech mouth immediately",
+        "Hidden, rest and reduced motion cancel native queues"
+      ]
+    },
+    "browserDeviceAcceptance": "Separate product verification; not established by this asset receipt",
+    "officialEditorOpened": false,
+    "officialEditorSaved": false,
+    "officialEditorReexported": false
+  },
+  "historicalMotionOnlyCandidate": {
+    "profile": "classic",
+    "status": "Superseded by continuous-body authoring; retained numerical motion/physics evidence only",
+    "originalMocSha256": "a48d4570dfd2fdb1f9d99afe94920759d78ac1cc016dfaf0f62c365ce0c307e0",
+    "originalTextureSha256": "d7d3079b151d8508607af79d12d37b2f808a9b13b0f6acafb4927f745849d84b",
+    "motionMeshFrames": 1347,
+    "revisedPhysicsSteps": 3150,
+    "independentBaselineRebuild": {
+      "baseCommit": "f2e775177faa9cea5c9168b31f2f1591d5cf0d45",
+      "rebuiltFiles": [
+        "akari.idle.motion3.json",
+        "akari.nod.motion3.json",
+        "akari.shake.motion3.json",
+        "akari.taphead.motion3.json",
+        "akari.greet.motion3.json",
+        "akari.model3.json",
+        "akari.physics3.json"
+      ],
+      "repeatedRunByteIdentical": true,
+      "negativeControls": [
+        "missing target rejected",
+        "legacy package rejected without writes",
+        "unmatched moc rejected before overlay writes"
+      ],
+      "overlayBytesMatchCurrentV2": true,
+      "scope": "Seven motion/physics/model3 files only; does not describe current MOC or texture"
+    },
+    "physicsComparison": {
+      "profile": "15 seconds; yaw 20 degrees / roll 8 degrees / body yaw 3 degrees for 7 seconds, neutral for remaining 8 seconds",
+      "samples": [
+        {
+          "variant": "baseline",
+          "fps": 30,
+          "frames": 450,
+          "outputs": [
+            {
+              "id": "ParamHairFront",
+              "peak": 0.1905396431684494,
+              "tailPeak": 0,
+              "saturatedFrames": 0
+            },
+            {
+              "id": "ParamHairBack",
+              "peak": 0.22852009534835815,
+              "tailPeak": 0,
+              "saturatedFrames": 0
+            }
+          ]
+        },
+        {
+          "variant": "baseline",
+          "fps": 60,
+          "frames": 900,
+          "outputs": [
+            {
+              "id": "ParamHairFront",
+              "peak": 0.22283640503883362,
+              "tailPeak": 0,
+              "saturatedFrames": 0
+            },
+            {
+              "id": "ParamHairBack",
+              "peak": 0.22848398983478546,
+              "tailPeak": 0,
+              "saturatedFrames": 0
+            }
+          ]
+        },
+        {
+          "variant": "baseline",
+          "fps": 120,
+          "frames": 1800,
+          "outputs": [
+            {
+              "id": "ParamHairFront",
+              "peak": 0.22636839747428894,
+              "tailPeak": 0,
+              "saturatedFrames": 0
+            },
+            {
+              "id": "ParamHairBack",
+              "peak": 0.22833137214183807,
+              "tailPeak": 0,
+              "saturatedFrames": 0
+            }
+          ]
+        },
+        {
+          "variant": "polished",
+          "fps": 30,
+          "frames": 450,
+          "outputs": [
+            {
+              "id": "ParamHairFront",
+              "peak": 0.10400427132844925,
+              "tailPeak": 0,
+              "saturatedFrames": 0
+            },
+            {
+              "id": "ParamHairBack",
+              "peak": 0.1300824135541916,
+              "tailPeak": 0,
+              "saturatedFrames": 0
+            }
+          ]
+        },
+        {
+          "variant": "polished",
+          "fps": 60,
+          "frames": 900,
+          "outputs": [
+            {
+              "id": "ParamHairFront",
+              "peak": 0.10404247790575027,
+              "tailPeak": 0,
+              "saturatedFrames": 0
+            },
+            {
+              "id": "ParamHairBack",
+              "peak": 0.1301424354314804,
+              "tailPeak": 0,
+              "saturatedFrames": 0
+            }
+          ]
+        },
+        {
+          "variant": "polished",
+          "fps": 120,
+          "frames": 1800,
+          "outputs": [
+            {
+              "id": "ParamHairFront",
+              "peak": 0.10405487567186356,
+              "tailPeak": 0,
+              "saturatedFrames": 0
+            },
+            {
+              "id": "ParamHairBack",
+              "peak": 0.1301264464855194,
+              "tailPeak": 0,
+              "saturatedFrames": 0
+            }
+          ]
+        }
+      ]
+    },
+    "scope": "These numerical results were measured with the earlier classic MOC; not an independent geometry or visual receipt for the continuous-body MOC"
+  },
+  "licenses": {
+    "authoringSource": "GPL-3.0-only for pinned PSD2Live/Umamo and independent Kotlin authoring runner; compiler binaries are not embedded in PetPal apps",
+    "runtime": "Official Live2D Core and Framework remain subject to their separate retained licenses and notices",
+    "artwork": "Generated original PetPal art and reused original project layers; no official sample character or third-party MOC copied",
+    "details": "docs/cubism/akari-authoring.md"
+  },
+  "scope": "Continuous-body source and runtime provenance, official Core asset execution, and focused runtime regression. Does not establish full visual quality, official Cubism Editor compatibility, real TTS/device acceptance or production deployment."
+}

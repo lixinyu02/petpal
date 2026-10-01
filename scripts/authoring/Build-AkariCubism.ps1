@@ -5,6 +5,7 @@ param(
   [string]$GradleUserHome,
   [string]$InputPsd,
   [string]$OutputDirectory,
+  [ValidateSet('classic', 'continuous-body')][string]$Profile = 'classic',
   [switch]$BuildUpstream,
   [switch]$Offline
 )
@@ -13,7 +14,10 @@ $taskRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $taskManifest = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'psd2live-source-manifest.json') | ConvertFrom-Json
 if (-not $SourceDirectory) { $SourceDirectory = Join-Path $taskRoot '.tools\psd2live-source' }
 if (-not $GradleUserHome) { $GradleUserHome = Join-Path $taskRoot '.tools\psd2live-gradle' }
-if (-not $InputPsd) { $InputPsd = Join-Path $taskRoot 'outputs\avatars\akari-cubism\akari.psd' }
+if (-not $InputPsd) {
+  $taskAvatarSource = if ($Profile -eq 'continuous-body') { 'akari-cubism-v2' } else { 'akari-cubism' }
+  $InputPsd = Join-Path $taskRoot "outputs\avatars\$taskAvatarSource\akari.psd"
+}
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $taskRoot '.tools\cubism-authoring\model' }
 $taskSource = (Get-Item -LiteralPath $SourceDirectory).FullName
 $taskInput = (Get-Item -LiteralPath $InputPsd).FullName
@@ -65,7 +69,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Independent authoring runner build failed.' }
   $taskClasses = Join-Path $taskBuild 'classes\kotlin\main'
   $taskCp = (@($taskClasses) + $taskClasspath) -join ';'
-  & $taskJava '-Xmx2g' '-Dfile.encoding=UTF-8' '-Djava.awt.headless=true' "-Dpetpal.authoring.projectRoot=$taskRoot" '-classpath' $taskCp 'PetPalAuthoringKt' $taskInput $taskOutput
+  & $taskJava '-Xmx2g' '-Dfile.encoding=UTF-8' '-Djava.awt.headless=true' "-Dpetpal.authoring.projectRoot=$taskRoot" '-classpath' $taskCp 'PetPalAuthoringKt' $taskInput $taskOutput ($Profile.ToLowerInvariant())
   if ($LASTEXITCODE -ne 0) { throw 'Original Cubism model export failed.' }
   $taskGenerated = @(Get-ChildItem -LiteralPath $taskOutput -File -Recurse | ForEach-Object {
     [ordered]@{ path=$_.FullName.Substring($taskOutput.Length + 1).Replace('\','/'); bytes=$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
@@ -76,6 +80,7 @@ try {
   $taskReceipt = [ordered]@{
     status='generated'; generatedAt=[DateTime]::UtcNow.ToString('o'); upstream=$taskManifest.upstream; commit=$taskManifest.commit;
     frozenSourceFiles=$taskManifest.selected.Count; sourceUnmodified=$true;
+    authoringProfile=$Profile.ToLowerInvariant();
     inputPsdSha256=(Get-FileHash -LiteralPath $taskInput -Algorithm SHA256).Hash.ToLowerInvariant();
     runnerSources=$taskRunnerSources; generatedFiles=$taskGenerated; officialCoreValidation='Run verify-cubism-model.mjs separately';
     editorValidation='CMO3 has not been validated in official Cubism Editor';
