@@ -5,6 +5,9 @@ import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 import path from 'node:path';
+import { browserQueryPolicy, normalizeSiteOrigins, validateBrowserQueryUrl } from './opencli-browser-policies.mjs';
+import { validateOpenCliQuery } from './opencli-sites.mjs';
+import { assertBrowserAdapterUrl, browserAdapterOrigins, browserAdapterNetworkRules, runBrowserAdapter } from './opencli-browser-adapters.mjs';
 
 const require = createRequire(import.meta.url);
 const VERSION = '1.8.8';
@@ -139,6 +142,8 @@ export class OpenCliRunner {
     this.selectedProfileId = null;
     this.session = `petpal-${randomUUID()}`;
     this.tabs = new Map();
+    this.adapterLeases = new Map();
+    this.adapterOperation = null;
     this.busy = false;
     this.controller = null;
     this.closed = false;
@@ -185,7 +190,7 @@ export class OpenCliRunner {
     let raw = await this.#rawStatus();
     checkAbort(signal);
     if (!this.#attached(raw) && raw?.daemonVersion === VERSION && Number.isSafeInteger(raw.pid) && raw.pid > 0) {
-      if (this.tabs.size) throw new Error('浏览器桥进程已改变，请先断开旧连接');
+      if (this.tabs.size || this.adapterLeases.size) throw new Error('浏览器桥进程已改变，请先断开旧连接');
       this.sharedPid = raw.pid;
     }
     if (!this.#attached(raw)) {
@@ -214,7 +219,7 @@ export class OpenCliRunner {
     checkAbort(signal);
     if (args.profileId) {
       if (!raw.profiles?.some((p) => p.contextId === args.profileId && profileCompatible(p))) throw new Error('所选 Chrome 配置未连接或扩展低于 1.0.24，请刷新扩展状态');
-      if (this.selectedProfileId && this.selectedProfileId !== args.profileId && this.tabs.size) throw new Error('请先关闭当前小伴标签页，再切换 Chrome 配置');
+      if (this.selectedProfileId && this.selectedProfileId !== args.profileId && (this.tabs.size || this.adapterLeases.size)) throw new Error('请先关闭当前小伴标签页，再切换 Chrome 配置');
       this.selectedProfileId = args.profileId;
     }
     return { action: 'connect', ...await this.status() };
@@ -266,6 +271,127 @@ export class OpenCliRunner {
     return page;
   }
 
+  async #closeAdapterLease(lease) {
+    if (this.selectedProfileId !== lease.profileId) throw new Error('查询页面所属 Chrome 档案已改变，无法确认关闭。');
+    // When cancellation races tab creation, the page id can be unknown. The
+    // upstream protocol resolves this close only inside this random session.
+    await this.#command('tabs', { op: 'close', ...(lease.page ? { page: lease.page } : {}) }, AbortSignal.timeout(Math.min(3000, this.timeoutMs)), lease.session);
+    this.adapterLeases.delete(lease.session);
+  }
+
+  async executeAdapter(input, { signal, policy: suppliedPolicy, siteOrigins = {} } = {}) {
+    const args = validateOpenCliQuery(input), policy = browserQueryPolicy(args.site, args.command);
+    if (!policy || (suppliedPolicy && (suppliedPolicy.site !== args.site || suppliedPolicy.command !== args.command))) throw new Error('此浏览器查询未开放。');
+    const configuredOrigins = normalizeSiteOrigins(siteOrigins);
+    validateBrowserQueryUrl(args, configuredOrigins);
+    const origins = browserAdapterOrigins(policy, configuredOrigins);
+    checkAbort(signal);
+    if (this.closed) throw new Error('浏览器工具已关闭');
+    if (this.busy) throw new Error('另一项浏览器操作正在进行');
+    if (this.adapterLeases.size) throw new Error('上次查询页面尚未确认关闭，请先断开浏览器连接。');
+    this.busy = true;
+    const controller = new AbortController(); this.controller = controller;
+    const taskSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(this.timeoutMs), ...(signal ? [signal] : [])]);
+    const lease = { session: `petpal-query-${randomUUID()}`, profileId: this.selectedProfileId, page: null };
+    let complete, cleanupError, failure;
+    this.adapterOperation = new Promise(resolve => { complete = resolve; });
+    const deadline = Date.now() + this.timeoutMs;
+    try {
+      // Verify the selected profile and daemon before recording a lease. No
+      // automatic connect, profile selection, default session or tab discovery.
+      const raw = await this.#rawStatus(); checkAbort(taskSignal);
+      if (!this.#attached(raw)) throw new Error('小伴浏览器桥已断开；请手动重新连接');
+      if (!lease.profileId || !raw.profiles?.some(profile => profile.contextId === lease.profileId && profileCompatible(profile))) throw new Error('请先显式选择已连接且扩展兼容的 Chrome 配置');
+      const bundle = await this.#bundle();
+      if (!bundle) throw new Error('未安装内置 OpenCLI');
+      const { buildEvaluateExpression } = await import(pathToFileURL(path.join(bundle.root, 'dist/src/browser/utils.js')).href);
+      const evaluate = async (input, ...values) => {
+        checkAbort(taskSignal);
+        const expression = buildEvaluateExpression(input, values);
+        if (expression.length > 100000) throw new Error('固定浏览器脚本过大。');
+        const rules = browserAdapterNetworkRules(args.site), remaining = Math.max(1, deadline - Date.now());
+        const guarded = `(async () => {
+          if (!${JSON.stringify(origins)}.includes(location.origin)) throw new Error('PetPal origin rejected');
+          const networkRules = ${JSON.stringify(rules)}, nativeFetch = globalThis.fetch.bind(globalThis);
+          const fetch = async (input, init = {}) => {
+            if (!(typeof input === 'string' || input instanceof URL)) throw new Error('PetPal API request rejected');
+            const url = new URL(input,location.href), method = String(init.method || 'GET').toUpperCase();
+            if (url.protocol !== 'https:' || url.username || url.password || url.port || !networkRules.some(rule => rule.origin === url.origin && rule.methods.includes(method) && rule.paths.includes(url.pathname))) throw new Error('PetPal API request rejected');
+            const headers = new Headers(init.headers);
+            if (['authorization','cookie','proxy-authorization'].some(name => headers.has(name))) throw new Error('PetPal credential header rejected');
+            const networkSignal = AbortSignal.timeout(${remaining}); let response;
+            try { response = await nativeFetch(url.href,{...init,headers,redirect:'error',signal:networkSignal}); }
+            catch { if (networkSignal.aborted) throw new Error('PetPal API deadline exceeded'); throw new Error('网站 API 请求失败，请检查网络与登录。'); }
+            if (!response.ok) { await response.body?.cancel(); throw new Error('网站 API 暂不可用或需要登录。'); }
+            const reader = response.body?.getReader(); if (!reader) return response;
+            const chunks = []; let bytes = 0;
+            try { for (;;) { const {value,done} = await reader.read(); if (done) break; bytes += value.byteLength; if (bytes > 2097152) { await reader.cancel(); throw new Error('PetPal API response too large'); } chunks.push(value); } }
+            finally { reader.releaseLock(); }
+            const blob = new Blob(chunks);
+            if (url.origin === 'https://api.bilibili.com') {
+              let payload; try { payload = JSON.parse(await blob.text()); } catch { throw new Error('B站 API 返回格式无效。'); }
+              if (!payload || payload.code !== 0) throw new Error('B站 API 拒绝请求，请检查登录、网络和访问限制。');
+            }
+            return new Response(blob,{status:response.status,statusText:response.statusText,headers:response.headers});
+          };
+          return (${expression});
+        })()`;
+        const result = await this.#command('exec', { page: lease.page, code: guarded }, taskSignal, lease.session);
+        return result.data;
+      };
+      const wait = async seconds => {
+        if (!Number.isFinite(seconds) || seconds < 0 || seconds > 5) throw new Error('固定浏览器等待超出范围。');
+        checkAbort(taskSignal);
+        await new Promise((resolve, reject) => {
+          const aborted = () => { clearTimeout(timer); taskSignal.removeEventListener('abort', aborted); reject(abortError()); };
+          const timer = setTimeout(() => { taskSignal.removeEventListener('abort', aborted); resolve(); }, seconds * 1000);
+          taskSignal.addEventListener('abort', aborted, { once: true });
+        });
+        checkAbort(taskSignal);
+      };
+      const page = Object.freeze({
+        evaluate, wait,
+        goto: async (url, options = {}) => {
+          const target = assertBrowserAdapterUrl(url, origins);
+          const result = await this.#command('navigate', { page: lease.page, url: target }, taskSignal, lease.session);
+          if (result.page && result.page !== lease.page) throw new Error('查询页面身份已改变，停止操作。');
+          if (options.waitUntil !== 'none') { await wait(0.15); await evaluate(`(async () => { const deadline = Date.now() + 1000; while (!document.body && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve,50)); return Boolean(document.body); })()`); }
+        },
+      });
+      this.adapterLeases.set(lease.session, lease);
+      const opened = await this.#command('tabs', { op: 'new', url: `${origins[0]}/` }, taskSignal, lease.session);
+      if (typeof opened.page !== 'string' || !/^[\w.:-]{1,128}$/.test(opened.page)) throw new Error('浏览器未返回查询页面身份。');
+      lease.page = opened.page;
+      let abortListener;
+      const aborted = new Promise((_, reject) => {
+        abortListener = () => reject(abortError());
+        taskSignal.addEventListener('abort', abortListener, { once: true });
+        if (taskSignal.aborted) abortListener();
+      });
+      let rows;
+      try { rows = await Promise.race([runBrowserAdapter({ args, policy, page, bundleRoot: bundle.root, siteOrigins: configuredOrigins }), aborted]); }
+      finally { taskSignal.removeEventListener('abort', abortListener); }
+      const output = { site: args.site, command: args.command, version: VERSION, rows, count: rows.length };
+      if (Buffer.byteLength(JSON.stringify(output)) > 128 * 1024) throw new Error('网站查询响应超过 128 KiB。');
+      return output;
+    } catch (error) {
+      failure = error;
+      if (taskSignal.aborted || Date.now() >= deadline || error?.message === 'PetPal API deadline exceeded') {
+        if (signal?.aborted || controller.signal.aborted) throw abortError();
+        throw Object.assign(new Error('浏览器网站查询超时；已停止，不会自动重试。'), { status: 504, code: 'timeout' });
+      }
+      let message = cleanText(error?.message || '浏览器网站查询失败。', 400);
+      for (const value of [args.arguments.passcode, args.arguments.url]) if (typeof value === 'string' && value) message = message.split(value).join('[已隐藏]');
+      throw Object.assign(new Error(message), { ...(error?.status ? { status: error.status } : {}), ...(error?.code ? { code: error.code } : {}) });
+    } finally {
+      controller.abort();
+      if (this.adapterLeases.has(lease.session)) try { await this.#closeAdapterLease(lease); } catch { cleanupError = new Error('查询页面未确认关闭；请先断开浏览器连接后检查，不会自动重试查询。'); }
+      if (this.controller === controller) this.controller = null;
+      this.adapterOperation = null; this.busy = false; complete();
+      if (cleanupError && !failure) throw cleanupError;
+    }
+  }
+
   async execute(input, { signal } = {}) {
     const args = validateBrowserAction(input);
     checkAbort(signal);
@@ -286,14 +412,22 @@ export class OpenCliRunner {
       if (args.action === 'close' && !args.tabId) {
         const failed = [];
         try {
+          for (const lease of [...this.adapterLeases.values()]) {
+            try { await this.#closeAdapterLease(lease); } catch { failed.push(lease.session); }
+          }
           // A failed page must not prevent the other independent leases from
           // being released. Cancellation still prevents further dispatches.
           for (const [tabId, record] of [...this.tabs]) {
             checkAbort(taskSignal);
-            try { await this.#command('tabs', { op: 'close', page: tabId }, taskSignal, record.session); }
+            try { await this.#command('tabs', { op: 'close', page: tabId }, taskSignal, record.session); this.tabs.delete(tabId); }
             catch (error) { checkAbort(taskSignal); failed.push(tabId); }
           }
-        } finally { await this.#stopChild(); }
+        } finally {
+          // A query lease must keep its exact daemon/profile identity until a
+          // later explicit close confirms release. Clearing that identity here
+          // would make the retained lease impossible to close or reconnect.
+          if (!this.adapterLeases.size) await this.#stopChild();
+        }
         if (failed.length) throw new Error(`浏览器连接已断开，但有 ${failed.length} 个小伴网页未确认关闭；请在浏览器中检查并手动关闭`);
         return { action: 'close', closed: true };
       }
@@ -381,5 +515,12 @@ export class OpenCliRunner {
     try { await stopping; }
     finally { if (this.stopping === stopping) this.stopping = null; }
   }
-  async close() { this.closed = true; this.controller?.abort(); await this.#stopChild(); }
+  async close() {
+    this.closed = true; this.controller?.abort();
+    await this.adapterOperation;
+    let failed = false;
+    for (const lease of [...this.adapterLeases.values()]) try { await this.#closeAdapterLease(lease); } catch { failed = true; }
+    if (failed) throw new Error('查询页面未确认关闭，请在所选 Chrome 档案检查小伴页面。');
+    await this.#stopChild();
+  }
 }

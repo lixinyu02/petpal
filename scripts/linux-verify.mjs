@@ -13,6 +13,7 @@ const native = []; const failures = []; const frontend = []; const applicationSo
 const requiredApplicationSource = ['server/app.mjs', 'server/auth.mjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/updates.mjs', 'desktop/updates.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/index.mjs', 'server/providers.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'NOTICE'];
 requiredApplicationSource.push('desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs');
 requiredApplicationSource.push('server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs');
+requiredApplicationSource.push('server/opencli-browser-policies.mjs', 'server/opencli-browser-adapters.mjs');
 requiredApplicationSource.push('desktop/startup-diagnostics.cjs', 'server/music-mcp.mjs', 'server/music-mcp-routes.mjs',
   'server/native/music-mcp/netease/server.py', 'server/native/music-mcp/netease/LICENSE', 'server/native/music-mcp/netease/pyproject.toml', 'server/native/music-mcp/netease/PROVENANCE.json',
   'server/native/music-mcp/qqmusic/login.py', 'server/native/music-mcp/qqmusic/LICENSE', 'server/native/music-mcp/qqmusic/pyproject.toml', 'server/native/music-mcp/qqmusic/PROVENANCE.json',
@@ -29,7 +30,9 @@ const requiredOpencliFiles = ['package.json', 'LICENSE', 'cli-manifest.json', 'd
   'clis/juejin/hot.js', 'clis/juejin/recommend.js', 'clis/juejin/utils.js', 'clis/mdn/search.js',
   'clis/npm/package.js', 'clis/npm/search.js', 'clis/npm/utils.js', 'clis/steam/app.js', 'clis/steam/search.js', 'clis/steam/top-sellers.js', 'clis/steam/utils.js',
   'clis/toutiao/hot.js', 'clis/toutiao/utils.js', 'clis/v2ex/hot.js', 'clis/v2ex/latest.js', 'clis/v2ex/topic.js',
-  'clis/wikipedia/search.js', 'clis/wikipedia/summary.js', 'clis/wikipedia/utils.js'].map(name => `node_modules/@jackwener/opencli/${name}`);
+  'clis/wikipedia/search.js', 'clis/wikipedia/summary.js', 'clis/wikipedia/utils.js',
+  'clis/tieba/hot.js', 'clis/tieba/search.js', 'clis/tieba/read.js',
+  'clis/bilibili/search.js', 'clis/bilibili/hot.js', 'clis/bilibili/ranking.js', 'clis/bilibili/video.js', 'clis/bilibili/comments.js', 'clis/bilibili/history.js', 'clis/bilibili/utils.js'].map(name => `node_modules/@jackwener/opencli/${name}`);
 const archivePrefix = path.basename(archive).replace(/\.tar\.gz$/, '');
 await tar.t({ file: archive, strict: true, onReadEntry(entry) {
   count++;

@@ -1,19 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { describeOpenCliSites, loadOpenCliCatalog, openCliQueryPolicy, validateOpenCliSites, validateOpenCliQuery } from '../server/opencli-sites.mjs';
+import { describeOpenCliSites, loadOpenCliCatalog, openCliQueryPolicy, validateOpenCliSites, validateOpenCliQuery, OPENCLI_QUERY_POLICIES } from '../server/opencli-sites.mjs';
+import { OPENCLI_BROWSER_POLICIES } from '../server/opencli-browser-policies.mjs';
 
-test('pinned inventory separates 179 namespaces from 12 reviewed query sites', async () => {
+test('pinned inventory keeps 23 public commands separate from reviewed browser and configured queries', async () => {
   const catalog = await loadOpenCliCatalog();
   assert.equal(catalog.version, '1.8.8');
-  assert.deepEqual(catalog.summary, { adapterNamespaces: 179, totalCommands: 1366, readCommands: 1009, writeCommands: 357, browserCommands: 1042, querySites: 12, queryCommands: 23 });
+  assert.equal(catalog.summary.publicQueryCommands, 23);
+  assert.equal(catalog.records.filter(command => command.callable && command.mode === 'public').length, OPENCLI_QUERY_POLICIES.length);
+  assert.equal(catalog.summary.browserQueryCommands, OPENCLI_BROWSER_POLICIES.length);
+  assert.equal(catalog.summary.queryCommands, OPENCLI_QUERY_POLICIES.length + OPENCLI_BROWSER_POLICIES.length);
+  assert.equal(catalog.summary.totalCommands, catalog.records.length);
+  assert.equal(catalog.summary.adapterNamespaces, catalog.sites.length);
+  assert.equal(catalog.notebookSites.length, 13);
+  assert.ok(catalog.notebookSites.every(site => site.status === 'ready'));
+  assert.ok(catalog.records.filter(command => command.callable).every(command => command.access === 'read'));
+  assert.ok(catalog.records.filter(command => command.access === 'write').every(command => !command.callable));
   const bilibili = catalog.sites.find(site => site.site === 'bilibili');
-  assert.equal(bilibili.queryCommands, 0); assert.equal(bilibili.needsBrowserBridge, true);
+  assert.ok(bilibili.queryCommands > 0); assert.equal(bilibili.needsBrowserBridge, true);
   assert.equal(catalog.sites.find(site => site.site === 'codex').local, true);
   const details = await describeOpenCliSites({ site: 'npm', command: 'package' });
   assert.equal(details.commands[0].callable, true); assert.equal(details.commands[0].inputSchema.additionalProperties, false);
   const browser = await describeOpenCliSites({ site: 'bilibili', command: 'search' });
-  assert.equal(browser.commands[0].callable, false); assert.equal(browser.commands[0].inputSchema, undefined);
+  assert.equal(browser.commands[0].callable, true); assert.equal(browser.commands[0].mode, 'browser');
+  assert.equal(browser.commands[0].inputSchema.additionalProperties, false);
+  const configured = await describeOpenCliSites({ site: 'dyyj', command: 'read' });
+  assert.equal(configured.commands[0].callable, true); assert.equal(configured.commands[0].mode, 'configured');
 });
 
 test('inventory accepts fixed identifiers only and rejects unknown entries', async () => {
@@ -30,9 +43,9 @@ test('query accepts reviewed schemas and preserves explicit typed bounds', () =>
   assert.equal(openCliQueryPolicy('arxiv', 'paper').modulePath, 'arxiv/paper.js');
 });
 
-test('query refuses plugin paths, credentials, write/browser commands and hostname injection', () => {
+test('query refuses plugin paths, credentials, unreviewed writes and hostname injection', () => {
   for (const value of [
-    null, [], { site: 'bilibili', command: 'search', arguments: { query: 'cat' } },
+    null, [], { site: 'bilibili', command: 'like', arguments: { bvid: 'BV1xx411c7mD' } },
     { site: 'confluence', command: 'search', arguments: { cql: 'type=page' } },
     { site: 'npm', command: 'package', arguments: { name: 'react', token: 'secret' } },
     { site: 'npm', command: 'package', arguments: { name: 'react' }, modulePath: '../../evil' },

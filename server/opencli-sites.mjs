@@ -1,6 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { OPENCLI_BROWSER_POLICIES, browserQueryPolicy, notebookWebsiteCatalog, normalizeSiteOrigins } from './opencli-browser-policies.mjs';
 
 export const OPENCLI_VERSION = '1.8.8';
 const require = createRequire(import.meta.url);
@@ -42,7 +43,7 @@ export const OPENCLI_QUERY_POLICIES = freeze([
 const policies = new Map(OPENCLI_QUERY_POLICIES.map(policy => [`${policy.site}/${policy.command}`, policy]));
 const clone = value => JSON.parse(JSON.stringify(value));
 
-export function openCliQueryPolicy(site, command) { const policy = policies.get(`${site}/${command}`); return policy ? clone(policy) : null; }
+export function openCliQueryPolicy(site, command) { const policy = policies.get(`${site}/${command}`); return policy ? { ...clone(policy), mode: 'public' } : browserQueryPolicy(site, command); }
 export function validateOpenCliSites(body = {}) {
   if (!object(body) || Object.keys(body).some(key => !['site', 'command'].includes(key))) throw invalid('OpenCLI 网站查询参数无效。');
   for (const key of ['site', 'command']) if (body[key] !== undefined && (typeof body[key] !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(body[key]))) throw invalid(`OpenCLI ${key} 无效。`);
@@ -51,7 +52,7 @@ export function validateOpenCliSites(body = {}) {
 }
 export function validateOpenCliQuery(body) {
   if (!object(body) || Object.keys(body).some(key => !['site', 'command', 'arguments'].includes(key))) throw invalid('OpenCLI 查询含未支持的字段。');
-  const policy = typeof body.site === 'string' && typeof body.command === 'string' ? policies.get(`${body.site}/${body.command}`) : null;
+  const policy = typeof body.site === 'string' && typeof body.command === 'string' ? openCliQueryPolicy(body.site, body.command) : null;
   if (!policy) throw invalid('此网站命令未开放；请先查看 OpenCLI 网站清单。');
   const args = body.arguments ?? {};
   if (!object(args) || Object.keys(args).some(key => !Object.hasOwn(policy.inputSchema.properties, key))) throw invalid('OpenCLI arguments 含未支持的字段。');
@@ -81,7 +82,10 @@ export async function resolveOpenCliQueryBundle(packageJsonPath) {
   return { root, version: metadata.version };
 }
 
-export async function loadOpenCliCatalog(packageJsonPath) {
+export async function loadOpenCliCatalog(packageJsonPath, siteOrigins = {}) {
+  siteOrigins = normalizeSiteOrigins(siteOrigins);
+  const notebookSites = notebookWebsiteCatalog(siteOrigins);
+  const websites = new Map(notebookSites.map(site => [site.site, site]));
   const bundle = await resolveOpenCliQueryBundle(packageJsonPath);
   const raw = await readFile(path.join(bundle.root, 'cli-manifest.json'), 'utf8');
   if (Buffer.byteLength(raw) > 2 * 1024 * 1024) throw new Error('OpenCLI 清单过大。');
@@ -89,24 +93,32 @@ export async function loadOpenCliCatalog(packageJsonPath) {
   if (!Array.isArray(manifest) || manifest.length > 5000) throw new Error('OpenCLI 清单无效。');
   const records = manifest.map(entry => {
     if (!entry || typeof entry.site !== 'string' || typeof entry.name !== 'string') throw new Error('OpenCLI 命令清单无效。');
-    const policy = policies.get(`${entry.site}/${entry.name}`);
-    if (policy && (entry.access !== 'read' || entry.strategy !== 'public' || entry.browser !== false || entry.modulePath !== policy.modulePath)) throw new Error('已开放 OpenCLI 命令与固定清单不匹配。');
-    return { site: entry.site, command: entry.name, description: String(entry.description || '').slice(0, 600), access: entry.access, strategy: entry.strategy, browser: entry.browser === true, domain: entry.domain || null, callable: Boolean(policy), ...(policy ? { inputSchema: clone(policy.inputSchema) } : {}) };
+    const policy = openCliQueryPolicy(entry.site, entry.name);
+    if (policy?.mode === 'public' && (entry.access !== 'read' || entry.strategy !== 'public' || entry.browser !== false || entry.modulePath !== policy.modulePath)) throw new Error('已开放 OpenCLI 命令与固定清单不匹配。');
+    if (policy?.engine === 'upstream' && (entry.access !== 'read' || entry.browser !== true || entry.modulePath !== policy.modulePath)) throw new Error('已开放浏览器命令与固定清单不匹配。');
+    return { site: entry.site, command: entry.name, description: String(policy?.description || entry.description || '').slice(0, 600), access: policy?.engine === 'builtin' ? 'read' : entry.access, strategy: policy?.engine === 'builtin' ? 'browser' : entry.strategy, browser: policy?.engine === 'builtin' || entry.browser === true, domain: entry.domain || null, mode: policy?.mode || 'inventory', callable: Boolean(policy), ...(policy ? { inputSchema: clone(policy.inputSchema), ...(policy.login ? { login: policy.login } : {}) } : {}) };
   });
-  if (records.filter(entry => entry.callable).length !== policies.size) throw new Error('已开放 OpenCLI 命令缺失。');
+  if (records.filter(entry => entry.mode === 'public').length !== policies.size || records.filter(entry => entry.mode === 'browser').length !== OPENCLI_BROWSER_POLICIES.filter(policy => manifest.some(entry => entry.site === policy.site && entry.name === policy.command)).length) throw new Error('已开放 OpenCLI 命令缺失。');
+  for (const policy of OPENCLI_BROWSER_POLICIES) {
+    if (records.some(entry => entry.site === policy.site && entry.command === policy.command)) continue;
+    const website = websites.get(policy.site), ready = website.status === 'ready';
+    records.push({ site: policy.site, command: policy.command, description: policy.description, access: 'read', strategy: 'browser', browser: true, domain: website.origins[0] ? new URL(website.origins[0]).hostname : null, mode: policy.mode, callable: ready, inputSchema: clone(policy.inputSchema), login: policy.login, configRequired: !ready });
+  }
   const sites = [...new Set(records.map(entry => entry.site))].sort().map(site => {
     const entries = records.filter(entry => entry.site === site), domains = [...new Set(entries.map(entry => entry.domain).filter(Boolean))].sort();
     const enabledCommands = entries.filter(entry => entry.callable).map(entry => entry.command).sort();
     const browserCommands = entries.filter(entry => entry.browser).length;
-    return { id: site, site, domains, commands: entries.length, queryCommands: enabledCommands.length, enabledCommands, browserCommands, needsBrowserBridge: browserCommands > 0, local: domains.length > 0 && domains.every(domain => ['127.0.0.1', 'localhost', 'doubao-app'].includes(domain)) };
+    const website = websites.get(site);
+    if (website) domains.splice(0, domains.length, ...website.origins.map(origin => new URL(origin).hostname));
+    return { id: site, site, domains, commands: entries.length, queryCommands: enabledCommands.length, enabledCommands, browserCommands, needsBrowserBridge: browserCommands > 0, local: domains.length > 0 && domains.every(domain => ['127.0.0.1', 'localhost', 'doubao-app'].includes(domain)), mode: entries.find(entry => entry.mode !== 'inventory')?.mode || 'inventory', ...(website ? { label: website.label, websiteStatus: website.status, login: website.login } : {}) };
   });
-  const summary = { adapterNamespaces: sites.length, totalCommands: records.length, readCommands: records.filter(entry => entry.access === 'read').length, writeCommands: records.filter(entry => entry.access === 'write').length, browserCommands: records.filter(entry => entry.browser).length, querySites: sites.filter(site => site.queryCommands > 0).length, queryCommands: policies.size };
-  return { version: OPENCLI_VERSION, summary, sites, records };
+  const summary = { adapterNamespaces: sites.length, totalCommands: records.length, readCommands: records.filter(entry => entry.access === 'read').length, writeCommands: records.filter(entry => entry.access === 'write').length, browserCommands: records.filter(entry => entry.browser).length, querySites: sites.filter(site => site.queryCommands > 0).length, queryCommands: records.filter(entry => entry.callable).length, publicQueryCommands: policies.size, browserQueryCommands: records.filter(entry => entry.callable && entry.browser).length, configuredSites: notebookSites.filter(site => site.status === 'ready').length };
+  return { version: OPENCLI_VERSION, summary, sites, records, notebookSites };
 }
 
-export async function describeOpenCliSites(body = {}, packageJsonPath) {
-  const args = validateOpenCliSites(body), catalog = await loadOpenCliCatalog(packageJsonPath);
-  if (!args.site) return { version: catalog.version, summary: catalog.summary, sites: catalog.sites };
+export async function describeOpenCliSites(body = {}, packageJsonPath, siteOrigins = {}) {
+  const args = validateOpenCliSites(body), catalog = await loadOpenCliCatalog(packageJsonPath, siteOrigins);
+  if (!args.site) return { version: catalog.version, summary: catalog.summary, sites: catalog.sites, notebookSites: catalog.notebookSites };
   const commands = catalog.records.filter(entry => entry.site === args.site && (!args.command || entry.command === args.command));
   if (!commands.length) throw invalid('此 OpenCLI 网站或命令不在内置清单内。');
   return { version: catalog.version, summary: catalog.summary, site: args.site, sites: catalog.sites.filter(site => site.site === args.site), commands };

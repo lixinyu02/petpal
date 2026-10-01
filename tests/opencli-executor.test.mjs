@@ -47,7 +47,14 @@ test('native OpenCLI rejects query, arbitrary commands, malformed config and inj
   let created=0;
   const manager=await executor(t,{toolsFactory:()=>{created++;throw Error('must not create runtime');}});await manager.connect(connection());
   for(const action of ['query','exec','run','prepare','connect'])await assert.rejects(manager.manageOpenCli(action,{}));
-  for(const body of [null,[],{enabled:true},{revision:randomUUID(),enabled:true,command:'npx'},{revision:randomUUID(),enabled:'yes'}])await assert.rejects(manager.manageOpenCli('configure',body));
+  for(const body of [null,[],{enabled:true},{revision:randomUUID(),enabled:true,command:'npx'},{revision:randomUUID(),enabled:'yes'},
+    {revision:randomUUID(),enabled:true,siteOrigins:{},command:'npx'},
+    {revision:randomUUID(),enabled:true,siteOrigins:{bilibili:['https://www.bilibili.com']}},
+    {revision:randomUUID(),enabled:true,siteOrigins:{wlgo:['http://untrusted.example.com']}},
+    {revision:randomUUID(),enabled:true,siteOrigins:{wlgo:['https://forum.example.com/path']}},
+    {revision:randomUUID(),enabled:true,siteOrigins:{wlgo:['https://forum.example.com'],unknown:[]}},
+    {revision:randomUUID(),enabled:true,siteOrigins:[]},
+  ])await assert.rejects(manager.manageOpenCli('configure',body),error=>error.code==='executor_protocol_invalid');
   for(const body of [{url:'https://example.com'},{site:'../../private'},{site:'x',command:'--help'},{site:'x',args:['top']},null])await assert.rejects(manager.manageOpenCli('sites',body));
   for(const body of [{action:'eval',code:'1+1'},{action:'open',url:'http://music.163.com'},{action:'tabs',command:'shell'},{action:'click',tabId:'owned',target:'selector'}])await assert.rejects(manager.manageOpenCli('action',body));
   await assert.rejects(manager.manageOpenCli('status',{token:'untrusted'}));assert.equal(created,0);
@@ -66,6 +73,28 @@ test('real OpenCLI default config revision passes native configure and saved dis
   assert.match(initial.revision,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   const changed=await manager.manageOpenCli('configure',{...initial,enabled:false});assert.equal(changed.enabled,false);assert.notEqual(changed.revision,initial.revision);
   await manager.disconnect();await manager.connect(connection());assert.deepEqual(await manager.manageOpenCli('config'),changed);assert.equal(constructed,2);
+});
+
+test('native OpenCLI saves scoped siteOrigins through existing CAS and old two-field updates preserve them',async t=>{
+  const manager=await executor(t,{toolsFactory:options=>{
+    const opencliManager=new OpenCliManager({dataDir:options.opencliDataDir,scope:options.musicMcpScope,
+      browser:{close:async()=>{},status:async()=>({available:true,ready:false})}});
+    return{opencliManager,close:()=>opencliManager.close()};
+  }});
+  await manager.connect(connection());
+  const initial=await manager.manageOpenCli('config');
+  const configured=await manager.manageOpenCli('configure',{...initial,siteOrigins:{wlgo:['https://FORUM.example.com/'],dyyj:['https://film.example.com']}});
+  assert.deepEqual(configured.siteOrigins,{dyyj:['https://film.example.com'],wlgo:['https://forum.example.com']});
+  assert.notEqual(configured.revision,initial.revision);
+  await assert.rejects(manager.manageOpenCli('configure',{...initial,siteOrigins:{wlgo:['https://stale.example.com']}}),error=>error.code==='config_changed');
+  assert.deepEqual(await manager.manageOpenCli('config'),configured);
+  const disabled=await manager.manageOpenCli('configure',{revision:configured.revision,enabled:false});
+  assert.deepEqual(disabled.siteOrigins,configured.siteOrigins);
+  await manager.disconnect();await manager.connect(connection());
+  assert.deepEqual(await manager.manageOpenCli('config'),disabled);
+  const reset=await manager.manageOpenCli('configure',{revision:disabled.revision,enabled:true,siteOrigins:{}});
+  assert.equal(reset.siteOrigins,undefined);
+  assert.deepEqual((await manager.manageOpenCli('sites',{site:'wlgo'})).sites[0].domains,['www.wlgooo.com','wlgooo.com']);
 });
 
 test('native OpenCLI rechecks exact account and full Agent permission before touching scoped runtime',async t=>{

@@ -2,14 +2,15 @@ import { MusicController, musicPlayers, validateMusicCommand } from './music.mjs
 import { validateBrowserAction } from './opencli.mjs';
 import { OpenCliManager } from './opencli-manager.mjs';
 import { validateOpenCliSites, validateOpenCliQuery } from './opencli-sites.mjs';
+import { describeOpenCliQueryArguments } from './opencli-browser-policies.mjs';
 import { MusicMcpManager, validateMusicMcpCall, MUSIC_MCP_TOOLS } from './music-mcp.mjs';
 import { ComputerUseMcpManager, validateComputerUseCall, validateComputerUseTools } from './computer-use-mcp.mjs';
 import { CODEX_TOOL_VERSION } from './codex-config.mjs';
 
 const musicActions = { open: '打开', play: '播放', pause: '暂停', next: '下一首', previous: '上一首' };
 export const desktopToolSpecs = [
-  {type:'function',name:'petpal_opencli_sites',description:'查看选中执行电脑的内置 OpenCLI 网站库存与可调用查询。无参数返回网站概览；传 site 查看命令，传 site+command 获取真实 inputSchema。库存含本地应用，打包存在不等于开放或联网成功。callable=true 的公开查询不需要 Chrome 扩展；其他浏览器适配器仅作为库存说明。',inputSchema:{type:'object',properties:{site:{type:'string'},command:{type:'string'}},additionalProperties:false}},
-  {type:'function',name:'petpal_opencli_query',description:'用选中执行电脑的包内 OpenCLI 查询公开网站。先用 petpal_opencli_sites 获取 callable 命令和 inputSchema，再传精确 site、command、arguments。仅固定审阅的只读命令；无需浏览器扩展。需完整访问并遵循审批。失败如实报告，不使用 shell、npx 或其他接口代替，不自行启用工具。',inputSchema:{type:'object',properties:{site:{type:'string'},command:{type:'string'},arguments:{type:'object'}},required:['site','command','arguments'],additionalProperties:false}},
+  {type:'function',name:'petpal_opencli_sites',description:'查看选中执行电脑的内置 OpenCLI 网站库存与可调用查询。无参数返回网站概览与notebookSites常用网站；传site+command获取真实inputSchema。callable=true且mode=public无需Chrome；mode=browser/configured需要用户在此电脑设置中明确连接Chrome档案。needs-url/configRequired的站点先由用户填写网址。打包和ready不代表网站已登录或联网成功。',inputSchema:{type:'object',properties:{site:{type:'string'},command:{type:'string'}},additionalProperties:false}},
+  {type:'function',name:'petpal_opencli_query',description:'用选中执行电脑的内置OpenCLI执行固定只读网站查询。先查petpal_opencli_sites的callable命令与schema。public走公开HTTP；browser/configured使用用户已显式连接的Chrome，失败时引导到OpenCLI设置，不自行选档案或重试。网盘只读目录，不下载或转存；configured站内搜索通过必应site:。需完整访问并遵循审批。失败如实报告，不用shell/npx/任意脚本代替，不自行启用工具。',inputSchema:{type:'object',properties:{site:{type:'string'},command:{type:'string'},arguments:{type:'object'}},required:['site','command','arguments'],additionalProperties:false}},
   {type:'function',name:'petpal_computer_use_tools',description:'在选中的执行电脑连接已启用的 Zavora Computer Use MCP，获取真实工具清单；传 tool 可获取一个工具的完整参数。支持应用、Accessibility、截图、键鼠、剪贴板和脚本。不会安装程序。每项实际操作需要完整访问并遵循当前审批方式。',inputSchema:{type:'object',properties:{tool:{type:'string'}},additionalProperties:false}},
   {type:'function',name:'petpal_computer_use_call',description:'调用选中执行电脑上的 Computer Use。先查真实 schema，再发现窗口、读取 Accessibility，必要时截图；基于最近结果操作并读回验证。截图直接给模型观察。先确认软件/窗口，支持 focus_strategy 的操作只允许 strict。失败不得声称完成。脚本/剪贴板/全屏观察也需完整访问与当前审批。',inputSchema:{type:'object',properties:{tool:{type:'string'},arguments:{type:'object'}},required:['tool','arguments'],additionalProperties:false}},
   { type: 'function', name: 'petpal_music_mcp_tools', description: '连接已启用的本机音乐 MCP 并返回真实工具清单与参数。网易云桌面 MCP 仅 Windows；Ubuntu 使用现有媒体工具。QQ MCP 仅查询和播放链接，不能控制QQ桌面播放。只在选中的执行电脑运行，不会配置或安装服务。', inputSchema: {type:'object',properties:{player:{type:'string',enum:['netease','qqmusic']}},required:['player'],additionalProperties:false} },
@@ -64,7 +65,7 @@ export function createDesktopTools({ dataDir, music = new MusicController(), ope
     }
     if(name==='petpal_opencli_query'){
       const value=validateOpenCliQuery(args);
-      return {description:`OpenCLI 公开查询：${value.site}/${value.command}\n${JSON.stringify(value.arguments)}`,approvalRequired:true};
+      return {description:`OpenCLI 网站查询：${value.site}/${value.command}\n${describeOpenCliQueryArguments(value)}`,approvalRequired:true};
     }
     if(name==='petpal_computer_use_tools'){
       const value=validateComputerUseTools(args);

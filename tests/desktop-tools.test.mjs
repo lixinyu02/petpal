@@ -44,6 +44,24 @@ test('OpenCLI discovery and queries use the scoped manager and missing identity 
   }
   assert.equal(queries,1);assert.equal(browsers,0);await tools.close();
 });
+
+test('reviewable OpenCLI share approvals retain site and command but hide full URLs and extraction codes', async()=>{
+  const calls=[],manager={sites:async()=>({sites:[]}),query:async args=>{calls.push(args);return {ok:true,rows:[]};},close:async()=>{}};
+  const tools=createDesktopTools({dataDir:'.unused-fixture',computerUseMcp,musicMcp:{close:async()=>{}},music:{},opencliManager:manager});
+  const urls={'baidu-pan':'https://pan.baidu.com/s/1abcdeFGH',quark:'https://pan.quark.cn/s/abcdef12','xunlei-pan':'https://pan.xunlei.com/s/abcdef12'};
+  for(const [site,url] of Object.entries(urls)){
+    const args={site,command:'share-tree',arguments:{url:`${url}?pwd=Y7gX`,passcode:'S9pQ',limit:3}};
+    const approval=tools.describe('petpal_opencli_query',args);
+    assert.equal(approval.approvalRequired,true);assert.match(approval.description,new RegExp(`${site}/share-tree`));
+    assert.doesNotMatch(approval.description,/https:|Y7gX|S9pQ|abcdef12|1abcdeFGH/);assert.match(approval.description,/已隐藏/);
+    await tools.execute('petpal_opencli_query',args);
+    assert.equal(calls.at(-1).arguments.passcode,'S9pQ');assert.equal(calls.at(-1).arguments.url,`${url}?pwd=Y7gX`);
+  }
+  const status=tools.describe('petpal_opencli_query',{site:'fire-exam',command:'status',arguments:{url:'https://xfhyjd.119.gov.cn/status?application=private'}});
+  assert.doesNotMatch(status.description,/application|https:|private/);
+  assert.throws(()=>tools.describe('petpal_opencli_query',{site:'bilibili',command:'like',arguments:{bvid:'BV1xx411c7mD'}}));
+  await tools.close();
+});
 test('registry serializes side effects and releases busy state on failure',async()=>{
   let release;const tools=fixture({execute:()=>new Promise(resolve=>{release=resolve;})});
   const first=tools.execute('petpal_music_command',{player:'netease',action:'play'});

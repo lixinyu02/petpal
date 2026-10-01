@@ -31,6 +31,7 @@ const syntheticSecrets = new Map([
   ['tests/music-mcp-routes.test.mjs', new Set(['music-mount-fixture-bootstrap'])],
   ['tests/music-mcp.test.mjs', new Set(['private-account-one'])],
   ['tests/opencli-executor.test.mjs', new Set(['synthetic-opencli-session'])],
+  ['tests/opencli-manager.test.mjs', new Set(['privateCamelApiKey'])],
   ['tests/computer-use-integration.test.mjs', new Set(['computer-fixture-bootstrap', 'synthetic-session'])],
   ['tests/notifications-api.test.mjs', new Set(['fixture-notifications-password'])],
   ['tests/task-notification-controller.test.mjs', new Set(['foreground-only-secret'])],

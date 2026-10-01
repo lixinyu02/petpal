@@ -4,15 +4,19 @@ import { chmod, lstat, mkdir, open, readFile, realpath, rename, unlink } from 'n
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OpenCliRunner, openCliEnvironment, validateBrowserAction } from './opencli.mjs';
-import { describeOpenCliSites, loadOpenCliCatalog, resolveOpenCliQueryBundle, validateOpenCliQuery } from './opencli-sites.mjs';
+import { describeOpenCliSites, loadOpenCliCatalog, openCliQueryPolicy, resolveOpenCliQueryBundle, validateOpenCliQuery } from './opencli-sites.mjs';
+import { normalizeSiteOrigins, validateBrowserQueryUrl } from './opencli-browser-policies.mjs';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const failure = (status, message, code) => Object.assign(new Error(message), { status, code });
 const abortError = () => Object.assign(failure(499, 'OpenCLI 网站查询已取消。', 'cancelled'), { name: 'AbortError' });
 const cleanText = value => String(value ?? '').replace(/\b(sk-[\w-]{8,}|eyJ[\w-]+\.[\w-]+\.[\w-]+)\b/g, '[已隐藏]').replace(/(Bearer\s+)[^\s"']+/gi, '$1[已隐藏]').replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|cookie|authorization)\s*[=:]\s*["']?)[^\s"',;&]+/gi, '$1[已隐藏]').replace(/([?&#](?:token|key|code|session|auth)[^=&#]*=)[^&#\s"']+/gi, '$1[已隐藏]');
-const sanitize = value => Array.isArray(value) ? value.map(sanitize) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => !/^(?:__proto__|constructor|prototype)$/.test(key)).map(([key, item]) => [key, sanitize(item)])) : typeof value === 'string' ? cleanText(value) : value;
-const validConfig = value => object(value) && Object.keys(value).length === 2 && uuid.test(value.revision) && typeof value.enabled === 'boolean';
+const sanitize = value => Array.isArray(value) ? value.map(sanitize) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => !/^(?:__proto__|constructor|prototype|cookie|cookies|stoken|token|api[_-]?key|access[_-]?token|refresh[_-]?token|csrf(?:[_-]?token)?|authorization|password|passcode|secret)$/i.test(key)).map(([key, item]) => [key, sanitize(item)])) : typeof value === 'string' ? cleanText(value).replace(/([?&#]pwd=)[^&#\s"']+/gi,'$1[已隐藏]') : value;
+const validConfig = value => {
+  if (!object(value) || Object.keys(value).some(key => !['revision', 'enabled', 'siteOrigins'].includes(key)) || !uuid.test(value.revision) || typeof value.enabled !== 'boolean') return false;
+  try { normalizeSiteOrigins(value.siteOrigins); return true; } catch { return false; }
+};
 const workerPath = fileURLToPath(new URL('./opencli-worker.mjs', import.meta.url)).replace(/\.asar([\\/])/i, '.asar.unpacked$1');
 
 export class OpenCliManager {
@@ -45,7 +49,8 @@ export class OpenCliManager {
     if (!info.isFile() || info.isSymbolicLink() || info.size > 4096 || info.size < 1) throw failure(409, 'OpenCLI 配置文件未知，请备份后检查。', 'invalid_config');
     let value; try { value = JSON.parse(await readFile(this.configFile, 'utf8')); } catch { throw failure(409, 'OpenCLI 配置文件格式无效。', 'invalid_config'); }
     if (!validConfig(value)) throw failure(409, 'OpenCLI 配置文件字段无效。', 'invalid_config');
-    return { ...value };
+    const siteOrigins = normalizeSiteOrigins(value.siteOrigins);
+    return { revision: value.revision, enabled: value.enabled, ...(Object.keys(siteOrigins).length ? { siteOrigins } : {}) };
   }
   async config() { this._live(); return this._readConfig(); }
   _recoverBrowser() {
@@ -97,15 +102,17 @@ export class OpenCliManager {
     await this._safeDirectory(true);
     let lock; try { lock = await this.openLock(this.lockFile, 'wx', 0o600); } catch (error) { if (error.code === 'EEXIST') throw failure(409, 'OpenCLI 配置正在修改，请刷新后重试。', 'config_busy'); throw error; }
     const receipt = { handle: lock, identity: null };
-    let result;
+    let result, originsChanged = false;
     try {
       receipt.identity = await lock.stat();
       await lock.writeFile(JSON.stringify({ ownerPid: process.pid, nonce: randomUUID() }));
       const current = await this._readConfig();
       if (body.revision !== current.revision) throw failure(409, 'OpenCLI 配置已变化，请刷新后重试。', 'config_changed');
-      if (body.enabled === current.enabled) result = current;
+      const siteOrigins = normalizeSiteOrigins(body.siteOrigins === undefined ? current.siteOrigins : body.siteOrigins);
+      originsChanged = JSON.stringify(siteOrigins) !== JSON.stringify(current.siteOrigins || {});
+      if (body.enabled === current.enabled && !originsChanged) result = current;
       else {
-        result = { revision: randomUUID(), enabled: body.enabled };
+        result = { revision: randomUUID(), enabled: body.enabled, ...(Object.keys(siteOrigins).length ? { siteOrigins } : {}) };
         const temporary = path.join(this.scopeDir, `config-${randomUUID()}.tmp`);
         let handle;
         try { handle = await open(temporary, 'wx', 0o600); await handle.writeFile(JSON.stringify(result)); await handle.sync(); await handle.close(); handle = null; await rename(temporary, this.configFile); await chmod(this.configFile, 0o600); }
@@ -113,15 +120,16 @@ export class OpenCliManager {
       }
     } finally { await this._releaseLock(receipt); }
     if (!result.enabled) { await this._stopQuery(abortError()); await this._shutdownBrowser(); }
+    else if (originsChanged) await this._stopQuery(abortError());
     return result;
     } finally { this.configuring = false; }
   }
   async status() {
     const config = await this.config();
-    const [browser, catalog] = await Promise.all([this.browser.status(), loadOpenCliCatalog(this.packageJsonPath).catch(() => null)]);
-    return { ...browser, config, catalog: catalog?.summary || null, queryReady: Boolean(config.enabled && catalog), queryBusy: Boolean(this.operation), ...(config.enabled ? {} : { ready: false, queryReady: false, message: this.browserRecovery && !this.browserRecovery.confirmed ? 'OpenCLI 已停用；自有浏览器进程尚未确认退出，请检查本机进程。' : 'OpenCLI 已关闭；网站清单仍可查看。' }) };
+    const [browser, catalog] = await Promise.all([this.browser.status(), loadOpenCliCatalog(this.packageJsonPath, config.siteOrigins).catch(() => null)]);
+    return { ...browser, config, catalog: catalog?.summary || null, queryReady: Boolean(config.enabled && catalog), browserQueryReady: Boolean(config.enabled && catalog && browser.ready), queryBusy: Boolean(this.operation), ...(config.enabled ? {} : { ready: false, queryReady: false, message: this.browserRecovery && !this.browserRecovery.confirmed ? 'OpenCLI 已停用；自有浏览器进程尚未确认退出，请检查本机进程。' : 'OpenCLI 已关闭；网站清单仍可查看。' }) };
   }
-  async sites(args = {}) { this._live(); return describeOpenCliSites(args, this.packageJsonPath); }
+  async sites(args = {}) { this._live(); const config = await this.config(); return describeOpenCliSites(args, this.packageJsonPath, config.siteOrigins); }
   async _enabled() { const config = await this.config(); if (!config.enabled) throw failure(403, 'OpenCLI 已关闭，请在设置中启用。', 'disabled'); return config; }
   async executeBrowser(args, { signal } = {}) {
     this._live(); const input = validateBrowserAction(args);
@@ -139,6 +147,7 @@ export class OpenCliManager {
   }
   async query(body, { signal } = {}) {
     this._live(); const args = validateOpenCliQuery(body);
+    if (openCliQueryPolicy(args.site, args.command).mode !== 'public') return this._browserQuery(args, { signal });
     if (signal?.aborted) throw abortError();
     if (this.operation || this.configuring) throw failure(409, '此账号正在处理 OpenCLI 请求，请稍后重试。', 'busy');
     const operation = { child: null, error: null }; let complete;
@@ -192,6 +201,32 @@ export class OpenCliManager {
       if (signal?.aborted) onAbort(); else { child.stdin.on('error', () => {}); child.stdin.end(JSON.stringify(args)); }
       return await finished;
     } finally { await resultPromise?.catch(() => {}); clearTimeout(timer); clearTimeout(killTimer); clearTimeout(exitTimer); signal?.removeEventListener('abort', onAbort); if (this.operation === operation && !operation.retained) this.operation = null; complete(); }
+  }
+  async _browserQuery(args, { signal } = {}) {
+    if (signal?.aborted) throw abortError();
+    if (this.operation || this.configuring) throw failure(409, '此账号正在处理 OpenCLI 请求，请稍后重试。', 'busy');
+    const controller = new AbortController(); let complete;
+    const operation = { error: null, stopped: new Promise(resolve => { complete = resolve; }) };
+    operation.stop = error => { operation.error ||= error; controller.abort(error); };
+    this.operation = operation;
+    const onAbort = () => operation.stop(abortError()); signal?.addEventListener('abort', onAbort, { once: true });
+    let timer;
+    try {
+      const config = await this._enabled(); this._live();
+      if (signal?.aborted) onAbort(); if (operation.error) throw operation.error;
+      if (this.configuring) throw failure(409, 'OpenCLI 配置正在修改，请稍后重试。', 'config_busy');
+      validateBrowserQueryUrl(args, config.siteOrigins || {});
+      timer = setTimeout(() => operation.stop(failure(504, 'OpenCLI 浏览器查询超时，未自动重试。', 'timeout')), this.timeoutMs);
+      const value = await this.browser.executeAdapter(args, { signal: controller.signal, policy: openCliQueryPolicy(args.site, args.command), siteOrigins: config.siteOrigins || {} });
+      if (operation.error) throw operation.error;
+      if (!object(value) || value.site !== args.site || value.command !== args.command || value.version !== '1.8.8' || !Array.isArray(value.rows) || value.rows.length > 50 || value.count !== value.rows.length || Buffer.byteLength(JSON.stringify(value)) > this.maxOutputBytes) throw failure(502, 'OpenCLI 浏览器查询响应格式或长度无效。', 'invalid_response');
+      return sanitize(value);
+    } catch (error) {
+      if (operation.error) throw operation.error;
+      // Share passwords must never echo through adapter/upstream exception text.
+      if (['baidu-pan', 'quark', 'xunlei-pan'].includes(args.site) && !['site_url_required','invalid_arguments','disabled','config_busy','invalid_config','invalid_config_path','closed'].includes(error.code)) throw failure(error.status || 502, '网盘查询未完成，请检查浏览器登录、提取码和分享有效期；未自动重试。', 'browser_query_failed');
+      throw error;
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); if (this.operation === operation) this.operation = null; complete(); }
   }
   async _stopQuery(error) { const operation = this.operation; if (!operation) return; operation.stop(error); await operation.stopped; if (operation.retained && !operation.closeReceived) throw failure(502, 'OpenCLI 查询进程尚未确认退出。', 'shutdown_failed'); }
   async close() {

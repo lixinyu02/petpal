@@ -6,16 +6,18 @@ import { mkdtemp, open, readFile, readdir, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { OpenCliManager } from '../server/opencli-manager.mjs';
+import { OPENCLI_QUERY_POLICIES } from '../server/opencli-sites.mjs';
+import { OPENCLI_BROWSER_POLICIES } from '../server/opencli-browser-policies.mjs';
 
 async function setup(t, options = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-opencli-manager-'));
   const launches = [], children = []; let browserClose = 0, browserExecute = 0;
-  const browser = { status: async () => ({ available: true, version: '1.8.8', ready: false }), close: async () => { browserClose++; }, execute: async args => { browserExecute++; return args; } };
+  const browser = { status: async () => ({ available: true, version: '1.8.8', ready: false }), close: async () => { browserClose++; }, execute: async args => { browserExecute++; return args; }, ...options.browser };
   const launch = (runtime, args, settings) => {
     launches.push({ runtime, args, settings });
     const child = Object.assign(new EventEmitter(), { pid: 1001, exitCode: null, stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), signals: [] });
     child.finish = code => { if (child.exitCode !== null) return; child.exitCode = code; child.emit('close', code); };
-    child.kill = signal => { child.signals.push(signal); if (!options.delayExit) child.finish(1); return true; };
+    child.kill = signal => { child.signals.push(signal); child.emit('kill', signal); if (!options.delayExit) child.finish(1); return true; };
     const input = []; child.stdin.on('data', chunk => input.push(chunk)); child.stdin.on('end', () => {
       child.request = JSON.parse(Buffer.concat(input).toString());
       if (options.run) options.run(child);
@@ -29,13 +31,18 @@ async function setup(t, options = {}) {
 }
 const query = { site: 'npm', command: 'package', arguments: { name: 'react' } };
 const waitForChild = async f => { for (let i = 0; i < 50 && !f.children.length; i++) await new Promise(resolve => setTimeout(resolve, 2)); assert.equal(f.children.length, 1); return f.children[0]; };
+const waitForSignal = (child, expected) => child.signals.includes(expected) ? Promise.resolve() : new Promise(resolve => {
+  const onSignal = signal => { if (signal === expected) { child.removeListener('kill', onSignal); resolve(); } };
+  child.on('kill', onSignal);
+});
 
 test('default configuration, status and inventory read without writing or spawning', async t => {
   const f = await setup(t);
   const config = await f.manager.config(); assert.equal(config.enabled, true);
   assert.match(config.revision, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
-  const status = await f.manager.status(); assert.equal(status.queryReady, true); assert.equal(status.catalog.querySites, 12);
-  assert.equal((await f.manager.sites()).summary.queryCommands, 23);
+  const status = await f.manager.status(); assert.equal(status.queryReady, true); assert.equal(status.browserQueryReady, false);
+  assert.equal(status.catalog.publicQueryCommands, 23);
+  assert.equal((await f.manager.sites()).summary.queryCommands, OPENCLI_QUERY_POLICIES.length + OPENCLI_BROWSER_POLICIES.length);
   assert.equal(f.launches.length, 0); assert.deepEqual(await readdir(f.directory), []);
 });
 
@@ -46,7 +53,7 @@ test('saved disable persists, CAS rejects stale updates and inventories remain r
   await assert.rejects(f.manager.configure({ ...initial, enabled: true }), error => error.status === 409);
   await assert.rejects(f.manager.query(query), error => error.code === 'disabled');
   await assert.rejects(f.manager.executeBrowser({ action: 'connect' }), error => error.code === 'disabled');
-  assert.equal((await f.manager.sites()).summary.querySites, 12); assert.equal(f.launches.length, 0); assert.equal(f.browserExecute(), 0);
+  assert.equal((await f.manager.sites()).summary.publicQueryCommands, 23); assert.equal(f.launches.length, 0); assert.equal(f.browserExecute(), 0);
   const other = new OpenCliManager({ dataDir: f.directory, browser: { close: async () => {} } });
   assert.deepEqual(await other.config(), disabled); await other.close();
   await f.manager.configure({ ...disabled, enabled: true });
@@ -82,7 +89,7 @@ test('worker outputs are redacted and invalid envelopes fail closed', async t =>
 test('timeout and cancellation wait for actual child exit, do not overlap or retry', async t => {
   const f = await setup(t, { timeoutMs: 25, delayExit: true, run: () => {} });
   let settled = false; const pending = f.manager.query(query).catch(error => { settled = true; return error; });
-  const child = await waitForChild(f); await new Promise(resolve => setTimeout(resolve, 50));
+  const child = await waitForChild(f); await waitForSignal(child, 'SIGKILL');
   assert.equal(settled, false); assert.deepEqual(child.signals, ['SIGTERM', 'SIGKILL']);
   await assert.rejects(f.manager.query(query), error => error.code === 'busy');
   child.finish(1); assert.equal((await pending).code, 'timeout'); assert.equal(f.launches.length, 1);
@@ -226,4 +233,154 @@ test('successful manager close is idempotent and repeated failed close keeps one
   assert.equal(child.listenerCount('close'), 1);
   fail = false; await manager.close(); assert.equal(child.listenerCount('close'), 0);
   await manager.close(); assert.equal(closes, 3);
+});
+
+const browserQuery = { site: 'baidu-search', command: 'search', arguments: { query: '小猫' } };
+const browserResult = (args, rows = [{ title: 'Browser result' }]) => ({ site: args.site, command: args.command, version: '1.8.8', rows, count: rows.length });
+
+test('browser queries preserve selected profile and captured scoped origins without launching a public worker', async t => {
+  const calls = [], selectedProfileId = 'explicit-work-profile';
+  const f = await setup(t, { browser: { selectedProfileId, executeAdapter: async (args, options) => { calls.push({ args, options }); return browserResult(args); } } });
+  const initial = await f.manager.config();
+  const configured = await f.manager.configure({ ...initial, siteOrigins: { dyyj: ['https://film.example.com'] } });
+  const request = { site: 'dyyj', command: 'read', arguments: { url: 'https://film.example.com/article/1' } };
+  assert.equal((await f.manager.query(request)).count, 1);
+  assert.equal(f.manager.browser.selectedProfileId, selectedProfileId);
+  assert.equal(calls.length, 1); assert.equal(calls[0].options.policy.engine, 'configured');
+  assert.equal(calls[0].options.policy.site, 'dyyj');
+  assert.deepEqual(calls[0].options.siteOrigins, configured.siteOrigins);
+  assert.ok(calls[0].options.signal instanceof AbortSignal);
+  assert.equal(calls[0].args.arguments.limit, 5);
+  assert.equal(f.launches.length, 0); assert.equal(f.browserExecute(), 0);
+  await assert.rejects(f.manager.query({ ...request, arguments: { url: 'https://bbs.dyyjmax.org/article/1' } }), error => error.code === 'invalid_arguments');
+  assert.equal(calls.length, 1);
+});
+
+test('origin overrides share account-scoped CAS and legacy two-field clients preserve saved websites', async t => {
+  const f = await setup(t);
+  const initial = await f.manager.config();
+  const configured = await f.manager.configure({ ...initial, siteOrigins: { dyyj: ['https://film.example.com'], wlgo: ['https://forum.example.com'] } });
+  assert.notEqual(configured.revision, initial.revision);
+  await assert.rejects(f.manager.configure({ ...initial, siteOrigins: { wlgo: ['https://other.example.com'] } }), error => error.code === 'config_changed');
+  assert.deepEqual(await f.manager.configure({ revision: configured.revision, enabled: true }), configured);
+  const disabled = await f.manager.configure({ revision: configured.revision, enabled: false });
+  assert.deepEqual(disabled.siteOrigins, configured.siteOrigins);
+  const peer = new OpenCliManager({ dataDir: f.directory, scope: 'another-account', browser: { close: async () => {} } });
+  t.after(() => peer.close());
+  assert.equal((await peer.config()).siteOrigins, undefined);
+  const peerConfig = await peer.configure({ ...await peer.config(), siteOrigins: { wlgo: ['https://peer.example.com'] } });
+  assert.deepEqual((await f.manager.config()).siteOrigins, configured.siteOrigins);
+  assert.deepEqual((await peer.config()).siteOrigins, peerConfig.siteOrigins);
+  await assert.rejects(f.manager.configure({ ...disabled, siteOrigins: { wlgo: ['http://private.invalid'] } }), error => error.status === 400);
+  assert.deepEqual(await f.manager.config(), disabled);
+  const reset = await f.manager.configure({ ...disabled, enabled: true, siteOrigins: {} });
+  assert.equal(reset.siteOrigins, undefined);
+  assert.deepEqual((await f.manager.sites({ site: 'wlgo' })).sites[0].domains, ['www.wlgooo.com', 'wlgooo.com']);
+});
+
+test('old persisted enabled/revision configurations remain readable and acquire origins only on explicit update', async t => {
+  const f = await setup(t);
+  const disabled = await f.manager.configure({ ...await f.manager.config(), enabled: false });
+  await writeFile(f.manager.configFile, JSON.stringify({ revision: disabled.revision, enabled: false }));
+  assert.deepEqual(await f.manager.config(), disabled);
+  assert.equal((await f.manager.sites()).notebookSites.length, 13);
+  await assert.rejects(f.manager.query(browserQuery), error => error.code === 'disabled');
+  assert.equal(f.launches.length, 0);
+});
+
+test('browser query owns the shared gate immediately and disabling waits for the captured adapter to finish', async t => {
+  let finish, started, observeAbort; let calls = 0;
+  const ready = new Promise(resolve => { started = resolve; });
+  const aborted = new Promise(resolve => { observeAbort = resolve; });
+  const f = await setup(t, { browser: { executeAdapter: async (args, { signal }) => {
+    calls++; signal.addEventListener('abort', observeAbort, { once: true }); started();
+    return new Promise(resolve => { finish = () => resolve(browserResult(args)); });
+  } } });
+  const pending = f.manager.query(browserQuery); const rejected = assert.rejects(pending, error => error.name === 'AbortError');
+  await assert.rejects(f.manager.query(query), error => error.code === 'busy');
+  await ready;
+  await assert.rejects(f.manager.executeBrowser({ action: 'connect' }), error => error.code === 'busy');
+  let resolved = false;
+  const disabling = f.manager.configure({ ...await f.manager.config(), enabled: false }).then(value => { resolved = true; return value; });
+  await aborted; assert.equal(resolved, false); assert.equal(f.browserClose(), 0);
+  finish(); await rejected;
+  assert.equal((await disabling).enabled, false); assert.equal(f.browserClose(), 1); assert.equal(calls, 1);
+  assert.equal(f.manager.operation, null);
+  await assert.rejects(f.manager.query(browserQuery), error => error.code === 'disabled');
+  assert.equal(calls, 1); assert.equal(f.launches.length, 0);
+});
+
+test('changing origins cancels only the captured query and future requests use the new snapshot', async t => {
+  let finish, started, observeAbort; const seen = [];
+  const ready = new Promise(resolve => { started = resolve; });
+  const aborted = new Promise(resolve => { observeAbort = resolve; });
+  const f = await setup(t, { browser: { executeAdapter: async (args, options) => {
+    seen.push(options.siteOrigins);
+    if (seen.length === 1) { options.signal.addEventListener('abort', observeAbort, { once: true }); started(); return new Promise(resolve => { finish = () => resolve(browserResult(args)); }); }
+    return browserResult(args);
+  } } });
+  const configured = await f.manager.configure({ ...await f.manager.config(), siteOrigins: { wlgo: ['https://old.example.com'] } });
+  const pending = f.manager.query({ site: 'wlgo', command: 'read', arguments: { url: 'https://old.example.com/article/1' } });
+  const rejected = assert.rejects(pending, error => error.name === 'AbortError'); await ready;
+  const updating = f.manager.configure({ ...configured, siteOrigins: { wlgo: ['https://new.example.com'] } });
+  await aborted; assert.deepEqual(seen[0], { wlgo: ['https://old.example.com'] });
+  finish(); await rejected; await updating;
+  await f.manager.query({ site: 'wlgo', command: 'read', arguments: { url: 'https://new.example.com/article/1' } });
+  assert.deepEqual(seen[1], { wlgo: ['https://new.example.com'] });
+  assert.equal(f.browserClose(), 0); assert.equal(f.launches.length, 0);
+});
+
+test('saving unchanged normalized origins is a no-op and does not cancel an active browser query', async t => {
+  let finish, started, observeAbort, capturedSignal;
+  const ready = new Promise(resolve => { started = resolve; });
+  const aborted = new Promise(resolve => { observeAbort = () => resolve('aborted'); });
+  const f = await setup(t, { browser: { executeAdapter: async (args, { signal }) => {
+    capturedSignal = signal; signal.addEventListener('abort', observeAbort, { once: true }); started();
+    return new Promise(resolve => { finish = () => resolve(browserResult(args)); });
+  } } });
+  const config = await f.manager.configure({ ...await f.manager.config(), siteOrigins: { wlgo: ['https://forum.example.com'] } });
+  const pending = f.manager.query({ site: 'wlgo', command: 'read', arguments: { url: 'https://forum.example.com/article/1' } }).catch(error => error);
+  await ready;
+  const saving = f.manager.configure({ ...config, siteOrigins: { wlgo: ['https://FORUM.example.com/'] } });
+  try {
+    const outcome = await Promise.race([saving.then(() => 'saved'), aborted]);
+    assert.equal(outcome, 'saved'); assert.equal(capturedSignal.aborted, false);
+    assert.deepEqual(await saving, config);
+  } finally { finish(); await pending; await saving.catch(() => {}); }
+  assert.equal(f.manager.operation, null); assert.equal(f.launches.length, 0);
+});
+
+test('browser query responses strip credentials and require exact bounded response envelopes', async t => {
+  let response;
+  const f = await setup(t, { browser: { executeAdapter: async args => response ?? browserResult(args) } });
+  response = browserResult(browserQuery, [{ title: 'Bearer privateBearer password=privatePassword', cookie: 'privateCookie', access_token: 'privateAccess', api_key: 'privateApiKey', apiKey: 'privateCamelApiKey', nested: { token: 'privateToken', passcode: 'privatePasscode', url: 'https://example.com?pwd=privatePwd&token=privateUrlToken' } }]);
+  assert.doesNotMatch(JSON.stringify(await f.manager.query(browserQuery)), /privateBearer|privatePassword|privateCookie|privateAccess|privateApiKey|privateCamelApiKey|privateToken|privatePasscode|privatePwd|privateUrlToken/);
+  for (const invalid of [null, [], { ...browserResult(browserQuery), site: 'bing' }, { ...browserResult(browserQuery), command: 'hot' }, { ...browserResult(browserQuery), version: '1.9.0' }, { ...browserResult(browserQuery), count: 2 }, { ...browserResult(browserQuery), rows: {} }, browserResult(browserQuery, Array.from({ length: 51 }, () => ({ title: 'too many' }))), browserResult(browserQuery, [{ title: 'x'.repeat(128 * 1024) }])]) {
+    response = invalid;
+    // null is intentionally passed to the fake adapter rather than treated as a default.
+    f.manager.browser.executeAdapter = async () => response;
+    await assert.rejects(f.manager.query(browserQuery), error => error.code === 'invalid_response');
+    assert.equal(f.manager.operation, null);
+  }
+  assert.equal(f.launches.length, 0);
+});
+
+test('share adapter errors never echo URLs or extraction codes for any of the three cloud drives', async t => {
+  const shares = { 'baidu-pan': 'https://pan.baidu.com/s/1abcdeFGH', quark: 'https://pan.quark.cn/s/abcdef12', 'xunlei-pan': 'https://pan.xunlei.com/s/abcdef12' };
+  const f = await setup(t, { browser: { executeAdapter: async args => { throw new Error(`upstream echoed ${args.arguments.url} passcode S9pQ`); } } });
+  for (const [site, url] of Object.entries(shares)) {
+    await assert.rejects(f.manager.query({ site, command: 'share-tree', arguments: { url: `${url}?pwd=Y7gX`, passcode: 'S9pQ' } }), error => {
+      assert.equal(error.code, 'browser_query_failed'); assert.doesNotMatch(error.message, /https:|Y7gX|S9pQ|abcdef12|1abcdeFGH/); return true;
+    });
+  }
+  assert.equal(f.launches.length, 0);
+});
+
+test('pre-aborted browser queries do not connect, select profiles, launch workers or run an adapter', async t => {
+  let adapters = 0;
+  const f = await setup(t, { browser: { executeAdapter: async args => { adapters++; return browserResult(args); } } });
+  const controller = new AbortController(); controller.abort();
+  await assert.rejects(f.manager.query(browserQuery, { signal: controller.signal }), error => error.name === 'AbortError');
+  assert.equal(adapters, 0); assert.equal(f.launches.length, 0); assert.equal(f.browserExecute(), 0);
+  assert.equal(f.manager.operation, null);
 });

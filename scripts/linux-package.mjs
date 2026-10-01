@@ -25,6 +25,7 @@ const opencliVersion = metadata.dependencies['@jackwener/opencli'];
 const requiredApplicationSource = ['server/updates.mjs', 'desktop/updates.mjs', 'server/app.mjs', 'server/auth.mjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/index.mjs', 'server/providers.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'NOTICE'];
 requiredApplicationSource.push('server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs');
 requiredApplicationSource.push('server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs');
+requiredApplicationSource.push('server/opencli-browser-policies.mjs', 'server/opencli-browser-adapters.mjs');
 requiredApplicationSource.push('server/computer-use-mcp.mjs','server/computer-use-tool-names.mjs','server/computer-use-mcp-routes.mjs','server/dynamic-tool-output.mjs','server/model-request-limits.mjs');
 requiredApplicationSource.push('server/native/computer-use/LICENSE','server/native/computer-use/patches/linux-x11-window-geometry.patch');
 requiredApplicationSource.push('desktop/startup-diagnostics.cjs', 'server/music-mcp.mjs', 'server/music-mcp-routes.mjs',
@@ -39,7 +40,9 @@ const requiredOpencliFiles = ['package.json', 'LICENSE', 'cli-manifest.json', 'd
   'clis/juejin/hot.js', 'clis/juejin/recommend.js', 'clis/juejin/utils.js', 'clis/mdn/search.js',
   'clis/npm/package.js', 'clis/npm/search.js', 'clis/npm/utils.js', 'clis/steam/app.js', 'clis/steam/search.js', 'clis/steam/top-sellers.js', 'clis/steam/utils.js',
   'clis/toutiao/hot.js', 'clis/toutiao/utils.js', 'clis/v2ex/hot.js', 'clis/v2ex/latest.js', 'clis/v2ex/topic.js',
-  'clis/wikipedia/search.js', 'clis/wikipedia/summary.js', 'clis/wikipedia/utils.js'];
+  'clis/wikipedia/search.js', 'clis/wikipedia/summary.js', 'clis/wikipedia/utils.js',
+  'clis/tieba/hot.js', 'clis/tieba/search.js', 'clis/tieba/read.js',
+  'clis/bilibili/search.js', 'clis/bilibili/hot.js', 'clis/bilibili/ranking.js', 'clis/bilibili/video.js', 'clis/bilibili/comments.js', 'clis/bilibili/history.js', 'clis/bilibili/utils.js'];
 if (![electronVersion, codexVersion, opencliVersion].every(version => /^\d+\.\d+\.\d+$/.test(version))) throw new Error('Electron, Codex and OpenCLI versions must be exact.');
 const requested = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const architectures = requested.length ? requested : ['x64', 'arm64'];

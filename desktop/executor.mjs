@@ -8,6 +8,7 @@ import { normalizeAgentPermissions } from '../server/agent-permissions.mjs';
 import { inspectImage, IMAGE_LIMIT } from '../server/attachments.mjs';
 import { normalizeReasoningEffort } from '../server/providers.mjs';
 import { validateBrowserAction } from '../server/opencli.mjs';
+import { normalizeSiteOrigins } from '../server/opencli-browser-policies.mjs';
 import { normalizeProjectDirectory } from '../server/project-directory.mjs';
 
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -195,7 +196,10 @@ export class DesktopExecutor {
   async manageOpenCli(action, body) {
     if (!['config', 'status', 'configure', 'action', 'sites', 'cancel'].includes(action)) throw invalid();
     if (['config', 'status', 'cancel'].includes(action) && body !== undefined) throw invalid();
-    if (action === 'configure' && (!object(body) || Object.keys(body).length !== 2 || !uuid(body.revision) || typeof body.enabled !== 'boolean')) throw invalid();
+    if (action === 'configure') {
+      if (!object(body) || Object.keys(body).some(key => !['revision', 'enabled', 'siteOrigins'].includes(key)) || !uuid(body.revision) || typeof body.enabled !== 'boolean') throw invalid();
+      try { normalizeSiteOrigins(body.siteOrigins); } catch { throw invalid(); }
+    }
     if (action === 'sites') {
       if (body === undefined) body = {};
       if (!object(body) || Object.keys(body).some(key => !['site', 'command'].includes(key)) ||

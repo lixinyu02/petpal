@@ -1,13 +1,15 @@
 import {useEffect,useRef,useState,type FormEvent} from 'react';
 import {ArrowUpRight,Check,ChevronDown,Globe2,Loader2,RefreshCw,Search,Unplug} from 'lucide-react';
 import {getSessionEpoch,isSessionChanged,type User} from './api';
-import {openCliTransport,type OpenCliBrowserAction,type OpenCliConfig,type OpenCliSites,type OpenCliStatus} from './platform/opencli';
+import {openCliTransport,openCliConfiguredSites,openCliConfigChanged,openCliConfigPatch,openCliOriginDraft,type OpenCliOriginDraft,type OpenCliBrowserAction,type OpenCliConfig,type OpenCliSites,type OpenCliStatus,type OpenCliMode,type OpenCliLogin} from './platform/opencli';
 import './desktop-assistant.css';
 import './opencli-settings.css';
 
 const officialSites=[{name:'QQ 音乐官网',url:'https://y.qq.com/'},{name:'网易云音乐官网',url:'https://music.163.com/'}];
 const bridgeStates={stopped:'尚未启动',owned:'由小伴管理',shared:'已共享连接',external:'发现其他浏览器桥',unavailable:'当前不可用'};
 type Command=NonNullable<OpenCliSites['commands']>[number];
+const modeLabels:Record<OpenCliMode,string>={public:'公开查询',browser:'浏览器查询',configured:'站点页面查询',inventory:'仅打包'};
+const loginLabels:Record<OpenCliLogin,string>={optional:'部分内容可能需要登录',required:'需要网站登录',share:'读取分享信息；可能需要提取码'};
 
 function parameters(command:Command){
   const schema=command.inputSchema as {properties?:Record<string,{type?:string;description?:string}>;required?:string[]}|undefined;
@@ -18,6 +20,7 @@ function parameters(command:Command){
 export default function OpenCliSettings({connected,user}:{connected:boolean;user?:User}) {
   const transport=useRef(openCliTransport()).current;
   const [config,setConfig]=useState<OpenCliConfig|null>(null),[enabled,setEnabled]=useState(true);
+  const [originDraft,setOriginDraft]=useState<OpenCliOriginDraft>(()=>openCliOriginDraft());
   const [status,setStatus]=useState<OpenCliStatus|null>(null),[catalog,setCatalog]=useState<OpenCliSites|null>(null);
   const [details,setDetails]=useState<Record<string,Command[]>>({});
   const [profileId,setProfileId]=useState(''),[search,setSearch]=useState(''),[filter,setFilter]=useState('callable');
@@ -27,13 +30,13 @@ export default function OpenCliSettings({connected,user}:{connected:boolean;user
   const allowed=connected&&(transport.native?!!user?.canUseCodex&&(user.isOwner||user.agentAccess==='full'):!!user?.isOwner);
   const allowedNow=useRef(allowed);allowedNow.current=allowed;
   const current=(controller?:AbortController)=>alive.current&&allowedNow.current&&getSessionEpoch()===epoch&&!controller?.signal.aborted;
-  const dirty=!!config&&config.enabled!==enabled;
+  const dirty=openCliConfigChanged(config,enabled,originDraft);
   const running=!!busy;
 
   function applyStatus(next:OpenCliStatus,replaceConfig=false){
     setStatus(next);
     setProfileId(previous=>next.profiles.some(profile=>profile.id===previous&&profile.connected)?previous:next.selectedProfileId||'');
-    if(replaceConfig||!dirty){setConfig(next.config);setEnabled(next.config.enabled);}
+    if(replaceConfig||!dirty){setConfig(next.config);setEnabled(next.config.enabled);setOriginDraft(openCliOriginDraft(next.config));}
   }
   async function run(label:string,work:(signal:AbortSignal)=>Promise<void>){
     if(!current()||operation.current)return;
@@ -63,7 +66,7 @@ export default function OpenCliSettings({connected,user}:{connected:boolean;user
   useEffect(()=>{
     alive.current=true;
     if(allowed)void read(true);
-    else{setConfig(null);setEnabled(true);setStatus(null);setCatalog(null);setDetails({});setProfileId('');setBusy('');setError('');setNotice('');}
+    else{setConfig(null);setEnabled(true);setOriginDraft(openCliOriginDraft());setStatus(null);setCatalog(null);setDetails({});setProfileId('');setBusy('');setError('');setNotice('');}
     const cancelRequests=()=>{
       for(const request of requests.current)request.abort();
       if(nativeAction.current&&transport.native&&getSessionEpoch()===epoch)void transport.cancel().catch(()=>{});
@@ -75,11 +78,13 @@ export default function OpenCliSettings({connected,user}:{connected:boolean;user
   async function save(event:FormEvent){
     event.preventDefault();if(!config||!dirty||running)return;
     await run('保存 OpenCLI',async signal=>{
-      const next=await transport.configure({revision:config.revision,enabled},signal);
+      const next=await transport.configure(openCliConfigPatch(config,enabled,originDraft),signal);
       if(!current()||signal.aborted)return;
-      setConfig(next);setEnabled(next.enabled);
-      setNotice(next.enabled?'已启用 OpenCLI。Agent 可按当前权限调用网站查询；浏览器桥由你手动连接。':'已关闭 OpenCLI。新的 Agent 网站查询和网页操作将被禁用。');
+      setConfig(next);setEnabled(next.enabled);setOriginDraft(openCliOriginDraft(next));setDetails({});
+      setNotice(next.enabled?'OpenCLI 设置已保存。Agent 可按当前权限调用网站查询；浏览器桥由你手动连接。':'已关闭 OpenCLI。新的 Agent 网站查询和网页操作将被禁用。');
       const nextStatus=await transport.status(signal);if(current()&&!signal.aborted)applyStatus(nextStatus,true);
+      if(!current()||signal.aborted)return;
+      const nextCatalog=await transport.sites({},signal);if(current()&&!signal.aborted)setCatalog(nextCatalog);
     });
   }
   async function loadDetails(site:string){
@@ -120,7 +125,9 @@ export default function OpenCliSettings({connected,user}:{connected:boolean;user
 
   const summary=catalog?.summary||status?.catalog;
   const needle=search.trim().toLowerCase();
-  const sites=(catalog?.sites||[]).filter(site=>(filter!=='callable'||site.queryCommands>0)&&(!needle||[site.site,...site.domains,...site.enabledCommands].some(value=>value.toLowerCase().includes(needle))));
+  const sites=(allowed?catalog?.sites||[]:[]).filter(site=>(filter!=='callable'||site.queryCommands>0)&&(!needle||[site.site,site.label||'',...site.domains,...site.enabledCommands].some(value=>value.toLowerCase().includes(needle))));
+  const notebookSites=allowed?catalog?.notebookSites||[]:[];
+  const awaitingOrigins=notebookSites.filter(site=>site.status==='needs-url').length;
   const selectedOnline=!!status?.profiles.some(profile=>profile.id===profileId&&profile.connected);
   const browserReady=!!status?.ready&&selectedOnline&&status.selectedProfileId===profileId;
   const browserAttached=status?.daemon.state==='owned'||status?.daemon.state==='shared';
@@ -129,27 +136,46 @@ export default function OpenCliSettings({connected,user}:{connected:boolean;user
     <div className="assistant-section-heading"><div><h3 id="opencli-title"><Globe2 size={19}/>OpenCLI 网站工具</h3><p>{transport.native?'管理这台电脑':'管理服务主机'}的内置网站查询与 Chrome 网页工具。</p></div><button type="button" className="secondary-button" disabled={!allowed||running} onClick={()=>void read()}><RefreshCw size={14}/>刷新状态</button></div>
     {!allowed&&<p className="assistant-unavailable">{!connected?'登录后可以读取 OpenCLI 设置。':transport.native?'需要账号拥有完全访问这台电脑的 Agent 权限。':'服务主机的 OpenCLI 配置由主账号管理。网页和 Android 可通过所选执行电脑调用。'}</p>}
     {error&&<p className="form-error" role="alert">{error}</p>}
-    <form className="opencli-enable-form" onSubmit={save}>
+    <form id="opencli-config-form" className="opencli-enable-form" onSubmit={save} noValidate>
       <label className="opencli-enable"><input type="checkbox" checked={enabled} disabled={!allowed||running||!config} onChange={event=>{setEnabled(event.target.checked);setNotice('');}}/><span><strong>启用内置 OpenCLI</strong><small>首次配置默认开启，保留你保存的关闭选择。</small></span></label>
       <button type="submit" className="primary-button" disabled={!allowed||running||!config||!dirty}><Check size={15}/>保存</button>
     </form>
-    {dirty&&<div className="opencli-unsaved"><span>开关尚未保存。</span><button type="button" className="assistant-tool-settings" disabled={running} onClick={()=>void read(true)}>恢复已保存设置</button></div>}
-    <div className="opencli-status-line" aria-live="polite"><span className={`opencli-state${status?.queryReady?' is-ready':''}`}>{!allowed?'未读取':!status?'等待状态':!status.config.enabled?'已关闭':status.queryReady?'网站查询已就绪':'运行时未就绪'}</span>{status?.version&&<span>OpenCLI {status.version}</span>}{summary&&<span>{summary.querySites} 个查询入口 · {summary.queryCommands} 项开放命令</span>}</div>
+    {allowed&&dirty&&<div className="opencli-unsaved"><span>开关或网站网址尚未保存。</span><button type="button" className="assistant-tool-settings" disabled={running} onClick={()=>void read(true)}>恢复已保存设置</button></div>}
+    <div className="opencli-status-line" aria-live="polite"><span className={`opencli-state${status?.queryReady?' is-ready':''}`}>{!allowed?'未读取':!status?'等待状态':!status.config.enabled?'已关闭':status.queryReady?'网站查询已就绪':'运行时未就绪'}</span>{allowed&&status?.version&&<span>OpenCLI {status.version}</span>}{allowed&&summary&&<span>{summary.querySites} 个查询入口 · {summary.queryCommands} 项开放命令{summary.publicQueryCommands!==undefined&&summary.browserQueryCommands!==undefined?`（公开 ${summary.publicQueryCommands} / 浏览器 ${summary.browserQueryCommands}）`:''}</span>}</div>
     <p className="field-help">公开网站查询无需 Chrome 扩展，交给 Agent 调用即可；仍遵循任务的访问权限和确认设置。网页操作需安装 Browser Bridge 并明确选择 Chrome 档案。</p>
     {status?.message&&<p className="assistant-unavailable">{status.message}</p>}
     {busy&&<div className="opencli-progress" role="status"><span className="assistant-state"><Loader2 size={15} className="spin"/>{busy}…</span><button type="button" className="secondary-button" disabled={!allowed||busy==='正在取消'} onClick={()=>void cancel()}>取消请求</button></div>}
 
+    <details className="opencli-notebook">
+      <summary><span><strong>常用网站</strong><small>{notebookSites.length?`${notebookSites.length} 个入口${awaitingOrigins?` · ${awaitingOrigins} 个待配置网址`:''}`:'读取状态后查看常用网站'}</small></span><ChevronDown size={16}/></summary>
+      <div className="opencli-notebook-body">
+        <p className="field-help">Agent 可查询这些网站。Switch520 使用网站原生搜索，其余自建站点通过必应 site: 搜索；页面读取限于默认或已保存网址。入口已准备不代表所有网站已联网验收。</p>
+        {!!notebookSites.length&&<ul className="opencli-notebook-list">{notebookSites.map(site=>{
+          const entry=catalog?.sites.find(item=>item.site===site.site);
+          const configured=openCliConfiguredSites.find(item=>item.site===site.site);
+          return <li key={site.site}>
+            <div className="opencli-notebook-row"><strong>{site.label}</strong><span className={`opencli-capability${site.status==='ready'?' is-callable':''}`}>{site.status==='needs-url'?'待配置网址':entry?.mode?modeLabels[entry.mode]:'查询入口'}</span></div>
+            <p className="opencli-notebook-description">{site.origins.length?site.origins.join(' · '):'填写当前网站的 HTTPS 地址后使用'}{site.login?` · ${loginLabels[site.login]}`:''}</p>
+            {!!site.commands.length&&<p className="opencli-command-names">{site.commands.map(command=><code key={command}>{command}</code>)}</p>}
+            {configured&&<div className="opencli-origin-fields">{Array.from({length:configured.slots},(_,index)=><label key={index} htmlFor={`opencli-origin-${site.site}-${index}`}><span>{index?'自定义备用网址（可选）':'自定义网址（可选）'}</span><input id={`opencli-origin-${site.site}-${index}`} form="opencli-config-form" type="url" value={originDraft[site.site]?.[index]||''} placeholder={site.origins[index]||'https://网站域名'} maxLength={512} autoCapitalize="none" autoCorrect="off" spellCheck={false} disabled={!allowed||running||!config} onChange={event=>{const value=event.target.value;setOriginDraft(previous=>({...previous,[site.site]:Array.from({length:configured.slots},(_,at)=>at===index?value:previous[site.site]?.[at]||'')}));setNotice('');}}/></label>)}</div>}
+          </li>;
+        })}</ul>}
+        {!notebookSites.length&&<p className="field-help">{!allowed?'登录并取得设置权限后可查看。':catalog?'当前执行端暂未提供常用网站配置，请升级该端运行时。':'请先读取 OpenCLI 状态。'}</p>}
+        {!!notebookSites.length&&<p className="field-help">已配置计划中的默认网址。仅在网站换域名时填写自定义 HTTPS 源地址，省略页面路径和查询参数；清空并保存可恢复默认网址。修改后使用上方“保存”，未保存时不会用于 Agent。</p>}
+      </div>
+    </details>
+
     <details className="opencli-catalog">
       <summary><span><strong>网站与命令清单</strong><small>{summary?`已打包 ${summary.adapterNamespaces} 个适配器 · ${summary.totalCommands} 项命令`:'读取状态后查看'}</small></span><ChevronDown size={16}/></summary>
       <div className="opencli-catalog-body">
-        <p className="field-help">“可调用”是小伴已开放的公开查询。其他适配器仅随运行时打包，可能需要网站登录或浏览器扩展；清单不代表当前网络已通过测试。</p>
+        <p className="field-help">“可调用”是小伴已开放的查询，公开查询无需 Chrome，浏览器查询使用所选档案的登录状态。其他适配器仅随运行时打包；清单不代表当前网络已通过测试。</p>
         <div className="opencli-catalog-search"><label><span className="opencli-visually-hidden">搜索网站或命令</span><Search size={15}/><input type="search" value={search} maxLength={120} placeholder="搜索网站、域名或命令" disabled={!allowed||!catalog} onChange={event=>setSearch(event.target.value)}/></label><select aria-label="网站清单范围" value={filter} disabled={!allowed||!catalog} onChange={event=>setFilter(event.target.value)}><option value="callable">可调用的查询</option><option value="all">所有内置适配器</option></select></div>
         <p className="opencli-result-count" role="status">{catalog?`${sites.length} 个结果`:'正在等待读取清单'}</p>
         <div className="opencli-site-list">{sites.map(site=><details className="opencli-site" key={site.site}>
-          <summary><span><strong>{site.site}</strong><small>{site.domains.length?site.domains.join(' · '):site.local?'本地应用适配器':'上游适配器'}</small></span><span className={`opencli-capability${site.queryCommands?' is-callable':''}`}>{site.queryCommands?`${site.queryCommands} 项可调用`:'仅打包'}</span><ChevronDown size={14}/></summary>
-          <div className="opencli-site-body"><p className="field-help">共 {site.commands} 项内置命令{site.browserCommands?`，其中 ${site.browserCommands} 项依赖浏览器桥`:''}。{!site.queryCommands&&'当前尚未向 Agent 开放此适配器。'}</p>
+          <summary><span><strong>{site.label||site.site}</strong><small>{site.domains.length?site.domains.join(' · '):site.websiteStatus==='needs-url'?'等待配置当前网站网址':site.local?'本地应用适配器':'上游适配器'}</small></span><span className={`opencli-capability${site.queryCommands?' is-callable':''}`}>{site.websiteStatus==='needs-url'?'待网址':site.queryCommands?`${site.queryCommands} 项可调用`:'仅打包'}</span><ChevronDown size={14}/></summary>
+          <div className="opencli-site-body"><p className="field-help">共 {site.commands} 项内置命令{site.browserCommands?`，其中 ${site.browserCommands} 项依赖浏览器桥`:''}。{site.mode&&`${modeLabels[site.mode]}。`}{site.login&&`${loginLabels[site.login]}。`}{!site.queryCommands&&'当前尚未向 Agent 开放此适配器。'}{site.websiteStatus==='needs-url'&&'请先在“常用网站”保存当前网址。'}</p>
             {!!site.enabledCommands.length&&<><p className="opencli-command-names">{site.enabledCommands.map(command=><code key={command}>{command}</code>)}</p><button type="button" className="assistant-tool-settings" disabled={!allowed||running||!!details[site.site]} onClick={()=>void loadDetails(site.site)}>{details[site.site]?'已读取查询说明':'查看查询参数与说明'}</button></>}
-            {details[site.site]&&<ul className="opencli-command-list">{details[site.site].filter(command=>command.callable).map(command=><li key={command.command}><code>{command.command}</code><p>{command.description}</p><small>{parameters(command)}</small></li>)}</ul>}
+            {details[site.site]&&<ul className="opencli-command-list">{details[site.site].filter(command=>command.callable).map(command=><li key={command.command}><code>{command.command}</code><p>{command.description}</p><small>{command.mode?`${modeLabels[command.mode]}。`:''}{command.login?`${loginLabels[command.login]}。`:''}{command.mode==='browser'||command.mode==='configured'?'需显式选择在线 Chrome 档案。':''}{parameters(command)}</small></li>)}</ul>}
           </div>
         </details>)}</div>
         {catalog&&!sites.length&&<p className="field-help">没有匹配的适配器，请更换搜索词或切换清单范围。</p>}
