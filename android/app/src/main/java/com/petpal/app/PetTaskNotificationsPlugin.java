@@ -119,11 +119,13 @@ public class PetTaskNotificationsPlugin extends Plugin {
         fromMain(call, () -> call.resolve(new JSObject(TaskNotificationState.consume(getContext(), TaskNotificationPolicy.id(call.getString("instanceId")), TaskNotificationPolicy.id(call.getString("userId"))).toString())));
     }
     @PluginMethod public void openSystemSettings(PluginCall call) {
-        fromMain(call, () -> {
-            getActivity().startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                android.net.Uri.fromParts("package", getContext().getPackageName(), null)));
-            call.resolve(new JSObject().put("opened", true));
-        });
+        fromMain(call, () -> call.resolve(BackgroundSettings.open(getActivity(), "app")));
+    }
+    @PluginMethod public void backgroundSettings(PluginCall call) {
+        fromMain(call, () -> call.resolve(BackgroundSettings.status(getContext())));
+    }
+    @PluginMethod public void openBackgroundSettings(PluginCall call) {
+        fromMain(call, () -> call.resolve(BackgroundSettings.open(getActivity(), call.getString("kind"))));
     }
     @Override protected void handleOnDestroy() { destroyed = true; permissionInput = null; resumeCall = null; TaskNotificationState.listen(null); io.shutdownNow(); super.handleOnDestroy(); }
 }

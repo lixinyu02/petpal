@@ -1,11 +1,11 @@
 # 小伴 PetPal
 
-可以聊天、陪伴和使用真实 Codex CLI 的个人伙伴。Android **0.9.2 试用版**新增后台 Agent 任务提醒，已通过独立 API 36 模拟器的真实任务完成、通知点击后重新登录打开会话及注销清理验收。Windows 继续使用修复启动问题的 0.9.1，Ubuntu 沿用 0.9.0。Web、Android、Windows 与 Ubuntu 共用 React 界面；Node 个人服务负责账号、模型连接、图片、历史和 Agent 任务。支持 Chat Completions / Responses、图片聊天、可授权的 Agent 工作台、CosyVoice 朗读，以及二次元伙伴和 3D 小猫。
+可以聊天、陪伴和使用真实 Codex CLI 的个人伙伴。Android **0.9.3 试用版**新增手机品牌识别与省电、自启动、通知设置快捷入口；0.9.2 已提供后台 Agent 任务提醒并通过独立 API 36 模拟器通知链路验收。Windows 继续使用修复启动问题的 0.9.1，Ubuntu 沿用 0.9.0。Web、Android、Windows 与 Ubuntu 共用 React 界面；Node 个人服务负责账号、模型连接、图片、历史和 Agent 任务。支持 Chat Completions / Responses、图片聊天、可授权的 Agent 工作台、CosyVoice 朗读，以及二次元伙伴和 3D 小猫。
 
 | 平台 | Chat 与图片 | Agent 执行位置 | 交付形式 |
 | --- | --- | --- | --- |
 | Web | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | Web 构建 / 自部署源码 |
-| Android | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | 0.9.2 开发签名试用 APK，versionCode 12 |
+| Android | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | 0.9.3 开发签名试用 APK，versionCode 13 |
 | Windows | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | 0.9.1 x64 ZIP / 便携 EXE |
 | Ubuntu | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | x64 / arm64 `.tar.gz` |
 
@@ -13,18 +13,20 @@
 
 ## 下载与开始使用
 
-源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。[Android 0.9.2 预发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.2)、[Windows 0.9.1 发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.1)，Ubuntu 等旧包保留 [0.9.0 发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.0)：
+源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。[Android 0.9.3 预发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.3)、[Windows 0.9.1 发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.1)，Ubuntu 等旧包保留 [0.9.0 发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.0)：
 
 - [Windows x64 ZIP（推荐）](https://github.com/lixinyu02/petpal/releases/download/v0.9.1/PetPal-0.9.1-Windows-x64.zip)：Windows 10 / 11 x64，完整解压到本地新文件夹，再双击 `PetPal.exe`。不要在 ZIP 内运行或单独移动 EXE，无需安装 Node.js / Git。
 - [Windows x64 便携 EXE](https://github.com/lixinyu02/petpal/releases/download/v0.9.1/PetPal-0.9.1-Windows-x64.exe)：无需独立安装，每次先解压内置工具，看到启动提示后请等待，勿重复双击。Windows 包暂未商业签名。
 - [Ubuntu x64](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Ubuntu-x64.tar.gz) / [Ubuntu arm64](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Ubuntu-arm64.tar.gz)：解压后运行 `./start-petpal.sh`；目标机 GUI 尚未验收。
-- [Android 0.9.2 试用 APK](https://github.com/lixinyu02/petpal/releases/download/v0.9.2/PetPal-0.9.2-Android-debug.apk) / [服务器下载](https://magicdatou.top:44318/downloads/PetPal-0.9.2-Android-debug.apk)：versionCode 12，沿用此前开发签名；API 36 模拟器通知链路已验收，实体手机仍需分别验证，不是应用商店正式签名包。SHA-256：`bfa3a099c35fa10985871872da6d3ba9c2c89bfd562fd0e646304c4ead522aac`。
+- [Android 0.9.3 试用 APK](https://github.com/lixinyu02/petpal/releases/download/v0.9.3/PetPal-0.9.3-Android-debug.apk) / [服务器下载](https://magicdatou.top:44318/downloads/PetPal-0.9.3-Android-debug.apk)：versionCode 13，沿用此前开发签名；新增手机后台设置入口，API 36 模拟器标准设置跳转已验收，厂商实体手机仍需分别验证，不是应用商店正式签名包。SHA-256：`503db5c9c6d2ce454db99f58081ab48911e41052e0cdccf4eb016a03ea9733c6`。
 - [Web 静态包](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Web.zip)：需配合同版本 Node 后端。
-- [源码归档](https://github.com/lixinyu02/petpal/archive/refs/tags/v0.9.2.zip)：GitHub 按发布标签提供，包含前后端和原生壳源码，可按锁文件重建。Windows 使用 `npm run desktop:win`，构建隔离前端并生成 EXE / ZIP，不覆盖运行中的 `dist`。
+- [源码归档](https://github.com/lixinyu02/petpal/archive/refs/tags/v0.9.3.zip)：GitHub 按发布标签提供，包含前后端和原生壳源码，可按锁文件重建。Windows 使用 `npm run desktop:win`，构建隔离前端并生成 EXE / ZIP，不覆盖运行中的 `dist`。
 
 以 Release 实际文件、校验摘要及验收说明为准。登录后的「下载」页从本项目 GitHub Releases 读取真实发布文件，显示平台、架构、版本、稳定 / 预览渠道和开发签名标记；不存在的包不会显示下载按钮，网络失败可以重试。
 
 旧 Android 0.9.0 APK 不包含后台任务提醒，需要升级至 0.9.2；网页升级不会给旧 APK 增加原生通知服务。后台通知需要配套新版后端，验收范围见 [Android 后台任务通知](docs/workflow/2026-10-01-petpal-android-notifications-issues.md)。
+
+Android 0.9.3 在「后台任务提醒 → 让提醒更稳定」增加省电限制、自启动设置、应用通知入口。识别小米、华为、荣耀、OPPO / 一加 / realme、vivo / iQOO、三星、魅族、华硕和其他 Android，提供对应指导。入口不可用时安全回退并说明实际打开的页面；需要升级 APK 才能使用新桥，详见 [手机后台设置](docs/android-background-settings.md)。
 
 进入应用后先连接并登录个人服务。电脑客户端登录同一公共服务账号后自动登记为执行电脑；Web、Android 和桌面版都在 Agent 的「执行电脑」下拉框选择目标。选择电脑保持当前账号、模型和中央聊天历史，不会切换整套后端或要求重新登录。主账号在「连接与设置 → 电脑助手」配置中央 Responses 地址、模型与密钥；成员使用管理员分配的模型和 Agent 权限。中央服务器原有的本机 Codex 登录模式继续保留。
 
