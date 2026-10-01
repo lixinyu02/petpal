@@ -8,14 +8,14 @@
 
 - Goal: 为 notebook 明确列出的十三个网站提供受控 Agent 接入。
 - Ordering rule: Complete issues in sequence. 同一 issue 内独立组件由子代理并行实现。
-- Current status: issue-1/2/3 done；issue-4 in_progress。网站浏览器查询的实际 Bridge 档案仍未就绪，已单独记录。
+- Current status: issue-1/2/3/4 done。网站浏览器查询的实际 Bridge 档案仍未就绪，已单独记录，不能视为端到端网站查询通过。
 
 ## Issue List
 
 - [x] issue-1 接入浏览器网站策略、账号配置和 UI
 - [x] issue-2 回归与真实浏览器验收
 - [x] issue-3 Chrome / Browser Bridge 安装引导
-- [ ] issue-4 网页与后端部署
+- [x] issue-4 网页与后端部署
 
 ## issue-1
 
@@ -48,7 +48,7 @@
 - 验收标准: Windows / Ubuntu x64 / ARM64 支持矩阵明确；未安装时可准备官方安装器；扩展授权及系统确认交用户；安装器启动不等于已安装/Bridge已就绪；继承所选执行电脑及现有审批
 - 状态: done
 - 验证方式: 最终108/108目标测试、build、Chrome草稿/权限和窄屏；真实Google MSI验签及两架构仓库元数据签名通过，未实际安装/授予扩展权限
-- commit: 本 issue 提交
+- commit: 17156b3
 
 ## issue-4
 
@@ -57,6 +57,6 @@
 - 范围: 保留私有服务配置重启、认证接口及公网页面验收、源码审计和推送
 - 依赖: issue-3
 - 验收标准: health正常；未登录操作拒绝；授权清单及新引导入口可见；不改冻结0.9.6发布包和更新清单
-- 状态: in_progress
-- 验证方式: 本机/公网接口、Chrome生产UI
-- commit: pending
+- 状态: done
+- 验证方式: 本机/公网health与401鉴权、69条查询/13站清单、Chrome test账号生产草稿入口；Qwen真实Codex只读status工具调用与返回已在rollout核实；源码index审计和origin/main推送
+- commit: 本 issue 文档提交
