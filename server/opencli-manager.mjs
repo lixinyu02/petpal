@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { OpenCliRunner, openCliEnvironment, validateBrowserAction } from './opencli.mjs';
 import { describeOpenCliSites, loadOpenCliCatalog, openCliQueryPolicy, resolveOpenCliQueryBundle, validateOpenCliQuery } from './opencli-sites.mjs';
 import { normalizeSiteOrigins, validateBrowserQueryUrl } from './opencli-browser-policies.mjs';
+import { OpenCliBrowserSetup, validateOpenCliSetup } from './opencli-browser-setup.mjs';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value));
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -20,7 +21,7 @@ const validConfig = value => {
 const workerPath = fileURLToPath(new URL('./opencli-worker.mjs', import.meta.url)).replace(/\.asar([\\/])/i, '.asar.unpacked$1');
 
 export class OpenCliManager {
-  constructor({ dataDir, scope = 'local', browser, packageJsonPath, runtime = process.execPath, launch = spawn, openLock = open, env = process.env, timeoutMs = 30000, shutdownTimeoutMs = 2000, maxOutputBytes = 128 * 1024 } = {}) {
+  constructor({ dataDir, scope = 'local', browser, browserSetup, packageJsonPath, runtime = process.execPath, launch = spawn, openLock = open, env = process.env, timeoutMs = 30000, shutdownTimeoutMs = 2000, maxOutputBytes = 128 * 1024 } = {}) {
     if (typeof dataDir !== 'string' || !dataDir || typeof scope !== 'string' || !scope || scope.length > 512 || /[\x00-\x1f]/.test(scope)) throw new Error('OpenCLI 需要有效的独立数据目录和账号范围。');
     this.dataDir = path.resolve(dataDir); this.scopeHash = createHash('sha256').update(scope).digest('hex');
     this.scopeDir = path.join(this.dataDir, 'opencli-scopes', this.scopeHash);
@@ -29,6 +30,7 @@ export class OpenCliManager {
     this.defaultConfig = { revision: `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`, enabled: true };
     this.browserFactory = browser ? null : () => new OpenCliRunner({ dataDir: this.scopeDir, packageJsonPath, runtime });
     this.browser = browser || this.browserFactory();
+    this.setup = browserSetup ?? new OpenCliBrowserSetup({ dataDir: path.join(this.scopeDir, 'browser-setup') });
     this.packageJsonPath = packageJsonPath; this.runtime = runtime; this.launch = launch; this.env = env;
     this.openLock = openLock; this.failedLock = null; this.browserRecovery = null;
     this.timeoutMs = timeoutMs; this.shutdownTimeoutMs = shutdownTimeoutMs; this.maxOutputBytes = maxOutputBytes;
@@ -126,8 +128,35 @@ export class OpenCliManager {
   }
   async status() {
     const config = await this.config();
-    const [browser, catalog] = await Promise.all([this.browser.status(), loadOpenCliCatalog(this.packageJsonPath, config.siteOrigins).catch(() => null)]);
-    return { ...browser, config, catalog: catalog?.summary || null, queryReady: Boolean(config.enabled && catalog), browserQueryReady: Boolean(config.enabled && catalog && browser.ready), queryBusy: Boolean(this.operation), ...(config.enabled ? {} : { ready: false, queryReady: false, message: this.browserRecovery && !this.browserRecovery.confirmed ? 'OpenCLI 已停用；自有浏览器进程尚未确认退出，请检查本机进程。' : 'OpenCLI 已关闭；网站清单仍可查看。' }) };
+    const [browser, catalog, setup] = await Promise.all([this.browser.status(), loadOpenCliCatalog(this.packageJsonPath, config.siteOrigins).catch(() => null), this.setup.status().catch(() => ({ message: 'Chrome 安装状态暂时无法读取，请用 Agent 检查所选电脑。' }))]);
+    return { ...browser, config, setup, catalog: catalog?.summary || null, queryReady: Boolean(config.enabled && catalog), browserQueryReady: Boolean(config.enabled && catalog && browser.ready), queryBusy: Boolean(this.operation), ...(config.enabled ? {} : { ready: false, queryReady: false, message: this.browserRecovery && !this.browserRecovery.confirmed ? 'OpenCLI 已停用；自有浏览器进程尚未确认退出，请检查本机进程。' : 'OpenCLI 已关闭；网站清单仍可查看。' }) };
+  }
+  async executeSetup(body, { signal } = {}) {
+    this._live(); const args = validateOpenCliSetup(body);
+    if (signal?.aborted) throw abortError();
+    // Passive discovery remains available when OpenCLI is disabled; preparation
+    // and opening the marketplace share the account's existing operation lock.
+    if (args.action === 'status') {
+      const value = await this.setup.status(); this._live();
+      if (signal?.aborted) throw abortError();
+      return value;
+    }
+    if (this.operation || this.configuring) throw failure(409, '此账号正在处理 OpenCLI 请求，请稍后重试。', 'busy');
+    const controller = new AbortController(); let complete;
+    const operation = { error: null, stopped: new Promise(resolve => { complete = resolve; }) };
+    operation.stop = error => { operation.error ||= error; controller.abort(error); };
+    this.operation = operation;
+    const onAbort = () => operation.stop(abortError()); signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      await this._enabled(); this._live();
+      if (signal?.aborted) onAbort(); if (operation.error) throw operation.error;
+      if (this.configuring) throw failure(409, 'OpenCLI 配置正在修改，请稍后重试。', 'config_busy');
+      await this._safeDirectory(true);
+      if (operation.error) throw operation.error;
+      const value = await this.setup.execute(args, { signal: controller.signal });
+      this._live(); if (operation.error) throw operation.error;
+      return value;
+    } finally { signal?.removeEventListener('abort', onAbort); if (this.operation === operation) this.operation = null; complete(); }
   }
   async sites(args = {}) { this._live(); const config = await this.config(); return describeOpenCliSites(args, this.packageJsonPath, config.siteOrigins); }
   async _enabled() { const config = await this.config(); if (!config.enabled) throw failure(403, 'OpenCLI 已关闭，请在设置中启用。', 'disabled'); return config; }
@@ -235,6 +264,7 @@ export class OpenCliManager {
     this.closed = true;
     this.closing = (async () => {
       await this._stopQuery(abortError());
+      await this.setup.close();
       if (this.failedLock) await this._releaseLock(this.failedLock);
       if (this.browserRecovery?.confirmed && this.browserFactory) this._recoverBrowser();
       await this._shutdownBrowser();

@@ -3,12 +3,14 @@ import { validateBrowserAction } from './opencli.mjs';
 import { OpenCliManager } from './opencli-manager.mjs';
 import { validateOpenCliSites, validateOpenCliQuery } from './opencli-sites.mjs';
 import { describeOpenCliQueryArguments } from './opencli-browser-policies.mjs';
+import { validateOpenCliSetup } from './opencli-browser-setup.mjs';
 import { MusicMcpManager, validateMusicMcpCall, MUSIC_MCP_TOOLS } from './music-mcp.mjs';
 import { ComputerUseMcpManager, validateComputerUseCall, validateComputerUseTools } from './computer-use-mcp.mjs';
 import { CODEX_TOOL_VERSION } from './codex-config.mjs';
 
 const musicActions = { open: '打开', play: '播放', pause: '暂停', next: '下一首', previous: '上一首' };
 export const desktopToolSpecs = [
+  {type:'function',name:'petpal_opencli_setup',description:'检查所选执行电脑的 Chrome 安装环境(status，纯读)；用户要求准备浏览器时，用 install-browser 从固定 Google 官方源下载并验证安装器，返回 prepared 和路径，不代表已安装。用户在系统界面完成协议、安装或提权后再 status 检查。open-extension 仅在该电脑打开固定官方 Browser Bridge 商店页，扩展权限由用户确认；不静默加载扩展、不修改默认浏览器或档案。OpenCLI 已内置，无需全局 npm/npx。后续通过该电脑OpenCLI设置检查连接并显式选在线档案。下载/打开需完整访问和当前审批；旧客户端缺工具时应更新，不能回退到shell下载或绕过授权。',inputSchema:{type:'object',properties:{action:{type:'string',enum:['status','install-browser','open-extension']}},required:['action'],additionalProperties:false}},
   {type:'function',name:'petpal_opencli_sites',description:'查看选中执行电脑的内置 OpenCLI 网站库存与可调用查询。无参数返回网站概览与notebookSites常用网站；传site+command获取真实inputSchema。callable=true且mode=public无需Chrome；mode=browser/configured需要用户在此电脑设置中明确连接Chrome档案。needs-url/configRequired的站点先由用户填写网址。打包和ready不代表网站已登录或联网成功。',inputSchema:{type:'object',properties:{site:{type:'string'},command:{type:'string'}},additionalProperties:false}},
   {type:'function',name:'petpal_opencli_query',description:'用选中执行电脑的内置OpenCLI执行固定只读网站查询。先查petpal_opencli_sites的callable命令与schema。public走公开HTTP；browser/configured使用用户已显式连接的Chrome，失败时引导到OpenCLI设置，不自行选档案或重试。网盘只读目录，不下载或转存；configured站内搜索通过必应site:。需完整访问并遵循审批。失败如实报告，不用shell/npx/任意脚本代替，不自行启用工具。',inputSchema:{type:'object',properties:{site:{type:'string'},command:{type:'string'},arguments:{type:'object'}},required:['site','command','arguments'],additionalProperties:false}},
   {type:'function',name:'petpal_computer_use_tools',description:'在选中的执行电脑连接已启用的 Zavora Computer Use MCP，获取真实工具清单；传 tool 可获取一个工具的完整参数。支持应用、Accessibility、截图、键鼠、剪贴板和脚本。不会安装程序。每项实际操作需要完整访问并遵循当前审批方式。',inputSchema:{type:'object',properties:{tool:{type:'string'}},additionalProperties:false}},
@@ -59,6 +61,11 @@ export function createDesktopTools({ dataDir, music = new MusicController(), ope
   };
   let active = null, closed = false;
   function describe(name, args) {
+    if(name==='petpal_opencli_setup'){
+      const value=validateOpenCliSetup(args);
+      const label={status:'只读检查 Chrome 安装环境', 'install-browser':'从 Google 官方下载并验证 Chrome 安装器（用户完成安装）', 'open-extension':'打开官方 Browser Bridge 商店页（用户确认扩展权限）'}[value.action];
+      return {description:`所选执行电脑 · ${label}`,approvalRequired:value.action!=='status'};
+    }
     if(name==='petpal_opencli_sites'){
       const value=validateOpenCliSites(args);
       return {description:`查看内置 OpenCLI 网站清单${value.site?` · ${value.site}`:''}${value.command?`/${value.command}`:''}`,approvalRequired:false};
@@ -115,6 +122,7 @@ export function createDesktopTools({ dataDir, music = new MusicController(), ope
       const operation = { controller, done: new Promise(resolve => { finish = resolve; }) }; active = operation;
       const cancel = () => controller.abort(); signal?.addEventListener('abort', cancel, { once: true });
       try {
+        if(name==='petpal_opencli_setup')return await browserFor(conversationId).executeSetup(args,{signal:controller.signal});
         if(name==='petpal_opencli_sites')return await browserFor(conversationId).sites(args);
         if(name==='petpal_opencli_query')return await browserFor(conversationId).query(args,{signal:controller.signal});
         if(name==='petpal_computer_use_tools')return await computerFor(conversationId).tools(args,{signal:controller.signal});

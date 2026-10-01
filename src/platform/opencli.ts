@@ -20,7 +20,11 @@ export type OpenCliSites = {
   sites:OpenCliSite[]; commands?:OpenCliCommand[];
   notebookSites?:{site:string;label:string;origins:string[];status:'ready'|'needs-url';commands:string[];login?:OpenCliLogin}[];
 };
-export type OpenCliStatus = BrowserStatus & { config:OpenCliConfig; catalog:OpenCliSites['summary']|null; queryReady:boolean };
+export type OpenCliSetup = {
+  platform:string; arch:string; supported:boolean; chromeInstalled:boolean|null; installerSupported:boolean;
+  extensionUrl:string; downloadPage:string; message:string;
+};
+export type OpenCliStatus = BrowserStatus & { config:OpenCliConfig; catalog:OpenCliSites['summary']|null; queryReady:boolean; setup?:OpenCliSetup };
 export type OpenCliBrowserAction = {
   action:'connect'|'tabs'|'open'|'snapshot'|'click'|'fill'|'key'|'close';
   profileId?:string; tabId?:string; url?:string; target?:number; text?:string;

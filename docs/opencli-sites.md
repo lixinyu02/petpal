@@ -56,3 +56,16 @@ Windows／Ubuntu 0.9.5 和新版服务增加 `petpal_opencli_sites`、`petpal_op
 升级会变更Codex工具版本，已有Agent对话需按界面提示使用新配置或新建对话。聊天记录和已暂停队列保留。Ubuntu包完成归档、原生模块和依赖审计；实际Ubuntu桌面运行仍待验证。
 
 Qwen分段兼容同时在当前后端的中央执行和远程模型转发层生效。现有0.9.5客户端连接此后端时可收到标准消息流；已发布包的本机直连上游代码未因服务器更新而改变，本轮没有重打安装包。
+## 首次使用：没有 Chrome 或扩展
+
+OpenCLI 1.8.8 已内置，公开查询不需要浏览器。浏览器查询需要执行电脑上的 Chrome 和官方 Browser Bridge；Web / Android 只发送远程任务，不在手机安装桌面扩展。
+
+在 Agent「连接详情 → 准备浏览器」或「设置 → 电脑助手 → OpenCLI → Chrome 网页连接」生成任务草稿。草稿保留你选择的电脑、模型和权限，不自动发送或提高权限；已有未发送文字/附件时会保留原内容。安装准备和打开商店页需要当前账号的完整访问及本轮审批；只读检测不需要完整访问。
+
+固定工具 `petpal_opencli_setup`：
+
+- `status`：只检查平台与 Chrome 文件，不运行会自动启动 daemon 的 `opencli doctor`。
+- `install-browser`：从 Google 官方准备并验证安装器；返回 `prepared`、本机路径及用户下一步。它不是安装完成；用户在系统界面完成协议、安装或提权。
+- `open-extension`：在执行电脑打开固定 [官方扩展商店](https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk)。扩展权限由用户确认；不强制安装、不改默认浏览器、不自动连接账号档案。
+
+安装后再次检测，并在这台电脑的 OpenCLI 设置「检查连接」，明确选择在线档案。网页能打开、Chrome 已安装与 Bridge 可查询是三个不同结果。当前 Google 官方 Linux 下载提供 amd64 / arm64；Windows 本轮客户端支持 x64。旧客户端缺少 setup 工具时需更新客户端，不能用任意 shell/npx 替代。此次先上线网页/后端，冻结的 0.9.6 客户端没有重打。

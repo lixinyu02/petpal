@@ -36,6 +36,6 @@
 
 ## 追加需求：未安装 Chrome 的执行电脑
 
-用户要求考虑 Chrome / 扩展缺失的首次使用场景。OpenCLI CLI 已打包，不能要求另装全局 npm。新增固定安装引导供所选执行电脑的 Agent 调用，先检测平台、Chrome 和 Bridge，再从 Google 官方准备 Chrome 安装器。Windows 验证 Authenticode Google 签名；Ubuntu x64 / ARM64 使用官方对应 .deb 并检查包名与架构。系统提权、协议与扩展访问授权由用户在相应界面完成；不静默改浏览器偏好或用户档案。安装器启动只报告等待用户，不声称就绪。公开 worker 查询仍不需要 Chrome。
+用户要求考虑 Chrome / 扩展缺失的首次使用场景。OpenCLI CLI 已打包，不能要求另装全局 npm。新增固定安装引导供所选执行电脑的 Agent 调用，先检测平台、Chrome 和 Bridge，再从 Google 官方准备 Chrome 安装器。Windows 验证 Authenticode Google 签名；Ubuntu x64 / ARM64 固定Google primary key验证InRelease、Packages哈希、DEB哈希及内部包名/架构/版本，缺工具或验证失败不降级。系统提权、协议与扩展访问授权由用户在相应界面完成；不静默改浏览器偏好或用户档案。工具不启动安装器，prepared只代表下载验证完成。公开 worker 查询仍不需要 Chrome。
 
 设置里的“交给 Agent 准备”只产生可检查的任务草稿，保留当前执行电脑、权限和模型；不得自动提高权限或自动发送。Web / Android 可以准备远程电脑，不能在手机上安装桌面扩展。最终就绪仍需要显式连接在线 Chrome 档案。

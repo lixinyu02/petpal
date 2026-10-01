@@ -3,7 +3,7 @@ import type { AgentHost, CodexStatus, User } from './api';
 import WorkspaceDisclosure from './WorkspaceDisclosure';
 import './workspace-controls.css';
 
-export function AgentOnboarding({ codex, user, host, hostLoading = false, localHostId = '', onConfigure }: { codex: CodexStatus; user?: User; host?: AgentHost; hostLoading?: boolean; localHostId?: string; onConfigure(): void }) {
+export function AgentOnboarding({ codex, user, host, hostLoading = false, localHostId = '', onConfigure, onPrepareBrowser, prepareBrowserDisabled = false }: { codex: CodexStatus; user?: User; host?: AgentHost; hostLoading?: boolean; localHostId?: string; onConfigure(): void; onPrepareBrowser?():void; prepareBrowserDisabled?:boolean }) {
   const owner = Boolean(user?.isOwner), local = Boolean(host && host.id === localHostId);
   let status: 'locked'|'checking'|'offline'|'configuration'|'unavailable'|'authentication'|'ready';
   if (!user?.canUseCodex) status = 'locked';
@@ -28,6 +28,7 @@ export function AgentOnboarding({ codex, user, host, hostLoading = false, localH
     <h3>{details.title}</h3><p>{details.description}</p>
     <p className="agent-onboarding-hint"><CircleHelp size={13}/>图片理解取决于所选模型；主机软件操作需要相应权限。</p>
     {owner && <button type="button" className="agent-onboarding-configure" onClick={onConfigure}><Settings2 size={14}/>模型设置</button>}
+    {onPrepareBrowser && <button type="button" className="agent-onboarding-configure" disabled={prepareBrowserDisabled} onClick={onPrepareBrowser}><Terminal size={14}/>准备浏览器</button>}
   </WorkspaceDisclosure>;
   return <section className={`agent-onboarding agent-onboarding-${status}`} aria-label="Agent 连接状态">
     <Icon size={20} className={status === 'checking' ? 'spin' : undefined} aria-hidden="true"/>

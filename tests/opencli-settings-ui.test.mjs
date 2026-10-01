@@ -35,13 +35,13 @@ function textContent(tree){
 }
 
 /** Execute the component's real state, effects and event handlers with a deterministic hook host. */
-function fixture({connected=true,user={isOwner:true},native=false}={}){
-  let epoch=1,active,props={connected,user},saved={revision:'saved-one',enabled:true};
+function fixture({connected=true,user={isOwner:true},native=false,onPrepareBrowser,prepareBrowserDisabled=false,setup}={}){
+  let epoch=1,active,props={connected,user,onPrepareBrowser,prepareBrowserDisabled},saved={revision:'saved-one',enabled:true};
   const defaultOrigins={dyyj:['https://bbs.dyyjmax.org','https://bbs.dyyjv.com'],switch520:['https://520switch.com'],gamer520:['https://gamer520.com'],dygang:['https://dygangs.me'],wlgo:['https://wlgooo.com'],'fire-exam':['https://xfhyjd.119.gov.cn']};
   const originsFor=site=>saved.siteOrigins?.[site]||defaultOrigins[site]||['https://example.invalid'];
   const browserSites=['bing','baidu-search','baidu-pan','tieba','bilibili','quark','xunlei-pan'];
   const calls=[],events=new EventTarget(),owner={index:0,hooks:[],effects:[],tree:null};
-  const status=()=>({config:saved,queryReady:true,available:true,ready:false,profiles:[],selectedProfileId:null,daemon:{state:'stopped'},extension:{connected:false},version:'1.8.8'});
+  const status=()=>({config:saved,queryReady:true,available:true,ready:false,profiles:[],selectedProfileId:null,daemon:{state:'stopped'},extension:{connected:false},version:'1.8.8',...(setup?{setup}:{})});
   const catalog=()=>({version:'1.8.8',summary:{adapterNamespaces:179,totalCommands:1366,readCommands:1009,writeCommands:357,browserCommands:1042,querySites:24,queryCommands:40,publicQueryCommands:27,browserQueryCommands:13,configuredSites:6},
     sites:[...platform.openCliConfiguredSites.map(({site,label})=>({site,label,domains:originsFor(site).map(origin=>new URL(origin).hostname),commands:2,queryCommands:2,browserCommands:1,enabledCommands:['search','read'],needsBrowserBridge:true,local:false,id:site,mode:'configured',websiteStatus:'ready'})),...browserSites.map(site=>({site,domains:['example.invalid'],commands:1,queryCommands:1,browserCommands:1,enabledCommands:['search'],needsBrowserBridge:true,local:false,id:site,mode:'browser'}))],
     notebookSites:[...platform.openCliConfiguredSites.map(({site,label})=>({site,label,origins:originsFor(site),status:'ready',commands:['search','read']})),...browserSites.map(site=>({site,label:site,origins:['https://example.invalid'],status:'ready',commands:['search']}))]});
@@ -182,4 +182,62 @@ test('an old-session save result cannot publish URLs or trigger more reads after
   await saving;await flush();f.owner.render();
   assert.equal(f.calls.length,reads);assert.equal(f.find('input',props=>props.type==='url'),undefined);
   assert.equal(f.text().includes('late-private.example'),false);f.owner.unmount();
+});
+
+test('browser guidance names the managed host and does not treat a legacy status as Chrome installation proof',async()=>{
+  for(const options of [{},{native:true,user:{isOwner:true,canUseCodex:true}}]){
+    const f=fixture(options);await f.ready();
+    assert.match(f.text(),/Chrome 尚未检测/);assert.equal(f.text().includes('已检测到 Chrome'),false);
+    assert.match(f.text(),options.native?/下方检测和连接管理这台电脑/:/下方检测和连接管理服务主机/);
+    assert.match(f.text(),/聊天任务使用你在聊天中选择的执行电脑/);
+    assert.match(f.text(),/网页或 Android 没有 Chrome，也可通过远程电脑/);
+    assert.equal(f.find('ol',props=>props.className==='opencli-browser-steps').props.children.length,3);
+    assert.equal(f.find('a',props=>props.href==='https://www.google.com/chrome/').props.target,'_blank');
+    assert.equal(f.find('a',props=>props.href.includes('chromewebstore.google.com')).props.rel,'noreferrer');
+    assert.match(f.text(),/由你确认安装并授权连接/);
+    f.owner.unmount();
+  }
+});
+
+test('setup detection is shown only with management permission and is hidden immediately on logout',async()=>{
+  const setup={platform:'win32',arch:'x64',supported:true,chromeInstalled:true,installerSupported:true,extensionUrl:'https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk',downloadPage:'https://www.google.com/chrome/',message:'fixture-host-setup-message'};
+  const f=fixture({setup});await f.ready();
+  assert.match(f.text(),/服务主机：已检测到 Chrome · win32\/x64/);assert.match(f.text(),/fixture-host-setup-message/);
+  f.setProps({connected:false,user:undefined});
+  assert.equal(f.text().includes('已检测到 Chrome'),false);assert.equal(f.text().includes('fixture-host-setup-message'),false);
+  assert.equal(f.find('select',props=>props['aria-label']==='OpenCLI 浏览器档案').props.value,'');f.owner.unmount();
+});
+
+test('prepare browser invokes only the draft callback and leaves transport configuration and permissions unchanged',async()=>{
+  const received=[],user={isOwner:true,canUseCodex:true,agentAccess:'workspace'};
+  const f=fixture({user,onPrepareBrowser:(...args)=>received.push(args)});await f.ready();
+  const calls=plain(f.calls),permissions=plain(user),button=f.find('button',(_props,node)=>textContent(node)==='让 Agent 准备浏览器');
+  assert.equal(button.props.disabled,false);button.props.onClick();
+  assert.deepEqual(received,[[]]);assert.deepEqual(plain(f.calls),calls);assert.deepEqual(user,permissions);
+  assert.match(f.text(),/生成任务草稿，在聊天所选执行电脑上准备；由你发送，沿用当前权限/);
+  f.owner.unmount();
+});
+
+test('remote preparation can use a member callback without reading service-owner configuration',async()=>{
+  let prepared=0;
+  const f=fixture({user:{canUseCodex:true,agentAccess:'full',isOwner:false},onPrepareBrowser:()=>prepared++});await f.ready();
+  assert.deepEqual(f.calls,[]);const button=f.find('button',(_props,node)=>textContent(node)==='让 Agent 准备浏览器');
+  assert.equal(button.props.disabled,false);button.props.onClick();assert.equal(prepared,1);assert.deepEqual(f.calls,[]);f.owner.unmount();
+});
+
+test('prepare is hidden without a callback and guarded for login, disabled state, busy work and stale sessions',async()=>{
+  const absent=fixture();await absent.ready();assert.equal(absent.find('button',(_props,node)=>textContent(node)==='让 Agent 准备浏览器'),undefined);absent.owner.unmount();
+  for(const options of [{connected:false},{user:null},{prepareBrowserDisabled:true}]){
+    let prepared=0;const f=fixture({...options,onPrepareBrowser:()=>prepared++});await f.ready();
+    const button=f.find('button',(_props,node)=>textContent(node)==='让 Agent 准备浏览器');
+    assert.equal(button.props.disabled,true);button.props.onClick();assert.equal(prepared,0);f.owner.unmount();
+  }
+  let prepared=0;const f=fixture({onPrepareBrowser:()=>prepared++});await f.ready();
+  const done=deferred(),previousStatus=f.transport.status;
+  f.transport.status=async()=>{await done.promise;return previousStatus();};
+  f.find('button',(_props,node)=>textContent(node)==='刷新状态').props.onClick();f.owner.render();
+  const busy=f.find('button',(_props,node)=>textContent(node)==='让 Agent 准备浏览器');assert.equal(busy.props.disabled,true);busy.props.onClick();assert.equal(prepared,0);
+  done.resolve();await flush();f.owner.render();
+  const enabled=f.find('button',(_props,node)=>textContent(node)==='让 Agent 准备浏览器');assert.equal(enabled.props.disabled,false);
+  f.changeSession();enabled.props.onClick();assert.equal(prepared,0);f.owner.unmount();
 });

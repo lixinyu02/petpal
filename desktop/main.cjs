@@ -111,7 +111,7 @@ function queuePortableUpdate(prepared) {
 
 function secureWindow(win) {
   win.webContents.setWindowOpenHandler(({ url }) => {
-    const helpLinks = new Set(['https://github.com/jackwener/opencli', 'https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk']);
+    const helpLinks = new Set(['https://www.google.com/chrome/', 'https://github.com/jackwener/opencli', 'https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk']);
     if (win === mainWindow && (helpLinks.has(url) || isPetPalReleaseUrl(url))) void shell.openExternal(url).catch(() => {});
     return { action: 'deny' };
   });

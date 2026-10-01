@@ -6,6 +6,8 @@ import './desktop-assistant.css';
 import './opencli-settings.css';
 
 const officialSites=[{name:'QQ 音乐官网',url:'https://y.qq.com/'},{name:'网易云音乐官网',url:'https://music.163.com/'}];
+const chromeDownloadUrl='https://www.google.com/chrome/';
+const bridgeExtensionUrl='https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk';
 const bridgeStates={stopped:'尚未启动',owned:'由小伴管理',shared:'已共享连接',external:'发现其他浏览器桥',unavailable:'当前不可用'};
 type Command=NonNullable<OpenCliSites['commands']>[number];
 const modeLabels:Record<OpenCliMode,string>={public:'公开查询',browser:'浏览器查询',configured:'站点页面查询',inventory:'仅打包'};
@@ -17,7 +19,7 @@ function parameters(command:Command){
   return entries.length?entries.map(([name,value])=>`${name}${schema?.required?.includes(name)?'（必填）':'（可选）'}${value.description?`：${value.description}`:''}`).join('；'):'无需参数';
 }
 
-export default function OpenCliSettings({connected,user}:{connected:boolean;user?:User}) {
+export default function OpenCliSettings({connected,user,onPrepareBrowser,prepareBrowserDisabled=false}:{connected:boolean;user?:User;onPrepareBrowser?:()=>void;prepareBrowserDisabled?:boolean}) {
   const transport=useRef(openCliTransport()).current;
   const [config,setConfig]=useState<OpenCliConfig|null>(null),[enabled,setEnabled]=useState(true);
   const [originDraft,setOriginDraft]=useState<OpenCliOriginDraft>(()=>openCliOriginDraft());
@@ -32,6 +34,8 @@ export default function OpenCliSettings({connected,user}:{connected:boolean;user
   const current=(controller?:AbortController)=>alive.current&&allowedNow.current&&getSessionEpoch()===epoch&&!controller?.signal.aborted;
   const dirty=openCliConfigChanged(config,enabled,originDraft);
   const running=!!busy;
+  const canPrepareBrowser=connected&&!!user&&!prepareBrowserDisabled&&!running;
+  const prepareAllowedNow=useRef(canPrepareBrowser);prepareAllowedNow.current=canPrepareBrowser;
 
   function applyStatus(next:OpenCliStatus,replaceConfig=false){
     setStatus(next);
@@ -122,6 +126,10 @@ export default function OpenCliSettings({connected,user}:{connected:boolean;user
     }catch(e){if(current(controller)&&!isSessionChanged(e))setError((e as Error).message);}
     finally{requests.current.delete(controller);if(operation.current===token){operation.current=null;if(current())setBusy('');}}
   }
+  function prepareBrowser(){
+    if(!alive.current||!prepareAllowedNow.current||operation.current||getSessionEpoch()!==epoch||!onPrepareBrowser)return;
+    onPrepareBrowser();
+  }
 
   const summary=catalog?.summary||status?.catalog;
   const needle=search.trim().toLowerCase();
@@ -132,6 +140,10 @@ export default function OpenCliSettings({connected,user}:{connected:boolean;user
   const browserReady=!!status?.ready&&selectedOnline&&status.selectedProfileId===profileId;
   const browserAttached=status?.daemon.state==='owned'||status?.daemon.state==='shared';
   const actionDisabled=!allowed||running||dirty||!config?.enabled;
+  const managedHost=transport.native?'这台电脑':'服务主机';
+  const managedStatus=allowed?status:null;
+  const chromeState=managedStatus?.setup?.chromeInstalled===true?'已检测到 Chrome':managedStatus?.setup?.chromeInstalled===false?'未检测到 Chrome':'Chrome 尚未检测';
+  const bridgeState=managedStatus?`${bridgeStates[managedStatus.daemon.state]} · ${managedStatus.extension.connected?'扩展已连接':'扩展未连接'}`:'Browser Bridge 尚未检测';
   return <section className="assistant-section opencli-settings" aria-labelledby="opencli-title">
     <div className="assistant-section-heading"><div><h3 id="opencli-title"><Globe2 size={19}/>OpenCLI 网站工具</h3><p>{transport.native?'管理这台电脑':'管理服务主机'}的内置网站查询与 Chrome 网页工具。</p></div><button type="button" className="secondary-button" disabled={!allowed||running} onClick={()=>void read()}><RefreshCw size={14}/>刷新状态</button></div>
     {!allowed&&<p className="assistant-unavailable">{!connected?'登录后可以读取 OpenCLI 设置。':transport.native?'需要账号拥有完全访问这台电脑的 Agent 权限。':'服务主机的 OpenCLI 配置由主账号管理。网页和 Android 可通过所选执行电脑调用。'}</p>}
@@ -143,7 +155,7 @@ export default function OpenCliSettings({connected,user}:{connected:boolean;user
     {allowed&&dirty&&<div className="opencli-unsaved"><span>开关或网站网址尚未保存。</span><button type="button" className="assistant-tool-settings" disabled={running} onClick={()=>void read(true)}>恢复已保存设置</button></div>}
     <div className="opencli-status-line" aria-live="polite"><span className={`opencli-state${status?.queryReady?' is-ready':''}`}>{!allowed?'未读取':!status?'等待状态':!status.config.enabled?'已关闭':status.queryReady?'网站查询已就绪':'运行时未就绪'}</span>{allowed&&status?.version&&<span>OpenCLI {status.version}</span>}{allowed&&summary&&<span>{summary.querySites} 个查询入口 · {summary.queryCommands} 项开放命令{summary.publicQueryCommands!==undefined&&summary.browserQueryCommands!==undefined?`（公开 ${summary.publicQueryCommands} / 浏览器 ${summary.browserQueryCommands}）`:''}</span>}</div>
     <p className="field-help">公开网站查询无需 Chrome 扩展，交给 Agent 调用即可；仍遵循任务的访问权限和确认设置。网页操作需安装 Browser Bridge 并明确选择 Chrome 档案。</p>
-    {status?.message&&<p className="assistant-unavailable">{status.message}</p>}
+    {allowed&&status?.message&&<p className="assistant-unavailable">{status.message}</p>}
     {busy&&<div className="opencli-progress" role="status"><span className="assistant-state"><Loader2 size={15} className="spin"/>{busy}…</span><button type="button" className="secondary-button" disabled={!allowed||busy==='正在取消'} onClick={()=>void cancel()}>取消请求</button></div>}
 
     <details className="opencli-notebook">
@@ -183,12 +195,20 @@ export default function OpenCliSettings({connected,user}:{connected:boolean;user
     </details>
 
     <details className="opencli-browser">
-      <summary><span><strong>Chrome 网页连接</strong><small>{status?`${bridgeStates[status.daemon.state]} · ${status.extension.connected?'扩展已连接':'扩展未连接'}`:'需要官方 Browser Bridge 扩展'}</small></span><ChevronDown size={16}/></summary>
+      <summary><span><strong>Chrome 网页连接</strong><small>{managedHost} · {chromeState} · {managedStatus?.extension.connected?'Bridge 已连接':'需要 Browser Bridge'}</small></span><ChevronDown size={16}/></summary>
       <div className="opencli-browser-body">
-        <p className="field-help">读取状态不会自动启动浏览器桥。安装扩展并打开相应 Chrome 档案，检查连接后选择在线档案。</p>
-        <label>Chrome 档案<select aria-label="OpenCLI 浏览器档案" value={profileId} disabled={actionDisabled} onChange={event=>setProfileId(event.target.value)}><option value="">请选择在线档案</option>{status?.profiles.map(profile=><option key={profile.id} value={profile.id} disabled={!profile.connected}>{profile.label}{profile.connected?'':'（离线）'}</option>)}</select></label>
-        <div className="assistant-actions"><button type="button" className="secondary-button" disabled={actionDisabled||!status?.available||(status.daemon.state==='external'&&!status.daemon.compatible)||(!!profileId&&!selectedOnline)} onClick={()=>void browserAction({action:'connect',...(profileId?{profileId}:{})},'检查浏览器连接')}><Globe2 size={14}/>{profileId?'连接所选档案':'检查连接'}</button><button type="button" className="secondary-button" disabled={actionDisabled||!browserAttached} onClick={()=>void browserAction({action:'close'},'断开浏览器')}><Unplug size={14}/>断开</button>{officialSites.map(site=><button type="button" className="secondary-button" key={site.url} disabled={actionDisabled||!browserReady} onClick={()=>void browserAction({action:'open',profileId,url:site.url},`打开${site.name}`)}><ArrowUpRight size={14}/>{site.name}</button>)}</div>
-        <div className="assistant-links"><a href="https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk" target="_blank" rel="noreferrer">安装 Browser Bridge 扩展 ↗</a><a href="https://github.com/jackwener/opencli" target="_blank" rel="noreferrer">OpenCLI 使用说明 ↗</a></div>
+        <p className="field-help">下方检测和连接管理{managedHost}；聊天任务使用你在聊天中选择的执行电脑。网页或 Android 没有 Chrome，也可通过远程电脑查询网站。</p>
+        {onPrepareBrowser&&<div className="opencli-prepare-browser"><button type="button" className="secondary-button" disabled={!canPrepareBrowser} onClick={prepareBrowser}><Globe2 size={14}/>让 Agent 准备浏览器</button><p>生成任务草稿，在聊天所选执行电脑上准备；由你发送，沿用当前权限。</p></div>}
+        <ol className="opencli-browser-steps">
+          <li><div><strong>安装 Chrome</strong><span className="opencli-browser-detection">{managedHost}：{chromeState}{managedStatus?.setup?` · ${managedStatus.setup.platform}/${managedStatus.setup.arch}`:''}</span><p>在{managedHost}安装 Chrome 并打开要使用的档案。</p><a href={chromeDownloadUrl} target="_blank" rel="noreferrer">Chrome 官方下载 ↗</a>{managedStatus?.setup?.message&&<p>{managedStatus.setup.message}</p>}</div></li>
+          <li><div><strong>安装 Browser Bridge 扩展</strong><p>在该 Chrome 档案中打开扩展商店，由你确认安装并授权连接。</p><a href={bridgeExtensionUrl} target="_blank" rel="noreferrer">安装 Browser Bridge 扩展 ↗</a></div></li>
+          <li><div><strong>检查连接并选择档案</strong><span className="opencli-browser-detection">{managedHost}：{bridgeState}</span><p>读取状态不会自动启动浏览器桥。先检查连接，再明确选择在线 Chrome 档案并连接。</p>
+            <label>Chrome 档案<select aria-label="OpenCLI 浏览器档案" value={allowed?profileId:''} disabled={actionDisabled} onChange={event=>setProfileId(event.target.value)}><option value="">请选择在线档案</option>{managedStatus?.profiles.map(profile=><option key={profile.id} value={profile.id} disabled={!profile.connected}>{profile.label}{profile.connected?'':'（离线）'}</option>)}</select></label>
+            <div className="assistant-actions"><button type="button" className="secondary-button" disabled={actionDisabled||!managedStatus?.available||(managedStatus.daemon.state==='external'&&!managedStatus.daemon.compatible)||(!!profileId&&!selectedOnline)} onClick={()=>void browserAction({action:'connect',...(profileId?{profileId}:{})},'检查浏览器连接')}><Globe2 size={14}/>{profileId?'连接所选档案':'检查连接'}</button><button type="button" className="secondary-button" disabled={actionDisabled||!browserAttached} onClick={()=>void browserAction({action:'close'},'断开浏览器')}><Unplug size={14}/>断开</button></div>
+          </div></li>
+        </ol>
+        <div className="assistant-actions opencli-browser-sites">{officialSites.map(site=><button type="button" className="secondary-button" key={site.url} disabled={actionDisabled||!browserReady} onClick={()=>void browserAction({action:'open',profileId,url:site.url},`打开${site.name}`)}><ArrowUpRight size={14}/>{site.name}</button>)}</div>
+        <div className="assistant-links"><a href="https://github.com/jackwener/opencli" target="_blank" rel="noreferrer">OpenCLI 使用说明 ↗</a></div>
         <p className="field-help">当前网页动作支持两个音乐官网。兼容的浏览器桥可共享；断开只关闭小伴自己的页面与自有进程。</p>
       </div>
     </details>

@@ -22,4 +22,15 @@
 
 自有 daemon 的只读连接检查为 extension.connected=false、profiles=[]。自有 daemon 随后关闭。没有在线 OpenCLI Browser Bridge 档案，因此未完成 Agent → 所选电脑 → Browser Bridge → 新站点的真实查询。Chrome 页面能访问与 Bridge 查询成功分别记录。
 
-安装与环境引导已追加为 issue-3；不擅自给扩展授权、选择 Chrome 档案或绕过站点登录。生产部署尚未进行；本记录在最终验收后补齐。
+安装与环境引导已完成 issue-3；不擅自给扩展授权、选择 Chrome 档案或绕过站点登录。生产部署尚未进行；本记录在最终验收后补齐。
+
+## Chrome / Bridge 准备验收
+
+- 相关回归 344/344 通过；真实 Google 下载发现 gzip 透明解码与 Content-Length 不一致，已固定 identity 编码并拒绝不一致响应。此后安装/registry/manager/native/UI/草稿相关最终 108/108 通过，其中安装模块 34 项。
+- 网页 TypeScript / Vite 构建通过。Chrome 实际点击准备按钮后进入未发送 Agent 草稿，当前电脑仍为中央服务器，权限仍为只读、需要时询问；没有提交任务或扩大权限。
+- 新引导的窄屏 Agent 页面实测 CSS 412×960、scrollWidth=412、相关控件溢出为0；截图保存在忽略的私有测试目录，viewport已恢复。
+- Windows 真实检测确认已有 Chrome，helper PowerShell AST 通过。
+- 为测试下载分支，在独立私有目录真实准备官方 Google MSI，并通过 Valid + Google LLC Authenticode 和私有ACL检查。168,673,280 bytes；SHA256 `e744ffd35f5af8d453443a1a20d96a749f396c39d2e6238868f375ea519d8dc9`。结果为 `prepared / installed=false / userActionRequired=true`；未启动安装器。
+- 真实 Google key → InRelease → amd64/arm64 Packages 签名/哈希链由 Windows Git GnuPG 验证通过；包版本154.0.8037.92-1。没有下载完整DEB，也没有在Ubuntu目标机执行安装。Ubuntu ARM64已有官方包，不能沿用旧版不支持判断。
+- 新工具只允许 status/install-browser/open-extension，下载与商店打开继承所选电脑的账号 scope、完整访问与审批；不提供自定义网址、命令、profile或插件加载。
+- Web/Android任务发送给所选电脑。本轮未重打冻结0.9.6客户端，旧客户端本机缺新工具时应更新客户端，不能认为服务器部署已替换其运行时。
