@@ -20,7 +20,9 @@
 
 ## Delivery and Risks
 
-更新版本，默认沿用最近几版的 preview 发布，不改变当前正式更新源、签名 sequence 或 stable latest。用户明确选择正式发布时再将新包接入两条签名更新源。保留旧 release 和下载资产，先审核新包与清单，再发布新版本。不扩展账号权限，不重试历史任务，不涉及板项目或板用 WSL。源归档/包审计不代替 Ubuntu/Android 真机验收；Windows unsigned 包与便携启动耗时须如实说明。
+本轮已按正式稳定版 0.9.6 发布，冻结包及发布标签来源固定为 `eaae5322566c915b06070e7248f1770470cdd197`，后续文档提交不改变包的来源。GitHub Releases 与服务器分别沿用既有发布身份，五目标清单均使用 stable / sequence 8；旧公钥、历史防回滚记录、Release 和下载资产保留。服务器发布及更新器完整下载、GitHub 四个大包与六项直接资产完整字节读回、签名清单、正式 latest/tag 和 Chrome 登录下载验收均通过。内部 preview 转为 stable 时只替换本轮草稿元数据，保留原 preparation 和清单快照，不改安装包字节。ZIP 首次公网读取超时发生在 POST 前，恢复只延长有界传输期限并增加进度日志，保留原失败证据。
+
+不扩展账号权限，不重试历史任务，不涉及板项目或板用 WSL。Ubuntu/Android 本轮没有真机运行验收；Android code16 沿用开发签名，Windows 两包实际为 unsigned。Windows 的 ZIP 与便携 EXE 均实际启动，并各完成两次独立顺序启动；便携 EXE 生命周期包括展开和退出清理，不把该耗时称为纯 UI 启动时间。
 
 ## Verification
 

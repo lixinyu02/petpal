@@ -1,8 +1,8 @@
 # 软件内更新与发布
 
-更新协议支持 Windows x64、Ubuntu x64 / ARM64、Android 和 Web 五个目标，可由 GitHub Releases 或 HTTPS 服务器提供签名清单。当前公开 Windows 包为 [v0.9.1](https://github.com/lixinyu02/petpal/releases/tag/v0.9.1)，其他平台安装包沿用 [v0.9.0](https://github.com/lixinyu02/petpal/releases/tag/v0.9.0)；下载与平台验收范围见 [README](../README.md) 和 [执行电脑验收](acceptance-execution-hosts.md)。
+0.9.6 已重新制作 Windows x64、Ubuntu x64 / ARM64、Android 和 Web 五个更新目标，客户端包含 GitHub Releases 与可信 HTTPS 服务器的来源选择功能。[GitHub 正式版](https://github.com/lixinyu02/petpal/releases/tag/v0.9.6) 已公开并成为 latest，服务器正式更新源也已上线。安装方式和分平台边界见 [README](../README.md) 与 [0.9.6 验收](acceptance-0.9.6.md)。
 
-本轮先上线网页与后端，原生客户端源码已准备服务器源适配，但**没有重新制作 Windows、Ubuntu 或 Android 安装包**。服务器目录中的原生包是上述已发布文件的镜像，不包含本轮的来源选择功能；已有客户端须在后续新版发布后更新，不能仅通过切换后端配置获得新的原生下载能力。
+两份 0.9.6 清单均使用 stable 通道、sequence 8，各自沿用原发布公钥；服务器与 GitHub 是不同签名身份，切源时须使用对应公钥。两源五目标均已验证 0.9.5 → 0.9.6 更新可用，当前 Web 0.9.6 返回已最新。服务器源还通过隔离 DesktopUpdateManager 的 Windows 完整下载、签名和 SHA-256 验证，未调用安装或启动下载文件；GitHub 十项资产完整字节读回和正式 latest/tag 检查通过。Android 是 versionCode 16 的原开发签名 APK；Windows 未做 Authenticode 签名。更新清单的 Ed25519 签名不能代替这些平台签名。
 
 ## 历史版本与信任配置
 

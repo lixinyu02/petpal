@@ -1,28 +1,30 @@
 # 小伴 PetPal
 
-可以聊天、陪伴和使用真实 Codex CLI 的个人伙伴。Windows／Ubuntu **0.9.5 预发布版**包含 Computer Use 与音乐 MCP，并默认启用本机支持的控制入口。0.9.5 新增默认开启的内置 OpenCLI 网站查询与网站清单，开放12个公开入口、23条只读命令，支持所选执行电脑上的真实Agent调用，详见 [OpenCLI网站查询](docs/opencli-sites.md)。Android **0.9.3 试用版**提供手机品牌识别与省电、自启动、通知设置快捷入口；0.9.2 已提供后台 Agent 任务提醒并通过独立 API 36 模拟器通知链路验收。Web、Android、Windows 与 Ubuntu 共用 React 界面；Node 个人服务负责账号、模型连接、图片、历史和 Agent 任务。支持 Chat Completions / Responses、图片聊天、可授权的 Agent 工作台、CosyVoice 朗读，以及二次元伙伴和 3D 小猫。
+可以聊天、陪伴和使用真实 Codex CLI 的个人伙伴。**0.9.6** 已重打 Windows、Ubuntu 和 Android 客户端，包含 Agent 项目目录、Qwen 图片输入、Chat 派发 Agent、默认启用的电脑／音乐控制和内置 OpenCLI。Web、Android、Windows 与 Ubuntu 共用 React 界面；Node 个人服务负责账号、模型连接、图片、历史和 Agent 任务。支持 Chat Completions / Responses、CosyVoice 朗读、二次元伙伴和可选的 3D 小猫。
+
+**0.9.6 已正式公开发布**：GitHub 和服务器下载、两条签名更新源及 Chrome 登录下载页验收均通过。两份更新清单均为 stable / sequence 8，分别沿用 GitHub 和服务器各自的既有发布公钥，不能混用。详见 [软件内更新](docs/updates.md) 和 [0.9.6 验收](docs/acceptance-0.9.6.md)。
 
 | 平台 | Chat 与图片 | Agent 执行位置 | 交付形式 |
 | --- | --- | --- | --- |
-| Web | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | Web 构建 / 自部署源码 |
-| Android | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | 0.9.3 开发签名试用 APK，versionCode 13 |
-| Windows | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | 0.9.5 预发布 x64 ZIP / 便携 EXE |
-| Ubuntu | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | 0.9.5 预发布 x64 / arm64 `.tar.gz` |
+| Web | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | 0.9.6 Web 构建 / 自部署源码 |
+| Android | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | 0.9.6 开发签名 APK，versionCode 16 |
+| Windows | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | 0.9.6 x64 ZIP / 便携 EXE |
+| Ubuntu | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | 0.9.6 x64 / arm64 `.tar.gz` |
 
-桌面包包含 Electron、Node 运行时、Codex **0.143.0** 和 OpenCLI **1.8.8**，无需另装 Node/npm。手机和网页上的 Agent 在所选电脑执行，不会因此获得手机本地其他 App 的控制能力。**旧 v0.7.0 桌面包没有同账号电脑注册功能，需要升级桌面客户端；更新网页不能替换旧客户端里的执行器。** 使用方法见 [执行电脑](docs/execution-hosts.md)，历史发布的验收范围见 [0.7.0 验收](docs/acceptance-0.7.md)。
+桌面包包含 Electron、Node 运行时、Codex **0.143.0** 和 OpenCLI **1.8.8**，无需另装 Node/npm。Agent 与 Chat + Agent 可选择执行电脑并填写该电脑上的现有项目目录，详见 [项目目录](docs/agent-project-directory.md) 和 [执行电脑](docs/execution-hosts.md)。手机和网页上的 Agent 在所选电脑执行，不会因此获得手机本地其他 App 的控制能力；网页更新也不会替换旧桌面客户端中的执行器。OpenCLI 网站查询开放 12 个公开入口、23 条只读命令，详见 [网站查询](docs/opencli-sites.md)。
 
 ## 下载与开始使用
 
-源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。[Windows／Ubuntu 0.9.5 预发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.4)、[Android 0.9.3 预发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.3)。历史 [Windows 0.9.1](https://github.com/lixinyu02/petpal/releases/tag/v0.9.1) 与 [0.9.0](https://github.com/lixinyu02/petpal/releases/tag/v0.9.0) 包继续保留：
+源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。[0.9.6 正式发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.6) 已公开，可使用以下 GitHub 或服务器下载。旧 Release 和安装包继续保留。
 
-- [Windows 0.9.4 x64 ZIP（推荐）](https://github.com/lixinyu02/petpal/releases/download/v0.9.4/PetPal-0.9.4-Windows-x64.zip)：Windows 10 / 11 x64，完整解压到本地新文件夹，再双击 `PetPal.exe`。不要在 ZIP 内运行或单独移动 EXE，无需安装 Node.js / Git。
-- [Windows 0.9.4 x64 便携 EXE](https://github.com/lixinyu02/petpal/releases/download/v0.9.4/PetPal-0.9.4-Windows-x64.exe)：无需独立安装，每次先解压内置工具，看到启动提示后请等待，勿重复双击。Windows 包暂未商业签名。
-- [Ubuntu 0.9.4 x64](https://github.com/lixinyu02/petpal/releases/download/v0.9.4/PetPal-0.9.4-Ubuntu-x64.tar.gz) / [Ubuntu 0.9.4 arm64](https://github.com/lixinyu02/petpal/releases/download/v0.9.4/PetPal-0.9.4-Ubuntu-arm64.tar.gz)：解压后运行 `./start-petpal.sh`；两架构完整归档与 ELF 审计通过，目标机 GUI 尚未验收。
-- [Android 0.9.3 试用 APK](https://github.com/lixinyu02/petpal/releases/download/v0.9.3/PetPal-0.9.3-Android-debug.apk) / [服务器下载](https://magicdatou.top:44318/downloads/PetPal-0.9.3-Android-debug.apk)：versionCode 13，沿用此前开发签名；新增手机后台设置入口，API 36 模拟器标准设置跳转已验收，厂商实体手机仍需分别验证，不是应用商店正式签名包。SHA-256：`503db5c9c6d2ce454db99f58081ab48911e41052e0cdccf4eb016a03ea9733c6`。
-- [Web 静态包](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Web.zip)：需配合同版本 Node 后端。
-- [源码归档](https://github.com/lixinyu02/petpal/archive/refs/tags/v0.9.4.zip)：GitHub 按发布标签提供，包含前后端和原生壳源码，可按锁文件重建。Windows 使用 `npm run desktop:win`，构建隔离前端并生成 EXE / ZIP，不覆盖运行中的 `dist`。
+- Windows 0.9.6 x64 ZIP（推荐）：[服务器下载](https://magicdatou.top:44318/downloads/PetPal-0.9.6-Windows-x64.zip) / [GitHub](https://github.com/lixinyu02/petpal/releases/download/v0.9.6/PetPal-0.9.6-Windows-x64.zip)。完整解压到本地新文件夹，再双击 `PetPal.exe`；不要在 ZIP 内运行或单独移动 EXE，无需安装 Node.js / Git。
+- Windows 0.9.6 x64 便携 EXE：[服务器下载](https://magicdatou.top:44318/downloads/PetPal-0.9.6-Windows-x64.exe) / [GitHub](https://github.com/lixinyu02/petpal/releases/download/v0.9.6/PetPal-0.9.6-Windows-x64.exe)。无需独立安装，每次先展开内置工具，请等待启动提示。两种 Windows 包均未做 Authenticode 签名。
+- Ubuntu 0.9.6 x64：[服务器](https://magicdatou.top:44318/downloads/PetPal-0.9.6-Ubuntu-x64.tar.gz) / [GitHub](https://github.com/lixinyu02/petpal/releases/download/v0.9.6/PetPal-0.9.6-Ubuntu-x64.tar.gz)；arm64：[服务器](https://magicdatou.top:44318/downloads/PetPal-0.9.6-Ubuntu-arm64.tar.gz) / [GitHub](https://github.com/lixinyu02/petpal/releases/download/v0.9.6/PetPal-0.9.6-Ubuntu-arm64.tar.gz)。解压后运行 `./start-petpal.sh`；完整归档与 ELF 审核通过，本轮没有目标机 CLI / GUI 运行验收。
+- Android 0.9.6 APK：[服务器下载](https://magicdatou.top:44318/downloads/PetPal-0.9.6-Android-debug.apk) / [GitHub](https://github.com/lixinyu02/petpal/releases/download/v0.9.6/PetPal-0.9.6-Android-debug.apk)。versionCode 16，包名及 0.9.3 开发证书保持，具备覆盖同签名旧包的条件；这仍是开发签名 APK，非应用商店签名。本轮没有手机或模拟器安装验收。
+- Web 0.9.6 静态包：[服务器下载](https://magicdatou.top:44318/downloads/PetPal-0.9.6-Web.zip) / [GitHub](https://github.com/lixinyu02/petpal/releases/download/v0.9.6/PetPal-0.9.6-Web.zip)。需配合同版本 Node 后端。
+- [0.9.6 源码归档](https://github.com/lixinyu02/petpal/archive/refs/tags/v0.9.6.zip)：发布标签固定指向 `eaae5322566c915b06070e7248f1770470cdd197`，包含前后端和原生壳，可按锁文件重建。Windows 使用 `npm run desktop:win`，构建隔离前端并生成 EXE / ZIP，不覆盖运行中的 `dist`。
 
-以 Release 实际文件、校验摘要及验收说明为准。登录后的「下载」页从本项目 GitHub Releases 读取真实发布文件，显示平台、架构、版本、稳定 / 预览渠道和开发签名标记；不存在的包不会显示下载按钮，网络失败可以重试。
+以 Release 的实际文件、校验摘要及 [验收说明](docs/acceptance-0.9.6.md) 为准。登录后的「下载」页读取本项目真实 GitHub Releases，显示平台、架构、版本和开发签名标记；不存在的包不会显示下载按钮，网络失败可重试。Chrome 已验证 Android、Windows ZIP/EXE、Ubuntu 两架构的 0.9.6 稳定版选择、真实 URL 和摘要，实际 CSS 412×960 下无横向溢出。
 
 旧 Android 0.9.0 APK 不包含后台任务提醒，需要升级至 0.9.2；网页升级不会给旧 APK 增加原生通知服务。后台通知需要配套新版后端，验收范围见 [Android 后台任务通知](docs/workflow/2026-10-01-petpal-android-notifications-issues.md)。
 
