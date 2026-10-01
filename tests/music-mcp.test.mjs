@@ -19,14 +19,14 @@ function fakeSpawn(calls, version = 'Python 3.11.9') {
     return child;
   };
 }
-async function harness(t, { mode = 'default', platform = 'win32', scope = 'local', dataDir, version, ...options } = {}) {
+async function harness(t, { mode = 'default', platform = 'win32', scope = 'local', dataDir, version, configured = true, ...options } = {}) {
   const directory = dataDir || await mkdtemp(path.join(os.tmpdir(), 'petpal-music-mcp-'));
   const calls = [], transports = [], transportOptions = []; const events = path.join(directory, `events-${scope}.jsonl`);
   const manager = new MusicMcpManager({ dataDir: directory, scope, platform, env: envSecrets, spawn: fakeSpawn(calls, version), closeTimeoutMs: 5500, processTimeoutMs: 500, connectTimeoutMs: 5000, callTimeoutMs: 1500,
     transportFactory: params => { transportOptions.push(params); const player = params.args.includes('mcp_qqmusic') ? 'qqmusic' : 'netease'; const transport = new StdioClientTransport({ ...params, command: process.execPath, args: [fixture, '--player', player, '--events', events, '--mode', mode] }); transports.push(transport); return transport; }, ...options });
   t.after(async () => { await manager.close(); if (!dataDir) await rm(directory, { recursive: true, force: true }); });
   const config = await manager.config();
-  await manager.configure({ revision: config.revision, pythonExecutable: process.execPath, neteaseEnabled: true, qqmusicEnabled: true });
+  if (configured) await manager.configure({ revision: config.revision, pythonExecutable: process.execPath, neteaseEnabled: true, qqmusicEnabled: true });
   return { manager, calls, transports, transportOptions, directory, events, readEvents: async () => { try { return (await readFile(events, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); } catch (error) { if (error.code === 'ENOENT') return []; throw error; } } };
 }
 const command = (player, tool, args = {}) => ({ player, tool, arguments: args });
@@ -40,17 +40,50 @@ test('fixed music MCP allowlist rejects global keys, shell fields, unsupported n
 
 test('config/status never spawn and defaults persist with strict CAS and file validation', async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'petpal-music-config-')); let spawned = 0;
-  const manager = new MusicMcpManager({ dataDir: directory, spawn: () => { spawned++; throw new Error('must not spawn'); } });
+  const manager = new MusicMcpManager({ dataDir: directory, platform: 'win32', spawn: () => { spawned++; throw new Error('must not spawn'); } });
   t.after(async () => { await manager.close(); await rm(directory, { recursive: true, force: true }); });
-  const initial = await manager.config(); assert.deepEqual({ ...initial, revision: 'revision' }, { revision: 'revision', pythonExecutable: '', cloudmusicExecutable: '', cdpPort: 9223, neteaseEnabled: false, qqmusicEnabled: false });
+  const initial = await manager.config(); assert.deepEqual({ ...initial, revision: 'revision' }, { revision: 'revision', pythonExecutable: '', cloudmusicExecutable: '', cdpPort: 9223, neteaseEnabled: true, qqmusicEnabled: true });
   assert.equal((await manager.status()).servers.every(server => !server.connected && server.tools.length === 0), true); assert.equal(spawned, 0);
   for (const body of [{ revision: initial.revision, command: 'cmd.exe' }, { revision: initial.revision, credential: 'secret' }, { qqmusicEnabled: true }, { revision: initial.revision, pythonExecutable: 'python' }, { revision: initial.revision, cloudmusicExecutable: fixture }, { revision: initial.revision, cdpPort: 80 }, { revision: initial.revision, qqmusicEnabled: 'true' }]) await assert.rejects(manager.configure(body), { status: 400 });
-  const saved = await manager.configure({ revision: initial.revision, qqmusicEnabled: true }); assert.notEqual(saved.revision, initial.revision);
+  const saved = await manager.configure({ revision: initial.revision, qqmusicEnabled: false }); assert.notEqual(saved.revision, initial.revision);
   await assert.rejects(manager.configure({ revision: initial.revision, neteaseEnabled: true }), { status: 409 });
   const [a, b] = await Promise.allSettled([manager.configure({ revision: saved.revision, cdpPort: 9224 }), manager.configure({ revision: saved.revision, cdpPort: 9225 })]);
   assert.equal([a, b].filter(value => value.status === 'fulfilled').length, 1); assert.equal([a, b].find(value => value.status === 'rejected').reason.status, 409);
   assert.equal(spawned, 0); assert.equal((await readFile(path.join(directory, 'music-mcp.json'), 'utf8')).includes('secret'), false);
   if (process.platform !== 'win32') assert.equal((await stat(path.join(directory, 'music-mcp.json'))).mode & 0o777, 0o600);
+});
+
+test('new desktop music settings use upstream support defaults without preparing dependencies or connecting', async t => {
+  for (const [platform, neteaseEnabled] of [['win32', true], ['linux', false], ['darwin', false]]) {
+    const { manager, calls, transportOptions, readEvents } = await harness(t, { platform, configured: false });
+    const config = await manager.config(), status = await manager.status();
+    assert.equal(config.neteaseEnabled, neteaseEnabled); assert.equal(config.qqmusicEnabled, true); assert.deepEqual(status.config, config);
+    assert.equal(status.servers.find(server => server.id === 'netease').platformSupported, neteaseEnabled); assert.equal(status.servers.find(server => server.id === 'qqmusic').platformSupported, true);
+    assert.equal(status.servers.every(server => !server.connected && server.tools.length === 0), true); assert.equal(calls.length, 0); assert.equal(transportOptions.length, 0); assert.deepEqual(await readEvents(), []);
+    for (const server of status.servers) await assert.rejects(stat(server.prepare.dependenciesDirectory), { code: 'ENOENT' });
+  }
+});
+
+test('persisted disabled music settings retain executable paths port and revision after restart', async t => {
+  const first = await harness(t, { configured: false }); const initial = await first.manager.config();
+  const executable = path.join(first.directory, 'cloudmusic.exe'); await writeFile(executable, 'test-only-file');
+  const saved = await first.manager.configure({ revision: initial.revision, pythonExecutable: process.execPath, cloudmusicExecutable: executable, cdpPort: 9234, neteaseEnabled: false, qqmusicEnabled: false });
+  const bytes = await readFile(first.manager.configFile, 'utf8'); await first.manager.close();
+  const restarted = await harness(t, { dataDir: first.directory, configured: false, platform: 'linux' });
+  assert.deepEqual(await restarted.manager.config(), saved); assert.equal(await readFile(restarted.manager.configFile, 'utf8'), bytes);
+  const status = await restarted.manager.status(); assert.equal(status.servers.every(server => !server.enabled && !server.connected), true);
+  await assert.rejects(restarted.manager.call(command('qqmusic', 'search', { keyword: 'Synthetic' })), { code: 'disabled' });
+  assert.equal(restarted.calls.length, 0); assert.equal(restarted.transportOptions.length, 0);
+});
+
+test('enabled music defaults lazily connect on the first tool call without implicit dependency preparation', async t => {
+  const { manager, calls, transportOptions, readEvents } = await harness(t, { configured: false });
+  const initial = await manager.config(); const configured = await manager.configure({ revision: initial.revision, pythonExecutable: process.execPath });
+  assert.equal(configured.neteaseEnabled, true); assert.equal(configured.qqmusicEnabled, true); assert.equal(calls.length, 0); assert.equal(transportOptions.length, 0);
+  assert.equal((await manager.call(command('netease', 'search_music', { query: 'Synthetic' }))).ok, true);
+  assert.equal((await manager.call(command('qqmusic', 'search', { keyword: 'Synthetic' }))).ok, true);
+  assert.equal(transportOptions.length, 2); assert.equal(calls.length, 2); assert.equal(calls.every(call => call.args.length === 1 && call.args[0] === '--version'), true);
+  assert.deepEqual(await manager.config(), configured); assert.equal((await readEvents()).filter(event => event.method === 'tools/call').length, 2);
 });
 
 test('real SDK stdio initializes, lists actual tools and calls them while excluding unsafe tools', async t => {

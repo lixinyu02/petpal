@@ -1,26 +1,26 @@
 # 小伴 PetPal
 
-可以聊天、陪伴和使用真实 Codex CLI 的个人伙伴。Android **0.9.3 试用版**新增手机品牌识别与省电、自启动、通知设置快捷入口；0.9.2 已提供后台 Agent 任务提醒并通过独立 API 36 模拟器通知链路验收。Windows 继续使用修复启动问题的 0.9.1，Ubuntu 沿用 0.9.0。Web、Android、Windows 与 Ubuntu 共用 React 界面；Node 个人服务负责账号、模型连接、图片、历史和 Agent 任务。支持 Chat Completions / Responses、图片聊天、可授权的 Agent 工作台、CosyVoice 朗读，以及二次元伙伴和 3D 小猫。
+可以聊天、陪伴和使用真实 Codex CLI 的个人伙伴。Windows／Ubuntu **0.9.4 预发布版**包含 Computer Use 与音乐 MCP，并默认启用本机支持的控制入口。Android **0.9.3 试用版**提供手机品牌识别与省电、自启动、通知设置快捷入口；0.9.2 已提供后台 Agent 任务提醒并通过独立 API 36 模拟器通知链路验收。Web、Android、Windows 与 Ubuntu 共用 React 界面；Node 个人服务负责账号、模型连接、图片、历史和 Agent 任务。支持 Chat Completions / Responses、图片聊天、可授权的 Agent 工作台、CosyVoice 朗读，以及二次元伙伴和 3D 小猫。
 
 | 平台 | Chat 与图片 | Agent 执行位置 | 交付形式 |
 | --- | --- | --- | --- |
 | Web | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | Web 构建 / 自部署源码 |
 | Android | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | 0.9.3 开发签名试用 APK，versionCode 13 |
-| Windows | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | 0.9.1 x64 ZIP / 便携 EXE |
-| Ubuntu | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | x64 / arm64 `.tar.gz` |
+| Windows | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | 0.9.4 预发布 x64 ZIP / 便携 EXE |
+| Ubuntu | 登录同一个人服务 | 此电脑 / 同账号其他电脑 / 中央服务器 | 0.9.4 预发布 x64 / arm64 `.tar.gz` |
 
 桌面包包含 Electron、Node 运行时、Codex **0.143.0** 和 OpenCLI **1.8.8**，无需另装 Node/npm。手机和网页上的 Agent 在所选电脑执行，不会因此获得手机本地其他 App 的控制能力。**旧 v0.7.0 桌面包没有同账号电脑注册功能，需要升级桌面客户端；更新网页不能替换旧客户端里的执行器。** 使用方法见 [执行电脑](docs/execution-hosts.md)，历史发布的验收范围见 [0.7.0 验收](docs/acceptance-0.7.md)。
 
 ## 下载与开始使用
 
-源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。[Android 0.9.3 预发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.3)、[Windows 0.9.1 发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.1)，Ubuntu 等旧包保留 [0.9.0 发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.0)：
+源码仓库：[lixinyu02/petpal](https://github.com/lixinyu02/petpal)。[Windows／Ubuntu 0.9.4 预发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.4)、[Android 0.9.3 预发布入口](https://github.com/lixinyu02/petpal/releases/tag/v0.9.3)。历史 [Windows 0.9.1](https://github.com/lixinyu02/petpal/releases/tag/v0.9.1) 与 [0.9.0](https://github.com/lixinyu02/petpal/releases/tag/v0.9.0) 包继续保留：
 
-- [Windows x64 ZIP（推荐）](https://github.com/lixinyu02/petpal/releases/download/v0.9.1/PetPal-0.9.1-Windows-x64.zip)：Windows 10 / 11 x64，完整解压到本地新文件夹，再双击 `PetPal.exe`。不要在 ZIP 内运行或单独移动 EXE，无需安装 Node.js / Git。
-- [Windows x64 便携 EXE](https://github.com/lixinyu02/petpal/releases/download/v0.9.1/PetPal-0.9.1-Windows-x64.exe)：无需独立安装，每次先解压内置工具，看到启动提示后请等待，勿重复双击。Windows 包暂未商业签名。
-- [Ubuntu x64](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Ubuntu-x64.tar.gz) / [Ubuntu arm64](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Ubuntu-arm64.tar.gz)：解压后运行 `./start-petpal.sh`；目标机 GUI 尚未验收。
+- [Windows 0.9.4 x64 ZIP（推荐）](https://github.com/lixinyu02/petpal/releases/download/v0.9.4/PetPal-0.9.4-Windows-x64.zip)：Windows 10 / 11 x64，完整解压到本地新文件夹，再双击 `PetPal.exe`。不要在 ZIP 内运行或单独移动 EXE，无需安装 Node.js / Git。
+- [Windows 0.9.4 x64 便携 EXE](https://github.com/lixinyu02/petpal/releases/download/v0.9.4/PetPal-0.9.4-Windows-x64.exe)：无需独立安装，每次先解压内置工具，看到启动提示后请等待，勿重复双击。Windows 包暂未商业签名。
+- [Ubuntu 0.9.4 x64](https://github.com/lixinyu02/petpal/releases/download/v0.9.4/PetPal-0.9.4-Ubuntu-x64.tar.gz) / [Ubuntu 0.9.4 arm64](https://github.com/lixinyu02/petpal/releases/download/v0.9.4/PetPal-0.9.4-Ubuntu-arm64.tar.gz)：解压后运行 `./start-petpal.sh`；两架构完整归档与 ELF 审计通过，目标机 GUI 尚未验收。
 - [Android 0.9.3 试用 APK](https://github.com/lixinyu02/petpal/releases/download/v0.9.3/PetPal-0.9.3-Android-debug.apk) / [服务器下载](https://magicdatou.top:44318/downloads/PetPal-0.9.3-Android-debug.apk)：versionCode 13，沿用此前开发签名；新增手机后台设置入口，API 36 模拟器标准设置跳转已验收，厂商实体手机仍需分别验证，不是应用商店正式签名包。SHA-256：`503db5c9c6d2ce454db99f58081ab48911e41052e0cdccf4eb016a03ea9733c6`。
 - [Web 静态包](https://github.com/lixinyu02/petpal/releases/download/v0.9.0/PetPal-0.9.0-Web.zip)：需配合同版本 Node 后端。
-- [源码归档](https://github.com/lixinyu02/petpal/archive/refs/tags/v0.9.3.zip)：GitHub 按发布标签提供，包含前后端和原生壳源码，可按锁文件重建。Windows 使用 `npm run desktop:win`，构建隔离前端并生成 EXE / ZIP，不覆盖运行中的 `dist`。
+- [源码归档](https://github.com/lixinyu02/petpal/archive/refs/tags/v0.9.4.zip)：GitHub 按发布标签提供，包含前后端和原生壳源码，可按锁文件重建。Windows 使用 `npm run desktop:win`，构建隔离前端并生成 EXE / ZIP，不覆盖运行中的 `dist`。
 
 以 Release 实际文件、校验摘要及验收说明为准。登录后的「下载」页从本项目 GitHub Releases 读取真实发布文件，显示平台、架构、版本、稳定 / 预览渠道和开发签名标记；不存在的包不会显示下载按钮，网络失败可以重试。
 
@@ -32,7 +32,7 @@ Android 0.9.3 在「后台任务提醒 → 让提醒更稳定」增加省电限�
 
 桌面主窗口关闭后继续留在托盘，也继续为当前登录账号接收任务；注销账号、切换个人服务或在托盘彻底退出会关闭这台电脑的执行连接并停止其任务。拖动伙伴窗口顶部的三个点移动窗口，点击聊天图标打开工作台。
 
-当前 main 源码新增 [音乐 MCP 设置与使用说明](docs/music-mcp.md)：Windows 网易云的搜索／播放／队列／循环／音量／桌面歌词，以及 Windows／Ubuntu 的 QQ 查询和播放链接；保留指定播放器的系统媒体控制。此能力需要后续重打桌面客户端，旧发布包尚未包含原生 MCP 设置桥，Python 也需另行安装。
+0.9.4 桌面包已包含 Computer Use 与 [音乐 MCP 设置桥](docs/music-mcp.md)。新配置在 Windows 默认开启电脑控制、网易云 MCP、QQ MCP；Ubuntu 默认开启电脑控制与 QQ MCP，网易云桌面播放控制继续使用 MPRIS，上游网易云 MCP 不支持 Linux。已有手动关闭状态和配置原样保留。读取设置不会启动应用或安装依赖，Agent 实际调用时自动连接，并继续遵循账号完整访问权限与任务审批。音乐 MCP 首次使用仍需安装 Python、点击“准备依赖”；QQ MCP 仅查询和返回播放链接，不会据此启动 QQ 桌面播放。旧客户端需升级安装包才能获得这些原生桥。
 
 从源码运行 Web（Node.js 22+）：
 
@@ -175,7 +175,7 @@ Android APK 构建：Windows 使用 `scripts/build-android.ps1`，Linux 使用 `
 
 历史0.7.0 后端已有真实 `gpt-6-luna` Responses 文字与单图请求成功，以及真实 Codex CLI 只读 + 询问任务完成的证据；本机与可信 HTTPS 入口返回相同服务实例，匿名语音、图片、下载和 Agent 请求均被拒绝。后续版本已接通共享ASR和CosyVoice3情绪语气，当前证据以对应 workflow 验收为准。
 
-Windows 最终便携 EXE 的资源、内置 CLI 和窗口 smoke 结果以本版验收文档为准，不沿用旧版结论。Ubuntu x64 / arm64 是跨平台打包与归档 / ELF 审计，尚无目标机 GUI 运行证据；Android 0.7.0 / code 9 是开发签名包，尚无手机实机验收。真实麦克风、摄像头、物理音频与各平台桌宠效果需在目标设备验证。本轮未对 RK3566 板卡安装、烧录或重启。
+0.9.4 Windows 最终便携 EXE 已实际启动，并完成 Computer Use 70 项工具发现；相关 manager、API、桌面执行器、音乐与打包回归 184／184 通过。Ubuntu x64 / arm64 完整归档与 ELF 审计通过，尚无这两份新包的实体 GUI 运行证据。Android 仍为 0.9.3 / code 13 开发签名包，模拟器与厂商实体手机验收分别记录。真实麦克风、摄像头、物理音频与各平台桌宠效果需在目标设备验证。本轮未对 RK3566 板卡安装、烧录或重启。
 
 Android 0.9.2 最终 APK 已通过独立 API 36 模拟器的直接 Agent 设备链路：真实 Qwen/Codex 任务退后台完成、设备凭据加密、系统通知可见、实际系统点击启动 Activity、重新登录后验证并打开任务对话，以及注销后的原生清理和服务端撤销。失败任务、Chat 父对话、切换 scope、去重与恢复另由后端/controller/native 测试覆盖。该结论不扩展为 Android 13～15、实体手机、厂商省电、长期电池表现或全部冷启动/断网/切账号设备矩阵通过。Node 自动测试、原生单元测试、APK 审计与设备实测分别记录。
 

@@ -1,6 +1,6 @@
 {
   "name": "petpal",
-  "version": "0.9.1",
+  "version": "0.9.4",
   "private": true,
   "type": "module",
   "description": "小伴 PetPal — 四端个人桌宠与 Codex 助手",

@@ -23,8 +23,9 @@ export default function ComputerUseSettings({connected,user}:{connected:boolean;
   async function save(event:FormEvent){event.preventDefault();if(!draft)return;await run('保存',async signal=>{const value=await transport.configure(draft,signal);const next=await transport.status(signal);if(current(signal)){apply(value);setStatus(next);setNotice('Computer Use 配置已保存，新 Agent 对话可使用。');}});}
   async function connection(action:'connect'|'disconnect'){await run(action==='connect'?'连接':'断开',async signal=>{const value=await transport[action](signal);if(current(signal)){setStatus(value);setNotice(action==='connect'?'已连接这台电脑的 Zavora MCP。':'已断开桌面控制。');}});}
   const running=!!busy||!!status?.busy;
-  return <details className="computer-use-settings"><summary><Monitor size={18}/><span><strong>桌面操作 · Computer Use</strong><small>{transport.native?'这台执行电脑':'服务主机'} · {status?.connected?`已连接 ${status.toolsCount} 项工具`:'Zavora 7.4.0'}</small></span><ChevronDown size={17}/></summary><div className="computer-use-body">
+  return <details className="computer-use-settings"><summary><Monitor size={18}/><span><strong>桌面操作 · Computer Use</strong><small>{transport.native?'这台执行电脑':'服务主机'} · {status?.connected?`已连接 ${status.toolsCount} 项工具`:config?config.enabled?'已启用 · 按任务连接':'已关闭':'读取设置中'}</small></span><ChevronDown size={17}/></summary><div className="computer-use-body">
     <p>让 Agent 识别应用和窗口，读取界面、观察截图，再执行鼠标、键盘或脚本操作。Chat 派发的任务也会使用你选中的执行电脑。</p>
+    <p className="field-help">支持的电脑首次配置默认启用，Agent 调用时自动连接；可在下方关闭并保存。已有手动设置会保留。</p>
     {!allowed&&<p className="form-error">{transport.native?'请登录拥有完整 Agent 权限的电脑账号。':'网页仅服务管理员可以配置服务主机；其他账号请在电脑客户端配置自己的执行电脑。'}</p>}{error&&<p className="form-error" role="alert">{error}</p>}
     <form onSubmit={save}><fieldset disabled={!allowed||running||!draft}>
       <label className="computer-use-toggle"><input type="checkbox" checked={draft?.enabled??false} onChange={event=>{setDraft(value=>value?{...value,enabled:event.target.checked}:value);setNotice('');}}/><span>启用这台电脑的桌面操作</span></label>

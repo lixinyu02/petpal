@@ -17,7 +17,8 @@ const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const MAX_ARGUMENT_BYTES = 16 * 1024, MAX_SCHEMA_BYTES = 32 * 1024, MAX_LIST_BYTES = 1024 * 1024, MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 const forbidden = new Set(['__proto__', 'constructor', 'prototype', 'approval_token']);
 const configFields = ['revision', 'enabled', 'profile'];
-const defaultConfig = () => ({ revision: randomUUID(), enabled: false, profile: 'full' });
+const supportedPlatform = (platform, arch) => ['win32', 'linux', 'darwin'].includes(platform) && ['x64', 'arm64'].includes(arch);
+const defaultConfig = (platform, arch) => ({ revision: randomUUID(), enabled: supportedPlatform(platform, arch), profile: 'full' });
 const packageRoot = fileURLToPath(new URL('../node_modules/@zavora-ai/computer-use-mcp/', import.meta.url)).replace(/\.asar([\\/])/i, '.asar.unpacked$1');
 const entryPoint = path.join(packageRoot, 'dist', 'server.js');
 const sourceCommit = 'cfbb6af0e704da17c43df6c668225a2f84aca762';
@@ -183,7 +184,7 @@ export class ComputerUseMcpManager {
     if (!config) {
       // Multiple settings panels may request status at the same instant. Share
       // this instance's first creation; independent processes still use CAS lock.
-      this.initializingConfig ||= this._lock(async () => { this._live(); const current = await this._read(); if (current) return current; const initial = defaultConfig(); await this._write(initial); return initial; }).finally(() => { this.initializingConfig = null; });
+      this.initializingConfig ||= this._lock(async () => { this._live(); const current = await this._read(); if (current) return current; const initial = defaultConfig(this.platform, this.arch); await this._write(initial); return initial; }).finally(() => { this.initializingConfig = null; });
       config = await this.initializingConfig;
     }
     const changed = this.revision !== null && this.revision !== config.revision;
@@ -230,7 +231,7 @@ export class ComputerUseMcpManager {
     this.verifiedNative = { path: file, minimumGlibc: receipt.minimumGlibc, sha256: receipt.sha256 }; this.nativeCache = { key, value: this.verifiedNative }; return this.verifiedNative;
   }
   async _runtimeReadiness() {
-    const supported = ['win32', 'linux', 'darwin'].includes(this.platform) && ['x64', 'arm64'].includes(this.arch);
+    const supported = supportedPlatform(this.platform, this.arch);
     const runtimeCompatible = Number(this.versions.napi) >= 9 && versionAtLeast(this.versions.node, '20.0');
     let native, nativeError; try { native = await this._compatibleNative(); } catch (error) { nativeError = error.message; }
     const minimumGlibc = native?.minimumGlibc || '2.39';
@@ -242,7 +243,7 @@ export class ComputerUseMcpManager {
   async status() {
     const config = await this.config(), readiness = await this._runtimeReadiness();
     let bundled = false; try { await access(entryPoint); bundled = true; } catch { /* Passive existence check only. */ }
-    return { config, platform: this.platform, arch: this.arch, version: COMPUTER_USE_MCP_VERSION, connected: Boolean(this.session?.ready), toolsCount: this.session?.ready ? this.session.tools.length : 0, busy: this.busy, bundled, readiness, message: this.message || (this.session?.ready ? '已连接这台电脑的 stdio MCP。' : !config.enabled ? '电脑操作默认关闭。' : readiness.message) };
+    return { config, platform: this.platform, arch: this.arch, version: COMPUTER_USE_MCP_VERSION, connected: Boolean(this.session?.ready), toolsCount: this.session?.ready ? this.session.tools.length : 0, busy: this.busy, bundled, readiness, message: this.message || (this.session?.ready ? '已连接这台电脑的 stdio MCP。' : !config.enabled ? '电脑操作已关闭。' : readiness.message) };
   }
   async _operation(signal, timeoutMs, fn, { disconnectOnError = true } = {}) {
     this._check(signal); if (this.busy) throw failure(409, '这台电脑正在处理此账号的 MCP 请求，请稍后再试。', 'busy');

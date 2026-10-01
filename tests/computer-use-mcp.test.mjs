@@ -52,7 +52,7 @@ async function harness(t, { directory, scope = 'account-one', mode = 'normal', t
   // the real native receipt and ELF/hash discovery path.
   if (withoutCompatibleNative) manager._compatibleNative = async () => null;
   t.after(async () => { await manager.close(); if (ownDirectory) await rm(directory, { recursive: true, force: true }); });
-  const initial = await manager.config(); if (enabled) await manager.configure({ revision: initial.revision, enabled: true });
+  const initial = await manager.config(); if (typeof enabled === 'boolean') await manager.configure({ revision: initial.revision, enabled });
   const readEvents = async () => { try { return (await readFile(events, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); } catch (error) { if (error.code === 'ENOENT') return []; throw error; } };
   return { manager, parameters, transports, events, readEvents, directory };
 }
@@ -72,13 +72,13 @@ test('fixed 70 tools and five profiles reject model-selected commands, policies 
   for (const body of [[], null, { tool: 'unknown' }, { tool: 'type', env: {} }]) assert.throws(() => validateComputerUseTools(body), { status: 400 });
 });
 
-test('status and config are passive, default off, CAS private, and reject executable/native/environment configuration', async t => {
-  const { manager, parameters, directory } = await harness(t, { enabled: false }); const initial = await manager.config();
-  assert.deepEqual({ ...initial, revision: 'UUID' }, { revision: 'UUID', enabled: false, profile: 'full' });
+test('status and config are passive, default enabled, CAS private, and reject executable/native/environment configuration', async t => {
+  const { manager, parameters, directory } = await harness(t, { enabled: null }); const initial = await manager.config();
+  assert.deepEqual({ ...initial, revision: 'UUID' }, { revision: 'UUID', enabled: true, profile: 'full' });
   const status = await manager.status(); assert.equal(status.connected, false); assert.equal(status.toolsCount, 0); assert.equal(status.version, '7.4.0'); assert.equal(parameters.length, 0);
   for (const body of [{ enabled: true }, { revision: initial.revision, enabled: 'true' }, { revision: initial.revision, profile: 'all' }, { revision: initial.revision, command: 'npx' }, { revision: initial.revision, nativeModulePath: '/anything' }, { revision: initial.revision, approval_token: 'private' }, { revision: initial.revision, env: {} }]) await assert.rejects(manager.configure(body), { status: 400 });
-  await assert.rejects(manager.connect(), { code: 'disabled' }); assert.equal(parameters.length, 0);
-  const saved = await manager.configure({ revision: initial.revision, enabled: true }); assert.notEqual(saved.revision, initial.revision);
+  const saved = await manager.configure({ revision: initial.revision, enabled: false }); assert.notEqual(saved.revision, initial.revision);
+  assert.equal((await manager.status()).message, '电脑操作已关闭。'); await assert.rejects(manager.connect(), { code: 'disabled' }); assert.equal(parameters.length, 0);
   await assert.rejects(manager.configure({ revision: initial.revision, profile: 'core' }), { code: 'config_changed' });
   const settled = await Promise.allSettled([manager.configure({ revision: saved.revision, profile: 'core' }), manager.configure({ revision: saved.revision, profile: 'ax' })]);
   assert.equal(settled.filter(value => value.status === 'fulfilled').length, 1); assert.ok(['busy', 'config_changed'].includes(settled.find(value => value.status === 'rejected').reason.code));
@@ -86,12 +86,39 @@ test('status and config are passive, default off, CAS private, and reject execut
   if (process.platform !== 'win32') assert.equal((await stat(manager.configFile)).mode & 0o777, 0o600);
 });
 
+test('new desktop configurations enable only supported native platforms and architectures without connecting', async t => {
+  for (const [platform, arch, enabled] of [['win32', 'x64', true], ['linux', 'arm64', true], ['darwin', 'arm64', true], ['freebsd', 'x64', false], ['win32', 'ia32', false], ['linux', 'arm', false]]) {
+    const { manager, parameters, readEvents } = await harness(t, { enabled: null, platform, arch });
+    const initial = await manager.config(), status = await manager.status();
+    assert.equal(initial.enabled, enabled); assert.equal(status.readiness.supported, enabled); assert.deepEqual(status.config, initial);
+    assert.equal(status.connected, false); assert.equal(status.toolsCount, 0); assert.equal(parameters.length, 0); assert.deepEqual(await readEvents(), []);
+  }
+});
+
+test('persisted disabled computer configuration and profile survive manager restart unchanged', async t => {
+  const first = await harness(t, { enabled: null }); const initial = await first.manager.config();
+  const saved = await first.manager.configure({ revision: initial.revision, enabled: false, profile: 'ax' });
+  const bytes = await readFile(first.manager.configFile, 'utf8'); await first.manager.close();
+  const restarted = await harness(t, { directory: first.directory, enabled: null });
+  assert.deepEqual(await restarted.manager.config(), saved); assert.equal(restarted.manager.configFile, first.manager.configFile);
+  assert.equal(await readFile(restarted.manager.configFile, 'utf8'), bytes); assert.equal((await restarted.manager.status()).message, '电脑操作已关闭。');
+  await assert.rejects(restarted.manager.call(command('discover_applications')), { code: 'disabled' }); assert.equal(restarted.parameters.length, 0);
+});
+
+test('new enabled computer configuration lazily connects on the first tool call and preserves revision', async t => {
+  const { manager, parameters, readEvents } = await harness(t, { enabled: null }); const initial = await manager.config();
+  assert.equal(parameters.length, 0); assert.equal((await manager.status()).connected, false);
+  const result = await manager.call(command('discover_applications', { query: 'Synthetic' }));
+  assert.equal(result.ok, true); assert.equal(parameters.length, 1); assert.deepEqual(await manager.config(), initial);
+  assert.deepEqual((await readEvents()).map(event => event.method), ['initialize', 'notifications/initialized', 'tools/list', 'tools/call']);
+});
+
 test('concurrent first config/status requests share initialization instead of contending for own live lock', async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'petpal-computer-initial-')); let spawned = 0;
-  const manager = new ComputerUseMcpManager({ dataDir: directory, scope: 'first-browser-load', transportFactory: () => { spawned++; throw new Error('status is passive'); } });
+  const manager = new ComputerUseMcpManager({ dataDir: directory, scope: 'first-browser-load', platform: 'win32', arch: 'x64', transportFactory: () => { spawned++; throw new Error('status is passive'); } });
   t.after(async () => { await manager.close(); await rm(directory, { recursive: true, force: true }); });
   const [a, b, c, d] = await Promise.all([manager.status(), manager.config(), manager.status(), manager.config()]);
-  assert.deepEqual(a.config, b); assert.deepEqual(c.config, d); assert.deepEqual(b, d); assert.equal(b.enabled, false); assert.equal(spawned, 0); assert.equal(manager.busy, false);
+  assert.deepEqual(a.config, b); assert.deepEqual(c.config, d); assert.deepEqual(b, d); assert.equal(b.enabled, true); assert.equal(spawned, 0); assert.equal(manager.busy, false);
   assert.equal(await readFile(manager.configFile, 'utf8'), `${JSON.stringify(b)}\n`);
 });
 

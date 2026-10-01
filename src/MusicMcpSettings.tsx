@@ -54,7 +54,7 @@ export default function MusicMcpSettings({connected,user}:{connected:boolean;use
     await run('保存配置',async signal=>{
       const next=await transport.configure({...draft,revision:config.revision,pythonExecutable:draft.pythonExecutable.trim(),cloudmusicExecutable:draft.cloudmusicExecutable.trim(),cdpPort:port},signal);
       if(!current()||signal.aborted)return;
-      applyConfig(next);setNotice('配置已保存。准备依赖并测试连接后，Agent 才能使用已发现的工具。');
+      applyConfig(next);setNotice('配置已保存。依赖准备好后，Agent 调用时自动连接；也可先测试连接。');
       const nextStatus=await transport.status(signal);if(current()&&!signal.aborted)setStatus(nextStatus);
     });
   }
@@ -80,6 +80,7 @@ export default function MusicMcpSettings({connected,user}:{connected:boolean;use
   }
   return <section className="assistant-section music-mcp-settings" aria-labelledby="music-mcp-title">
     <div className="assistant-section-heading"><div><h3 id="music-mcp-title"><Music2 size={19}/>音乐 MCP</h3><p>{transport.native?'管理这台电脑':'管理服务主机'}的专用音乐工具，供 Agent 在该电脑执行音乐请求。</p></div><button type="button" className="secondary-button" disabled={!allowed||!!busy} onClick={()=>void refresh()}><RefreshCw size={14}/>刷新状态</button></div>
+    <p className="field-help">本机支持的音乐 MCP 首次配置默认启用，Agent 调用时自动连接。首次使用仍需准备 Python 依赖；已有手动关闭设置会保留。</p>
     {!allowed&&<p className="assistant-unavailable">{!connected?'登录后可以读取音乐 MCP 设置。':transport.native?'此功能需要账号拥有完全访问这台电脑的 Agent 权限。':'服务主机的音乐 MCP 配置由主账号管理。'}</p>}
     {error&&<p className="form-error" role="alert">{error}</p>}
     {busy&&<p className="assistant-state" role="status"><Loader2 size={15} className="spin"/>{busy}…</p>}
@@ -89,7 +90,7 @@ export default function MusicMcpSettings({connected,user}:{connected:boolean;use
           const server=status?.servers.find(item=>item.id===source.id);
           const enabled=source.id==='netease'?draft?.neteaseEnabled:draft?.qqmusicEnabled;
           const unavailable=server?.platformSupported===false;
-          const state=!allowed?'未读取':!server?'等待状态':unavailable?'平台不可用':server.connected?'已连接':server.enabled?'未连接':'未启用';
+          const state=!allowed?'未读取':!server?'等待状态':unavailable?'平台不可用':server.connected?'已连接':server.enabled?'已启用':'未启用';
           return <details className="music-mcp-source" key={source.id}>
             <summary><span className="music-mcp-source-title"><strong>{source.name}</strong><span>{source.id==='netease'?'Windows 桌面客户端工具':'搜索、资料与播放链接'}</span></span><span className={`music-mcp-state${server?.connected?' is-connected':''}`}>{state}</span><ChevronDown className="music-mcp-chevron" size={16}/></summary>
             <div className="music-mcp-source-body">

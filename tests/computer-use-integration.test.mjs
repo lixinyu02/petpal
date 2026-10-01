@@ -22,7 +22,7 @@ async function routes(t) {
   store.state.users.push({ id: memberId, username: 'computer-fixture-member', displayName: 'Computer route fixture', role: 'member', agentAccess: 'full', disabled: false, providerIds: [], password: null, settings: defaultSettings(), voice: defaultVoiceSettings(), createdAt: new Date().toISOString() });
   store.state.sessions.push(ownerSession.session, memberSession.session); await store.save();
   const calls = { config: 0, status: 0, configure: 0, connect: 0, disconnect: 0 }; let spawned = 0;
-  const manager = new ComputerUseMcpManager({ dataDir: directory, scope: `${store.state.instanceId}:${store.state.ownerId}`, transportFactory: () => { spawned++; throw new Error('HTTP fixtures must not access actual desktop'); } });
+  const manager = new ComputerUseMcpManager({ dataDir: directory, scope: `${store.state.instanceId}:${store.state.ownerId}`, platform: 'win32', arch: 'x64', transportFactory: () => { spawned++; throw new Error('HTTP fixtures must not access actual desktop'); } });
   for (const method of ['config', 'status', 'configure']) { const original = manager[method].bind(manager); manager[method] = async (...args) => { calls[method]++; return original(...args); }; }
   for (const method of ['connect', 'disconnect']) manager[method] = async () => { calls[method]++; return { privateResult: 'must-not-be-returned' }; };
   const service = await createPetServer({ dataDir: directory, token: 'computer-fixture-bootstrap', codex: { status: async () => ({ available: false }), close: async () => {} }, desktopTools: { computerUseMcp: manager, status: async () => ({ busy: false }), close: () => manager.close() } });
@@ -48,10 +48,10 @@ test('real server denies anonymous and even full-Agent members before passive re
   assert.deepEqual(f.calls, { config: 0, status: 0, configure: 0, connect: 0, disconnect: 0 }); assert.equal(f.spawned(), 0);
 });
 
-test('owner config/status are passive, default disabled, and API preserves strict manager CAS without arbitrary startup fields', async t => {
+test('owner config/status are passive, default enabled, and API preserves strict manager CAS without arbitrary startup fields', async t => {
   const f = await routes(t); const initial = await (await f.request(`${prefix}/config`)).json(); const status = await (await f.request(`${prefix}/status`)).json();
-  assert.equal(initial.enabled, false); assert.equal(status.connected, false); assert.equal(status.toolsCount, 0); assert.equal(f.spawned(), 0);
-  const changed = await f.request(`${prefix}/config`, { method: 'PATCH', body: { revision: initial.revision, enabled: true, profile: 'ax' } }); assert.equal(changed.status, 200); const saved = await changed.json(); assert.equal(saved.profile, 'ax');
+  assert.equal(initial.enabled, true); assert.equal(status.connected, false); assert.equal(status.toolsCount, 0); assert.equal(f.spawned(), 0);
+  const changed = await f.request(`${prefix}/config`, { method: 'PATCH', body: { revision: initial.revision, enabled: false, profile: 'ax' } }); assert.equal(changed.status, 200); const saved = await changed.json(); assert.equal(saved.profile, 'ax'); assert.equal(saved.enabled, false); assert.notEqual(saved.revision, initial.revision);
   const stale = await f.request(`${prefix}/config`, { method: 'PATCH', body: { revision: initial.revision, profile: 'core' } }); assert.equal(stale.status, 409); await stale.arrayBuffer();
   for (const body of [{ enabled: true }, { revision: saved.revision, command: 'npx' }, { revision: saved.revision, env: {} }, { revision: saved.revision, nativeModulePath: '/anything' }]) { const response = await f.request(`${prefix}/config`, { method: 'PATCH', body }); assert.equal(response.status, 400); await response.arrayBuffer(); }
   assert.deepEqual(await (await f.request(`${prefix}/config`)).json(), saved); assert.equal(f.spawned(), 0);

@@ -115,7 +115,7 @@ test('owner config and status expose credential presence only and never return i
   const f = await routeFixture(t), profile = path.join(f.manager.profileRoot, 'qqmusic');
   await mkdir(profile, { recursive: true }); await writeFile(path.join(profile, 'credential.json'), JSON.stringify({ secret: credential }));
   const configResponse = await f.request(`${prefix}/config`); assert.equal(configResponse.status, 200);
-  const config = await configResponse.json(); assert.equal(typeof config.revision, 'string'); assert.equal(config.qqmusicEnabled, false);
+  const config = await configResponse.json(); assert.equal(typeof config.revision, 'string'); assert.equal(config.qqmusicEnabled, true);
   const statusResponse = await f.request(`${prefix}/status`); assert.equal(statusResponse.status, 200);
   const status = await statusResponse.json(), qqmusic = status.servers.find(value => value.id === 'qqmusic');
   assert.equal(qqmusic.credentialConfigured, true); assert.equal(qqmusic.connected, false);
@@ -128,8 +128,8 @@ test('owner config and status expose credential presence only and never return i
 
 test('owner configuration keeps real manager CAS and rejects credential or arbitrary runtime fields', async t => {
   const f = await routeFixture(t), initial = await (await f.request(`${prefix}/config`)).json();
-  const savedResponse = await f.request(`${prefix}/config`, { method: 'PATCH', body: { revision: initial.revision, qqmusicEnabled: true } });
-  assert.equal(savedResponse.status, 200); const saved = await savedResponse.json(); assert.equal(saved.qqmusicEnabled, true); assert.notEqual(saved.revision, initial.revision);
+  const savedResponse = await f.request(`${prefix}/config`, { method: 'PATCH', body: { revision: initial.revision, qqmusicEnabled: false } });
+  assert.equal(savedResponse.status, 200); const saved = await savedResponse.json(); assert.equal(saved.qqmusicEnabled, false); assert.notEqual(saved.revision, initial.revision);
   const stale = await f.request(`${prefix}/config`, { method: 'PATCH', body: { revision: initial.revision, neteaseEnabled: true } });
   assert.equal(stale.status, 409); await stale.arrayBuffer();
   for (const body of [{ qqmusicEnabled: false }, { revision: saved.revision, credential }, { revision: saved.revision, command: 'untrusted shell' }, { revision: saved.revision, cdpPort: 80 }]) {

@@ -27,7 +27,8 @@ export const MUSIC_MCP_SERVERS = Object.freeze({
     tools: Object.freeze(['search', 'detail', 'lyric', 'url', 'recommend', 'mv', 'similar', 'producer', 'hot_comments']) }),
 });
 const vendorRoot = fileURLToPath(new URL('./native/music-mcp/', import.meta.url)).replace(/\.asar([\\/])/i, '.asar.unpacked$1');
-const defaultConfig = () => ({ revision: randomUUID(), pythonExecutable: '', cloudmusicExecutable: '', cdpPort: 9223, neteaseEnabled: false, qqmusicEnabled: false });
+const supportedPlayer = (player, platform) => !MUSIC_MCP_SERVERS[player].windowsOnly || platform === 'win32';
+const defaultConfig = platform => ({ revision: randomUUID(), pythonExecutable: '', cloudmusicExecutable: '', cdpPort: 9223, neteaseEnabled: supportedPlayer('netease', platform), qqmusicEnabled: supportedPlayer('qqmusic', platform) });
 export const MUSIC_MCP_TOOLS = Object.freeze(Object.fromEntries(Object.entries(MUSIC_MCP_SERVERS).map(([player, value]) => [player, value.tools])));
 export function musicMcpReadOnly(player, tool) { return player === 'qqmusic' ? MUSIC_MCP_TOOLS.qqmusic.includes(tool) : player === 'netease' && ['get_netease_status', 'search_music', 'get_netease_queue'].includes(tool); }
 export function validateMusicMcpCall(body) {
@@ -95,7 +96,7 @@ export class MusicMcpManager {
   get busy() { return this.operations.size > 0; }
   _live() { if (this.closed) throw failure(503, '音乐 MCP 管理器正在退出。', 'closed'); }
   _player(player) { if (!Object.hasOwn(MUSIC_MCP_SERVERS, player)) throw failure(400, '请选择网易云音乐或 QQ 音乐。', 'invalid_player'); return MUSIC_MCP_SERVERS[player]; }
-  _supported(player) { return !this._player(player).windowsOnly || this.platform === 'win32'; }
+  _supported(player) { this._player(player); return supportedPlayer(player, this.platform); }
   _paths(player) { const profile = path.join(this.profileRoot, player); return { profile, dependenciesDirectory: path.join(profile, 'dependencies'), qqSourceDirectory: path.join(vendorRoot, 'qqmusic', 'src'), loginDirectory: profile, loginScript: path.join(profile, 'login.py') }; }
   async _directories(player) {
     const paths = this._paths(player);
@@ -266,7 +267,7 @@ export class MusicMcpManager {
   }
   async _refresh() {
     let config = await this._read();
-    if (!config) config = await this._lock(async () => { const existing = await this._read(); if (existing) return existing; const initial = defaultConfig(); await this._write(initial); return initial; });
+    if (!config) config = await this._lock(async () => { const existing = await this._read(); if (existing) return existing; const initial = defaultConfig(this.platform); await this._write(initial); return initial; });
     const changed = this.revision !== null && this.revision !== config.revision;
     if (changed) { for (const operation of this.operations) operation.controller.abort(failure(409, '音乐 MCP 配置已变化，请重新连接。', 'config_changed')); await Promise.allSettled([...this.sessions.keys()].map(player => this._disconnectSession(player))); }
     this.revision = config.revision;
@@ -277,7 +278,7 @@ export class MusicMcpManager {
     this._live();
     if (!object(body) || Object.keys(body).some(key => !CONFIG_FIELDS.includes(key)) || typeof body.revision !== 'string') throw failure(400, '音乐 MCP 配置包含不支持的字段或缺少版本。', 'invalid_config');
     const result = await this._lock(async () => {
-      const current = await this._read() || defaultConfig();
+      const current = await this._read() || defaultConfig(this.platform);
       if (body.revision !== current.revision) throw failure(409, '音乐 MCP 配置已变化，请刷新后重试。', 'config_changed');
       const next = validateConfig({ ...current, ...body });
       for (const field of ['pythonExecutable', 'cloudmusicExecutable']) if (next[field]) { try { if (!(await stat(next[field])).isFile()) throw new Error(); } catch { throw failure(400, '配置的运行程序不存在或不是文件。', 'invalid_path'); } }

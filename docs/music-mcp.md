@@ -2,6 +2,8 @@
 
 小伴的 Windows／Ubuntu 客户端提供两个固定来源的音乐 MCP。Agent 和 Chat 派发的后台 Agent 都在所选执行电脑调用；电脑需要保持客户端登录、在线，并给当前账号开通完整 Agent 权限。
 
+0.9.4 预发布桌面包已包含 Computer Use 与音乐 MCP 的原生设置桥。Windows 新配置默认开启电脑控制、网易云 MCP、QQ MCP；Ubuntu 新配置默认开启电脑控制与 QQ MCP，网易云播放控制使用 MPRIS，网易云 MCP 保持不可用。已有手动关闭状态、程序路径和其他配置原样保留；默认启用不会替你改变账号权限、任务访问范围或审批方式，也不会安装依赖、打开应用。
+
 | 能力 | Windows | Ubuntu |
 | --- | --- | --- |
 | 网易云搜索、播放指定歌曲、队列、循环、音量、桌面歌词 | cloudmusic-desktop-mcp，需官方 Windows 网易云客户端及兼容的 CDP 接口 | 此上游不支持 Linux |
@@ -15,8 +17,8 @@ QQ MCP 返回播放链接，不能据此宣称桌面客户端已经播放。QQ �
 1. 在准备执行任务的 PC 客户端登录，确认“执行电脑”状态在线。
 2. 打开“连接与设置 → 电脑助手 → 音乐 MCP”。PC 中配置的是这台电脑；网页中主账号配置的是后端服务主机。
 3. 安装 Python，包含 pip。网易云要求 Python 3.11 以上，QQ 要求 3.10 以上；小伴目前未内置 Python。若自动查找不到，在折叠的“Python 运行环境”填写本机 Python 程序的绝对路径。
-4. 启用需要的 MCP 并保存。Windows 网易云可以填写 `cloudmusic.exe` 的绝对路径；留空会查找常见安装位置。
-5. 点击“准备依赖”，再点击“测试连接”。首次准备会从固定 PyPI 源下载依赖，最多等待十分钟，可随时取消。只有完整安装并验证后才替换原依赖；失败保留旧集。
+4. 查看本机支持的 MCP 已启用；升级后若保留此前手动关闭状态，可按需开启并保存。Windows 网易云可以填写 `cloudmusic.exe` 的绝对路径；留空会查找常见安装位置。
+5. 点击“准备依赖”。首次准备会从固定 PyPI 源下载依赖，最多等待十分钟，可随时取消。只有完整安装并验证后才替换原依赖；失败保留旧集。依赖准备好后 Agent 首次调用自动连接，也可先点击“测试连接”检查工具发现。
 
 “测试连接”执行真实 MCP 初始化和工具发现，不打开音乐软件、不播放歌曲。若需要队列等网易云控制，Agent 的 `launch_netease_music` 会请求使用本机回环 CDP 端口启动官方客户端；已经运行但没有 CDP 的客户端需要用户自行关闭后再启动。CDP 可达也不保证客户端内部接口与上游兼容，失败必须以实际返回结果为准。
 
@@ -50,4 +52,6 @@ Ubuntu 也使用相同的 Python bootstrap，依赖与 `login.py` 路径取自�
 
 示例请求：“在这台电脑的网易云搜周杰伦，播放搜索到的晴天”“把网易云改为单曲循环”“查询 QQ 音乐晴天的歌词和播放链接”。歌曲可用性、会员限制与桌面控制兼容性以客户端和 MCP 的真实结果为准。
 
-本次源码已包含桥接与打包清单。旧 Windows／Ubuntu 安装包不会自动获得原生 MCP 设置桥；需后续重打新版客户端。Web 也可以派发到安装新版并登录在线的 PC。
+新版下载：[Windows 0.9.4 x64 ZIP](https://github.com/lixinyu02/petpal/releases/download/v0.9.4/PetPal-0.9.4-Windows-x64.zip)／[便携 EXE](https://github.com/lixinyu02/petpal/releases/download/v0.9.4/PetPal-0.9.4-Windows-x64.exe)、[Ubuntu 0.9.4 x64](https://github.com/lixinyu02/petpal/releases/download/v0.9.4/PetPal-0.9.4-Ubuntu-x64.tar.gz)／[arm64](https://github.com/lixinyu02/petpal/releases/download/v0.9.4/PetPal-0.9.4-Ubuntu-arm64.tar.gz)。这些包为 [0.9.4 预发布版](https://github.com/lixinyu02/petpal/releases/tag/v0.9.4)，Android 保持 0.9.3。旧 Windows／Ubuntu 安装包不会随网页更新自动获得原生 MCP 设置桥；Web 与 Android 可以派发到安装新版并登录在线的 PC。
+
+相关回归 184／184 通过。Windows 最终便携 EXE 已实际启动并完成 Computer Use 70 项工具发现；该结果不代表所有音乐客户端版本或全部桌面控制动作已验收。Ubuntu 两架构新包通过完整归档与 ELF 审计，尚未在实体电脑进行 GUI 验收。歌曲搜索、播放、会员限制和播放器媒体会话仍需以目标电脑实际返回结果为准。
