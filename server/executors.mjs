@@ -251,7 +251,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
     const disconnected=()=>{if(!res.writableEnded)controller.abort();};res.once('close',disconnected);
     let idle=setTimeout(()=>controller.abort(),30000), output=0, safeOutput=0;
     const reset=()=>{clearTimeout(idle);idle=setTimeout(()=>controller.abort(),30000);};
-    const redactor=createExecutorRelayRedactor({secret:config.apiKey});
+    const redactor=createExecutorRelayRedactor({secret:config.apiKey,model:run.entry.model});
     const write=async frame=>{
       checkRun(run);signal.throwIfAborted();safeOutput+=Buffer.byteLength(frame);if(safeOutput>24*1024*1024)throw failure(502,'模型响应超过限制。');
       if(!res.write(frame))await new Promise((resolve,reject)=>{const cleanup=()=>{res.off('drain',ready);signal.removeEventListener('abort',cancel);};const ready=()=>{cleanup();resolve();};const cancel=()=>{cleanup();reject(new Error('模型请求停止。'));};res.once('drain',ready);signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel();});

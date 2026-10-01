@@ -24,7 +24,7 @@ assert.ok(runtime.portableSmoke.uiReady && runtime.portableSmoke.codex.available
 assert.equal(runtime.portableSmoke.desktopTools.opencli.version, '1.8.8');
 assert.ok(asar.nativeHelperCompared);
 assert.equal(runtime.portableSmoke.executor?.available, true, 'Executor preload facade was not verified by the final portable');
-const requiredExecutionSource = ['desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs'];
+const requiredExecutionSource = ['desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs'];
 for (const file of requiredExecutionSource) {
   const frozen = freeze.find(item => item.path === file), packed = asar.files?.find(item => item.path === file), smoke = runtime.portableSmoke.bundleFiles?.find(item => item.path === file);
   assert.ok(frozen && packed && smoke, `Executor source must be present in frozen inputs, final EXE readback and native smoke: ${file}`);

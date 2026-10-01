@@ -1,6 +1,7 @@
 import http from 'node:http';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
 import {MODEL_REQUEST_BYTES} from './model-request-limits.mjs';
+import {CumulativeMessageAdapter,needsCumulativeMessageMapping} from './response-message-segments.mjs';
 
 const DEFAULTS={requestBytes:MODEL_REQUEST_BYTES,frameBytes:2*1024*1024,outputBytes:24*1024*1024,events:100000};
 const invalid=()=>new Error('Responses 流不完整或格式无效，请检查服务兼容性。');
@@ -140,8 +141,9 @@ export class ResponsesStreamNormalizer {
   finish(){if(!this.completed)throw invalid();return this.terminal.map(frame=>frame.raw);}
 }
 
-async function relaySse(body,write,signal,resetIdle,limits){
+async function relaySse(body,write,signal,resetIdle,limits,model){
   const reader=body.getReader(),decoder=new TextDecoder('utf-8',{fatal:true}),normalizer=new ResponsesStreamNormalizer();
+  const messageAdapter=needsCumulativeMessageMapping(model)?new CumulativeMessageAdapter():null;
   let pending='',received=0,doneMarker=false;
   const consume=async raw=>{
     const lines=raw.split(/\r?\n/),data=[],events=[];
@@ -151,7 +153,8 @@ async function relaySse(body,write,signal,resetIdle,limits){
     if(text==='[DONE]'){if(!normalizer.completed||doneMarker)throw invalid();doneMarker=true;return;}
     if(doneMarker)throw invalid();let value;try{value=JSON.parse(text);}catch{throw invalid();}
     if(events.length>1||events.length&&events[0]!==value.type)throw invalid();
-    for(const frame of normalizer.accept(value,raw))await write(frame);
+    const mapped=messageAdapter?messageAdapter.map(value):value;
+    for(const frame of normalizer.accept(mapped,mapped===value?raw:encode(mapped)))await write(frame);
   };
   const cancel=()=>{void reader.cancel().catch(()=>{});};signal.addEventListener('abort',cancel,{once:true});
   try{
@@ -211,7 +214,7 @@ export async function createCodexTransport({config,fetchImpl=fetch,authorizeMode
       let headerBytes=0;for(const [key,value] of response.headers)headerBytes+=key.length+value.length;if(headerBytes>16384)throw invalid();
       const length=response.headers.get('content-length');if(length!==null&&(!/^\d+$/.test(length)||Number(length)>limits.outputBytes))throw invalid();
       res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'});
-      await relaySse(response.body,write,signal,resetIdle,limits);signal.throwIfAborted();res.end();
+      await relaySse(response.body,write,signal,resetIdle,limits,body.model);signal.throwIfAborted();res.end();
     })().catch(()=>{
       if(!res.headersSent)sendError(signal.aborted?504:502,'Responses 请求未完成，请重试或检查服务兼容性。');
       else if(!res.destroyed){res.end(encode({type:'error',code:'petpal_transport_error',message:'Responses 请求未完成，请重试或检查服务兼容性。'}));}

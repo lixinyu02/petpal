@@ -1,3 +1,5 @@
+import {CumulativeMessageAdapter,needsCumulativeMessageMapping} from './response-message-segments.mjs';
+
 const FRAME_LIMIT = 2 * 1024 * 1024, OUTPUT_LIMIT = 24 * 1024 * 1024;
 const invalid = () => new Error('中央模型流不完整或格式无效。');
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -15,7 +17,7 @@ const terminalTypes = new Set(['response.completed', 'response.failed', 'respons
  * frame stays private until that suffix resolves; delayed bytes fill that same
  * frame, preserving original event/sequence order without synthetic events.
  */
-export function createExecutorRelayRedactor({ secret = '', maxFrameBytes = FRAME_LIMIT, maxOutputBytes = OUTPUT_LIMIT } = {}) {
+export function createExecutorRelayRedactor({ secret = '', model = '', maxFrameBytes = FRAME_LIMIT, maxOutputBytes = OUTPUT_LIMIT } = {}) {
   if (typeof secret !== 'string' || secret.length > 8192 || !Number.isSafeInteger(maxFrameBytes) || maxFrameBytes < 1 || maxFrameBytes > FRAME_LIMIT || !Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 1 || maxOutputBytes > OUTPUT_LIMIT) throw invalid();
   let mask = '[已隐藏]';
   if ([...mask].some(character => secret.includes(character))) {
@@ -52,6 +54,7 @@ export function createExecutorRelayRedactor({ secret = '', maxFrameBytes = FRAME
   };
   const streams = new Map(), items = new Map(), decoder = new TextDecoder('utf-8', { fatal: true });
   let responseId;
+  const messageAdapter=needsCumulativeMessageMapping(model)?new CumulativeMessageAdapter():null;
   let pending = '', queue = [], cursor = 0, inputBytes = 0, outputBytes = 0, count = 0, terminal = false, doneMarker = false, finished = false;
   const render = frame => {
     if (!frame.value) return frame.lines.map(scrub).join('\n') + '\n\n';
@@ -131,6 +134,7 @@ export function createExecutorRelayRedactor({ secret = '', maxFrameBytes = FRAME
     if (!object(value) || typeof value.type !== 'string' || !value.type || value.type.length > 100 || events.length > 1 || events.length === 1 && events[0] !== value.type) throw invalid();
     if (terminal && value.type !== 'response.done') throw invalid();
     if (value.type === 'response.done' && !terminal) throw invalid();
+    if(messageAdapter)value=messageAdapter.map(value);
     frame.value = clean(value); queue.push(frame);
     if (textualDeltas.has(value.type)) {
       if (typeof value.delta !== 'string') throw invalid();

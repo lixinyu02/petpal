@@ -52,4 +52,4 @@
 
 ## Acceptance Limits
 
-真实Codex0.143.0/GPT-6.1 Sol通过选定DesktopExecutor调用包内OpenCLI查询npm与V2EX，其余10站为worker联网探测。后台和执行电脑共处Windows，没有跨物理主机证据。Qwen经局域网及HTTPS网关仍遇到模型连接中断。Ubuntu两包完成完整归档、依赖与原生模块审计，实际UbuntuGUI未运行；Browser Bridge实际操作亦未验收。Windows最终便携EXE真实启动及查询通过，但未签名。库存179个适配器命名空间、1366命令包含本地应用，不能将库存表述为全部网站已可访问。
+真实Codex0.143.0/GPT-6.1 Sol通过选定DesktopExecutor调用包内OpenCLI查询npm与V2EX，其余10站为worker联网探测。后台和执行电脑共处Windows，没有跨物理主机证据。Qwen初期经局域网及HTTPS网关补测失败，随后同日issue-68定位并修复累计分段消息的兼容问题；实际查询及公网test同线程续接已通过，见[后续验收](2026-10-01-petpal-qwen-cumulative-stream-acceptance.md)。Ubuntu两包完成完整归档、依赖与原生模块审计，实际UbuntuGUI未运行；Browser Bridge实际操作亦未验收。Windows最终便携EXE真实启动及查询通过，但未签名。库存179个适配器命名空间、1366命令包含本地应用，不能将库存表述为全部网站已可访问。
