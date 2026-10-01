@@ -12,7 +12,7 @@ import { defaultCodexConfig } from '../server/codex-config.mjs';
 import { resolveProjectDirectory } from '../server/project-directory.mjs';
 
 const bootstrap = 'isolated-project-api-owner';
-const password = 'isolated-project-password';
+const password = randomUUID();
 async function until(callback) {
   for (let attempt = 0; attempt < 200; attempt++) { const value = await callback(); if (value) return value; await delay(5); }
   assert.fail('Project API fixture did not settle');

@@ -62,7 +62,7 @@ test('directory normalization accepts explicit Windows and Linux absolute paths 
   assert.equal(normalizeProjectDirectory(undefined), '');
   assert.equal(normalizeProjectDirectory(''), '');
   assert.equal(normalizeProjectDirectory('/srv/projects/my app', 'linux'), '/srv/projects/my app');
-  assert.equal(normalizeProjectDirectory('C:\\Users\\User\\my project', 'win32'), 'C:\\Users\\User\\my project');
+  assert.equal(normalizeProjectDirectory('C:\\Projects\\my project', 'win32'), 'C:\\Projects\\my project');
   assert.equal(normalizeProjectDirectory('D:/projects/app', 'win32'), 'D:\\projects\\app');
   assert.equal(normalizeProjectDirectory('/srv/projects/$(literal)', 'linux'), '/srv/projects/$(literal)');
 });

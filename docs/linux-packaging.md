@@ -1,14 +1,14 @@
-# Ubuntu 0.7.0 包与验收范围
+# Ubuntu 0.9.6 包与验收范围
 
-Ubuntu 版包含共享 React 界面、Electron、Node 个人服务、Codex 0.143.0 和 OpenCLI 1.8.8，可使用本机 / 远程 Chat 与 Agent。当前发布格式为 x64 / arm64 portable `.tar.gz`，解压后运行 `./start-petpal.sh`；不需要另装 Node 或 Codex。两架构均为跨平台打包，归档、依赖与 ELF 审计不能替代 Ubuntu 目标机 GUI / 运行验收。当前版本结果见 [0.7.0 验收](acceptance-0.7.md)。
+Ubuntu 版包含共享 React 界面、Electron、Node 个人服务、Codex 0.143.0 和 OpenCLI 1.8.8，可使用本机 / 远程 Chat 与 Agent。当前发布格式为 x64 / arm64 portable `.tar.gz`，解压后运行 `./start-petpal.sh`；不需要另装 Node 或 Codex。两架构均为跨平台打包，归档、依赖与 ELF 审计不能替代 Ubuntu 目标机 GUI / 运行验收。当前版本结果见 [0.9.6 验收](acceptance-0.9.6.md)。
 
 ## 下载与运行
 
-在 [v0.7.0 Release](https://github.com/lixinyu02/petpal/releases/tag/v0.7.0) 选择 [Ubuntu x64](https://github.com/lixinyu02/petpal/releases/download/v0.7.0/PetPal-0.7.0-Ubuntu-x64.tar.gz) 或 [Ubuntu arm64](https://github.com/lixinyu02/petpal/releases/download/v0.7.0/PetPal-0.7.0-Ubuntu-arm64.tar.gz)，按发布页 SHA-256 核对文件。Ubuntu 22.04 或更高版本的桌面环境可执行：
+在 [v0.9.6 Release](https://github.com/lixinyu02/petpal/releases/tag/v0.9.6) 选择 [Ubuntu x64](https://github.com/lixinyu02/petpal/releases/download/v0.9.6/PetPal-0.9.6-Ubuntu-x64.tar.gz) 或 [Ubuntu arm64](https://github.com/lixinyu02/petpal/releases/download/v0.9.6/PetPal-0.9.6-Ubuntu-arm64.tar.gz)，按发布页 SHA-256 核对文件。Ubuntu 22.04 或更高版本的桌面环境可执行：
 
 ```sh
-tar -xzf PetPal-0.7.0-Ubuntu-x64.tar.gz
-cd PetPal-0.7.0-Ubuntu-x64
+tar -xzf PetPal-0.9.6-Ubuntu-x64.tar.gz
+cd PetPal-0.9.6-Ubuntu-x64
 ./start-petpal.sh
 ```
 
@@ -22,11 +22,11 @@ ARM64 主机使用对应 arm64 文件及目录。整个解压目录需要保持�
 ./opencli.sh --version
 ```
 
-API 模式使用独立 Codex home、配置和工作区；主机模式保留用户已有的 Codex 登录。桌面本地数据保存在 Electron 用户数据目录，包内没有凭据、上传图片或聊天历史。默认工作区在应用用户数据目录下，可通过 `PETPAL_WORKSPACE` 指定项目；每次任务仍遵循自己的访问和审批策略。
+API 模式使用独立 Codex home、配置和工作区；主机模式保留用户已有的 Codex 登录。桌面本地数据保存在 Electron 用户数据目录，包内没有凭据、上传图片或聊天历史。默认工作区在应用用户数据目录下；Agent 与 Chat + Agent 可在界面的“项目目录”中指定执行电脑上的现有绝对路径，详见 [项目目录](agent-project-directory.md)。每次任务仍遵循自己的访问和审批策略。
 
-0.7.0 Agent 支持 `read-only` / `workspace-write` / `full-access` 与 `ask` / `auto` / `review`，默认只读 + 询问。成员需要 owner 授予 `workspace` 或 `full` 后才能使用，授权不会自动提升每次任务的策略。插入指令、最多 5 条等待队列、图片和停止 / 恢复行为与其他客户端一致；重启后队列暂停，不自动重放。具体限制见 [README](../README.md#agent-工作台)。
+0.9.6 Agent 支持 `read-only` / `workspace-write` / `full-access` 与 `ask` / `auto` / `review`，默认只读 + 询问。成员需要 owner 授予 `workspace` 或 `full` 后才能使用，授权不会自动提升每次任务的策略。插入指令、最多 5 条等待队列、图片和停止 / 恢复行为与其他客户端一致；重启后队列暂停，不自动重放。具体限制见 [README](../README.md#agent-工作台)。
 
-OpenCLI 网页控制需要官方 Chrome Browser Bridge 扩展和明确选择的浏览器档案。Ubuntu 音乐控制需要播放器在当前用户 D-Bus 上提供兼容的 MPRIS 会话；MPRIS 本身不提供歌曲搜索。音乐 / 浏览器动作需要完整访问并遵循任务审批模式，安装扩展与真实动作不属于归档审计。
+OpenCLI 公开查询默认启用；网页操作需要官方 Chrome Browser Bridge 扩展和明确选择的浏览器档案。QQ 音乐 MCP 负责搜索及播放链接，返回链接不代表桌面已播放。网易云上游 MCP 仅支持 Windows，Ubuntu 桌面播放控制使用 MPRIS。Computer Use 默认启用，按任务授权使用 Accessibility 和截图等能力。Ubuntu 音乐控制需要播放器在当前用户 D-Bus 上提供兼容的 MPRIS 会话；MPRIS 本身不提供歌曲搜索。音乐 / 浏览器动作需要完整访问并遵循任务审批模式，安装扩展与真实动作不属于归档审计。
 
 ## 图形与系统依赖
 
@@ -34,11 +34,11 @@ OpenCLI 网页控制需要官方 Chrome Browser Bridge 扩展和明确选择的�
 
 二次元伙伴和 3D 小猫共用账号设置、模型和历史，形象选择持久化为 `settings.companionKind`。小猫使用 Three.js/WebGL；主界面与透明窗口共用 `PetScene`、`CatModel` 和行为状态机。二次元角色源码与发布资源位于 `src/avatar/` 和 `public/avatars/`，为原创立绘的无损 WebP 和网格动画，不是 Cubism `.moc3` 运行时。8 张原始 PNG 保留在 `artwork/akari/`，仅源码包收录，安装包不同时带两份立绘。旧精灵图 / GIF 仅保留为历史素材；不能用静态截图代替实时渲染验证。
 
-CosyVoice 已接入经过认证的个人服务，每条完成的 AI 消息可单独朗读 / 停止。系统音色和物理扬声器取决于目标桌面；通用远程 TTS、远程 ASR 与浏览器识别仍只是预备配置。保存配置不会自动录音。
+CosyVoice 已接入经过认证的个人服务，每条完成的 AI 消息可单独朗读 / 停止。应用已融合远程 ASR 与流式 TTS，系统音色、麦克风和物理扬声器取决于目标桌面。保存配置不会自动录音。
 
 ## 从源码跨平台打包
 
-冻结代码、依赖锁文件与前端构建后执行：
+在独立源码副本中冻结代码、依赖锁文件与前端构建后执行，避免将在线服务的 dist 作为构建目录：
 
 ```sh
 npm ci
@@ -54,16 +54,16 @@ node scripts/linux-package.mjs arm64
 
 输出为：
 
-- `releases/ubuntu/PetPal-0.7.0-Ubuntu-x64.tar.gz`
-- `releases/ubuntu/PetPal-0.7.0-Ubuntu-arm64.tar.gz`
+- `releases/ubuntu/PetPal-0.9.6-Ubuntu-x64.tar.gz`
+- `releases/ubuntu/PetPal-0.9.6-Ubuntu-arm64.tar.gz`
 
 每个包旁有 SHA-256 文件，包内包含来源摘要 `BUILD-MANIFEST.json`。本地构建清单位于 `evidence/linux-package-x64.json` / `evidence/linux-package-arm64.json`，这些机器验收文件不随公开源码分发。
 
 独立复核最终归档的实际字节、原生 ELF、架构、启动器和可执行权限：
 
 ```sh
-node scripts/linux-verify.mjs releases/ubuntu/PetPal-0.7.0-Ubuntu-x64.tar.gz --compare-current-dist
-node scripts/linux-verify.mjs releases/ubuntu/PetPal-0.7.0-Ubuntu-arm64.tar.gz --compare-current-dist
+node scripts/linux-verify.mjs releases/ubuntu/PetPal-0.9.6-Ubuntu-x64.tar.gz --compare-current-dist
+node scripts/linux-verify.mjs releases/ubuntu/PetPal-0.9.6-Ubuntu-arm64.tar.gz --compare-current-dist
 ```
 
 `--compare-current-dist` 逐字节比较包内前端与当前 `dist/`，并核对 desktop / server 源码，包括 Agent 权限与队列、附件、下载目录和远程传输模块。`codex`、`codex-code-mode-host`、`rg`、`bwrap`、`zsh` 按目标架构封装并保留 0755 权限；同时校验 Electron ELF。最终文件数量和哈希以对应版本的独立回执为准，不能复用旧版数字。
@@ -72,6 +72,6 @@ node scripts/linux-verify.mjs releases/ubuntu/PetPal-0.7.0-Ubuntu-arm64.tar.gz -
 
 ## 验收边界
 
-0.7.0 已有共享后端的真实 Responses 文字 / 图片与真实 Codex CLI 只读任务证据；它们不等同于在 Ubuntu 包内执行成功。x64 / arm64 仍需目标机验证 GUI、WebGL、角色交互、托盘、透明置顶、本机 CLI、取消 / 退出清理、语音与媒体设备。ARM64 包也不代表 RK3566 板卡已经安装或测试。
+0.9.6 已有 Qwen 图片通过两条 Chat 连接、Windows 包内 Codex 的中央与 DesktopExecutor 的实际识图证据。Ubuntu 两包分别通过完整归档字节、ELF、依赖与来源审核，本轮未执行 Ubuntu 包内运行时；不能把 Windows 和共享后端测试当作 Ubuntu 执行成功。x64 / arm64 仍需目标机验证 GUI、WebGL、角色交互、托盘、透明置顶、本机 CLI、取消 / 退出清理、语音与媒体设备。ARM64 包也不代表 RK3566 板卡已经安装或测试。
 
-请以 [0.7.0 验收](acceptance-0.7.md) 的本版结果为准。旧版 `codex-live.json`、0.2 的 3D 截图和历史包回执均不能替代本版 Ubuntu 运行证据。
+请以 [0.9.6 验收](acceptance-0.9.6.md) 的本版结果为准。旧版 `codex-live.json`、0.2 的 3D 截图和历史包回执均不能替代本版 Ubuntu 运行证据。
