@@ -1,0 +1,3529 @@
+{
+  "upstream": "https://github.com/tsunehimatoi/psd2live",
+  "commit": "2ac751fbb3ffdc8251a82e0d600d97afafafcaac",
+  "sourceZipSha256": "e97360577560c87ac6eae8bb2b96018a92cf2528af580a5b71385be9c7f4893e",
+  "archiveUrl": "https://codeload.github.com/tsunehimatoi/psd2live/zip/2ac751fbb3ffdc8251a82e0d600d97afafafcaac",
+  "selected": [
+    {
+      "path": ".editorconfig",
+      "bytes": 62,
+      "sha256": "b368d3ef33508bdcfe6e3410a047e2f2318f23e0460e59363387d5b8c451345b"
+    },
+    {
+      "path": ".gitattributes",
+      "bytes": 121,
+      "sha256": "36c2eccbe032ad9fbd1d7abc3f90a532925d3efcc1baaf246c1ff3302eb71512"
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 504,
+      "sha256": "bf6a47ed3347f1fe49d763a27a2497e525451f1c590d4b024bf47b4d97170a54"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 35157,
+      "sha256": "22f65f0ba65b3fb08b8f2b681d5cefa436690fe67747fa9ad4674c75695643a4"
+    },
+    {
+      "path": "README.md",
+      "bytes": 9540,
+      "sha256": "fc0eb96cdc85a6c5d648fc982b5ea29d22771226c96cd4250b38b5620d28dffa"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "bytes": 2290,
+      "sha256": "ae30e42e9f22f50f870fba225ebc47d0a2a9794cb1237460d64d404623964cde"
+    },
+    {
+      "path": "build.gradle.kts",
+      "bytes": 9620,
+      "sha256": "b836738aecf69ae87cd6d02865627cbda4cb236ad7d99af9084b979832c2ef42"
+    },
+    {
+      "path": "docs/README.md",
+      "bytes": 5564,
+      "sha256": "2fa8d980899b83cde10449d1f0a90d42e03038dabb3e12b0c9fdc36930e3d053"
+    },
+    {
+      "path": "docs/en/README.md",
+      "bytes": 9855,
+      "sha256": "9168353839ed06889e087adee64607de7aebac340079c8a93edfeb99710543f8"
+    },
+    {
+      "path": "docs/en/guide/CUBISM_CI_RELEASE.md",
+      "bytes": 4541,
+      "sha256": "b8a36b9a70323f195253e770cc3796dc8444777264d7a730b15d3e28930e2a1b"
+    },
+    {
+      "path": "docs/en/guide/CUBISM_SDK_SETUP.md",
+      "bytes": 3900,
+      "sha256": "26d27bf1abb36dc7c6baf8e1f3dcf0b97c5a92a5a861b239e86f6d047a57b3b8"
+    },
+    {
+      "path": "docs/en/guide/DEVELOPMENT.md",
+      "bytes": 6832,
+      "sha256": "c7fa1bd07b52e4963716d28a9e6bc4895d6d4b7be78ce774aaf7f987f6d6fe25"
+    },
+    {
+      "path": "docs/en/guide/USER_GUIDE.md",
+      "bytes": 6823,
+      "sha256": "02453f82eb1d8c4287a076bdabd2aedbae0c60bcffe3fc39e572d28f7868a82e"
+    },
+    {
+      "path": "docs/en/spec/DEFORMER_AND_PARAMETER_SPEC.md",
+      "bytes": 3387,
+      "sha256": "589054d5f1bb7fdd78310020a5e9129f132b9cfaac039200766c2127e7523609"
+    },
+    {
+      "path": "docs/en/spec/IMPLEMENTATION_COMPARISON.md",
+      "bytes": 2154,
+      "sha256": "3a3d56869b05ede756ecff93003352ada6694dbf500ea2e7913d36aa20b5fcfa"
+    },
+    {
+      "path": "docs/en/spec/PROJECT_FORMAT.md",
+      "bytes": 3610,
+      "sha256": "b84f5943abc63c38775f167b51f2a818888eab1ec8f0bb7e9802caac970a5ef2"
+    },
+    {
+      "path": "docs/en/spec/PSD_LAYER_SPEC.md",
+      "bytes": 4174,
+      "sha256": "ddb349c4c08014a42d80111062c161a81d46881931f242a1fcbf156dcb4ae47f"
+    },
+    {
+      "path": "docs/ja/README.md",
+      "bytes": 12610,
+      "sha256": "30ec0b9e96c2659328a2fb20d117f7c390e2af1c0f774f464c0a14e3d25c84da"
+    },
+    {
+      "path": "docs/ja/guide/CUBISM_SDK_SETUP.md",
+      "bytes": 4405,
+      "sha256": "6e138a0fe893a9891540648604406178d2e33620f8b3ef3e91730dec03b16465"
+    },
+    {
+      "path": "docs/ja/guide/DEVELOPMENT.md",
+      "bytes": 8575,
+      "sha256": "db329b5609576c4add2a8ce3fba54bd53993eecba4f9eb5679b85cf124108411"
+    },
+    {
+      "path": "docs/ja/guide/USER_GUIDE.md",
+      "bytes": 8192,
+      "sha256": "158f987fbd0538e8660da3b6a0ea64b56c3318883d461742e0be0f47ed68c984"
+    },
+    {
+      "path": "docs/ja/spec/DEFORMER_AND_PARAMETER_SPEC.md",
+      "bytes": 3568,
+      "sha256": "1e203740eafc491302cd3a8c476841734e48a7c734dfeb4f3a6d8e752a8ef3f7"
+    },
+    {
+      "path": "docs/ja/spec/IMPLEMENTATION_COMPARISON.md",
+      "bytes": 2276,
+      "sha256": "f387c4bf8254681d27f556e9e3e5f1c4976ef732f3c5d3d0bdc1cd3b81f57d3f"
+    },
+    {
+      "path": "docs/ja/spec/PSD_LAYER_SPEC.md",
+      "bytes": 4322,
+      "sha256": "ed3f570e26dc7b0e9b402e6cc12baeeb5d625049db9017031f4c9e1d7425f8f0"
+    },
+    {
+      "path": "docs/zh/ROADMAP.md",
+      "bytes": 3064,
+      "sha256": "b75538a81be1c82143e16cd9ea25342b1b9d32731ca7320b924a09c3c5f7844a"
+    },
+    {
+      "path": "docs/zh/STATUS.md",
+      "bytes": 2208,
+      "sha256": "18d8af7a3fdae6a9b53b87f077c0dcd93cf5fb6f5f2595574a6c556ac3c5ada3"
+    },
+    {
+      "path": "docs/zh/agent/AGENT_DESIGN.md",
+      "bytes": 3664,
+      "sha256": "3b8e59c26743e1a9d6ece7b6529bd310c979c5509f6424264c4a074bae7dd207"
+    },
+    {
+      "path": "docs/zh/agent/MCP_AUTHORING.md",
+      "bytes": 17087,
+      "sha256": "6d7536523e3b56267b25cfb291191bbd8dac0bdd598eb666aa6ef175ac772a1a"
+    },
+    {
+      "path": "docs/zh/agent/UI_MCP_PARITY_ISSUE_13.md",
+      "bytes": 8055,
+      "sha256": "dcb81132041756eff995c2c0bb7ea7fa808b16de8307a8e75ecbb021f1ec4c64"
+    },
+    {
+      "path": "docs/zh/agent/archive/AGENT_RESEARCH_2026-09-13.md",
+      "bytes": 25708,
+      "sha256": "fc1b1ec3523085599d445facea123b4ded4becd421679f9215638e2f2eb710a8"
+    },
+    {
+      "path": "docs/zh/guide/CANVAS_EDITOR.md",
+      "bytes": 8561,
+      "sha256": "4cb753d398b59b33a79192194ffd87547e8576bf7cd5da19cb6b5099074941b3"
+    },
+    {
+      "path": "docs/zh/guide/CUBISM_CI_RELEASE.md",
+      "bytes": 4331,
+      "sha256": "9c391f085a7a05ab3e761476974ce80725cbb2f8d0b7d3506aa83dbf0415bd02"
+    },
+    {
+      "path": "docs/zh/guide/CUBISM_SDK_SETUP.md",
+      "bytes": 3673,
+      "sha256": "77ed78d221b2fae3185589379ba90a110d1776a61bf6d86a624cbca1f127a2e8"
+    },
+    {
+      "path": "docs/zh/guide/DEFORM_PATHS.md",
+      "bytes": 1630,
+      "sha256": "ae07ded0c5db18139a2db2929078bae86ea21db3955aefb1678389c9bc39c3bb"
+    },
+    {
+      "path": "docs/zh/guide/DEVELOPMENT.md",
+      "bytes": 6653,
+      "sha256": "a4132a0b5551f7a04a0d665336627dd2c22857c575308d07910921affd05166e"
+    },
+    {
+      "path": "docs/zh/guide/PHYSICS.md",
+      "bytes": 13827,
+      "sha256": "9cb3494b8709b2759f662497b0653eb1b8393f8a883bd45fe4b9ed89677231d0"
+    },
+    {
+      "path": "docs/zh/guide/SIMULATION.md",
+      "bytes": 26491,
+      "sha256": "0b11dea8d3f8c37c60d05a229bf0bad964698ef5311f86779f4c31223a22f96a"
+    },
+    {
+      "path": "docs/zh/guide/SKELETON.md",
+      "bytes": 24481,
+      "sha256": "062d45ef71274d1276fdc03a046f7c735208973809a50e529977af1b57f6ee9a"
+    },
+    {
+      "path": "docs/zh/guide/SWING.md",
+      "bytes": 11113,
+      "sha256": "5e7a1f880cd963bf64cef523457e52ab7dc2e27f3841561998cdb24ffb6a1923"
+    },
+    {
+      "path": "docs/zh/guide/TEXTURE_UPSCALE.md",
+      "bytes": 2965,
+      "sha256": "3f2148645e62be87e15db737a5e97bdbe5831bd13be5a6842c2b486879d15de9"
+    },
+    {
+      "path": "docs/zh/guide/USER_GUIDE.md",
+      "bytes": 7488,
+      "sha256": "77fd7b1f5621638219658ded7d6c9790ce19df286fb7558f771f55c91cc42999"
+    },
+    {
+      "path": "docs/zh/spec/DEFORMER_AND_PARAMETER_SPEC.md",
+      "bytes": 3267,
+      "sha256": "62894e360e9433444f024b8c9b9c13875f0db8586062ac9c553abb641156f938"
+    },
+    {
+      "path": "docs/zh/spec/IMPLEMENTATION_COMPARISON.md",
+      "bytes": 2090,
+      "sha256": "f1c64854f7805c70d7e6f1da0f980b48a4d21f0a1e065280a49e6bbabc8d8a6d"
+    },
+    {
+      "path": "docs/zh/spec/MESH_TOPOLOGY_AND_SPLIT.md",
+      "bytes": 4796,
+      "sha256": "c21a0c93eb7b73e7888f5621bdf208c0849d5429cc81baeef5e48dd0a4807560"
+    },
+    {
+      "path": "docs/zh/spec/PAINT_SYSTEM_ARCHITECTURE_AND_PRD.md",
+      "bytes": 2825,
+      "sha256": "84685a30fe4fd28cfb43fb222cbda0719f799a2672c15b951110f1d7b6ad4e59"
+    },
+    {
+      "path": "docs/zh/spec/PROJECT_FORMAT.md",
+      "bytes": 4046,
+      "sha256": "c6713d5757fa48e27cb9a53b56c1427a9a51a2c70bafe10111d8a8fe8898a353"
+    },
+    {
+      "path": "docs/zh/spec/PSD_LAYER_SPEC.md",
+      "bytes": 3976,
+      "sha256": "50352df84667a1fa67880af51f8f76d472c12e691f875615015da7c1b1172ae1"
+    },
+    {
+      "path": "docs/zh/spec/RUNTIME_EXPORT_ARCHITECTURE_AND_GAPS.md",
+      "bytes": 6495,
+      "sha256": "e10a564983a5583dec0e21a66a56a8358003159d723b9cee1cd83329cfff19d1"
+    },
+    {
+      "path": "docs/zh/spec/SKELETON_TOOL_INVENTORY.md",
+      "bytes": 9979,
+      "sha256": "8ac1d692b6663cd4e6150085ab5f36900576f4f0c35f36d80a5a70ba5f1da66b"
+    },
+    {
+      "path": "gradle.properties",
+      "bytes": 517,
+      "sha256": "97bff1217e656bdd8fb5f693c29e992781e85264995ed6d1f675ddbb1e12a2ef"
+    },
+    {
+      "path": "gradle/wrapper/gradle-wrapper.properties",
+      "bytes": 281,
+      "sha256": "c94d41b634a5e0ff8a2f812023697b1337eebac18e9962610356a1793f72896d"
+    },
+    {
+      "path": "gradlew",
+      "bytes": 8654,
+      "sha256": "ab5c0cad16305af2e619c159c1f58dd68d07fab9c11e36701e109c0277407f7a"
+    },
+    {
+      "path": "gradlew.bat",
+      "bytes": 2846,
+      "sha256": "475c4f08cd57cf2faa819e7f36d72aa93f0ad646ea23a8f7fa3ef54dee1cbc52"
+    },
+    {
+      "path": "licenses/CubismSdkForJava-5-r.5/Core/LICENSE.md",
+      "bytes": 520,
+      "sha256": "b81e37048010ef1d336106151201a0323c3309cae44aecdedf57831fe88fa991"
+    },
+    {
+      "path": "licenses/CubismSdkForJava-5-r.5/Framework/LICENSE.md",
+      "bytes": 2245,
+      "sha256": "1d373c37742a729cfdcbbb8b2b326ec7bf0e809df918284863ec550ea6ad949c"
+    },
+    {
+      "path": "licenses/CubismSdkForJava-5-r.5/LICENSE.md",
+      "bytes": 3093,
+      "sha256": "89fe2b886070171167983533f488f4ecb05d64905b933625c94f64bc8f8f6681"
+    },
+    {
+      "path": "licenses/CubismSdkForNative-5-r.5/Core/LICENSE.md",
+      "bytes": 520,
+      "sha256": "b81e37048010ef1d336106151201a0323c3309cae44aecdedf57831fe88fa991"
+    },
+    {
+      "path": "licenses/CubismSdkForNative-5-r.5/Framework/LICENSE.md",
+      "bytes": 2254,
+      "sha256": "b367cb8009a392894796baac33dc43e4918462f457574b4a81ceb7bbf7c86803"
+    },
+    {
+      "path": "licenses/CubismSdkForNative-5-r.5/Framework/NOTICE.md",
+      "bytes": 81,
+      "sha256": "96185d14a8c74d5f4d7533ca04a30dfae0c4425901cd1be9b368fc978cac0832"
+    },
+    {
+      "path": "licenses/CubismSdkForNative-5-r.5/LICENSE.md",
+      "bytes": 3061,
+      "sha256": "bfb10ff526e0efcd67b4191b334f3cab191981ff0fa705e7990677966efbb1b8"
+    },
+    {
+      "path": "licenses/CubismSdkForNative-5-r.5/NOTICE.md",
+      "bytes": 4256,
+      "sha256": "698685c289f25e16ca4f65febe6a93583b638c2db0db3526894514a840aa2047"
+    },
+    {
+      "path": "licenses/JNA-5.18.0/LICENSE",
+      "bytes": 797,
+      "sha256": "07c938b23950ab7d47a24ef35f9f5da3a05ae164278dc959ad6994135ed59ff1"
+    },
+    {
+      "path": "mcp_proxy.py",
+      "bytes": 10429,
+      "sha256": "8f8bd0a978dce0003a8129631c7955f6728397c67e951a4117aa1d66310c01a5"
+    },
+    {
+      "path": "native/README.md",
+      "bytes": 2553,
+      "sha256": "e4bd2f9a52db6ec6c32a43a3c563178840168712c4b9a26be0bf49dc005ed44c"
+    },
+    {
+      "path": "native/build_live2d_renderer.bat",
+      "bytes": 7232,
+      "sha256": "24c28c664792cbb4820427ab494c5a0c8da428bb85162670cc0bac95a82ed1c1"
+    },
+    {
+      "path": "native/build_live2d_renderer.sh",
+      "bytes": 3686,
+      "sha256": "d94719294b5ff6f537cdc4e18a44303d906bcd1ebfa4804cc23bb7ae1a9fc19d"
+    },
+    {
+      "path": "native/live2d_renderer/CMakeLists.txt",
+      "bytes": 7004,
+      "sha256": "2b5e3a6fccb06d2ab4caefc4fc77743929e2b41daf93dc21281b80e736922955"
+    },
+    {
+      "path": "native/live2d_renderer/README.md",
+      "bytes": 2969,
+      "sha256": "eb9d14215d665a862d9d7e70e20cf15fc74c84697187668b2f5162ae616c33a5"
+    },
+    {
+      "path": "native/live2d_renderer/include/live2d_renderer.h",
+      "bytes": 5321,
+      "sha256": "d45910fced62a985c8b0d711642d91baa00131fe7f2ec5ced79a5ae1c4ed74c2"
+    },
+    {
+      "path": "native/live2d_renderer/src/live2d_model.cpp",
+      "bytes": 21552,
+      "sha256": "dada882b3b0feb43d341e1dec32ba6ed0a8ebbe2212039061b09b2b767362702"
+    },
+    {
+      "path": "native/live2d_renderer/src/live2d_model.h",
+      "bytes": 3239,
+      "sha256": "b98e8b047e650dbf002034f86d795358e86a32c327a63649407579eb56b6875d"
+    },
+    {
+      "path": "native/live2d_renderer/src/live2d_pal.cpp",
+      "bytes": 5514,
+      "sha256": "08c2b451c0d2536010e1bbe45fd89f842e5b0240fe887afac13ece9dbc20da43"
+    },
+    {
+      "path": "native/live2d_renderer/src/live2d_pal.h",
+      "bytes": 902,
+      "sha256": "a44b53c430d6215a1009bbc40baf2203de1a453052b9e3e7ed0410e428e526f0"
+    },
+    {
+      "path": "native/live2d_renderer/src/live2d_renderer.cpp",
+      "bytes": 22571,
+      "sha256": "5702f8862b58df77c1f6d1a664e4cac1a0f291f26f889bc9896d188d00b04dad"
+    },
+    {
+      "path": "native/live2d_renderer/test_render.cpp",
+      "bytes": 705,
+      "sha256": "e2301bcbcd214b310ea0d1f3aea3802c2155915c5c644346d14be6587d930dec"
+    },
+    {
+      "path": "native/package_linux.sh",
+      "bytes": 10257,
+      "sha256": "2bd6032df5dcd65feb41182e3e781b8a6e62e0a9ea8fbeb754089db93155a80c"
+    },
+    {
+      "path": "native/physics_reference/README.md",
+      "bytes": 1091,
+      "sha256": "b6ed9b5425d472a73c2c9fe28430dc85bfe48e254763a29a6822b33fce791c1a"
+    },
+    {
+      "path": "native/physics_reference/physics_reference.cpp",
+      "bytes": 4897,
+      "sha256": "2e28ac86d5a1799d949684e495ed205b5a14ad51200d16b166b3e9b371403428"
+    },
+    {
+      "path": "run-gui.bat",
+      "bytes": 442,
+      "sha256": "15d08f2d860231e43832179d21151a6a1a4b65e67074f64dce78a6196f1d8836"
+    },
+    {
+      "path": "settings.gradle.kts",
+      "bytes": 261,
+      "sha256": "74aaceb99753df046c28bcd4d5cb3a324ab86fd85cefe1f39a2cc6fb65ca2ab6"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/AppInstanceLock.kt",
+      "bytes": 1305,
+      "sha256": "01ea078fb12abe8c0a3c76544f58ddfff7425330bd1f3a1343906137603527e7"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/Main.kt",
+      "bytes": 9521,
+      "sha256": "cb2e340bdf1d8a17a6e879727c25e354d5ab37e090b0ca6dcd7e856c1fead703"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentAlphaCleanup.kt",
+      "bytes": 7904,
+      "sha256": "73a9fea3858b48347737c7a727994aa2634ae5c11aa5075a7e0f467fc645fe0c"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentAssetTools.kt",
+      "bytes": 9112,
+      "sha256": "3c0abb9d1bdeac03915efac537cb2296611a67f93cd3f205d91a2b4f76ef5666"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentAssetWorkflow.kt",
+      "bytes": 16922,
+      "sha256": "ed9d217f4521c663593c988fd86ccc0743aa9e5ed1837806a453ab4b481d15c1"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentAuthoringSchema.kt",
+      "bytes": 3262,
+      "sha256": "2e614aab999e6730bd1a6341853adce051d57254aa20b0c5682e8ba7919c7f5e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentAuthoringTools.kt",
+      "bytes": 69595,
+      "sha256": "d89a0e6fe02053101a5562a749fdeda2fc38d796c8375003735657f95e63e0ef"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentCoverage.kt",
+      "bytes": 1450,
+      "sha256": "f980c4f15092dc5af22f8694645fdd622193363d5b7cda3b2979ac275789fd79"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentMcpService.kt",
+      "bytes": 110889,
+      "sha256": "0eb53e40eebe276f1ee801c73d5182fde7fabaa13c6eae4767ff257fda52af3b"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentMotionObservation.kt",
+      "bytes": 5344,
+      "sha256": "ad861670d0ff8ce57eb0365d5e17bdbad17aa000e82ce0a24c4240f7bf38e535"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentObjectToolSchema.kt",
+      "bytes": 1833,
+      "sha256": "106204ca32f8cee0d597f0cc1bcad69d78fb8f15878e646a3c22850589fbdaa0"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentPathTools.kt",
+      "bytes": 24816,
+      "sha256": "2cd2aba1fc798e7b6e484012988cf207dfbeb4033a32616672fa718c7bc9a696"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentPlacementValidation.kt",
+      "bytes": 1675,
+      "sha256": "bbb9793c284ac89438657d9e1303c24ae2e6e17849caf5745becb8fbf52e9ce9"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentPoseSheet.kt",
+      "bytes": 5772,
+      "sha256": "b85c46bf0d97f6e7ad3d7027316768a86d39b16857e53e935c7dbda863e30062"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentRegistration.kt",
+      "bytes": 6191,
+      "sha256": "df227832242f732f24b6ba1fcbbc8edab0b3a301032f23a8a9c44141a983a669"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentRigGeometry.kt",
+      "bytes": 4365,
+      "sha256": "164df1d5a801f5e22e384f5a96fb9cdab4f0d0a089a5f1b0a84ed2ec87dfb2d5"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentRigToolSchema.kt",
+      "bytes": 5654,
+      "sha256": "3c579a9d6bbdfd5617d379e49c8fd8d67ffa0494a6dd214387e4ea03fe5baf07"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentSkeletonMotionEdits.kt",
+      "bytes": 9631,
+      "sha256": "6295808d4580695c030c73ca2f44b861a38d445f642d0250a30a7a1b38f9f544"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentSourceEditing.kt",
+      "bytes": 8323,
+      "sha256": "a6ce5edf102e601af4ed0930fd14df19ff98c59c9ab5362af313895293e72368"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentSourcePainting.kt",
+      "bytes": 6373,
+      "sha256": "7723629d2f6e39f5830f94137b590d79f9dd8b09b2ffecac4bd76757313f2378"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentSpatialPlacement.kt",
+      "bytes": 2948,
+      "sha256": "b270e01e7feff438f7ac63d614c435939db7cfcab2c65b33924fcfa55cd5d4d5"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentTaskManager.kt",
+      "bytes": 5878,
+      "sha256": "05cc10cec5e00e4c19e83163587d91742fd3e01cafc0bcc935eab38b0711d146"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentViewRenderer.kt",
+      "bytes": 20805,
+      "sha256": "df5e7ef23c2287df86faa783d1919414994e379b7963c5994c4b2d448b9f59d4"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentWorkspace.kt",
+      "bytes": 29837,
+      "sha256": "a5ed54a5b86b0ff937c1d94f4f8ecd335d3a3ba851114b0a0808574d91b36f2a"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentWorkspaceDocument.kt",
+      "bytes": 15659,
+      "sha256": "7961396b9392c87c73f39881e52445742c006de315bc70b36be932ffdf4e8d8e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/AgentWorkspaceStore.kt",
+      "bytes": 43111,
+      "sha256": "4ce60ede754f8e42bdd453ddd9f2352bf296497cabc9adc099ed1079e233f2d9"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/agent/ViewModelAgentWorkspace.kt",
+      "bytes": 129670,
+      "sha256": "87c1bbc8ba568ba9210dcebdd1e06d3026074f819a7e12ceeb05361d2cf7a669"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/AdaptiveMeshGenerator.kt",
+      "bytes": 60217,
+      "sha256": "20bac826f02a0cd0c92b3064af8785850b3a1c803387023f34f32ba68deaaa88"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/AlphaEdgePreprocessor.kt",
+      "bytes": 2642,
+      "sha256": "9623674a046cf0a2648ad2da6c708659eb006a2d21fca8de54af4c3d3f353329"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/Analyzer.kt",
+      "bytes": 6921,
+      "sha256": "65998373e225832d7b6a0601c0dee860dd943e658ab5759264fc0de276e25c89"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/AtlasPacker.kt",
+      "bytes": 5240,
+      "sha256": "0758eb096e093ecfd328fcda55cc46df062ffb491a7686978289ac96e917e145"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/BezierWarp.kt",
+      "bytes": 11883,
+      "sha256": "7625a1738414baa868d655162ca88cf2b6f7036aa0af7ac49bcb23a8dae8710e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/CanvasEdits.kt",
+      "bytes": 47421,
+      "sha256": "2314ea662a1a932f229ef7940c1e796c5013fe4c802248c62f1aabcd5a69be4e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/CanvasLatestQueue.kt",
+      "bytes": 617,
+      "sha256": "a627acb24038465391edcbee24652dcf2bc9e9aac35abb5b66c21e34a0c281cc"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/CanvasTopology.kt",
+      "bytes": 4724,
+      "sha256": "2c62a75d172d4bb290a64481697a4ca5c075398ba23f33ade62ae614a46adde1"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/Cmo3PhysicsInjector.kt",
+      "bytes": 4961,
+      "sha256": "44dfabf58ba4b7fad612f07d8c55778bbbfb20d2d50e0d631f0e92fe6452ddec"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/ComponentSplitter.kt",
+      "bytes": 8071,
+      "sha256": "0eca26a1fb2fc2c65c548ba198f954f587e2ba40421409e19e25887c3efe3c22"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/CubismJson.kt",
+      "bytes": 977,
+      "sha256": "df2839b596b48dad3f4738ab2ccc390fb04aeb8ff426a9c55a54c25f6aaacfec"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/CubismSdkPreviewSession.kt",
+      "bytes": 26739,
+      "sha256": "0e7000036debf079ad6ea25e9925d53b8c98bc040a951555beba7d76f72892de"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/DeformPathJournal.kt",
+      "bytes": 5639,
+      "sha256": "194d173ac70079519e6aa5f5c0d6768990af8ef15c94ca3a2ffb108080ad592a"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/DeformPathTools.kt",
+      "bytes": 7486,
+      "sha256": "1ddd253447a41236d3f31c5f09ccc292de0431d7e32fee9d2c6ebeac0caad183"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/GlueSeam.kt",
+      "bytes": 17583,
+      "sha256": "819147e26d024732f121803013f5f019edfb6d77e92d6f72ae716d26b37a6e9b"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/HeadOrientation.kt",
+      "bytes": 6202,
+      "sha256": "992c3b8624fcc6dbb896b44501fede3001d3d056f4720c00a0f43e189a9d777a"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/LayerClassifier.kt",
+      "bytes": 8907,
+      "sha256": "6c6bb5d92904d4e8f0d04eefedb25ca089df1ef145511e9605f2f9b85dfd8a98"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/LayerImport.kt",
+      "bytes": 5208,
+      "sha256": "d45e69ceadc21e7a55a92c897ce30fb8097a37a6797f8d8fdea4938c8eaa9927"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/MeshComponentSplit.kt",
+      "bytes": 13723,
+      "sha256": "871108035538b2b235c4d8f75275f6261524dbfea3b441154ba453ea92cc0415"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/MeshRebuildEdits.kt",
+      "bytes": 4996,
+      "sha256": "00bbb24f1828c74300a43562a8749cb20b9c04165b72e62e46c8b3a887efdffa"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/Model.kt",
+      "bytes": 11320,
+      "sha256": "ad52242dad1aed9890ca30f43c517ef5147e0385c3d7a6a252da9ae8dcdea6b0"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/ModelDownloader.kt",
+      "bytes": 12815,
+      "sha256": "a1f486a91ca0fdb854a98d404edeeefc294e83569739ec4e4cbe3f9b1bbd7299"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/MotionClips.kt",
+      "bytes": 12370,
+      "sha256": "271500fd8849a72cba4b66af0d3f525c33fbddcbb4679f898a8c171e1371c885"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/MotionGenerator.kt",
+      "bytes": 6654,
+      "sha256": "04fccbcc38f53045f1c643d32262fdccb08320e5be7f2388bfc69b8db6d69d32"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/MouthContour.kt",
+      "bytes": 7384,
+      "sha256": "074634ee2585350f1374654eacefd5468c96619a1420593223cdf1386eb50a04"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/MouthCurve.kt",
+      "bytes": 2451,
+      "sha256": "4ba66758d9da7df5d89697391d05db5d615e5efdc0a355042740e36f3a4173f2"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/MouthLipLayers.kt",
+      "bytes": 10921,
+      "sha256": "ee8bb4abfbb2c01735e6174512d9cc2c705fdd0a6da8ef0bfd90199e05183f13"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/MouthStrokeMesh.kt",
+      "bytes": 4772,
+      "sha256": "3a0aa42ea85adfe6b540300f7815d1bd6a351e0c4733cc8acc5750e90e9621ed"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/NinePoseFaceRig.kt",
+      "bytes": 15506,
+      "sha256": "a5b8417decf0eb142211ffdaa86e4d11cceb238ef7bb7cfdc70d2927939429b8"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/PSD2LivePipeline.kt",
+      "bytes": 28466,
+      "sha256": "5200c696868f09418d6de69fc7d6f113fb6cdd473e5dc1f4bea6cad6b882e74c"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/ParameterKeyEdits.kt",
+      "bytes": 17494,
+      "sha256": "e83d4663fb6fee1515612a5b92954ccfdf3cc95a7bbf10268b889d11d60b965f"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/Physics3Json.kt",
+      "bytes": 4217,
+      "sha256": "2d39a3cc210954d6527c0ac6c52907cd1d2c0bd67142a6e3829e920531f4b2e3"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/PhysicsAuthoring.kt",
+      "bytes": 9835,
+      "sha256": "5900d0a4e8063dd77af76188d2efa9c9929e8c708e2a0f5887769b44b182b05f"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/PhysicsCatalog.kt",
+      "bytes": 4355,
+      "sha256": "c12fbf214067356c1d2f7fa8eb6d6696727d2fef86838e8067237eed7b78c3b2"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/PhysicsDrag.kt",
+      "bytes": 3446,
+      "sha256": "0fe0ad46ad2668bdd690b5cc99aaed80aa222b7755add59256837bb4f82d0c77"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/PhysicsEngine.kt",
+      "bytes": 11990,
+      "sha256": "c671cc009e1e6d909d913b558120c247a12178c8e42c460824af12b9b1bff183"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/PhysicsGenerator.kt",
+      "bytes": 7006,
+      "sha256": "ce0a4bdf5d6f372b7cb22cddbed97b81c927eec5d706e96b8780cf896286b382"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/PhysicsPresets.kt",
+      "bytes": 5086,
+      "sha256": "f99f44cc976978c27fc586c84907e9b645926e98d4de9788af0d4c919a645a1a"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/PhysicsSimulation.kt",
+      "bytes": 7194,
+      "sha256": "da3a1a4117eac483ab2af97b87f5501e0d9a9a90ec9203582a7b6e7095599c6b"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/PreviewMeshCache.kt",
+      "bytes": 1712,
+      "sha256": "fc08ce02300ced77e9f99c251514757a8eb9374f37edf71d329bff2414cee5f0"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/PreviewRenderer.kt",
+      "bytes": 1552,
+      "sha256": "53a2bde7c166f59ceee6380faa459022f7d86d44ff15a66984a0327a22e29e92"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/PuppetSourceAtlas.kt",
+      "bytes": 2847,
+      "sha256": "8ea8ea2f22d9a47aa984a037b484583398e24c4b03562f4a9cfbb4be371d673b"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/RigAuthoringJournal.kt",
+      "bytes": 10699,
+      "sha256": "05395f4d5349e069af5fd6e557d3990e99bf40b5809136ddf4c72cb53a5c5904"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/RigBuilder.kt",
+      "bytes": 115270,
+      "sha256": "d49d30e8e24d80b3a9bf6b4c5917cc6207c4aff27bc2dc0d998b28119d2f0907"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/RigCommandDelta.kt",
+      "bytes": 16228,
+      "sha256": "436ce40914ee42a13cf1bba96ba255fb2b82b6eca9d7309c51b658a5a6ab10b0"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/RigEditOverlay.kt",
+      "bytes": 31018,
+      "sha256": "6320c71642da76cc5e9647a35507b876e5a66fd3ec405e9b1562c3fbf3dd6f2a"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/RigGeometryDiagnostics.kt",
+      "bytes": 2658,
+      "sha256": "30bc578d13199108bd038fd702221d80b3835a18f16ac8a22aab3e2ea556a0da"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/RigGeometryTools.kt",
+      "bytes": 22258,
+      "sha256": "f65dbe9fb89f9380930b9c206ac2d43b892e47497c510183024d5d1fe1560fc6"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/RigIntegrityValidator.kt",
+      "bytes": 14615,
+      "sha256": "5dc2b0df5cf2d33b98006d757d8547acdd6033e075622e49673fd8057b135e9d"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/RigObjectEdits.kt",
+      "bytes": 6942,
+      "sha256": "b460e7b524630965f51a58662163616a379318bce8bbed8c91052035c0b2b311"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/RigPhysics.kt",
+      "bytes": 15750,
+      "sha256": "17534fe8261490c63f24e6c4e8ba30b65dfb8181050025808dcf717a6af54efe"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/RigStructureEdits.kt",
+      "bytes": 20447,
+      "sha256": "3fcbaa793766736a260b9ab42b835a865648d09249b4e02cebc002e4f193f0e1"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/RigSwingEdits.kt",
+      "bytes": 23553,
+      "sha256": "cc02e3dd5af3d4f1217d4436ffea8d4dc24b5964529bd03dfff4070c74b4c1d0"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/RotationCreationSpace.kt",
+      "bytes": 9574,
+      "sha256": "145052e98f8b700ddc6ead031c2447931d27dc4edb69a59cc16a04175a98fd82"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/Skeleton.kt",
+      "bytes": 23882,
+      "sha256": "d2036deda79862c93ab10188354d71b7fa6ae32d81ce4fe37e3cf5032d4941fb"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SkeletonAuthoring.kt",
+      "bytes": 8773,
+      "sha256": "78393da0171540a936fbac4f3109d94faefcc7edad5a747e14463a291af1ea76"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SkeletonAutoBuilder.kt",
+      "bytes": 24141,
+      "sha256": "28750fa2ef49152e7c9e0c3703cd2dcc32c8049e474de579f77aacc00ca96bd5"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SkeletonConstraints.kt",
+      "bytes": 1303,
+      "sha256": "6fcf99cfef175187b937522df062b838b066d53cb527d791736b935d27099cd3"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SkeletonIk.kt",
+      "bytes": 4418,
+      "sha256": "cfef102df19f7e8415ced0d3d45f936fc91b44d9ab8e38b8838b229158866def"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SkeletonManualWeights.kt",
+      "bytes": 12795,
+      "sha256": "4bac0da535fa72f12007e05e69fcac51a69e874c7589c5623d00769ee9bdf60e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SkeletonMeshRefine.kt",
+      "bytes": 5601,
+      "sha256": "cbd30513d53aa85364a0888dcb81c8c26f88cf0bfd0cb92fb9203f54602cb202"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SkeletonMotions.kt",
+      "bytes": 19927,
+      "sha256": "68888f2181c622c2a49d254ba9e167ee4526b263b12c8c5ebb714a55899f217d"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SkeletonPoseSolver.kt",
+      "bytes": 9292,
+      "sha256": "de64617c229ef0cdbe38fb5971c3cada66280e03c0fe7be1864c7f30207f8b0b"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SkeletonPoses.kt",
+      "bytes": 11432,
+      "sha256": "138c4cc4a54d53ed81c1dfcb495fab7f4faf717c17cdcbb038e548296576e1b1"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SkeletonRig.kt",
+      "bytes": 72829,
+      "sha256": "5be83912de050cfd31933b91b29f0dd00e2bc1c9042acb10bbd75daf90cef0f6"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SkeletonWeights.kt",
+      "bytes": 9581,
+      "sha256": "38e131def5cab5a7921bedcf09fc56618cfe5c5de973c3658a9fbd07338267e0"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SwingAuthoring.kt",
+      "bytes": 15443,
+      "sha256": "119b01c5d61dd35596a2d60488a5501d1d88ef660416f7b1103b5e50d0099051"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SwingDeformer.kt",
+      "bytes": 14752,
+      "sha256": "8a959ca6b461c6a0a64b5f1c289fa912ffcca81e25049c104bd265d8f3592ff7"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/SwingGizmo.kt",
+      "bytes": 17397,
+      "sha256": "20544db7cc7a4753134c1eddbb2e782cd45576c3d85750f7cdcd9d9796c01795"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/TextureUpscale.kt",
+      "bytes": 12535,
+      "sha256": "ad1088fba77542a870f703e622aa71b138f318ab2e7957b14ba2823034d61665"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/VertexGroupJournal.kt",
+      "bytes": 11681,
+      "sha256": "2c5f86a65f49650991d0c30762107f7b49ef15dae390b79536e47fae667773fb"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/WeldGroups.kt",
+      "bytes": 3614,
+      "sha256": "bb9d71c6244ad843016bc5b0064c02eb6dc6df201c78111957e558dfd4f7a630"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/mesh/EdgeBandBuilder.kt",
+      "bytes": 11897,
+      "sha256": "9b693eb20004f20804cbe4dcece28dde5dab3fbc8fa293d214876dd83be7fb17"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/mesh/MeshGeometry.kt",
+      "bytes": 9742,
+      "sha256": "f2be8ace51b0bd5c18e35344a58c2d4a6eaa71cd28d572bc8a9638bfcc629369"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/mesh/StructuredMeshFill.kt",
+      "bytes": 28422,
+      "sha256": "05df1fbd9cb1977f5f2348263d5f84e1ac59840c68056580016abdb5daa0d5b7"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/sim/ClothFit.kt",
+      "bytes": 16917,
+      "sha256": "9b312d35bf4e0a6bda658098f4d55d938371dd13780dcabde4e7e854cd50427d"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/sim/ModelPresets.kt",
+      "bytes": 25813,
+      "sha256": "47e5c59a1a2dff3ac189b71c482ba44e776acfc2dcb62fc38fd792a8fc983612"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/sim/RigSimEdits.kt",
+      "bytes": 11467,
+      "sha256": "36ab28c6d46de3d4ec80e2a602e41655745d474e6512cb76259120f24a07dd0b"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/sim/SimAuthoring.kt",
+      "bytes": 9375,
+      "sha256": "8c448289c09486ddfeea633a227203db86d99db8e903012df3d1aae0a25a30fb"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/sim/SimBake.kt",
+      "bytes": 9892,
+      "sha256": "70b7f9df7443794dfb6cc72b32fc135d98fb96ac8958ff92eb17506bf7e2034b"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/sim/SimBaker.kt",
+      "bytes": 35683,
+      "sha256": "7240d38331b2b552ef2ca8572fd8473e817246bbaa681dc229a65d592c935453"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/sim/SimGenerator.kt",
+      "bytes": 11171,
+      "sha256": "99b46cc50eed12b47e5b8cd36ccd3e5b034bf7d17802e5399219ecf987d1e60c"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/sim/SimMotionLibrary.kt",
+      "bytes": 7920,
+      "sha256": "ec84ef0a947b8e2e346d6c40bf3f2b1a2e384d0c02a89311ecabff1dd4d9683e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/sim/SimPendulumFit.kt",
+      "bytes": 39529,
+      "sha256": "6d1fcf43f53a1993c6f870efa25a2892849b83a250c4794801860ecac0acae4d"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/sim/SimPreview.kt",
+      "bytes": 3347,
+      "sha256": "d7f9f10464a7adc8c9370cb8ad7c10b69c32777e561f3762c62355e9f68e3302"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/sim/SimScene.kt",
+      "bytes": 24551,
+      "sha256": "b352dcba8e031cd62e16d5cdea7fd126bfbe4c7f04570bf8ddb4ec2a1d769b7a"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/core/sim/XpbdSolver.kt",
+      "bytes": 25921,
+      "sha256": "a4e083a22c1f1d10aaa6a54a7c8f61f339d22b0b3e254cb74f0e709d006c9fd7"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/history/WorkspaceHistoryTree.kt",
+      "bytes": 7131,
+      "sha256": "5ba73c4d19c70bd4fadb03a77e4209c85cf31b126503f6e655bd8180c3bde7c8"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/i18n/I18n.kt",
+      "bytes": 2554,
+      "sha256": "48f23918ed2c45cec86aec5d173b213615b213c42bbd62c0ae34c8015ad9f483"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/project/ProjectArchive.kt",
+      "bytes": 6164,
+      "sha256": "2e9aeb945e64e414b23a0bb7870f6b3d11b809796c21a0d53ec4468a06f21209"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/project/ProjectSession.kt",
+      "bytes": 5739,
+      "sha256": "e91d10fc40c69d237e2b840a14190fc9a9cad5db7a582798f696983bc85e812c"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/project/WorkspaceStateCodec.kt",
+      "bytes": 46155,
+      "sha256": "838f8bb09d0569cf5d1f8b1256f75eea254d0c1d83b373639a205f2cb9dd92e9"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/BrushShape.kt",
+      "bytes": 9976,
+      "sha256": "38101b41e7ecf73a778ccba62bec94aa79d55d667f761bb9bef928b44ea6b536"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/CanvasCursors.kt",
+      "bytes": 2970,
+      "sha256": "0c7c2331fab51649271e92649fcecdff56192b8dc77cc55627d9743c812272b4"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/CanvasEditor.kt",
+      "bytes": 322928,
+      "sha256": "bb157e23ebca57ac91a5d87b184bbfa2664dc6db2deb25bdb887ba8e2b34fbe4"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/CanvasGestureGeometry.kt",
+      "bytes": 1699,
+      "sha256": "bd97f5ecdfba504878f8053280ab3b6419e2d5921dbbc761b445670db88b2ed2"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/CanvasGuideVisibility.kt",
+      "bytes": 1577,
+      "sha256": "af08360f34b84e962c9786a713309b9778978f08daaee655fb5e2647959f275f"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/ComponentPalette.kt",
+      "bytes": 960,
+      "sha256": "219ee681de001a65db53998d4cbd0e694972c9eb55b18e236f98abcb38330872"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/LayerPaintEngine.kt",
+      "bytes": 15720,
+      "sha256": "991c7dcff7d0d50e76bed4b71a3a9d3237ae167fbbce38e268eaca8c35d5b0f2"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/LocalizedName.kt",
+      "bytes": 639,
+      "sha256": "ddf62e86c10428d50fc95f03d7d03dedbcdcee2d1ad08a5b3ca1f5a71afb0fa6"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/MotionTimelineGeometry.kt",
+      "bytes": 5356,
+      "sha256": "88b34c2307f8b1827a885e1b6e79ebd8a878558a04b84b4f81d82b254a682086"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/PaintSession.kt",
+      "bytes": 15520,
+      "sha256": "bd19b09f047e953b2444b273e90843ad28bc154099e72890ab862d0ba858e93f"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/PaintShape.kt",
+      "bytes": 1265,
+      "sha256": "97535ef82dc86d8dca3839486674022af022e1f6e56e603511ba4a954bf0705b"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/ParameterKeyMarks.kt",
+      "bytes": 9515,
+      "sha256": "19546882fec375026b55939797f68ec08fb6f7dd14993e2d6dbfab7468f55adf"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/RigCanvasSupport.kt",
+      "bytes": 21475,
+      "sha256": "fc2d26ef89ba1d83197a9216232fffd274a3becf4636eae52a3fffe4c6c24598"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/RigInformationOverlay.kt",
+      "bytes": 20831,
+      "sha256": "98718ec7fc0c6ce2d8cf5b2b225705b84663688e434ba2299127a016967f0d04"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/RotationGuideProjection.kt",
+      "bytes": 1475,
+      "sha256": "2eb9d97f9ce14de3a48cf80bb8dd10a02b6b32cfc40b13b9c35ba09ea4083e2a"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/SkeletonPalette.kt",
+      "bytes": 977,
+      "sha256": "19327a906475ca120c3b52c722e951b19e2433f5c4d64ea0ff0f21600364644d"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/SkeletonPoseTool.kt",
+      "bytes": 4930,
+      "sha256": "222ba33fa5d6fcae4a5f5052f679ae8cf27c6f7851dfc1f8c16a2033be8c505c"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/SkiaRigPainter.kt",
+      "bytes": 8105,
+      "sha256": "b0b71767668e5abd8fc1539b275af910dcf7ab3db6ef2f84146dacde5d569df6"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/TransformBox.kt",
+      "bytes": 14841,
+      "sha256": "f01f4f61f3dc4615f648308665c3479f9800e3faa183b2cac0c4d4e08da7de6c"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/WeightPaint.kt",
+      "bytes": 3467,
+      "sha256": "eda2cbb04e21328547f017bed3c02ee1fe98bda0f7256481b83d680930a02a6c"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/AgentConnectionDialog.kt",
+      "bytes": 18966,
+      "sha256": "bb518aab3f8384bd24f9ee991d1278037062593aea2237922b8f9bad8558d2ee"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/AppTitleBar.kt",
+      "bytes": 45460,
+      "sha256": "ce43e266893a5988641cb545b6dce3de92520eae66f7790a3274e98c2fe98d48"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/BatchMeshSplitDialog.kt",
+      "bytes": 15845,
+      "sha256": "21e96e03c1958199fd54c02fa7a1d1cb87cb5f99aac1d602ea4ce19f8eccedca"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/BoneGlyph.kt",
+      "bytes": 4065,
+      "sha256": "b722c247beea46dc0a38584b75221013753422d58bdc067d3bc3ed5324d4f5bb"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/CanvasBackgroundMenu.kt",
+      "bytes": 6013,
+      "sha256": "7f6d7f7d3946bab91971d0bcf1eb3d26af9a12d172857e86c74f263cfe12669e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/ColorPickerPopup.kt",
+      "bytes": 22767,
+      "sha256": "36b6464256df2b6c46c83ceb90b128e9b90a6059be044e75ba999c94284dd5d6"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/CompactWidgets.kt",
+      "bytes": 66178,
+      "sha256": "3ae7f35e99e46bdb0d6755f2c843639ac67295216893a5081d3f87ee32216828"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/DrawOrderRulerComposable.kt",
+      "bytes": 22571,
+      "sha256": "c74966a5d06a2fc53f488906d552c54f5f67bacab7099ad29eefd3b64fc1171c"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/ExportDialog.kt",
+      "bytes": 12344,
+      "sha256": "613cf5fb12541bb6400d3430c7f23e92b6a9515f1f1bb0da65bb8461aada87cd"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/ExportPsdDialog.kt",
+      "bytes": 9366,
+      "sha256": "9b04e6694a6ee6db1b5e08ed2cc723d41906200bd9a3f9bcc4f3c2d1862c43f8"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/HelpDialog.kt",
+      "bytes": 18302,
+      "sha256": "4c76847b18c39695f06436b5ef812f54b488ff2dafda7393ef4f2a26c731a1ce"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/ImageLightboxDialog.kt",
+      "bytes": 5458,
+      "sha256": "27bf2e92f6ce42af15a5aad898a0ac7befad26c7fa506d07a58d4ba9b37aeccc"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/InlineEditorRegions.kt",
+      "bytes": 464,
+      "sha256": "016d821c560dfb8457525f6e12e1914e124855e4887fac7bd446f77535bfa580"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/KeyCap.kt",
+      "bytes": 3937,
+      "sha256": "16cb0d8f87173ee813f1d503bcb6ee096dd8313531d81143fc5bfff6a7f132d6"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/MeshFillParameterControls.kt",
+      "bytes": 7113,
+      "sha256": "c768d566dd24f4c0c2efb0b32f58b3923e0f24cf6847504840b1493a056be695"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/MeshSplitDialog.kt",
+      "bytes": 8247,
+      "sha256": "f87ecbdfa21fcb8ac4f48e56b0b76981c36d13f14b59e9f32cec239ebfdeee60"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/MouthSettingsPopup.kt",
+      "bytes": 10561,
+      "sha256": "9ffd1737ff97675a33b22938f28ddfe7eb41e0dbde9cc5bda863db1990e17b81"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/ProjectLocationDialog.kt",
+      "bytes": 13082,
+      "sha256": "62d752001fc8c818b31e5ff421a3e708483dee7c9cd8063ce4474c3fbb78b4a6"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/RebuildMeshPromptDialog.kt",
+      "bytes": 3928,
+      "sha256": "a511441a98b47821fc44ecfaafb8bd333a9af1e20e4385e94388137959c02a1e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/SettingsDialog.kt",
+      "bytes": 28959,
+      "sha256": "5f0b5d5163fc17775e0fef9edab849d544cd6393887a2327c80da0cce423296b"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/SwingSessionPanel.kt",
+      "bytes": 13058,
+      "sha256": "10626d4dd9c7e5c50ac335bb4e4e3108135827b2f57e9f652e07814d3cc583ba"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/TextureAtlasSettingsSection.kt",
+      "bytes": 5491,
+      "sha256": "a35cb201a28f78c9ebcec2c9018ad2d00c0970edad5213300235b83b8b96fd0f"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/TextureUpscaleDialog.kt",
+      "bytes": 14457,
+      "sha256": "8d2edefe8d5a18d876d725b352e76e76c1a0075aed243ccbe1ee33bcbdbb7041"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/ThemeSettingsSection.kt",
+      "bytes": 13038,
+      "sha256": "587179cb60b7c25504ab8e719095ee53a56ef68f3c1709c46cd5a19a68bf5008"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/components/ViewOptionsMenu.kt",
+      "bytes": 18316,
+      "sha256": "f12cd8aea1e08b8b475ae63124498c4643001464e5bf43f34598deebef609c4e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/AppSettings.kt",
+      "bytes": 12534,
+      "sha256": "3c1054d2bfa0b0026a5b9b97f66173faaa142bd94c928c2ef13e65e22009c957"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/CanvasBackground.kt",
+      "bytes": 1122,
+      "sha256": "1321580d3413e94b38f78d523dce85f0370164de8855f8fc87108a6ec0960dd8"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/CanvasPresentation.kt",
+      "bytes": 14714,
+      "sha256": "01bda254b9a429222af55be3c319b8e88789e84da4120634aefb1eb1e30677ed"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/EditorFieldSessions.kt",
+      "bytes": 1817,
+      "sha256": "36e77d669d962c03eb977184e4aab24a7de669f1721051f9203e3e32d9f05cba"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/FramePacer.kt",
+      "bytes": 936,
+      "sha256": "6fde81712354cdd565932a8b3d8c772e91b806be3b1ab8c55abd9eaa02ea4a81"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/KeyBinding.kt",
+      "bytes": 6433,
+      "sha256": "6b257e3580fd316d25fab21c95e7ecc2f1e76f30734609f0c13530c5eb133854"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/MotionEditorState.kt",
+      "bytes": 9146,
+      "sha256": "614c812c7e91061dbbc860aabbd745b6c9ec8ef76a73bb3c7b6b6e0d159fe7ab"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/PSD2LiveState.kt",
+      "bytes": 31514,
+      "sha256": "b6dd187cf10208a7e0aa17678307c2a35c04c935f2a25e8062be80bf66e65f07"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/PSD2LiveViewModel.kt",
+      "bytes": 239093,
+      "sha256": "0a4475a7aa71e538a6619452304f6639a53277adac3d3d947ada74132a12e57f"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/ParameterSnapshot.kt",
+      "bytes": 603,
+      "sha256": "e994880ffd4257c9b22448ef9dfd0d9ff647a97b8e2c609fd44612a3d491d015"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/PhysicsPresetStore.kt",
+      "bytes": 2138,
+      "sha256": "5c3080ee18102255ff812e3b2e170746f74a689d527504fcf1864659995d1e0c"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/PreviewMotionPlayer.kt",
+      "bytes": 3493,
+      "sha256": "887708e21c22c8458be18d8bb6c84633ca40180de8b272f134ab1548e929ae88"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/RecentFiles.kt",
+      "bytes": 1481,
+      "sha256": "19cc4ce95612e55f572bd3e1138dc217e0e40d24812781865dc62d953555e08f"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/ShortcutRegistry.kt",
+      "bytes": 20894,
+      "sha256": "74c3e162cdaa141e0eff35f48a11d62711ce37ecae543b11960364537daf0d36"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/state/TaskProgress.kt",
+      "bytes": 1903,
+      "sha256": "b8e8cdaf3d4eb22f1fe56c8c91f64a41d057d1d0dc92420a1685a5eda7ee6e70"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/theme/CompactTheme.kt",
+      "bytes": 7131,
+      "sha256": "b65b2343e48a0f0ade5b1168fe91f5008d7e6958c92476b92a28af8b4e0e1285"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/theme/FrostedGlass.kt",
+      "bytes": 2381,
+      "sha256": "f866ac5e4f0b02734a5b06016e5a7f9e17c968a1dc747613f88c3136ec8ebc14"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/theme/ThemeCatalog.kt",
+      "bytes": 15968,
+      "sha256": "2f17a6bf71c6069eb39c8346921d711c24cdeb87538135d781b77cd0cf55cf06"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/tutorial/InteractiveTutorial.kt",
+      "bytes": 22753,
+      "sha256": "28c9521ca448e77298013c999eb6c4ae19564c7ff2ad4e625eda4ef8e74b21b3"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/tutorial/TutorialGeometry.kt",
+      "bytes": 2174,
+      "sha256": "d707b906c6b840ab0e0a5f1d60f9ba6110119728306571c125624ae0d286b88c"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/tutorial/TutorialOverlay.kt",
+      "bytes": 10534,
+      "sha256": "c812f879797425d983015c22b7cabfc6fee70b8b5f4c9f77c511da074c0e3113"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/tutorial/TutorialRichText.kt",
+      "bytes": 3571,
+      "sha256": "d5d2fe055fcfd922f69270e9ba39c5968e663c92638d2e40e1b9ac5aa6e14241"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/tutorial/TutorialTargets.kt",
+      "bytes": 2495,
+      "sha256": "88037d89c44d8d759d54499ce2fb431aebadaf1eaa09ddf937fe3e65563baa80"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/utils/DesktopDropTarget.kt",
+      "bytes": 10927,
+      "sha256": "a34bf9d6ee2df4b29dd0a5c0c01152f9500a57b3cc99d2f8efd7477416241690"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/utils/DesktopUtils.kt",
+      "bytes": 4040,
+      "sha256": "b4774e47100bbc89da562aa13c371e235cb273e32b2434e8d7e18cdaa6c4404c"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/utils/NativeFilePicker.kt",
+      "bytes": 13189,
+      "sha256": "87001ed7a2907a01f548fe894bcc896a3212de13190c1fcbe3026342d2043c7e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/AnimationEditorView.kt",
+      "bytes": 47899,
+      "sha256": "cb03d61bd4a0b7a9e50ca369a9af16074cd0d945315edeb24c83731b98b76c06"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/AnimationPanelView.kt",
+      "bytes": 26090,
+      "sha256": "c031115322c8ee9cf43b2496cc74c2afa4ecafdd83fa9f0df1f53e46b1dc25a0"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/BottomLogDock.kt",
+      "bytes": 21381,
+      "sha256": "251b9a87e518794dabbc0906babea31c70f5db8daada75ac49b0979e88ce06d8"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/CanvasContextMenu.kt",
+      "bytes": 59387,
+      "sha256": "ef82642f1dde4cb90667a7ed7d6d79d728951078451459a9bedbb2de2b4e59df"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/CanvasEditorOverlay.kt",
+      "bytes": 182452,
+      "sha256": "8fa6e20f065376091a33f53ffce3353644669026b1f93d225a0a973213316fcb"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/CanvasModeMenu.kt",
+      "bytes": 20053,
+      "sha256": "c5cac31bd8ac0fea1cea4c1729fcc0a47d855be3699100774e64c4ff3c41dc31"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/CanvasPreviewToolbar.kt",
+      "bytes": 10671,
+      "sha256": "030125a34196ddd12240f66dfb417757202556348b05aa009651173b9e47d7e1"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/CanvasToolIcons.kt",
+      "bytes": 28314,
+      "sha256": "a8a05ab2ac4d947d0f5c36e996492f41d35448436deac82f5755c394b1a21b4a"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/CanvasViewOptionsBar.kt",
+      "bytes": 10338,
+      "sha256": "2e931e1bfd3d3bf4755dc8964dcd690976e276c2cc9326a6f16be5e1c326f91d"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/CanvasViewportComposable.kt",
+      "bytes": 78693,
+      "sha256": "16783fab66ce4d0477c13d947c409475b59ab3802efaf8ecebd55479557a07ca"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/DockLayout.kt",
+      "bytes": 14968,
+      "sha256": "9cf3cefce6a55d2b2113e342e14e7d769b0faf8d90d961d426f512b62c5ee74e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/DockWorkspaceView.kt",
+      "bytes": 55146,
+      "sha256": "60911eeef2668c7a5b8ad3cb82535a2246520bb660051d34034ceac70132bba0"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/EmptyCanvasStart.kt",
+      "bytes": 15426,
+      "sha256": "788a7b0ff05564c9a83f3d8010db57fe2f488260756de91b6fcacf0e9192f3b7"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/HierarchyMeshPreview.kt",
+      "bytes": 4991,
+      "sha256": "7aba28c555475488c18b283508fa1c5bbe8f91bbdcf6c6bab420e05872212049"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/HistoryTreeView.kt",
+      "bytes": 45417,
+      "sha256": "ce3f2c0cb71b77c45f29e416b7cc1efe7565353ae872679fb99e76cba9b9c5d6"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/InspectorPanelView.kt",
+      "bytes": 54133,
+      "sha256": "ed07717893f303c957688b23e64db8fa741e79cf5ea89b84559e393f1a239cf6"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/InspectorView.kt",
+      "bytes": 29184,
+      "sha256": "d003eee867e881d9fcdea4cc0ffc8fcf1a4286f81486a684dfafc4c6f6de0d29"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/MeshPanelView.kt",
+      "bytes": 15623,
+      "sha256": "df2bd95177681957e80764a9a61a7a4fa147aa61d2416c57b3eff68aace6ee45"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/ModelPresetPanels.kt",
+      "bytes": 17059,
+      "sha256": "864c3f3dfc5e26fb8dd4f44cc50726eceaee75244cfd0a522ca3de1308d70880"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/PSD2LiveApp.kt",
+      "bytes": 36583,
+      "sha256": "3dabc62841cf18691d9e8a1e98c4fe6dc29c69b1a0a1f9596849fc073bbd9e8e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/PanelChrome.kt",
+      "bytes": 16099,
+      "sha256": "528fe735f9590b22a8ad1073493e76fe9ec8a86651bebd7c9822f1a83d31831f"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/ParameterDefinitionDialog.kt",
+      "bytes": 14959,
+      "sha256": "9cbdfb14d484932945f2c0007729ddfde0a2f994031a7086a5dc74d552892467"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/ParameterKeyAxis.kt",
+      "bytes": 17778,
+      "sha256": "f652420e4f6fd6445489c2cca70b4752104217cc2eb438e6727289d1e254e63e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/ParameterKeysEditor.kt",
+      "bytes": 6314,
+      "sha256": "f9bba4d4a2673245159ca6f27ce5d904e3e20d1d61c56b680443d43aec5b5f59"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/ParameterSnapshotBar.kt",
+      "bytes": 8888,
+      "sha256": "25d6e69887a9e895cd4c86e696ede27e77d418be9f53f745716619547f8db9c5"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/ParametersPanelView.kt",
+      "bytes": 82283,
+      "sha256": "ccefd4b21377b4b3715109872ff55f1485f56efdc5174aafaef333d7608f6b13"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/PreviewInformationState.kt",
+      "bytes": 1049,
+      "sha256": "24ba19bbb60639f3cef7fdc68886ee000f0a23bc78ed0ec213c013f56e09e759"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/SkeletonBindingControls.kt",
+      "bytes": 2117,
+      "sha256": "e183137d6c7d3a742cb86df2ea92ae42b50f60bea095d0d32b64d0bc54289bc6"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/SkeletonIkControls.kt",
+      "bytes": 3859,
+      "sha256": "d6c663da6a144c4c6f92d26dc504452a4fab9da8710ce6924bd5359237b45ef4"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/SkeletonSavedPoseControls.kt",
+      "bytes": 2466,
+      "sha256": "e28af8d2da8554060089616f585498593d0fe1fe0305a4cadc33c76e3f2029dd"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/SkeletonTransformControls.kt",
+      "bytes": 5568,
+      "sha256": "1ebe8eaa9eabbb853c81166702a2f131ea92be40939ecc10f53d408c96c2466b"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/SkeletonTreeView.kt",
+      "bytes": 27889,
+      "sha256": "a1071f1b3743c83863fca36bf3fcf25097c624b7481b6d93e978a2696d7828ed"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/SkeletonWeightControls.kt",
+      "bytes": 7526,
+      "sha256": "53a40b7d8f996f30298f012813945fcbc5a9ce0c0bf95c6f406f5c10433aba75"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/ToolDetailsView.kt",
+      "bytes": 79772,
+      "sha256": "453276a3721ce9bdcbd860859eb7220c5f1b081148d48ca58337b46d4d5a1638"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/WorkspaceEditPanels.kt",
+      "bytes": 6085,
+      "sha256": "a9a5ab1b014d576f86fd7a20f0464d980a9d34ebae31c853222aaeaec5f68b83"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/WorkspacePresetMenu.kt",
+      "bytes": 13978,
+      "sha256": "2b6ba3aee4791a57a4ca7d70ac57df2a0a9af4c8e8e1c5722eb586a944bc4344"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/WorkspaceTabStrip.kt",
+      "bytes": 17274,
+      "sha256": "c1922f0beabe0944faff50330d494db8a1f3c7d43657d1a9a0b46a8258ae6fdf"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/WorkspaceView.kt",
+      "bytes": 72222,
+      "sha256": "c677d4c8795e5a48d4701d95a807b1d8e487fff3e7a36b17362ea67e876289b2"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/physics/PendulumCanvas.kt",
+      "bytes": 20638,
+      "sha256": "50a667a5257ede8a01eaef548530ff77bccbf51caa60cc1f980864310f019a13"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/physics/PhysicsAdvanced.kt",
+      "bytes": 6052,
+      "sha256": "65def904bfa350b25141e1dfdf539c72af0eb6d89dcaba259b3654375eaafaa0"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/physics/PhysicsGroupEditor.kt",
+      "bytes": 12450,
+      "sha256": "7e831d7e7d2ceea1f198b3d045c5b248dc4c288c7ac50550e5818cc305d1f759"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/physics/PhysicsLinks.kt",
+      "bytes": 9811,
+      "sha256": "8b5b7c845b1de77c28ccc064ac6704f3415d3f72602122d85fcf084927f8f56c"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/physics/PhysicsPanelView.kt",
+      "bytes": 16800,
+      "sha256": "fae7d3cd15fcaef7c9340ea49fda3ba668d0e82e32305d61d7ec064e69114d7e"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/physics/PhysicsPendulumSection.kt",
+      "bytes": 4115,
+      "sha256": "d386a27d84be37c46a71070ce7d9e438d3c8ea1197ec33921a32d20b0ddf6104"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/physics/PhysicsPresetBar.kt",
+      "bytes": 4128,
+      "sha256": "f760f31da8a789f8ab087122453d3797d6d3d4f0bfd9c7cabe8f32de857bb8b7"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/physics/PhysicsResponseGraph.kt",
+      "bytes": 4296,
+      "sha256": "e8ebbb65beda7e7e5f90a4ceb3ced33c5a9876691ab84ab47a1c26d242c33cef"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/physics/PhysicsWidgets.kt",
+      "bytes": 3770,
+      "sha256": "03cda1fc143b9cb1adc2c9fa4aed61623e446201035252526b2131f8d79ee573"
+    },
+    {
+      "path": "src/main/kotlin/io/github/psd2live/ui/views/simulation/SimulationPanelView.kt",
+      "bytes": 29525,
+      "sha256": "c2dfcafff2b69444be10c638b11cbb694560f7062d6254071d372bfcc14e39c3"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/BlendShapeAuthoring.kt",
+      "bytes": 20902,
+      "sha256": "5c1e50eaa6dee03bfd5b128372a6c40e9b039e3efc5d70240a7c9e46b0c264f7"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/DeleteEdits.kt",
+      "bytes": 14662,
+      "sha256": "85c47f58e23a2a0df36295ca5c7dde335393447f196bd9418685a1515f197abd"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/KeyformChannelEdits.kt",
+      "bytes": 14366,
+      "sha256": "4fc030c3c2378fd99079eee575464a02b4a91844a3b431097514af60c73d969f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/KeyformGeometryEdits.kt",
+      "bytes": 12123,
+      "sha256": "46c376c9daab91bc0a5e16b3fcc39a0f913d863fe2789978a8f9aee3bf6ca77b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/MeshElement.kt",
+      "bytes": 2175,
+      "sha256": "aee5acd7938880a9666114d1a545a7dbfb0a4f40c55a8bdb932efd179e885f41"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/MeshRefinementOps.kt",
+      "bytes": 43324,
+      "sha256": "6a01e827c4b4b278a1dd37aa9a6f49c2e96ee56826cf4f1b505941c837a1c8fe"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/MeshTopology.kt",
+      "bytes": 13637,
+      "sha256": "bc99b25d4fdae34e47253d93193e3aae3a1fcfa2448d3c493bab38b9f9f909ad"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/MeshTopologyEdits.kt",
+      "bytes": 12224,
+      "sha256": "ba66f10ec3b4e2d8d0cfcbba0f16611bb7e2c78192c34fb7dbf1869f8de43156"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/MeshTopologyOps.kt",
+      "bytes": 20685,
+      "sha256": "3931ad65631b05049dea440d636f2ef4f8981c8d1058ab05cf4963b47bbfa5f1"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/ParameterCrudEdits.kt",
+      "bytes": 13172,
+      "sha256": "c343fe71fa7a30fc505b0c414ff925e6371aff3073fb6affb72a33361a025aca"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/ParameterEdits.kt",
+      "bytes": 5549,
+      "sha256": "528cc7687d01fde2a3178fa7421f2698ccdded94a491fa3cfd4d5d58a871376b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/ParameterPanelEdits.kt",
+      "bytes": 14306,
+      "sha256": "d144d6628e6e4af6c128fba0838139e09a6cb0a8bd257cbe0a9c0215f17b2ea6"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/Pose.kt",
+      "bytes": 509,
+      "sha256": "5ead15a13090dbfe01d8ae7b3a228f6b56070778048dfc24eaa2272fd714cc5c"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/PuppetModelEdits.kt",
+      "bytes": 33839,
+      "sha256": "a9c20684015da7be34c6711d347c4f15578ec5c380d2f40afdb950818f1c27ff"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/edit/StructureEdits.kt",
+      "bytes": 6012,
+      "sha256": "b3b89b6d8e35dd6c8e4c14c93f9c9a068c14f8419ed420ac1f7c6b454455e388"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/FileKind.kt",
+      "bytes": 2750,
+      "sha256": "783321f0f954ba21bd21a0d34b2a2879657e22cb1f558f3a73f1ce313ea5c1fc"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/FormatCodec.kt",
+      "bytes": 3578,
+      "sha256": "6223b15e5c56e57ac89e4d87573c4797e506f38f4ad8fbe4e2bc69ffe3ea53ce"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/FormatRegistry.kt",
+      "bytes": 3832,
+      "sha256": "8d0a25f3cafda76e2e7e2c7b9b6dd4c81caca6785fb0d91016936824ceac06a0"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/FormatVersion.kt",
+      "bytes": 850,
+      "sha256": "e2830b0f7f19bb290f4084552e35c1f2b602618878a06428cf1028e2dae9cc4e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/art/AlphaAnalysis.kt",
+      "bytes": 10349,
+      "sha256": "21c5d6c489d16baaa77d0273f3a1e3caba18d83412ab399a53c5cea6599477e2"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/art/AlphaContourTrace.kt",
+      "bytes": 9849,
+      "sha256": "ec5cdff63c4c3eb224db64e2fa9c77ae3eca4e7e9f5c459ad750c3f2470760fd"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/art/ContourSimplify.kt",
+      "bytes": 7187,
+      "sha256": "ffd173e95109588bfb9dac4b69c94ab55d1d378597d0d3557f73b207571efd15"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/art/SourceArt.kt",
+      "bytes": 13609,
+      "sha256": "f4f47cdd661ed93ea45cf4088f63f76eb8a46b01daa73e58e63f2aa8d29b3383"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/atlas/AtlasPack.kt",
+      "bytes": 27944,
+      "sha256": "2a0dfad3829e94acc4b6c551b5d9af0a4fdaf947302a158741f817e35ad78bd3"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/atlas/AtlasPageCompose.kt",
+      "bytes": 32684,
+      "sha256": "6ca6926e15dc968db79668ea8a8c59865d5f5dd536876979a5c1c28b58952467"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/atlas/RectPacker.kt",
+      "bytes": 12437,
+      "sha256": "78cb57915cd8df61abe0993cc19b7cc6f5af1c49980247d32586c05554fa2d2b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/binary/BinaryText.kt",
+      "bytes": 4123,
+      "sha256": "1b223a317c0f899fc229c6b39d80ca01c7506f910fe5d79fce892c55afea6365"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/binary/ByteReader.kt",
+      "bytes": 4606,
+      "sha256": "afae0e5afca5d793965b1ec822ba2d60719ed96ac300ae0e5290eb903c0fbe3d"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/binary/ContentHash.kt",
+      "bytes": 795,
+      "sha256": "17b7db748c317f413328d34aeff4b6cd46ed33d681ecf72a9dbf1afa1aac9f2d"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/binary/Crc32.kt",
+      "bytes": 1520,
+      "sha256": "6beb3e20e09ec6746c7d113ffc634bc0ebed007577675b2ca488fe9f44c17bbe"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/binary/Deflate.kt",
+      "bytes": 5182,
+      "sha256": "e075852ef2a680bdedc187b50aa5a7799d6c3dbbea143694bb20b5cd7583764e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/bmp/BmpCodec.kt",
+      "bytes": 10483,
+      "sha256": "83a0714ed34b118ebb84e5ce0f348b173f0426c9853956afc83de06bacdace0e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/ClipBlend.kt",
+      "bytes": 2196,
+      "sha256": "1430a66e5fb2c4f1de48189a6aedd6458194478d3f956dfb12c091ff5434cceb"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/ClipContainer.kt",
+      "bytes": 5075,
+      "sha256": "15fcf232d0a4319688831716ea9881dd5f7f804e67efafd0eac7420bae03e7ec"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/ClipDatabaseAccess.kt",
+      "bytes": 955,
+      "sha256": "ab3da42e025be51d334886f4dba49603add5748eedb1ae4c406980ba44244709"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/ClipLayerTree.kt",
+      "bytes": 11699,
+      "sha256": "6f576210a8b3a68182af41120e63a6431fc77bd9697ca4e553221d443bf291e7"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/ClipRaster.kt",
+      "bytes": 19821,
+      "sha256": "38cb29906b5f65e4bf065c261f0bb38c64c143c93f6c5a1b6f53812f1d50a029"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/ClipReader.kt",
+      "bytes": 8954,
+      "sha256": "0cb2bd564fbaf6d3e6e7e5956d8d6b0900492746ae30d5290774f2e9e8c35b79"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/db/Canvas.kt",
+      "bytes": 212,
+      "sha256": "2899c93a0e77381f75629ecbd2c810fdf717d45ecb7a4e72be67ee7f508337fe"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/db/ClipDatabase.kt",
+      "bytes": 635,
+      "sha256": "b9ce4f19f91dfb8b22d939a9f4f984b380df331b8bed0564fa7b7e27711268c1"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/db/ClipQueries.kt",
+      "bytes": 4692,
+      "sha256": "a02f0c4452fafd41b83f7f9076a68fddf6c7df25f09caa0227f3550829e2e338"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/db/ExternalChunk.kt",
+      "bytes": 178,
+      "sha256": "5a403da94f3a9215e22b1715efa2872ddcc5446375859d05bdc1da9c9e4786a5"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/db/Layer.kt",
+      "bytes": 752,
+      "sha256": "e455c8585b8c4ee0ec0d9ce4705d15ac89e64da7270537b9dd1ff6e37708babe"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/db/Mipmap.kt",
+      "bytes": 146,
+      "sha256": "065908d17a3e19c23ff655fb995cc52fbe19e14f7c2c61524b914afb0a416d52"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/db/MipmapInfo.kt",
+      "bytes": 145,
+      "sha256": "0b37129a1e5b1680d30d32f35f9cefa753383329d3b3ba3272f0002a9b06c108"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/db/Offscreen.kt",
+      "bytes": 209,
+      "sha256": "5b3f3392fb0c94a3378bd4058e5c8c35cb36906cca6e40eb3dbaf055bd408794"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/db/SelectAllLayers.kt",
+      "bytes": 646,
+      "sha256": "469d433f9c0fedf6a1e02c9093444c4603bdfee15e0a2c630dc5de9e3a87c5d3"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/db/SelectLayerMaskRasters.kt",
+      "bytes": 221,
+      "sha256": "9d5aad2d48b0d8833f44e7bc9abcee426b2fcebbfe868fa625506609390cd25e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/db/SelectLayerRasters.kt",
+      "bytes": 217,
+      "sha256": "689a037fd9d0921b36606b4eecab790b843aa345f86c2c6afe686a7ba8d2655e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/db/SelectTextLayerIds.kt",
+      "bytes": 122,
+      "sha256": "2d8ac0d9a9da7947b9d259e03d3ae5fcf16e44478cfd371947455799b3192d8f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/clip/db/format/ClipDatabaseImpl.kt",
+      "bytes": 4742,
+      "sha256": "619d59d43784868a3d6f9203e4ba35144ad49ad53a31be267b7d40ca8a023d8b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/Cmo3.kt",
+      "bytes": 14451,
+      "sha256": "f268694698043ff5ddc9baaf6864c7ab90a857a951f4f36d00443fd9faff11d7"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/Cmo3Author.kt",
+      "bytes": 6710,
+      "sha256": "c47878e2f2429238eb5d854f5711b299b54a967236de1420e59083e1b5c99a2a"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/Cmo3GraphEditor.kt",
+      "bytes": 7447,
+      "sha256": "beb475188d9142e374b33d95cf15eefc110c904d1de40aff66d9d93fbb327fd9"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/Cmo3PiTables.kt",
+      "bytes": 24266,
+      "sha256": "dc0e73a0627c47cff9bfa80ee3133b113e97ddc2f4f64ca66ef726ffbe638b33"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/Cmo3TargetVersion.kt",
+      "bytes": 3653,
+      "sha256": "6720abc193f3467ad2c1c04cf5bd3db91e6699fb039863ea6d0688c15b482b51"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/Cmo3Version.kt",
+      "bytes": 1927,
+      "sha256": "9b365000a362223afbdd95b4767c79423d465d92c0440ffefddda92e7eb5eeb9"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/caff/CaffArchive.kt",
+      "bytes": 3374,
+      "sha256": "40aafeec2b164687988dcd5b1a0066f918bec2753b845583e18630d4ed023b2b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/caff/CaffCodec.kt",
+      "bytes": 10693,
+      "sha256": "6696011744a1cd7645c1fa6c7dde67327122cc76f56b0ac62ffe32dd7ec81499"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/caff/CaffEnums.kt",
+      "bytes": 2335,
+      "sha256": "62e1e9f314ee2ed7df0a084662bbba23d031308e62e4f761aa950eeaa05ad331"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/caff/CaffZip.kt",
+      "bytes": 10403,
+      "sha256": "78f18b02706008c6e244cdb78474d0e94d535c66202fb83bc726c96ff60e09ed"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/io/BinaryReader.kt",
+      "bytes": 5021,
+      "sha256": "e3d3f5a3dc0980357d3e8c51918059a35b28a74761bfd90950ef3f8f5cd29c1f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/io/BinaryWriter.kt",
+      "bytes": 5618,
+      "sha256": "af6c95242a05815a82e80c3639095969d6360af3a0774bd1b2ac914f86425158"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/model/custom/CustomClasses.kt",
+      "bytes": 8299,
+      "sha256": "56c8dbbf3199e2462adb3d468654d5ba09bbd76c31393815545caeb789168650"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/model/drawable/MeshTypes.kt",
+      "bytes": 2168,
+      "sha256": "b9cd475091c78a304042520d1309b856a44dd096574f135e1661d27d20b8e1ec"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/model/gen/GeneratedModel.kt",
+      "bytes": 35950,
+      "sha256": "cdeeceedbf1b2a812dc8ebeb0307d0b2090b335c951bb85cfb800ab936183899"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/model/identity/Identity.kt",
+      "bytes": 1222,
+      "sha256": "6baff993f8d9545c9b767887230bdfccc7b84837123cbc3bccd9fb7dd919423e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/model/type/FileRef.kt",
+      "bytes": 694,
+      "sha256": "7570f578850da7c91f28cfa2ff2acfe994c87c2f5630709abaa9ea118ee302ed"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/model/type/ValueTypes.kt",
+      "bytes": 1711,
+      "sha256": "4b584614a7e5ea87f6687bdc8ac9dfdb0866234b2efd1daaab0f4adf3c59f189"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/serialize/CollectionSerializers.kt",
+      "bytes": 6084,
+      "sha256": "d7de398cb4f190d95853405e4ee970c4f198b94b7fe8a1a285f5030bbeec7f64"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/serialize/CubismEngine.kt",
+      "bytes": 1253,
+      "sha256": "4e3793036294240c06bd84c44a9f6a65d2cd483e4fc3c15fe2c4c79895131b1f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/serialize/CustomSubsystem.kt",
+      "bytes": 2746,
+      "sha256": "d79c6e9f138a04888cf3ed90b7820437e1b421697d9e5715c186ac075e6d61e2"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/serialize/IdentitySerializers.kt",
+      "bytes": 2956,
+      "sha256": "90dd2189bcb6821a16fffdceae8204f3455dbdc0d4548969907f53544ffbe523"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/serialize/MeshSubsystem.kt",
+      "bytes": 747,
+      "sha256": "81315de201be242584e941021e2cdaf56c57df92fb7fd7d88d59f5caa23e8ab8"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/serialize/ModelDocument.kt",
+      "bytes": 4520,
+      "sha256": "bfad28248f3e54a6605b9bac43611309bfa6b0532c70009c0d63a6f7a4fde723"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/serialize/SerializeEngine.kt",
+      "bytes": 31113,
+      "sha256": "03208ebd4b321229aa8325dccb7405464d86de8d1ef51305880bb2cc66fe365e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/serialize/Serializers.kt",
+      "bytes": 11578,
+      "sha256": "b335847a2c15ffa94e37fc4c7425d652f3b8694130c5d2427e54149094d87b9d"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/serialize/ValueTypeSerializers.kt",
+      "bytes": 1869,
+      "sha256": "b122d52d397dfcc6ea176fafc670d83987b42235cabe394980f909fd132c9b88"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/serialize/Verbatim.kt",
+      "bytes": 1957,
+      "sha256": "6ef6bd1ee5eb58da77aaf3ddd45072efea547c074178a960711ec61454692599"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/serialize/annotations/Annotations.kt",
+      "bytes": 2817,
+      "sha256": "1c19c4256a0cc63a2202ad9ae09fae7012cf7da10bc2d8b2d3003fbb556db983"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/serialize/gen/GeneratedRegistration.kt",
+      "bytes": 7897,
+      "sha256": "e268e8f84d29bb8480f5bc64466a2ee15fb8c505ad2cae09441f3f4c2c4cf2c9"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/type/CArrayList.kt",
+      "bytes": 1106,
+      "sha256": "7093da027b68c09d321f38c2982a9e38cf279a8b1531f5e097b49085e89a5e6e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/type/CHashMap.kt",
+      "bytes": 1275,
+      "sha256": "7f7b0ad05f41b69765b65b8a67fb03cd1dbc98e2011df54bd05d7f79c13bd0b6"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/cmo3/xml/XmlCodec.kt",
+      "bytes": 1902,
+      "sha256": "83a74403fd0ac51bebb2180010a290ebb99dfca7d06fd2b5ce3cbcd1dcfad860"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/jpeg/JpegConstants.kt",
+      "bytes": 4881,
+      "sha256": "97eef7147d36e31da3f63e1c56103f4bd9b0db8cad23b88f9241b1e80134d63a"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/jpeg/JpegDecoder.kt",
+      "bytes": 43153,
+      "sha256": "2d8ec7f856791c0e42e43daf624f2b61f65725bff41f90e47044f120723ff866"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/jpeg/JpegHuffman.kt",
+      "bytes": 5997,
+      "sha256": "072a17b8afd6e4aeb664aac538b6cbb8427330fa4cefe37dbefef4a68efe1f05"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/jpeg/JpegIdct.kt",
+      "bytes": 8284,
+      "sha256": "53d8b249480715b3a5d478d68316866796e2e4426c97c3da36e9e06b8404bcab"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/jpeg/JpegReader.kt",
+      "bytes": 2763,
+      "sha256": "b7377f14b2852a1ab5da3724c9405ef90d96ddf7b17dfe7098ec1aafa6949863"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/kra/KraChannelMask.kt",
+      "bytes": 2496,
+      "sha256": "242b69decc35e302dfdfcdcfd2001e4947f5abcfa2e7c542d1f44108adcc2262"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/kra/KraColorModel.kt",
+      "bytes": 7244,
+      "sha256": "08f8e45462599978fc65462614f80df9b6c78dcea58c89a40c945c93f267f012"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/kra/KraLzf.kt",
+      "bytes": 5459,
+      "sha256": "c013af35fd2274039afb7422339d31f7714a209f0571f396dfbe958d12f2a5d0"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/kra/KraReader.kt",
+      "bytes": 20018,
+      "sha256": "b9f0f533dc490911d5323d2c87377fc878c265f7b935877a456bb19ac92d0ace"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/kra/KraTileData.kt",
+      "bytes": 6551,
+      "sha256": "b51f13d783fb7454bd3e5e7dc5baa2a3f9309157b3c9ed7cf2c50ead8650ab20"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/Moc3.kt",
+      "bytes": 6812,
+      "sha256": "fa1d0e17e6b200517eb1f69404e45b5f44c25594dab40e35493ce79635972b3a"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/MocDocument.kt",
+      "bytes": 3289,
+      "sha256": "4c6148170106eb3208c6df601da6ac63701b8686915df5431b2228cdadd77ed7"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/decode/MocArtMeshDecoder.kt",
+      "bytes": 5341,
+      "sha256": "483df6da67c3e713cf2a955a0fd3b5f76ca189ab0d00bd6cbdc9393df08174b7"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/decode/MocBindingResolver.kt",
+      "bytes": 5602,
+      "sha256": "2b8228ecf97ac6bafb47e1524368cb113bc5431f9b252d2d5e52928c086441a0"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/decode/MocBlendDecoder.kt",
+      "bytes": 21059,
+      "sha256": "fa0e1b28a52d036e2f21c5ec40a3fd2ffe1266bee05678b38a21c8f3ac1017fb"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/decode/MocDecodeTables.kt",
+      "bytes": 6267,
+      "sha256": "4850dcadb7b2a741cbd13e376c1f750df600d5863faaf6847e8a695776909fd2"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/decode/MocDecoder.kt",
+      "bytes": 12994,
+      "sha256": "7bcc87a79657e27499fc49800a3f3f206588aba16ea08b7c584cd43bf772af6b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/decode/MocDeformerDecoder.kt",
+      "bytes": 8023,
+      "sha256": "77abbb4c7ccc11cef234e93547358cb16bb0177f429a279ccb27d327519f3407"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/encode/MocAuxLowering.kt",
+      "bytes": 7410,
+      "sha256": "45debf1ef40c8207bb9b66169734f679f8b4b4e8f2affcd153faef26d2c3c659"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/encode/MocBlendLowering.kt",
+      "bytes": 7521,
+      "sha256": "0b1f236362dacade69b7f210be3f13fe4c85cbbe25d168bc22462ac597f84f84"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/encode/MocColorLowering.kt",
+      "bytes": 7281,
+      "sha256": "e360f6d91ae4a8ce1e1158c2b052679903ea17843e72f24a08ab1e60027e8e96"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/encode/MocCountInfo.kt",
+      "bytes": 7032,
+      "sha256": "98f9b4ebaef4d827d699f60cdce7d67236a68aec970380d1087f17837c43a490"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/encode/MocDerivedIndexes.kt",
+      "bytes": 3604,
+      "sha256": "661da4d82f59d9b6de0038d1ef72a23ee77f46fd5339756a1aacbb08e86369a1"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/encode/MocEncoder.kt",
+      "bytes": 10361,
+      "sha256": "cfe9f8dff2d6e4b6b0e8642055c263a5079b97fbba3835966459f31694a91f12"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/encode/MocGridLowering.kt",
+      "bytes": 5930,
+      "sha256": "847392ac9c42c017bdeb3b89c260bade20e0e778ada459e538477fc6fdebceb9"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/encode/MocLowering.kt",
+      "bytes": 3231,
+      "sha256": "f64725449384849ef259f48303c50b8f421981217c15a177ddf3e88f38819587"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/encode/MocLoweringContext.kt",
+      "bytes": 11640,
+      "sha256": "fa65592e1e435b3c512653a44f169cd4d9d5df7f065fbe967f9d2f5057709acb"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/encode/MocRuntimeSlots.kt",
+      "bytes": 2331,
+      "sha256": "d510aa5be647bb6c9ccc1b08d1d496f906207b79d86f262e6b43fe6693a87d5c"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/encode/MocStructureLowering.kt",
+      "bytes": 6602,
+      "sha256": "0359da67fa5346b8faa10651cde844fa432ff5d6f4cd8367a464aca4f32cb25c"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/encode/MocValueLowering.kt",
+      "bytes": 7435,
+      "sha256": "d7ad9a993a532b7389a32f9de078969597f0c2108f189ded5dbb49f4b36ed6ec"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/encode/SectionSink.kt",
+      "bytes": 6763,
+      "sha256": "8b21419aee73888188ac0dccd6bbe034115384f03345cac764c0f3f024c4b9db"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/io/LittleEndianReader.kt",
+      "bytes": 3269,
+      "sha256": "fd9e279417b6263b20bda34a1102eac3cbe01eab73db844792db4aaf8f966669"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/io/LittleEndianWriter.kt",
+      "bytes": 4509,
+      "sha256": "5daf96a4c2b2351066ca2ac3cf8e447812d664445245918283eca84b200fd314"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/json/Cdi3Json.kt",
+      "bytes": 1958,
+      "sha256": "7d8f6393081fa0ec22afc8ec0436679399fb06171a219d1f28b034d9b057b716"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/json/Model3Json.kt",
+      "bytes": 2707,
+      "sha256": "924c8969e48ece68fb1635194eba1c59df24388c26b8ac88c8c6a12564cbcdff"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/json/Physics3Json.kt",
+      "bytes": 4281,
+      "sha256": "81cac292777fae1c6bb2c925b7fea726108caa55d43c6442301440cb0762b60e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/json/Sidecars.kt",
+      "bytes": 1369,
+      "sha256": "213e28eae4dec213b1fff5534fe0f13a2149187d21c04e01a85d4ecc315677d6"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/json/UserData3Json.kt",
+      "bytes": 1195,
+      "sha256": "f95910831f85054cd2a20ac44557f29957f97504786bd3e915383b3b65065910"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/moc/Flags.kt",
+      "bytes": 2035,
+      "sha256": "63f80860984ba426e8c12c2359d6eafa2cd2553fbe163f778f73c4c8bd34d0d0"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/moc/MocCodec.kt",
+      "bytes": 3756,
+      "sha256": "a4d3de1adf466c2fb7ea7d7debc418899809968d0358267171b6e646166c1984"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/moc/MocModel.kt",
+      "bytes": 9307,
+      "sha256": "78c563bbf0ce24ed09ada78104624d4e734ff4a048fd0ce220f368b3dbe7e3a6"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/moc/MocSections.kt",
+      "bytes": 9259,
+      "sha256": "41d7fefa3d2378214bba5bbc216261b7c94acd25fbe698c20a1c38a8b0168f12"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/moc/MocVersion.kt",
+      "bytes": 1956,
+      "sha256": "c3920d1a23dcd36e187825fb4ae03e22510a8f8db20325c26153cfb73b2bcef8"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/moc/SectionLayout.kt",
+      "bytes": 28725,
+      "sha256": "52830266e420f5f5d84fe24c5361186118d86452442d2716992e8d93823c87a0"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/moc/Sections.kt",
+      "bytes": 3478,
+      "sha256": "3a693f05f18c56c14666c590b77ac50d62d22f18ae9e3e705d391861e0cfece8"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/model/Advanced.kt",
+      "bytes": 7433,
+      "sha256": "031ea0ed28dc45b215107c9ef77dbd1a40dba808be9a903e0635ef89866c0a95"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/model/ArtMesh.kt",
+      "bytes": 3387,
+      "sha256": "c788eeed60533501409f63d7cb84bd9c08e86b0be809d5fb4603cc91674d49e1"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/model/Deformers.kt",
+      "bytes": 3572,
+      "sha256": "904d09cfc9dc6449a256e847b299ea2896716f1dd2750b8b2ec0dd180e01e97b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/model/Keyforms.kt",
+      "bytes": 2145,
+      "sha256": "10fdb1b32a161cb3283be485632f5ae51a61df5628e36f1c218d6d03c57c5bd9"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/moc3/model/Structure.kt",
+      "bytes": 2826,
+      "sha256": "cf89991c052bc2015b4c6b5a1a99afa69c1b05d7b3a545f1cfb868b275c1953f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/png/PngChunks.kt",
+      "bytes": 5440,
+      "sha256": "0c18b65fb3caf38b74a15ed26f54603b627ac8b22b13083bcea298f4aac21f79"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/png/PngCodec.kt",
+      "bytes": 17452,
+      "sha256": "918c9d0d6a7890da66911ea6439bd4b5d7b0f776fa849cd96f3baba0b4e0ab0a"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/png/PngFilters.kt",
+      "bytes": 3333,
+      "sha256": "5623604ca379fcaceadb11ac213e4107ca09b475ccfc3c9d0aa1a7131e232cc4"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/psd/PsdLayerIds.kt",
+      "bytes": 474,
+      "sha256": "fcf33af27749fb0af554b745837a3fd0d5d121d058e57572b5befbfd3ae95466"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/psd/PsdLayerRecords.kt",
+      "bytes": 15449,
+      "sha256": "c808ee5412c170921a0406e200191fef45e4b383deadf75fde2f9c6b57e7be2f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/psd/PsdRaster.kt",
+      "bytes": 19061,
+      "sha256": "0c0beb1e820092ff3b157648615d7a276358f2e6c6014dc957e7076c655971ea"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/psd/PsdReader.kt",
+      "bytes": 7319,
+      "sha256": "2925bb2917fe89f40853122adbf833f858d52aec0cab00b42e9c17a4b8e48b79"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/psd/PsdWriter.kt",
+      "bytes": 16009,
+      "sha256": "43b6a41634ec5ea0105ff607bff231a94ce90a813d6e223b1220df0c7d752fe6"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/raster/RasterCodec.kt",
+      "bytes": 1468,
+      "sha256": "c9440cbdcb2484952a4ef4dfce8a887afc394df887036082011143b2b6cd7c5b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/raster/RasterImage.kt",
+      "bytes": 1839,
+      "sha256": "79cde215f367ef04a2b48382e914957f97959efafff42b3303f0f117aae6541f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/raster/RasterSourceArt.kt",
+      "bytes": 2452,
+      "sha256": "3d0698fc01040eaace2739025c6a68b1a73d75cc577d595b9c9e4e29f4ad525d"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/raster/RasterThumbnails.kt",
+      "bytes": 5955,
+      "sha256": "13f99b8c532d17ebd8b056d03e983471218722b289a66270b09686999a9060a2"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/tiff/TiffCcitt.kt",
+      "bytes": 20598,
+      "sha256": "1e74b2b30e4ed6122e95678911e597a335a17ada681797b90764159bfcdaea17"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/tiff/TiffConstants.kt",
+      "bytes": 4041,
+      "sha256": "10f79130724d498fe2dcf3ccb6190c591d7adfd88a4e18bf2dd85c8456d0e512"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/tiff/TiffDirectory.kt",
+      "bytes": 7172,
+      "sha256": "f6aa3ab3a1b0987267edb214f3159d9269bbea9df33a002f233fb7d4c95b911c"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/tiff/TiffLzw.kt",
+      "bytes": 7177,
+      "sha256": "f0bb8c98ffadf16708bb17ea86607b5e12bdfbdb442dc3f0aadcfc70103971cb"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/tiff/TiffPackBits.kt",
+      "bytes": 1532,
+      "sha256": "0238e27b795b487949d7bdb311bb569448c93f4a3e01117a10b0c1417e5a43c4"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/tiff/TiffPredictor.kt",
+      "bytes": 4989,
+      "sha256": "181065c12d94769f4af76c252add1802347914cbef9c3ca87cc83783c56aaedf"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/tiff/TiffReader.kt",
+      "bytes": 28076,
+      "sha256": "3a82d8bf00ad6ba168d44366ad751ea93b4a3be0f35e01dff2ee3f16ee9b6b13"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/webp/Vp8lDecoder.kt",
+      "bytes": 13214,
+      "sha256": "fb437e1a393b785d49d1c1d6a63f1b51f3a3bdd159bce757efcd22e7db673d79"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/webp/Vp8lHeader.kt",
+      "bytes": 3381,
+      "sha256": "c56cf16553f317ba35322a881710019e8e6cdb001656ca82dd9e97c8966dc465"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/webp/WebPReader.kt",
+      "bytes": 2251,
+      "sha256": "6d3d42d48c8c57778e12192f14b268a5371c7974a38b23bbe5bb929db8e2f296"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/webp/WebpColorCache.kt",
+      "bytes": 1141,
+      "sha256": "79ed108b61835e3d2d698167cb53b10827f7f8c32b965b88bf3778f349382aab"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/webp/WebpHuffman.kt",
+      "bytes": 9659,
+      "sha256": "738741d4540826be8bfd2eaa1d12cecb96bc35590100e9e36ab0dd21c19907f0"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/webp/WebpLsbBitReader.kt",
+      "bytes": 1811,
+      "sha256": "1f91c83e170a2322803cb7bc180dc9831f7d660a3e55921ff37e58e4a2109d6c"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/webp/WebpRaster.kt",
+      "bytes": 3109,
+      "sha256": "082b36c58898d45982970a4ff924676eef4eaae898f8c786e170605c4aa2243a"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/format/webp/WebpTransforms.kt",
+      "bytes": 13018,
+      "sha256": "a00547df9843a2d363db880f67688673036131c630b2775bf7cb409186190918"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/AtlasPageSet.kt",
+      "bytes": 1597,
+      "sha256": "e5c4b096c23fd740f1c7f9fe9d55280901d005d53d58b7a8f9a1ed4ef90bcd46"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/BlendModeMapping.kt",
+      "bytes": 10317,
+      "sha256": "38306441c37dcba09ba3112d5bc5ec7df33ed11f3831f42f21087ddc72d0cd5c"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/ExportNotice.kt",
+      "bytes": 6218,
+      "sha256": "2b7bd4066ee36e15584206c6e341fd8612b6194e3ea9f294d5467ee3632c042b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/ExportNoticeReason.kt",
+      "bytes": 12085,
+      "sha256": "a85823a6234cd4c03d64a8ca3de97921af32c113b141b116c97d53fb524c183a"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/KeyformBundle.kt",
+      "bytes": 12548,
+      "sha256": "602ecc52450bf9c304f16b8c0b02131d1a522c24565a93353b451b4a3a1c287f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/PuppetModelDiff.kt",
+      "bytes": 31251,
+      "sha256": "30a2eb2db08edc5073259b1db9e8331d1618e7af46f3302571397f46cbaad7a5"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/RuntimeTargetMapping.kt",
+      "bytes": 4630,
+      "sha256": "4b4f84756d7f340186feb4f2062013ce50aea727921fb1a07c90e16f2c6b2ae0"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/art/LayerBlendMapping.kt",
+      "bytes": 3227,
+      "sha256": "96104ab28e006d74525e75f195ce11a31e9c081ee8c17d247db2281b453ab2b9"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/art/SourceArtImport.kt",
+      "bytes": 40092,
+      "sha256": "cc141aa2c20730272cc08533379a842f5e92571a2cb2fc5ade1b5ca3e0264c20"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/art/SourceArtImportNotice.kt",
+      "bytes": 2388,
+      "sha256": "7b2749a236540b33feaa8a9d546d5713a73e005bbb62cafd8253abc2b902f397"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3AffineValues.kt",
+      "bytes": 1554,
+      "sha256": "583d911517b7e86865d57cb39fecc2e600ded97c3256017e493d2c188799327b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3AtlasIngest.kt",
+      "bytes": 21705,
+      "sha256": "aab35b54b10316ced7670f4c35deda2532697964828699e2ad7ccf14259d9b76"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3AtlasPages.kt",
+      "bytes": 3755,
+      "sha256": "ce09b931ab0c575b3a77d928ce9486f1e7c0bfbe649ef9a64bd2f15619a37e7f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3AtlasUndedup.kt",
+      "bytes": 10486,
+      "sha256": "aaf5202cfb74ae2be34f7b3d8d839c92e047823eecb0f2567d3a304ccbfeb66b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3AtlasWebIndex.kt",
+      "bytes": 4660,
+      "sha256": "bb03bdb92b9ce371505a3f3746f100605231199073f2df592b4047a539ee2e9d"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3AtlasWebLowering.kt",
+      "bytes": 26683,
+      "sha256": "8d578a10e3c44e2a6a3c96d08a0d76c3708000fdceabbb1cfb172c0da0d194c6"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3Conversion.kt",
+      "bytes": 12026,
+      "sha256": "4091b90d6f0eec00859e6f69c4e5c01ea8456ca33ed220020344664be13c7571"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3DeformPaths.kt",
+      "bytes": 10896,
+      "sha256": "0d7fc31d8967549b77b91b3ad0dabc313aba4003891a278720fc4017d19d33bc"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3DrawableTextureBinding.kt",
+      "bytes": 8588,
+      "sha256": "0695904a8ff4d549d5507310a18c4ea621a2f768cffaab0af417f7535916d304"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3Export.kt",
+      "bytes": 15553,
+      "sha256": "aee334c6457b9c93ffe8714a11a8f311a3b8a4a7d1b2ad51a8fbb45507d5989d"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3FreshFile.kt",
+      "bytes": 2318,
+      "sha256": "d533bb69c1ebd96c18948190075c1836a35e62e4cc18fbbc8d3de84fb7ccf246"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3GraphIndex.kt",
+      "bytes": 4149,
+      "sha256": "1da65099244c4269f8fb85065cb26cea28fb74fa93bcfb06223f6479bda1c12c"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3GraphLists.kt",
+      "bytes": 566,
+      "sha256": "cb917783b18b20d923993e1b856a47cb71682592d0929a7acf8fd12bd0d4eaf1"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3Icons.kt",
+      "bytes": 5461,
+      "sha256": "fd82ab8ba5efeb1f616ad0682ad9f183170738b4e1a6cc8741927ffeca25291a"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3ImageChainBuilder.kt",
+      "bytes": 68526,
+      "sha256": "0e5824fed47a881e6693c958471d49405107ea181128a3bfd9ab13db7b218798"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3Import.kt",
+      "bytes": 53205,
+      "sha256": "3a9984d0d3645bc7340d39d824ceb592d1261a243e619a1bb30d7f05b829ff3e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3KeyformLowering.kt",
+      "bytes": 52564,
+      "sha256": "efb3f8469c97306fd1dcf03c084b278fe6094501d280f5561bbe9d970042c7a1"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3LayeredArt.kt",
+      "bytes": 5791,
+      "sha256": "c0a51f21c05bc48111c24f7bb87b9aa6da0039e835e0969be56118587408f6fd"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3MeshSanitizer.kt",
+      "bytes": 1715,
+      "sha256": "e8edad16aafa03ce1e5448897e0fa725f7d152f6f9365f92bc998efa7d0b9e99"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3PropertyLowering.kt",
+      "bytes": 63037,
+      "sha256": "ad271bef6b675922b5d3058285e6919d4b004751a9ba15fa97dd9a94124bda7f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3RetainedLayerWeb.kt",
+      "bytes": 30262,
+      "sha256": "ac8f1ecdd0ee1345dc4253e4d9b68f3817b57ecbfc6a4f89e4155af919ee0904"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3SchemaProfile.kt",
+      "bytes": 515,
+      "sha256": "7d2365e20a84a4f19a5626ad46bb1f9c978437fcd4ac90e6bf0d430f2a323e42"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3SkeletonBuilder.kt",
+      "bytes": 17905,
+      "sha256": "990fc24e99dea9158467aa2471e7b04a1da3f1f1ee6b91238f46527218ae4da6"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3SourceLayerWeb.kt",
+      "bytes": 23016,
+      "sha256": "9f049c9ce21ff6feae31dc0980c597b3752edbe3bad95af24fff55fc4466d0ad"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/cmo3/Cmo3StructureLowering.kt",
+      "bytes": 38778,
+      "sha256": "265c9c08236ac1f3eb4080b2e105d90a0d29d0355681c0ad9672aa8c092b4388"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/Moc3ExportOptions.kt",
+      "bytes": 2372,
+      "sha256": "f50939d90587c471d8cf41cd04bf19f13fb3c384aa449f4f61736e329e7288af"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/Moc3Sidecars.kt",
+      "bytes": 11925,
+      "sha256": "83d96a483b6d7d03a12ae30ecf5b59e21fb5eccfb3fc45c574cd37445c2d1df1"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/Moc3SpaceSeam.kt",
+      "bytes": 9539,
+      "sha256": "fa2d13ae96a6a316937597fa400a9d6a142996deb9ad698ebcaccb90489990a5"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3ArtMeshLowering.kt",
+      "bytes": 7337,
+      "sha256": "ae4a02ea2da3c0692b5036b861a5094d7049fb7ee37fcd41176023791b447f3d"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3BlendShapeLowering.kt",
+      "bytes": 12848,
+      "sha256": "89fec80a6508f630e018b6ab9f506af81927404cb12e0c6b4b69b0851b0574e7"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3DeformerLowering.kt",
+      "bytes": 7525,
+      "sha256": "ac11226a69ee3bd49d48f824d1b37db49fbe036c442c07d35f8a62c15b2fba00"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3Export.kt",
+      "bytes": 11678,
+      "sha256": "7cf2a4581af722c22a53b0b9b49e2c46093b85275e21f316e54d8a9a67497751"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3ExportChannels.kt",
+      "bytes": 2840,
+      "sha256": "dc44f57da75e3280a940d8f695e8b71f17e8c500066b2dc481eb6f0f93d2d371"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3ExportContext.kt",
+      "bytes": 5037,
+      "sha256": "e72f4c60ad39e12c04af8967a677658c149e1b38ae493d0246d17c8f66e6729c"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3ExportEligibility.kt",
+      "bytes": 7763,
+      "sha256": "cae468229df322d1247dafea39995b4ce10bcc36d45f4ca7fc7a3b6a5f16bd1b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3ExportIds.kt",
+      "bytes": 12385,
+      "sha256": "c0b25a7fb2af44dec39b0a9af3d30ae06df552c979b489910362d63830abada1"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3ExportNotices.kt",
+      "bytes": 3313,
+      "sha256": "e4001bcd1d3f5fc783f5a474a8caf937d7aa1eaf462703614961de3dd55003a0"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3GlueLowering.kt",
+      "bytes": 3010,
+      "sha256": "ce81d98ed28999a1caae4b45f8300f532699393e8b48e762136ced44e4d0cb31"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3IndexPlan.kt",
+      "bytes": 7069,
+      "sha256": "fbcde9d63e83ed961af3f94d07a3193590bcc1be77224bd8ce7982a90c38023d"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3KeyformLowering.kt",
+      "bytes": 8157,
+      "sha256": "0f348d2dfb9a95fc42c89ba31f8ba5d6349e21d304f9d6059b1e1f9a100b3df9"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3LoweredParts.kt",
+      "bytes": 3590,
+      "sha256": "5ff79fcda945c7aa5d4068d4068bc56aad39154f9332611ea310b4b7673ca929"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3OffscreenLowering.kt",
+      "bytes": 4454,
+      "sha256": "2e9581af728336316de281369c8a77ee6b6c80996e783a6b5b681a657cc92620"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3ParameterLowering.kt",
+      "bytes": 1332,
+      "sha256": "f0cbd806ef17ddfe5caa37f17473f35c0d688d1167f7af548eee8d30f15a0e2f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3RenderOrderLowering.kt",
+      "bytes": 3722,
+      "sha256": "0552e48325f33c3349906cb0123980bee98899f142ed20862453374a6ac94678"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/export/Moc3VersionDowngrade.kt",
+      "bytes": 16399,
+      "sha256": "6c91027ccaf8ffabb28c1920f7d0ecb39079cea6b06cd18180c2e6d4e0f154e4"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/import/Moc3AtlasPages.kt",
+      "bytes": 1918,
+      "sha256": "7b89d07a74aa52da856d21c55bfcd8b6b7bad0da97722d3f12cdd466ac7c548c"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/import/Moc3BlendShapeImport.kt",
+      "bytes": 14770,
+      "sha256": "9450d34423003068dc6fb5a193bb04496f9bb8c20d6152211636c99ab13a4a66"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/import/Moc3DeformerImport.kt",
+      "bytes": 12194,
+      "sha256": "cc0b6d70cdf384164a76994031e3f68a48f8785bcb60f666dbb7cb90497ca0f8"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/import/Moc3DrawableImport.kt",
+      "bytes": 6843,
+      "sha256": "6faad612d25a374b67a574f50e0cb3ae41cbf7e35cca5947e1aea7e1375638bc"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/import/Moc3GlueImport.kt",
+      "bytes": 2358,
+      "sha256": "cd8865ba2af596d4126866921f2537945da279a59917091a96b9c77d1939d95e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/import/Moc3Import.kt",
+      "bytes": 8969,
+      "sha256": "d26e65c44106ede5f2e246b5ce007c9beb69cbd9150682d5c6b0f7607704461b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/import/Moc3ImportContext.kt",
+      "bytes": 13250,
+      "sha256": "24bd9ff67788ef4469db113bde72d2356109f5da2e5e130a27b6da5c9dea1509"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/import/Moc3KeyformImport.kt",
+      "bytes": 3557,
+      "sha256": "63ba9d6a531109b6b5d95d576eaf773502bc0ddff8d817a8ea965b7a87c05720"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/import/Moc3ParameterImport.kt",
+      "bytes": 5081,
+      "sha256": "85dca338cea9d1a25bb78d4a65671ca04782d191b5e44359dd68547356a5562c"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/import/Moc3PartImport.kt",
+      "bytes": 14577,
+      "sha256": "eeb5ed4d032b32f82afb7e9fe3243ff6cf3095cd55d8426e09669b4022024df2"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/interop/moc3/import/Moc3RenderOrderImport.kt",
+      "bytes": 4709,
+      "sha256": "309f88d2a57527c066c36dd52cab31dc958006580f8b302d996d2a77cbfc3bd8"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/AtlasPlacementDrag.kt",
+      "bytes": 25858,
+      "sha256": "a98ada62d42dcc204690aceff207d61d131dcfc2b22617e37772658ef1874f73"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/DecodedImage.kt",
+      "bytes": 164,
+      "sha256": "21ac9fbb3749df0878aa3842b1fc44fd93007751aa0fcca0cc4c6c2146f46c13"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/DerivedAtlasTextures.kt",
+      "bytes": 11154,
+      "sha256": "92c83ee34261f64a38d5433ae393115dd98d330d0883e9c345e8a5aec02c462f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/GridColors.kt",
+      "bytes": 2969,
+      "sha256": "a9c8c7e16245b15ecb45afe061bb08a4b679006aef7f4333aa8de2881c5e59f0"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/LayerDrawPlan.kt",
+      "bytes": 6437,
+      "sha256": "a63be935e21fd381e73dde5f547ea2b6c39e6541eb66c3551c813ef7b2365530"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/Moc3RestMesh.kt",
+      "bytes": 13255,
+      "sha256": "f9110fa88e4e14b7b06ac6f69c0ac2a5e775b0c538ef6d8d7378d75fb41d990f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/PuppetTextures.kt",
+      "bytes": 8951,
+      "sha256": "bb0e0d08534f1f329a523a12bf90432ac9cede14c6a3feef60276076d5a354da"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/SourceArtRasters.kt",
+      "bytes": 5935,
+      "sha256": "468411e5c507cc401f658603436812f11c3468e2f16699a74b6a4e52ede44306"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/SupersampledSurface.kt",
+      "bytes": 5589,
+      "sha256": "5b7f2160053505a9bd730e4661765f3a0c9ab295ef896e3b90755697afc94150"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/ViewportCamera.kt",
+      "bytes": 9465,
+      "sha256": "912b090d075a432d9d8e1248196aee7bc424b79784b4a2be82e1facbaa93bb10"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/device/DrawUniforms.kt",
+      "bytes": 10745,
+      "sha256": "9d172b11421fa59787688ad34442799eee3c175d7090f348ace95cf69498b1fa"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/device/GpuResources.kt",
+      "bytes": 7759,
+      "sha256": "3e40715b21a5ff897c3ae9484fd7528312cee852379b35a3f2dadf337fd81bbf"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/device/RenderDevice.kt",
+      "bytes": 23816,
+      "sha256": "42ced57c8328e82846c85f08af1e2e1a6c4ee71cf150f8e9424c8e910145bbfd"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/eval/BlendShapeEval.kt",
+      "bytes": 17030,
+      "sha256": "3b16a6b3ea9ca0197cd167b24a32d8d82958c729d68bcac1cb21998ec74a5c65"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/eval/CpuDeformationEvaluator.kt",
+      "bytes": 1025,
+      "sha256": "454c1e48862e5ccbd14f2c73c2c2a9498b1821aac91bf297d357d01969aa8096"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/eval/DeformPathMetrics.kt",
+      "bytes": 1529,
+      "sha256": "34f1b45bbabbc306f35f84f9439afd3c846b3ce56b97354777d190af2874441a"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/eval/DeformPrepare.kt",
+      "bytes": 16505,
+      "sha256": "2faff47c03dac8167d57ac56ba75442f85e1bcc090226a837e995b7f99eef85d"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/eval/DeformTransforms.kt",
+      "bytes": 14296,
+      "sha256": "290231ad2a67b308e4d31fbf2abb9ebc854cecec930f52c6a5913603539bee36"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/eval/DeformationEvaluator.kt",
+      "bytes": 1744,
+      "sha256": "56bf9ed21f987c621acd7076d58d4e02fd9caa70259041f9b1912097e9e1cd7c"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/eval/DeformerCascade.kt",
+      "bytes": 23033,
+      "sha256": "668f069f80dac7e77f7958dd4de65cea146de8b13812c03351c31261d1e393ef"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/eval/DrawableSpaceMapping.kt",
+      "bytes": 19022,
+      "sha256": "4b5a170f683ae0a6bcc7d9e9d5c7933b04fe08746fbf60989ea5d7cede604fcc"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/eval/KeyformBlend.kt",
+      "bytes": 716,
+      "sha256": "dcfc3b94d15e42306388d7c7ab2b682f2a2ad1036770e2d4bf6155e2c212fee1"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/eval/KeyformGridEval.kt",
+      "bytes": 4693,
+      "sha256": "41dc32067b4e11b9b903a61dc0b5e4d540768729c730e0bdfb9995ecaef8b939"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/eval/RenderOrder.kt",
+      "bytes": 7135,
+      "sha256": "d9a2e79c9fd67023143d7f51723ef6c44e4bdaf85cbeec88b1be9c60ee9b842e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/gl/GlFrameEncoder.kt",
+      "bytes": 18742,
+      "sha256": "44f839c23dd8f1d2d60d379066d89743688de3891e308cc6ce7d25bf62565261"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/gl/GlHandles.kt",
+      "bytes": 6990,
+      "sha256": "88e7a2db329d672eaf3b0acef7b06eb8069676d571c2e72c1226519107716eed"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/gl/GlRenderDevice.kt",
+      "bytes": 25153,
+      "sha256": "755ac17f5d6cbfcafbf181a22725913ab20b15bd6b10faad401db60f0e0b78a6"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/glsl/BackdropShaders.kt",
+      "bytes": 5947,
+      "sha256": "41eb365767d05cc1abc24851b148ec0cd17918c448198d593be2f13859a46c0d"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/glsl/CompositeShaders.kt",
+      "bytes": 7456,
+      "sha256": "3fa51c90a943d44e28b01eafcbcfb003294d70d360e94c20a0a8fddb0d3fe268"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/glsl/DeformGlsl.kt",
+      "bytes": 9614,
+      "sha256": "4899bc8a45835b01a71b17e52b66f601dcbdb60f3989b6962fdea95c4071d975"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/glsl/GlslDialect.kt",
+      "bytes": 1461,
+      "sha256": "9af3522486b93aa4ca827a40ed88f8746b0b683b52fbc0c42d068b8e60c1496c"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/glsl/PuppetShaders.kt",
+      "bytes": 8432,
+      "sha256": "1b678fee85465ceeadd70f77667586866075a9e46fda1f6eb3c3bce878306ede"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/glsl/ShaderContract.kt",
+      "bytes": 2798,
+      "sha256": "63e0e95eedad56430e14c649a6c424313add44002611cf591adf8baa11148905"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/pick/Picker.kt",
+      "bytes": 14344,
+      "sha256": "413e5da1f4f5ab8b1d83df72657d61e6df5538b078c74bf4d95afe5e9cbd6996"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/pick/RegionPick.kt",
+      "bytes": 4103,
+      "sha256": "cdd35978df508c5bca918af8cbbdd7b56ef0dce9df5af8a14863536866029fac"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/pick/ScreenSpacePick.kt",
+      "bytes": 20090,
+      "sha256": "4d2916f65d177cff56bdfbc8bd13a1c478f2179f33a55588765afbefe10dd0cc"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/puppet/BlendMath.kt",
+      "bytes": 14227,
+      "sha256": "0d805864b69378ba826fd0d7a144b3104b4e49ffc4d5fcc5075a5f09d9238bb1"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/puppet/ContentBoundsEval.kt",
+      "bytes": 2069,
+      "sha256": "6d2d4a4c199cb2ea19955fe71c7705338f204c476ee7b4e0ac9ac2d7b42a573e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/puppet/DeltaTexels.kt",
+      "bytes": 8280,
+      "sha256": "354efa4a7ced88b79b66cccf16d3ef0ca85c8dcd9d11836ae7478d668e757dd6"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/puppet/FallbackColor.kt",
+      "bytes": 1088,
+      "sha256": "fbea06b8931311198aae2252e577dc9dbbd8f76ef529ad2529c8751cb921e8ee"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/puppet/GlueLayout.kt",
+      "bytes": 6429,
+      "sha256": "d04a7561f4d91b1db0ace61b4e8e2364520157a198ff3d64d91d26ac07176dfc"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/puppet/ModelDiff.kt",
+      "bytes": 6982,
+      "sha256": "0279c227b4c775d9a2d67d49a5c9dab70fe71e4aabe317baf9397e4639a6b5d7"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/puppet/PixelRows.kt",
+      "bytes": 1349,
+      "sha256": "9f8707b488307f15d3f7cbbb6f0305965f895bac35ec018de42854adfe368259"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/puppet/PoseResolve.kt",
+      "bytes": 7697,
+      "sha256": "0f4992907dbf5f061e2020ee9467ee7b0257a2b9bb03dc05d60f285924c7ab98"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/puppet/PosedAabb.kt",
+      "bytes": 5537,
+      "sha256": "b4b4607c180a4a8c7fa873e3674d6b60b7f6ed538e5bb8af588322753c80cf5f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/render/puppet/PuppetRenderer.kt",
+      "bytes": 92602,
+      "sha256": "1dccdbdc40264d891c47058c6af3dff4880e64e47d0826f27fb15fda01c370f7"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/eval/ChannelSampling.kt",
+      "bytes": 6748,
+      "sha256": "7e74bf26841154d9498f77bf8b17774efb7817b38ba1d6d6acdd1c905973cb57"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/eval/KeyformGridSampling.kt",
+      "bytes": 9193,
+      "sha256": "d66d102523fa28ee6ed8b798e6899e5f78323edac0ad17c716e094fd1b7102dd"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/keyform/ChannelCompaction.kt",
+      "bytes": 11911,
+      "sha256": "0da8d49a9daf2a02577962b27124f87d252f93f9eb5e49e6982345fd2192d9eb"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/keyform/ChannelConstants.kt",
+      "bytes": 2855,
+      "sha256": "96c9735520709f48efa0d405009c21d2b5610c5649d2797ec2eeaea5c59a5814"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/keyform/ChannelFanOut.kt",
+      "bytes": 6480,
+      "sha256": "c0005c39d190e0eb5b6df2c057ad0b93a55f58919bac304d07252380b1801783"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/keyform/FormInterpolator.kt",
+      "bytes": 7024,
+      "sha256": "cd33eb6175dde17c8f6f2dc4a63ea5b23d9dffd096319de42c811455e889de0c"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/keyform/KeyformGridAlgebra.kt",
+      "bytes": 30139,
+      "sha256": "452c362cd9d7c006979810ff7c4b216d24bdb55f0f00a2f90fb7d1f2c9d66236"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/keyform/KeyformGridCompaction.kt",
+      "bytes": 14571,
+      "sha256": "b849757052feb4a4edb814de1f675e141128d574b82b9e78aa98dd211462a038"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/keyform/KeyformGridShape.kt",
+      "bytes": 8708,
+      "sha256": "684e07b15bb6871ca6a584ea7aca687f68a0eec444695d1d6781c982895d86ad"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/ArtSource.kt",
+      "bytes": 12590,
+      "sha256": "e55d2f15112efcc95b268b3d9f50d5a40cbcc52e8918e09d598f962d76811025"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/AtlasPlacement.kt",
+      "bytes": 11646,
+      "sha256": "c56c69a00ae0aa6fb8f8d17343327bd5858c27438d2ab5135464056ed771b43f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/BlendMode.kt",
+      "bytes": 3817,
+      "sha256": "1cff8455d3a8592862cd093312d2eade84199aea6d1b9bf0e7097aa53f925961"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/BlendShapes.kt",
+      "bytes": 4712,
+      "sha256": "d7c28d7c90685b11b894ba0e80ee0f1be0e9f040e293b470d5b40a8dc7f9985e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/ColorRgb.kt",
+      "bytes": 1377,
+      "sha256": "0704185a16fe5bd0361fcdcc773fdf3f09a7361d5f3925cadfdb0fb24b1b72df"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/DeformPath.kt",
+      "bytes": 1952,
+      "sha256": "4fb6f70b182b79cd23016ded97cb0a09ac0215901a2e33d3c6059c8055f1c85e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/Deformer.kt",
+      "bytes": 8020,
+      "sha256": "2016449f327605c691e8bd639ce19f5961dd96f014bb16a6a9a5d7673b15140b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/DrawableMesh.kt",
+      "bytes": 3722,
+      "sha256": "1e2e979a7753e453a735a04a1bc01d5f30bad1f29699d51a90a95bcd68b84e8f"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/FormChannel.kt",
+      "bytes": 5675,
+      "sha256": "7219bc5eb6093e5150c824e009cad5d63c9335da162baf94a5883c6306d78f30"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/GeometryForm.kt",
+      "bytes": 1874,
+      "sha256": "2690a81133cc103ba57893f06d2de32d70b029b0239054eec337e220499b7fed"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/Glue.kt",
+      "bytes": 3394,
+      "sha256": "2575ebfa431ab1a90ee51d924cc91ffa4328c27cc5a640e12ebe8b623de83ebf"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/Ids.kt",
+      "bytes": 1652,
+      "sha256": "0bcb5e5c5624e10c2ff3156a05e91d6181ebc07238bd47d2a9812f087e55f088"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/KeyableTarget.kt",
+      "bytes": 3322,
+      "sha256": "036c8cf470e0f53955849d0230227e57fe0ab73918eb08110c6428f35dbcf50d"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/KeyformGrid.kt",
+      "bytes": 6234,
+      "sha256": "b49b5fc09bd403b6030322478bea640e9df91c7704dc20e982619a8cc1edce0b"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/Keyforms.kt",
+      "bytes": 5816,
+      "sha256": "e2481cb13329b4292be5bb6a792ca30b082a768d50f875c15e40738f729e5886"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/PartGroupMode.kt",
+      "bytes": 3984,
+      "sha256": "986b16a67c743696e1a81dc835ba350a461e9e35a490ff083b7a876ee3c450fa"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/PuppetAtlas.kt",
+      "bytes": 8850,
+      "sha256": "e560414a61588a198f81182747d86b95ba92330aac57c5d9465992803adaf8aa"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/PuppetModel.kt",
+      "bytes": 20845,
+      "sha256": "3c2d65414f417dfc85eb35412c8cb65e230ce53c42a0d0921a1818d925296100"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/PuppetModelQueries.kt",
+      "bytes": 14797,
+      "sha256": "9714201f8723772648de657ef39746837a621b1320e1f45ad38c01e5c593f43e"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/RenderGroup.kt",
+      "bytes": 2303,
+      "sha256": "2c57581ea6b935e9b549bb41b6782f51f7cc4b67496c779021e3e1d034961955"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/RenderRootDerive.kt",
+      "bytes": 4448,
+      "sha256": "0ab68b584d997f50086a02de50f43ab706943a31085e394695cda3c0b11926e8"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/RuntimeFeatureScan.kt",
+      "bytes": 5038,
+      "sha256": "39f107842326bf8addf7752637fc3d71d3f760b776137d878c3604c0d1841371"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/RuntimeTarget.kt",
+      "bytes": 7227,
+      "sha256": "94f9b87ae9a340fdf7d1ac4cd7111aed4ccd2cf69481e2282658c3189cc239a0"
+    },
+    {
+      "path": "src/main/kotlin/org/umamo/runtime/model/VertexGroup.kt",
+      "bytes": 2366,
+      "sha256": "22779ef82b1257d8f8c68f762fd38c174adda9c6fbf4bcd7c27a05ae9ee30da8"
+    },
+    {
+      "path": "src/main/resources/i18n/Messages.properties",
+      "bytes": 124621,
+      "sha256": "fdedc8205aace70d729f91afe39fca36d67f99b44fda4f6cc7f8f0d766d28771"
+    },
+    {
+      "path": "src/main/resources/i18n/Messages_ja.properties",
+      "bytes": 152087,
+      "sha256": "d8b0ef571f61e57238aca7e24412c42a05980e4624bdc726cf3cee99486e3176"
+    },
+    {
+      "path": "src/main/resources/i18n/Messages_zh_CN.properties",
+      "bytes": 126537,
+      "sha256": "6c9c1f9a42523ffac3429c7c5c1c648e4945d46c7e8bee86464891377cbdd760"
+    },
+    {
+      "path": "src/main/resources/icons/psd2live.ico",
+      "bytes": 105205,
+      "sha256": "0e3f6e84f183ca2a647c20865aef558a2d90bff73bf0ab5055376fbcbaeaeb21"
+    },
+    {
+      "path": "src/main/resources/icons/psd2live.png",
+      "bytes": 227964,
+      "sha256": "5d35c869257ff0634ef82c11f39aafd8d5ce656585e5fede0f84035f08e5c145"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/agent/AgentSkeletonMotionEditsTest.kt",
+      "bytes": 3361,
+      "sha256": "7db8777d46f9b78538fc2902a0dfc21f2e84f793c631ebb33ea9179cd6f905a7"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/agent/AuthoringParityTest.kt",
+      "bytes": 8706,
+      "sha256": "4cd1827170c2730d4b0031d2c6fde5c07ac994ba470ed08fc1e548a1fd446a29"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/agent/LayerClassificationIntegrationTest.kt",
+      "bytes": 8037,
+      "sha256": "6c51f751a793b52397dc1a6ef7df3aee07e9d82141edce672a1116d274b63a04"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/agent/MissingMeshReplayIntegrationTest.kt",
+      "bytes": 3062,
+      "sha256": "1867d914800e32f65dfd5dc477c1608700f6c33f772b3eda2aa45e778e3b7c64"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/agent/PhysicsWorkspaceTest.kt",
+      "bytes": 3857,
+      "sha256": "c2614ac444eb7fcfcb6148f968a52b5621705a570510f2deab20ab8bceaba47d"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/agent/SkeletonMotionWorkspaceTest.kt",
+      "bytes": 3345,
+      "sha256": "958414974d65a6687887bdc2728e3dfd35c7c43da820d444daf9fe646d56becf"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/AdaptiveMeshTopologyTest.kt",
+      "bytes": 27286,
+      "sha256": "4ba3564aae616b4a886b31aee00d9851b7f92335f779dcca7612cd9e2d25bd29"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/BezierLatticeSamplingTest.kt",
+      "bytes": 1595,
+      "sha256": "9ce6926c997a2b9a4b6220e5802b0a44e3a692ee07d21981f48004215bb661d8"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/BlendShapeAuthoringTest.kt",
+      "bytes": 4576,
+      "sha256": "505bc458faa39f3f5b78abb11358258928b9fa6a8e88ec7def0db66ca845103b"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/CanvasDeformationModeTest.kt",
+      "bytes": 13593,
+      "sha256": "06223c924d502976c627a9cc07b5d44bd9588ad8e65a9f9b1f3e3a68fee6c9ac"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/CanvasLatestQueueTest.kt",
+      "bytes": 872,
+      "sha256": "75b887b5ea220b19e4742453ef00754c08996820f3de6834358d9af75c287f23"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/CanvasTopologyKnifeTest.kt",
+      "bytes": 5474,
+      "sha256": "413d45b2d9319da8beeda4ef288e34816c0a42f3fab32e99d6f14827eb3ea5e5"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/CubismJsonTest.kt",
+      "bytes": 8710,
+      "sha256": "841f3d9893aa1b7557b32ec8cf5807f622c74f0dc736a5fabe4b4c97b4053f8a"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/FreeWarpPlacementBoundsTest.kt",
+      "bytes": 4081,
+      "sha256": "6fd76fa607862cbdac9615b1f9ce443ebf9349a0be7890a274cf8a9575d715ae"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/GlueEditingTest.kt",
+      "bytes": 7285,
+      "sha256": "7ba00a14026878a0d97565693445fc0fdd012cb653777eea6ef0abee2bdef100"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/InspectorPropertyEditsTest.kt",
+      "bytes": 1547,
+      "sha256": "77e72338f707a6510f456561c6fc7558434c67aba2aed87ee4195b94086280ef"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/MeshComponentSplitTest.kt",
+      "bytes": 18240,
+      "sha256": "3dc56d2b8d50730a7e9f51f1129e73d2c7cdcd66681b51118c5df51f74c7947f"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/MeshFootprintRigTest.kt",
+      "bytes": 2821,
+      "sha256": "3e70f30cbea2f474c31ff3ca6745909be4c02f4c0b9266d55f1fcc4faeb0c0b7"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/MissingMeshStructureReplayTest.kt",
+      "bytes": 2060,
+      "sha256": "26de8190ef51bff7a67346f8f2467a850bfd8f9b3d3661193f6c0377983c8a41"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/MotionClipsTest.kt",
+      "bytes": 7632,
+      "sha256": "1b7e6e24f181a96ed4eae73f9d27fbc741bda2b4aa33091b13d56dc1d8fc6f5c"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/ParameterDefinitionTest.kt",
+      "bytes": 2281,
+      "sha256": "37a22f04f60b16c566f287482babcad2f32e3f974d37ce8028cefa205326b17b"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/ParameterKeyEditsTest.kt",
+      "bytes": 9590,
+      "sha256": "97d7b10dc18fd9edf4f4dbadf990e602520554739bb2a07c425ef2117d15e27e"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/PhysicsAuthoringTest.kt",
+      "bytes": 6702,
+      "sha256": "fa04b078be77b7c56755d845c941ef25ce6429e25daf787dbd1bd9a42adc0f8f"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/PhysicsTest.kt",
+      "bytes": 12427,
+      "sha256": "62b3b3e1527f50a3c003d5118e6e47311b4b7ccf15535c32d23316dceef67abc"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/PlacementParentLocalBoundsTest.kt",
+      "bytes": 3671,
+      "sha256": "9cac5cbe0e0c115a2dcbf7cef959b752e56f9120a6ae0ceb471ea233aea073e4"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/RotationCreationTest.kt",
+      "bytes": 14052,
+      "sha256": "f0f20a5d05e003f2dbe6f09096d08c6fb4600db030a935aac28cef43dd3ff1a9"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/RotationTipKeepScaleTest.kt",
+      "bytes": 2353,
+      "sha256": "19d8f4ec4862939f54b17bff445d76116a110d8e1777108ea450d25a348b0d4c"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/SkeletonAuthoringTest.kt",
+      "bytes": 8249,
+      "sha256": "069b4af73c7993bf7c8b21cff1114023dc1ae7c05a456b49dfbf86db22ae3720"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/SkeletonAutoBuilderTest.kt",
+      "bytes": 2882,
+      "sha256": "d03f0b01e2a2697d084ddafe7d290a510c856e08c9e050868cf8e13fa1ca353f"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/SkeletonConstraintTest.kt",
+      "bytes": 4239,
+      "sha256": "1f3edcb9e8931333b45c8c5f938aecf6c02f5ea2ca98a075e1da34c35df8b2b4"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/SkeletonManualWeightsTest.kt",
+      "bytes": 6204,
+      "sha256": "5bca238a6c69c3897c537b67658d07a0f8248c3068159cc6cea2e7fecccc20ac"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/SkeletonPipelineIntegrationTest.kt",
+      "bytes": 5623,
+      "sha256": "ffef7fcbcf12e9ed80817fee917a83073d584085ec5520f3e1f5df45af12001e"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/SkeletonRigTest.kt",
+      "bytes": 51803,
+      "sha256": "7f35a0f359afc987a0b1e0edf2a8aa0b9d06a4289d1ba267cbe8819611001b26"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/SkeletonStructuralTest.kt",
+      "bytes": 5002,
+      "sha256": "1367ce999e466e2de4983b5170e141256216e2e177ef9a247f824f5a46e7a44b"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/SkeletonWeightsTest.kt",
+      "bytes": 2123,
+      "sha256": "35291469e21b0917a77aa17dce22f073794f372c26d51916e289df50b681e9b2"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/SwingDeformerTest.kt",
+      "bytes": 27598,
+      "sha256": "dc872387e526b3a1dbaaa8eed5da55f14ee261c10d2606f01b0e20d99ab9af16"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/SwingPipelineIntegrationTest.kt",
+      "bytes": 4324,
+      "sha256": "adff6f28c115294b561d97c6192953cdea18be09633c9c5016fe87717fd1bc71"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/sim/ClothFitTest.kt",
+      "bytes": 5703,
+      "sha256": "32eb7502ee923c7dc132c3058ce76de6e9aae44c1fcc861d69e1cba45c0de0d5"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/sim/ModelPresetsTest.kt",
+      "bytes": 13275,
+      "sha256": "8bf6296ca2e1544eb04f14c600c8a4aad71a69e3ff465aea611d0a0cbed96b77"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/sim/SimBakeBenchmark.kt",
+      "bytes": 10593,
+      "sha256": "b23288af5234ed2aae8e0b127b61346c43f8b369b34d874885364c735cfccfd9"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/sim/SimBakeTest.kt",
+      "bytes": 21825,
+      "sha256": "a0e79f7e4759ed7659fd98bb93a4dbe760d40e7e9e940ef8d741d6efb6099344"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/sim/SimPipelineIntegrationTest.kt",
+      "bytes": 3901,
+      "sha256": "4fb2b351673e8cfee3eefc64ec696916b543bb32cc265154e9f1d8cdf2751025"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/core/sim/SimulationTest.kt",
+      "bytes": 22901,
+      "sha256": "21ef374b7bae7859db17a8ce816307bcc91154644e195d67147ce1946b48276a"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/project/ParameterSnapshotCodecTest.kt",
+      "bytes": 1112,
+      "sha256": "8466a4c250ff587167acfd13c7530ca0dc852f91cac6c5ab65b1446c20c1238b"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/BrushFalloffTest.kt",
+      "bytes": 3550,
+      "sha256": "6ad441acd55927b71c1cafdc310eabc36a9c839a37d428f97d9e1914027c4160"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/CachedSkiaPictureTest.kt",
+      "bytes": 2104,
+      "sha256": "e8709a5ba0b30cbebbc1b77fcc053da88ff425f938abb0ed3874c8d6d6300276"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/CanvasGestureGeometryTest.kt",
+      "bytes": 860,
+      "sha256": "c95c986d96f596a858c1c1be6b0b174d03d3e4358008ae009f20a658e5faece3"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/DeformPathRadiusTest.kt",
+      "bytes": 11145,
+      "sha256": "f8dfe0b7254b9b022843df19c550c2148954db0d58e497ab60c1a8e8e30d7af8"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/MotionTimelineGeometryTest.kt",
+      "bytes": 2017,
+      "sha256": "5e20e9d93e4b108f6b57cfe277cac5cd7534943ba5b9fb9c9d9344056f96832c"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/ParameterKeyAxisTest.kt",
+      "bytes": 2366,
+      "sha256": "7526fcfe483f8545e8027196d370e5115737098312c6581056aa6c5e12078bc1"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/ParameterKeyMarksTest.kt",
+      "bytes": 1152,
+      "sha256": "dfb34bb49fa96147264e04444b765589b0b7627f04735f2ef4410b182e9618b3"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/RotationGuideProjectionTest.kt",
+      "bytes": 3711,
+      "sha256": "8c4cf9ce6caace0482828fb0c8fd094c78f4597f8540b99201cbe8526bc81519"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/SelectedParameterTest.kt",
+      "bytes": 5459,
+      "sha256": "6c4d316d10ff83719fda7cef680856569503c9b26a61ba0a4268ad7a531565d6"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/SkeletonPoseSubToolTest.kt",
+      "bytes": 1220,
+      "sha256": "6e0a643964562f213c66190546a774ef83a371afdc734a4eda78eb3bebe9e7ef"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/state/BatchMeshSplitViewModelTest.kt",
+      "bytes": 1837,
+      "sha256": "377a7627bde304bccfcdf8b6d20fe698e1134c8f0d2640784904b025389377a5"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/state/CanvasModeMenuTest.kt",
+      "bytes": 12556,
+      "sha256": "513efb138533c5949b7269cf40e3a696c8f1775a14f23bf41515efdf905dbaba"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/state/LivePoseTest.kt",
+      "bytes": 6586,
+      "sha256": "8c180914cbc7808533eb0348369eaa67dbaedfb82f53fdfcd58b3b6b3475dad6"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/state/MotionKeyEditsTest.kt",
+      "bytes": 6120,
+      "sha256": "cdf12b516acb907b08ec60f6f6f3c42bbb833a3de1357dff43c740795174e51b"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/state/MultiCanvasIsolationTest.kt",
+      "bytes": 32380,
+      "sha256": "731a9042cb2ec324c387f13fae4f7b101b485f9dd65b67954265a7cd4081b82a"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/state/PreviewMotionPlayerTest.kt",
+      "bytes": 3912,
+      "sha256": "8178d6cdf4c924c080293a18650e7a839802c3c7da94d9a84ed8579f59f1e1bd"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/state/RecentFilesTest.kt",
+      "bytes": 1723,
+      "sha256": "74cc3c6624260da318e1f3fb1e0f5f71780883e09685cbbed2b154fb72f339d6"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/state/TaskProgressTest.kt",
+      "bytes": 2137,
+      "sha256": "dedc73a07c87d4059e869e9c74e5ffc0087f95904f2b56af5a7b2dc868b10667"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/state/WorkspacePoseTest.kt",
+      "bytes": 13633,
+      "sha256": "98b02db46d5a37e02ee2694b5dfed8bf4538fae6ec46dc0f09b61a384e640129"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/theme/ThemeCatalogTest.kt",
+      "bytes": 3189,
+      "sha256": "d2f979cc1da4bfd849e8179589ae9d395062c61a0db7a2661aa58049a3f0288d"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/tutorial/InteractiveTutorialCatalogTest.kt",
+      "bytes": 7366,
+      "sha256": "4e289041a4e3e17c2f0f52cf063913157735b523dbdd75076e7d2e78326e5f82"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/tutorial/TutorialGeometryTest.kt",
+      "bytes": 1748,
+      "sha256": "b416d32e6ee69cbc18b69f4bdce87b099304638b85fcde42af8f645efa4ec3a7"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/tutorial/TutorialRichTextTest.kt",
+      "bytes": 957,
+      "sha256": "000a3068d37e7fb53e7575a728e147a900413d134dcaa5611ad51216242f22d1"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/views/DockLayoutTest.kt",
+      "bytes": 11631,
+      "sha256": "0bed4d5cfcd62dd0fd03c3600eb0ab225ba7c644ce5125855a03524f6d482938"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/views/SkeletonDockTabTest.kt",
+      "bytes": 702,
+      "sha256": "77f0ad9c808cd1867146c1d1cb36c89b90ad60d155e7e085ca1f47f93c265d3e"
+    },
+    {
+      "path": "src/test/kotlin/io/github/psd2live/ui/views/WorkspaceEditPanelsTest.kt",
+      "bytes": 709,
+      "sha256": "d06a9733a9abc148dddb2ee044c25714aece2f65f4d5793121c19e23ccd6163c"
+    },
+    {
+      "path": "src/test/kotlin/org/umamo/edit/ParameterPanelEditsTest.kt",
+      "bytes": 2945,
+      "sha256": "2ef9d28697cef8e6d3368dfbbab37ea77fc6a05b8ea06d5f76e27ed66f070969"
+    },
+    {
+      "path": "src/test/kotlin/org/umamo/format/moc3/MocDefaultColorsTest.kt",
+      "bytes": 4388,
+      "sha256": "1c377704ad545fff99a3cdcf22ad51b4e405302cc31377a96080c81338b6fc3f"
+    },
+    {
+      "path": "src/test/kotlin/org/umamo/interop/PuppetModelUserDataDiffTest.kt",
+      "bytes": 837,
+      "sha256": "b2a1798d339d4517b7a6e2c0a647d6cba07ee227810cf688b169f8e3ce60b3b1"
+    },
+    {
+      "path": "src/test/kotlin/org/umamo/interop/cmo3/Cmo3DeformPathsObserverTest.kt",
+      "bytes": 6227,
+      "sha256": "042e369cb8a07fc3750b2b3c28087288a69008894b68fa6841011a64630ecedd"
+    },
+    {
+      "path": "src/test/kotlin/org/umamo/interop/cmo3/Cmo3VersionCompatibilityTest.kt",
+      "bytes": 6094,
+      "sha256": "1269d96be48d0be273210556d15e7d866ddddf35ee2de6d30bb498c590875ebc"
+    }
+  ],
+  "excluded": "All examples, test fixture binaries, SDK/Core binaries, wrapper JAR, release payloads and upscale worker"
+}

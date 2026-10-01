@@ -4,6 +4,8 @@
 
 **0.9.6 已正式公开发布**：GitHub 和服务器下载、两条签名更新源及 Chrome 登录下载页验收均通过。两份更新清单均为 stable / sequence 8，分别沿用 GitHub 和服务器各自的既有发布公钥，不能混用。详见 [软件内更新](docs/updates.md) 和 [0.9.6 验收](docs/acceptance-0.9.6.md)。
 
+网页二次元伙伴已接入原创 Cubism 模型：橘白配色、头发物理、视线、眨眼、脸红、泪光和跟随实际语音能量的口型。使用同源官方 Framework/Core，设备不支持或加载失败时自动使用原角色场景。编辑源位于 `outputs/avatars/akari-cubism/`，包含分层 PSD 和 CMO3 编辑候选；CMO3 尚未在官方 Editor 打开和再导出验收。本次网页更新没有重打 0.9.6 客户端，完整模型交付与验收边界见 [Cubism 说明](docs/cubism/README.md)。
+
 | 平台 | Chat 与图片 | Agent 执行位置 | 交付形式 |
 | --- | --- | --- | --- |
 | Web | 登录个人服务 | 同账号的在线电脑 / 中央服务器 | 0.9.6 Web 构建 / 自部署源码 |

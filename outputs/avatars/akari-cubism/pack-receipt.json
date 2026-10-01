@@ -1,0 +1,451 @@
+{
+  "schema": 1,
+  "atlases": [
+    {
+      "file": "parts-atlas.png",
+      "sha256": "e5009b457281efa0990404cd2115bcf843f2d14c5af62033333aa1d229cc296f"
+    },
+    {
+      "file": "emotion-parts.png",
+      "sha256": "173692eefe9606800b200edf29aaa5e71341b2de84155ffac5322819ee26870f"
+    },
+    {
+      "file": "face-parts.png",
+      "sha256": "ce228f18d72acb7ff2170b05743af6910cd4a349a03d1ecebf7a30154ed9bdf8"
+    }
+  ],
+  "psdSha256": "aa33d9aaaf37439f890f68f5c75e7f4983f2ed9f8f055704d1a983ad18e6f2a1",
+  "canvas": [
+    1024,
+    1536
+  ],
+  "layers": [
+    {
+      "name": "back hair",
+      "source": [
+        14,
+        6,
+        333,
+        365
+      ],
+      "target": [
+        170,
+        14,
+        680,
+        744
+      ],
+      "sha256": "d73b71edb497ad592ca125b47119374838273d60898fbb48bc7368fea9ffb51c",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "neck",
+      "source": [
+        949,
+        135,
+        305,
+        195
+      ],
+      "target": [
+        285,
+        478,
+        455,
+        291
+      ],
+      "sha256": "e482feb07aa2e588b1477cad62099e0234f2bd8092007b1575cad409a57179af",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "topwear",
+      "source": [
+        625,
+        30,
+        318,
+        338
+      ],
+      "target": [
+        92,
+        625,
+        840,
+        893
+      ],
+      "sha256": "6bfe43c9afc5e1a2373b2e6cb81ed5d2a49303d855217d6f1cc882f60d237f1c",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "face",
+      "source": [
+        349,
+        36,
+        269,
+        305
+      ],
+      "target": [
+        329,
+        134,
+        366,
+        415
+      ],
+      "sha256": "8a288088863a5367dc7172a741488e0cde4d0db6a46d50ca82c4299c0223b1e8",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "blush",
+      "atlas": "emotion-parts.png",
+      "source": [
+        123,
+        303,
+        996,
+        295
+      ],
+      "target": [
+        378,
+        400,
+        270,
+        54
+      ],
+      "sha256": "cc78c1c95bf58cc03268e9f5bc8988a18bd3b7060a64e44907eb19bec113ac2c",
+      "alpha": [
+        0,
+        253
+      ]
+    },
+    {
+      "name": "eyewhite-r",
+      "source": [
+        676,
+        487,
+        210,
+        128
+      ],
+      "target": [
+        376,
+        331,
+        110,
+        67
+      ],
+      "sha256": "3c8df15d386b4876042d9223757b0f46fe9ac3718534efa292cfe70a026b9bf2",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "eyewhite-l",
+      "source": [
+        992,
+        488,
+        219,
+        128
+      ],
+      "target": [
+        540,
+        331,
+        110,
+        64
+      ],
+      "sha256": "ac202b979c777c462132e3269848678e688b94e589ac23cdc6b159dfd0bfbf5e",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "irides-r",
+      "source": [
+        65,
+        770,
+        194,
+        184
+      ],
+      "target": [
+        398,
+        330,
+        66,
+        63
+      ],
+      "sha256": "c4492aed104c6d954775c0b7d26e984f4bac96f67e6d4bedb7a1df116a26ba43",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "irides-l",
+      "source": [
+        378,
+        768,
+        198,
+        183
+      ],
+      "target": [
+        562,
+        330,
+        66,
+        61
+      ],
+      "sha256": "9ebf96368884825d7569e2731ecc814fca1ca239b015934d2c1254d3d644d4e5",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "eyelash-r",
+      "source": [
+        654,
+        810,
+        242,
+        119
+      ],
+      "target": [
+        366,
+        323,
+        130,
+        64
+      ],
+      "sha256": "c44bdceee67844acda0c944a2c50c4f15715b2c9e247f96d73829fd6dab53c70",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "eyelash-l",
+      "source": [
+        982,
+        810,
+        254,
+        119
+      ],
+      "target": [
+        528,
+        323,
+        134,
+        63
+      ],
+      "sha256": "4edae0fcbb0581ba456bde722f48c303707e78ca3fb18e4f8e5007b8f527d56b",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "eye close-r",
+      "atlas": "face-parts.png",
+      "source": [
+        76,
+        312,
+        442,
+        145
+      ],
+      "target": [
+        366,
+        348,
+        130,
+        43
+      ],
+      "sha256": "075b1b1e969b782dcaf53921020e1acde704001123979363478c5e7505ea456a",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "eye close-l",
+      "atlas": "face-parts.png",
+      "source": [
+        745,
+        312,
+        445,
+        145
+      ],
+      "target": [
+        528,
+        348,
+        134,
+        44
+      ],
+      "sha256": "3aeed54d864bbb66cfd1cb4fc7910c8c1ccb9d65c0b3ad6b91347ad8cc725a96",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "tears",
+      "atlas": "emotion-parts.png",
+      "source": [
+        263,
+        891,
+        729,
+        95
+      ],
+      "target": [
+        399,
+        376,
+        226,
+        29
+      ],
+      "sha256": "53b618c2b437f39ebba44f1b889c307b38f6ceabd7f7d9b88099d712ccfc8dc3",
+      "alpha": [
+        0,
+        250
+      ]
+    },
+    {
+      "name": "eyebrow-r",
+      "source": [
+        41,
+        1053,
+        226,
+        80
+      ],
+      "target": [
+        374,
+        292,
+        113,
+        40
+      ],
+      "sha256": "bd40a6861228e827fd126f6c271fe06f478cf0b64b3b5fdd865fcb20dcc3ca3e",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "eyebrow-l",
+      "source": [
+        380,
+        1055,
+        237,
+        75
+      ],
+      "target": [
+        538,
+        292,
+        113,
+        36
+      ],
+      "sha256": "b3d552bad815c19247b2d47a87cfda211eb1789e3456570fdb42d3013f514289",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "mouth open",
+      "source": [
+        708,
+        1055,
+        148,
+        119
+      ],
+      "target": [
+        476,
+        451,
+        72,
+        58
+      ],
+      "sha256": "ea1e4d1bdd6b32a89fa5ff9c5eb21f54a80b58ed2da0c9937308a39905560f50",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "nose",
+      "atlas": "face-parts.png",
+      "source": [
+        295,
+        845,
+        76,
+        148
+      ],
+      "target": [
+        506,
+        410,
+        13,
+        25
+      ],
+      "sha256": "3454955f09c85754cd184bde8d708afe91be8061b334b33c7fb8b12d17e84011",
+      "alpha": [
+        0,
+        253
+      ]
+    },
+    {
+      "name": "mouth close",
+      "atlas": "face-parts.png",
+      "source": [
+        784,
+        918,
+        305,
+        82
+      ],
+      "target": [
+        473,
+        474,
+        78,
+        21
+      ],
+      "sha256": "db3ea784b910ba6658a36d87e367908b7ed8d41939cd5022e7be7977b92f1f47",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "front hair 1",
+      "source": [
+        14,
+        372,
+        343,
+        374
+      ],
+      "target": [
+        182,
+        4,
+        475,
+        518
+      ],
+      "sha256": "8809fc3ba4f3b285b4e2d8a2602631c5f55f08dfd6ee0c1cb3ada341d25d9ee8",
+      "alpha": [
+        0,
+        255
+      ]
+    },
+    {
+      "name": "front hair 2",
+      "source": [
+        417,
+        373,
+        210,
+        374
+      ],
+      "target": [
+        552,
+        29,
+        262,
+        467
+      ],
+      "sha256": "891d0a660eb020efd3286032428425a430b72786053d68a7b0a24483c53c578a",
+      "alpha": [
+        0,
+        255
+      ]
+    }
+  ],
+  "method": "Generated raster parts; deterministic crop, scale, offset and RGB8 PSD packaging; no procedural artwork."
+}

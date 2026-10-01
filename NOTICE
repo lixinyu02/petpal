@@ -55,3 +55,21 @@ native hashes are retained under server/native/computer-use/. ARM64 desktop
 operation has not been physically tested.
 The upstream package's Model Context Protocol 2.0.0 and Zod dependencies retain
 their package licenses. PetPal is an independent integration.
+
+Live2D Cubism
+-------------
+Cubism Web Framework 5-r.5, revision d4da0aa07e47d2c1e4f5fa7ea6047861ea5e5d0b
+Copyright(c) Live2D Inc. All rights reserved.
+License: Live2D Open Software License; retained with unchanged upstream source
+under vendor/cubism-web-framework/ and shipped under avatars/cubism-runtime/.
+
+Cubism Core 06.00.0001 from official Cubism SDK for Web 5-r.5
+Copyright(c) Live2D Inc. All rights reserved.
+License: Live2D Proprietary Software License Agreement; the redistributable
+Core and its original license/redistribution notice are in public/vendor/live2d/.
+These components are governed by their own licenses, not PetPal's license.
+The bundled Akari character artwork and model are original project assets.
+
+PSD2Live is an independent authoring tool, not bundled into the application.
+The self-contained GPL-3.0 authoring runner and its reproduction instructions
+are retained separately under scripts/authoring/ and docs/cubism/.

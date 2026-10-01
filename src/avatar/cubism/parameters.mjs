@@ -1,0 +1,69 @@
+const finite = value => Number.isFinite(value) ? value : 0;
+const clamp = (value, low = -1, high = 1) => Math.min(high, Math.max(low, finite(value)));
+const unit = value => clamp(value, 0, 1);
+
+/** Renderer-independent intent. This is parameter control, not a fabricated MOC. */
+export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = false, hidden = false, reducedMotion = false, nativeMotion = '' } = {}) {
+  const still = sleeping || hidden || reducedMotion;
+  const blinkL = sleeping ? 1 : unit(pose.blinkLeft);
+  const blinkR = sleeping ? 1 : unit(pose.blinkRight);
+  const smile = unit(pose.smileAmount), sad = unit(Math.max(finite(pose.sadAmount), finite(pose.downcastAmount)));
+  const quiet = sleeping || hidden || !pose.speaking;
+  const mouthForm = quiet ? smile * .7 - sad * .35 : pose.mouthShape === 'O' ? -.65 : pose.mouthShape === 'E' ? .25 : 0;
+  return {
+    ParamAngleX: still ? 0 : clamp(follow.headX) * 12 + (nativeMotion === 'Shake' ? 0 : clamp(pose.headShake) * 3),
+    ParamAngleY: still ? 0 : clamp(follow.headY) * 9 - (nativeMotion === 'Nod' ? 0 : clamp(pose.headNod) * 5),
+    ParamAngleZ: sleeping ? -5 : still ? 0 : clamp(follow.headTilt) * 8,
+    ParamEyeBallX: still ? 0 : clamp(follow.gazeX),
+    ParamEyeBallY: still ? 0 : clamp(follow.gazeY),
+    ParamBodyAngleX: still ? 0 : clamp(follow.bodyXPercent) * 4 + clamp(pose.bodyTurn) * 3,
+    ParamBodyAngleY: still ? 0 : clamp(pose.bodyLean) * 3,
+    ParamBodyAngleZ: still ? 0 : -clamp(follow.bodyRotationDegrees) * 3,
+    ParamEyeLOpen: hidden ? 1 : (1 - blinkL) * (1 - unit(pose.eyeSmile) * .15),
+    ParamEyeROpen: hidden ? 1 : (1 - blinkR) * (1 - unit(pose.eyeSmile) * .15),
+    ParamEyeLSmile: sleeping || hidden ? 0 : unit(pose.eyeSmile),
+    ParamEyeRSmile: sleeping || hidden ? 0 : unit(pose.eyeSmile),
+    ParamEyeBallForm: sleeping || hidden ? 0 : unit(pose.eyeSmile),
+    ParamBrowLY: hidden ? 0 : clamp(pose.browRaise) * .7,
+    ParamBrowRY: hidden ? 0 : clamp(pose.browRaise) * .7,
+    ParamBrowLAngle: hidden ? 0 : clamp(pose.browTilt) * .7,
+    ParamBrowRAngle: hidden ? 0 : -clamp(pose.browTilt) * .7,
+    ParamCheek: sleeping || hidden ? 0 : unit(pose.blush),
+    ParamBreath: still ? 0 : .35 + clamp(follow.breath) * .25 * unit(follow.breathScale / 1.12),
+    ParamShoulderY: still ? 0 : unit(pose.shoulderLift),
+    ParamTear: sleeping || hidden ? 0 : unit(pose.tearAmount),
+    ParamExcited: sleeping || hidden ? 0 : unit(pose.excitedAmount),
+    ParamSad: sleeping || hidden ? 0 : sad,
+    ParamMouthForm: hidden || sleeping ? 0 : clamp(mouthForm),
+    // Absolute application after motion/expression/physics guarantees immediate closure.
+    ParamMouthOpenY: quiet ? 0 : unit(pose.mouthOpen),
+  };
+}
+
+/** Framework returns virtual indices for unknown IDs; never treat them as real. */
+export function createCubismParameterBridge(model, idManager) {
+  const count = model.getParameterCount();
+  if (!Number.isSafeInteger(count) || count < 1 || count > 1024) throw new Error('Cubism parameter count is invalid.');
+  const bindings = new Map();
+  for (const name of Object.keys(cubismParameterTargets())) {
+    const index = model.getParameterIndex(idManager.getId(name));
+    if (!Number.isInteger(index) || index < 0 || index >= count) continue;
+    const low = model.getParameterMinimumValue(index), high = model.getParameterMaximumValue(index);
+    if (!Number.isFinite(low) || !Number.isFinite(high) || low > high) continue;
+    bindings.set(name, { index, low, high });
+  }
+  return {
+    supported: [...bindings.keys()],
+    apply(targets, { mouthOnly = false, additive = [], multiply = [] } = {}) {
+      const additiveNames = new Set(additive), multiplyNames = new Set(multiply);
+      for (const [name, binding] of bindings) {
+        if (mouthOnly !== name.startsWith('ParamMouth')) continue;
+        if (!Number.isFinite(targets[name])) continue;
+        let value = targets[name];
+        if (additiveNames.has(name)) value += model.getParameterValueByIndex(binding.index);
+        if (multiplyNames.has(name)) value *= model.getParameterValueByIndex(binding.index);
+        model.setParameterValueByIndex(binding.index, clamp(value, binding.low, binding.high));
+      }
+    },
+  };
+}

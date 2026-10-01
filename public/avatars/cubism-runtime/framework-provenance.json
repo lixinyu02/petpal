@@ -1,0 +1,9 @@
+{
+  "sourceRepository": "https://github.com/Live2D/CubismWebFramework",
+  "sourceCommit": "d4da0aa07e47d2c1e4f5fa7ea6047861ea5e5d0b",
+  "sampleCommit": "ed1e0b714826d92469b9e51cacc3346f4e393f03",
+  "bundleBytes": 199865,
+  "bundleSha256": "0170359c0cef965054f367ecdd18a8b66cd91aa2ea72ee50eb3c90285fde1e29",
+  "compiler": "esbuild",
+  "includesCore": false
+}

@@ -1,0 +1,28 @@
+{
+  "atlas": "parts-atlas.png",
+  "width": 1024,
+  "height": 1536,
+  "layers": [
+    {"name":"back hair","source":[14,6,333,365],"target":[170,14,680,744]},
+    {"name":"neck","source":[949,135,305,195],"target":[285,478,455,291]},
+    {"name":"topwear","source":[625,30,318,338],"target":[92,625,840,893]},
+    {"name":"face","source":[349,36,269,305],"target":[329,134,366,415]},
+    {"name":"blush","atlas":"emotion-parts.png","source":[123,303,996,295],"target":[378,400,270,54]},
+    {"name":"eyewhite-r","source":[676,487,210,128],"target":[376,331,110,67]},
+    {"name":"eyewhite-l","source":[992,488,219,128],"target":[540,331,110,64]},
+    {"name":"irides-r","source":[65,770,194,184],"target":[398,330,66,63]},
+    {"name":"irides-l","source":[378,768,198,183],"target":[562,330,66,61]},
+    {"name":"eyelash-r","source":[654,810,242,119],"target":[366,323,130,64]},
+    {"name":"eyelash-l","source":[982,810,254,119],"target":[528,323,134,63]},
+    {"name":"eye close-r","atlas":"face-parts.png","source":[76,312,442,145],"target":[366,348,130,43]},
+    {"name":"eye close-l","atlas":"face-parts.png","source":[745,312,445,145],"target":[528,348,134,44]},
+    {"name":"tears","atlas":"emotion-parts.png","source":[263,891,729,95],"target":[399,376,226,29]},
+    {"name":"eyebrow-r","source":[41,1053,226,80],"target":[374,292,113,40]},
+    {"name":"eyebrow-l","source":[380,1055,237,75],"target":[538,292,113,36]},
+    {"name":"mouth open","source":[708,1055,148,119],"target":[476,451,72,58]},
+    {"name":"nose","atlas":"face-parts.png","source":[295,845,76,148],"target":[506,410,13,25]},
+    {"name":"mouth close","atlas":"face-parts.png","source":[784,918,305,82],"target":[473,474,78,21]},
+    {"name":"front hair 1","source":[14,372,343,374],"target":[182,4,475,518]},
+    {"name":"front hair 2","source":[417,373,210,374],"target":[552,29,262,467]}
+  ]
+}

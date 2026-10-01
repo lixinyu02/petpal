@@ -1,0 +1,3 @@
+.cubism-scene>canvas{width:100%;height:100%;outline:none;touch-action:pan-y pinch-zoom;transform-origin:50% 60%}
+.cubism-scene>canvas:focus-visible{outline:2px solid #7c9270;outline-offset:-4px;border-radius:18px}
+.cubism-scene>.cubism-fallback{position:absolute;inset:0;width:100%;height:100%}

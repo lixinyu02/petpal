@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react';
 import type PetScene from '../pet/PetScene';
 import type { CompanionKind } from '../api';
 import type { PerformanceInput } from './performance.mjs';
-const AnimeScene = lazy(() => import('./AnimeScene'));
+const AnimeScene = lazy(() => import('./cubism/CubismScene'));
 const CatScene = lazy(() => import('../pet/PetScene'));
 
 class AvatarBoundary extends Component<{ children: ReactNode; kind: CompanionKind }, { failed: boolean }> {

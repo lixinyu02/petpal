@@ -1,0 +1,445 @@
+{
+  "repository": "https://github.com/Live2D/CubismWebFramework",
+  "commit": "d4da0aa07e47d2c1e4f5fa7ea6047861ea5e5d0b",
+  "sample_commit": "ed1e0b714826d92469b9e51cacc3346f4e393f03",
+  "files": [
+    {
+      "path": "LICENSE.md",
+      "source_blob": "bd0be75fcb069330a86ed9eeee73b56c2056e044",
+      "bytes": 2234,
+      "sha256": "7ed849bff1e6499aa7cd882e47d246ddbbe06817c1e84cb974df949488302614"
+    },
+    {
+      "path": "Shaders/WebGL/fragshadersrcalphablend.frag",
+      "source_blob": "f308687c97e63f1ad860220812fe24f4569c9a9c",
+      "bytes": 2189,
+      "sha256": "855b247f02042a808a41e282ee4d7de7cc4533abeb5032b4ab8fe84f7dec107f"
+    },
+    {
+      "path": "Shaders/WebGL/fragshadersrccolorblend.frag",
+      "source_blob": "c8dc7253b2edda473c007b92a7b247a3a2d54f50",
+      "bytes": 7525,
+      "sha256": "01d4bf6a14b4a738976e9a538767a21da0defa8816f3845a7df08a7713327538"
+    },
+    {
+      "path": "Shaders/WebGL/fragshadersrccopy.frag",
+      "source_blob": "4c125e2a3bf1441af4aadc9c1444be5a8912af08",
+      "bytes": 429,
+      "sha256": "15c67a4ec3adda4c849aff2a8319a3f6aceef8a84d5e5e1f3fb7fd9cd681193c"
+    },
+    {
+      "path": "Shaders/WebGL/fragshadersrcmaskinvertedpremultipliedalpha.frag",
+      "source_blob": "329d9b3375e7a70863bf650fd2145067612bfe62",
+      "bytes": 1051,
+      "sha256": "1005cff8113de587cf1c0e295288d04d85f0f4ebc223684c8340e017fd8fc788"
+    },
+    {
+      "path": "Shaders/WebGL/fragshadersrcmaskpremultipliedalpha.frag",
+      "source_blob": "0561a5bc5d1323393b1b66333c45570d5b3ff648",
+      "bytes": 1043,
+      "sha256": "f84ff615393d26ea6ab7c28747803db6472524c92567c0ad01e8225fbab36a3b"
+    },
+    {
+      "path": "Shaders/WebGL/fragshadersrcpremultipliedalpha.frag",
+      "source_blob": "2a3f728b65cf3c3c3c0f33cc22006253df2c00c7",
+      "bytes": 747,
+      "sha256": "c93abe215357cc782a25fc4ef20f5fe1f34e2cc193ee23d763b56b81fae5fce1"
+    },
+    {
+      "path": "Shaders/WebGL/fragshadersrcpremultipliedalphablend.frag",
+      "source_blob": "44b6cc7432d284c259d9b5871d80a547a9276240",
+      "bytes": 2038,
+      "sha256": "2155076275199a2946959838391dfb856e9d1db91b6ca3abd19ed70d4ff27e15"
+    },
+    {
+      "path": "Shaders/WebGL/fragshadersrcsetupmask.frag",
+      "source_blob": "308f5624efcc7c84e8ff493bb3233ec62f24e219",
+      "bytes": 736,
+      "sha256": "3cccc0b68a56cfbf4bd4841b0a759431dd159812c38dc280981ba633fa0afe7a"
+    },
+    {
+      "path": "Shaders/WebGL/vertshadersrc.vert",
+      "source_blob": "fb9b500900ada8eda3b8b02a546a766251ee6c92",
+      "bytes": 465,
+      "sha256": "291ed3f35f71f1e71e6df33fb055f009a8a9b36ee664f74f24f6cefef0c4029b"
+    },
+    {
+      "path": "Shaders/WebGL/vertshadersrcblend.vert",
+      "source_blob": "5839d768acd2a4fa0f0cb1f4662d593ed57e9a32",
+      "bytes": 738,
+      "sha256": "2589837bd7a6a550a1c3af41b4fa776011e6e71f2531320fa39afcb83b209bf4"
+    },
+    {
+      "path": "Shaders/WebGL/vertshadersrccopy.vert",
+      "source_blob": "65295fb0abbb9e30933fe208e36c97f7cb99ab19",
+      "bytes": 392,
+      "sha256": "b7bc4ba7517f405af4812ac47d99bc2b633c99f463c1224029556b00e8dff3cf"
+    },
+    {
+      "path": "Shaders/WebGL/vertshadersrcmasked.vert",
+      "source_blob": "100e9154228f1783f30e9419681e77d46aff70ed",
+      "bytes": 559,
+      "sha256": "6704a9df2e6d3ee5176c72fca4ba59358ba4827a07054b1e0a72a3c574e281fd"
+    },
+    {
+      "path": "Shaders/WebGL/vertshadersrcsetupmask.vert",
+      "source_blob": "ccdb2bb459fca65c767518022e4e96d4288cf4b1",
+      "bytes": 536,
+      "sha256": "649aad2f6c0af55a7a4adcf33dbf78937ef9d77ed6ba917fd716176adce25afe"
+    },
+    {
+      "path": "src/cubismdefaultparameterid.ts",
+      "source_blob": "1d716d59b4870ab8a3e91316c0b470b28b7d83a9",
+      "bytes": 5783,
+      "sha256": "f92e20db8145f06b73728fb6ba4215bbaed723e26959471f2e291962142c95b5"
+    },
+    {
+      "path": "src/cubismframeworkconfig.ts",
+      "source_blob": "3ff7d46070d10eacbdf4f859f89599c263dac25d",
+      "bytes": 1111,
+      "sha256": "92399ad1a572ec6048ea351ce4363b357f6f86471f9edb4af84bb7e16790828b"
+    },
+    {
+      "path": "src/cubismmodelsettingjson.ts",
+      "source_blob": "a494f3a6a753cd399ea45088261dc73badaa4bcc",
+      "bytes": 24382,
+      "sha256": "58ff868afbdab05f905782be3ae411c787ad0c9c3e79ad254fc596d08bbe0b6e"
+    },
+    {
+      "path": "src/effect/cubismbreath.ts",
+      "source_blob": "2e5f4d01bdceeb2879ddbe5c862cfec4dfa4650b",
+      "bytes": 3765,
+      "sha256": "06da2c2c10e91782fb99833c94842e6267dc996ddb35a1bfb99765f053c7729a"
+    },
+    {
+      "path": "src/effect/cubismeyeblink.ts",
+      "source_blob": "3afebcec7e39eafa4a551315e912d22aaef45a11",
+      "bytes": 7222,
+      "sha256": "a1c26cfcf2656424f370e17d4b4cb0f9642db2dd452af8f562c67ced26ba64de"
+    },
+    {
+      "path": "src/effect/cubismlook.ts",
+      "source_blob": "95d94a3a19b90e68116542d4028b05dea06f8063",
+      "bytes": 3657,
+      "sha256": "3c7f7dbea7b34c524bcf36fb5a15f9264d4a8a7228f5b124fdaddb2c82193f21"
+    },
+    {
+      "path": "src/effect/cubismpose.ts",
+      "source_blob": "cbe5ce325abd92c36b27ac48d49ea51c11beb753",
+      "bytes": 11698,
+      "sha256": "8eba3f692c8cd267ca75664d035565c6f61ac38201c56e7e2aa04389b964f1c2"
+    },
+    {
+      "path": "src/icubismallcator.ts",
+      "source_blob": "5e10ace9b4584d7c8b7f71bb009bc8364d7b7f67",
+      "bytes": 1932,
+      "sha256": "d0c3a178e6c6b86697117eac21cd7faa422bf180b4cc84adecfc3491c573055f"
+    },
+    {
+      "path": "src/icubismmodelsetting.ts",
+      "source_blob": "b11968e319e54762eb487d604c84444b7955b9b0",
+      "bytes": 6652,
+      "sha256": "87543afb93a5938211c08c2e5ae0116d0fd2bd813f92f3b5f48cf38105b1cf39"
+    },
+    {
+      "path": "src/id/cubismid.ts",
+      "source_blob": "0ac2c6f018bde0a8a5bf972f8b8c361c20b4706b",
+      "bytes": 2281,
+      "sha256": "ff10538238bcda0a97756bf3e6017409acfdb901657174e7f6a027b965d34ee0"
+    },
+    {
+      "path": "src/id/cubismidmanager.ts",
+      "source_blob": "5a7a4000373da72dd82f0b313111e58b77b503f8",
+      "bytes": 2413,
+      "sha256": "1ae3c3b2de5462d1bf6a98b5878eb7228d228d67adc7426bf549702fe6a5551e"
+    },
+    {
+      "path": "src/live2dcubismframework.ts",
+      "source_blob": "ada25a88ee55bfd3a5516e1440cccb9f909b3bd3",
+      "bytes": 8900,
+      "sha256": "dc20093ded82ed6704d94a443fa28961ba23aefb64fb76b9be35c8de869bd934"
+    },
+    {
+      "path": "src/math/cubismmath.ts",
+      "source_blob": "031196e6143c92dba998b657bb09cc0c1dc348ac",
+      "bytes": 9603,
+      "sha256": "2e6816bfcecc459bb1c8bd7fcaa03f971b2545c90a9c75a7236cca9a0c282961"
+    },
+    {
+      "path": "src/math/cubismmatrix44.ts",
+      "source_blob": "4510a8f4d0b80dc3aa4cbea5132223b178da99b8",
+      "bytes": 8038,
+      "sha256": "aa81745acf70315c536d0bada6cc422822765b2f44f8088a2ccea6cb6f9edc0d"
+    },
+    {
+      "path": "src/math/cubismmodelmatrix.ts",
+      "source_blob": "0f1f263eb9c119ea825c08b5ba54985b0672299a",
+      "bytes": 4715,
+      "sha256": "31e8787385c4c26d78d2f627f373d7a446db1a72d38f247a442a9bc9de42ee0f"
+    },
+    {
+      "path": "src/math/cubismtargetpoint.ts",
+      "source_blob": "9ee2e5947144057bb331456ac0ea1d420f5f252b",
+      "bytes": 5764,
+      "sha256": "b09812890e639d89f96e0b1774a4ccdc076d1174fcb3daa95b0acd8102285999"
+    },
+    {
+      "path": "src/math/cubismvector2.ts",
+      "source_blob": "449b7662b04441c3688b262110221bce496bcbaa",
+      "bytes": 4153,
+      "sha256": "369b0c0b842432f7156827bf77047276fb23b10301d9f5d40762497b9f75372d"
+    },
+    {
+      "path": "src/math/cubismviewmatrix.ts",
+      "source_blob": "c81a05a9b3f4f1e56b6d7b3ed3e96db2a3d228f0",
+      "bytes": 8345,
+      "sha256": "3276768bd6efbe287a3384eb1960f6c1901f10137f38396096a9e8e84b9a65f5"
+    },
+    {
+      "path": "src/model/cubismmoc.ts",
+      "source_blob": "94c3819a4fefd26145d284c5e0752bd5313141e2",
+      "bytes": 3675,
+      "sha256": "99a80e2102af7b3ba10b15d684f965930707018b6b239a0ce6d14e3a867f266b"
+    },
+    {
+      "path": "src/model/cubismmodel.ts",
+      "source_blob": "e8b23f501d3cec8500d6e7cd14ba43b65bbace8d",
+      "bytes": 62659,
+      "sha256": "fa4c21a270b3d18ae9f550cebf181d54504cf4b4198f1eeba6d0f3c55d7055a5"
+    },
+    {
+      "path": "src/model/cubismmodelmultiplyandscreencolor.ts",
+      "source_blob": "135ffae2d0d70c48efc4d8a839b03416d2de681c",
+      "bytes": 31866,
+      "sha256": "478b4fb805e6d4b5c450a58f29eaebcf75d176f87421797e218b0e3542a3b4b3"
+    },
+    {
+      "path": "src/model/cubismmodeluserdata.ts",
+      "source_blob": "f8acc05a4717f6466550f3d085e64baf98b602e6",
+      "bytes": 4248,
+      "sha256": "d4aaf59e04f834de345e0f9f1cced1062c28c9b1203bf09da17a0a8c2dddb6c4"
+    },
+    {
+      "path": "src/model/cubismmodeluserdatajson.ts",
+      "source_blob": "a691a70fab148f000790ea321012e577388206c3",
+      "bytes": 3035,
+      "sha256": "4c8f546a393ac47bf8245dd8f7ae65e50eb61518578c33c3ad28ef23b2ffa4c1"
+    },
+    {
+      "path": "src/model/cubismusermodel.ts",
+      "source_blob": "b760550212fda2559c294a4b4f4a5b37540817a9",
+      "bytes": 15104,
+      "sha256": "41707e75f0ab36808a3ba42d40a477d0b33e7c7da73cbce5a3de0771bd957a9c"
+    },
+    {
+      "path": "src/motion/acubismmotion.ts",
+      "source_blob": "c43dba4ecf58bad64aec14bc30d76a6dfae23b60",
+      "bytes": 14092,
+      "sha256": "649524b171f1a3ab8588a16dcb707a4f0da848f7fb87ad2b34148e0eea45ee08"
+    },
+    {
+      "path": "src/motion/cubismbreathupdater.ts",
+      "source_blob": "4961dd621adaa428644a002d8e5628d136fd0ced",
+      "bytes": 1698,
+      "sha256": "57acaadd41e6dac1ca31f69521166edf8366508e3dcf21ce9279687df72080df"
+    },
+    {
+      "path": "src/motion/cubismexpressionmotion.ts",
+      "source_blob": "34cb3ff062f8301288b29c68b439337648c2aacd",
+      "bytes": 12157,
+      "sha256": "20a75e357391116974a589fe8a9e5da3234cd214a214df94407f29b0152e86c5"
+    },
+    {
+      "path": "src/motion/cubismexpressionmotionmanager.ts",
+      "source_blob": "e50a3b91d2891bac5ade565e3b04d077de78a9c9",
+      "bytes": 9079,
+      "sha256": "17a12b23cf811cf8c7794b67beef53d47b10070ebd1d05a87becafe4a03fc403"
+    },
+    {
+      "path": "src/motion/cubismexpressionupdater.ts",
+      "source_blob": "756a522b208b536edf3b66878576ef469d5d12cc",
+      "bytes": 1989,
+      "sha256": "75fcf716ce50acd81c4d5f3e1179c6557e32fa4b8960d373aa36fe2734ec0c1b"
+    },
+    {
+      "path": "src/motion/cubismeyeblinkupdater.ts",
+      "source_blob": "d332a14d8445c5c7d606228a10eec0a50ecfd819",
+      "bytes": 2187,
+      "sha256": "a7e90b32cc8d47600ee0b2da44106efe4ea2a915556ccb28d6aa7f3ff93a5dcc"
+    },
+    {
+      "path": "src/motion/cubismlipsyncupdater.ts",
+      "source_blob": "9cbcdae11a72d5e2673e134c77d84658ddc4f9bc",
+      "bytes": 3003,
+      "sha256": "390bc6da44e9d2b38704b990cbbe31442b562eeb2b7d4bc1a17a1a94034958a3"
+    },
+    {
+      "path": "src/motion/cubismlookupdater.ts",
+      "source_blob": "536579cf7f631e5f6287c1f88707accbbacdcd9d",
+      "bytes": 2155,
+      "sha256": "a8fc4734ae53fa0f1b65b38a5358e6e7a456429a2743fc20f5fad637659bae18"
+    },
+    {
+      "path": "src/motion/cubismmotion.ts",
+      "source_blob": "cb495ad81db708dd22f10d520f55556aaab29b6a",
+      "bytes": 37913,
+      "sha256": "eb3e8862f60feedd12bc47300d8486b044c39a8af21e66f12613ce941c8fa5f6"
+    },
+    {
+      "path": "src/motion/cubismmotioninternal.ts",
+      "source_blob": "c3ca404f341577f85f18d98bc9c7969fdfe97fa5",
+      "bytes": 4928,
+      "sha256": "ede0f46ebdd0f4e0c25f5ba1825f6bccf658a463e08c0bc72a8af26230865805"
+    },
+    {
+      "path": "src/motion/cubismmotionjson.ts",
+      "source_blob": "4d70d118250cdf4d5c9ad29a084c1b997f7b27e5",
+      "bytes": 12496,
+      "sha256": "92eb9dd6fbe6086e02952fec021cf0daa68a3fc335ae88dd19ee281591b34c64"
+    },
+    {
+      "path": "src/motion/cubismmotionmanager.ts",
+      "source_blob": "068dee67516928b4a0f96783399ce4887ede259d",
+      "bytes": 3821,
+      "sha256": "7e88b825f99e4cbc1fd13ae07a7f5063a20ef9d96bf86855e426fb221813e72d"
+    },
+    {
+      "path": "src/motion/cubismmotionqueueentry.ts",
+      "source_blob": "c7142547179828c19a5254a8ffb36d879af0e6ef",
+      "bytes": 7248,
+      "sha256": "4619da4891829c7f8f5741a4b7f711a6cc2beb9fa06075a2b8caefec20b2ea19"
+    },
+    {
+      "path": "src/motion/cubismmotionqueuemanager.ts",
+      "source_blob": "afcb5757d9c95e59da742d03a8e2650cb648cf2a",
+      "bytes": 10707,
+      "sha256": "1aa0f6a39ffe9d83e0e06217a9cf6ebdf3a6e593242ff84d08684bbd2f4a01bb"
+    },
+    {
+      "path": "src/motion/cubismphysicsupdater.ts",
+      "source_blob": "3ee0b39674d5215f2efa0c9e19709d423eee2131",
+      "bytes": 1719,
+      "sha256": "003fda6b8a6537b75fff8f0cd4894d9f7f9ee0a1f668197d91d497adab3dbdd9"
+    },
+    {
+      "path": "src/motion/cubismposeupdater.ts",
+      "source_blob": "8c7f8aae89224b17864f413f89c86cc601bc5059",
+      "bytes": 1644,
+      "sha256": "58658839ea9aab83da69b91d6e54b9825ddb80cca47ee5c1cef615715e58c28e"
+    },
+    {
+      "path": "src/motion/cubismupdatescheduler.ts",
+      "source_blob": "a78b53814992f5a40dc4363edf654082c6876135",
+      "bytes": 5149,
+      "sha256": "ab59717783d79bf3675e55cf2037683cced648bca4a47dcb438c78184c9b1b5e"
+    },
+    {
+      "path": "src/motion/icubismupdater.ts",
+      "source_blob": "475febe15f136cfc0d7b811748edd1063db58e92",
+      "bytes": 3688,
+      "sha256": "ba937ffd59bc52f4de426aadac4269630e0267d36b5ba9acab788993f586feea"
+    },
+    {
+      "path": "src/motion/iparameterprovider.ts",
+      "source_blob": "62e282758ecb212a8610a6b6583c545ab0accd34",
+      "bytes": 1156,
+      "sha256": "c0b8c01f855dcf4e25a08ad19afb5136d8f92f3d6536ba125194c649df140b0b"
+    },
+    {
+      "path": "src/physics/cubismphysics.ts",
+      "source_blob": "e1efd4433b6989c87b2038ee0db409ed6381d2be",
+      "bytes": 44141,
+      "sha256": "41457e7486d380825f30936e34951c0de5362769e8229b99c28702a5a398d734"
+    },
+    {
+      "path": "src/physics/cubismphysicsinternal.ts",
+      "source_blob": "276f61deac3734976fbc3846f921912e8f071298",
+      "bytes": 8981,
+      "sha256": "db6ee02fe53f01f9575149d33ae44fc69876b32225da921b44bfc8a6d294082b"
+    },
+    {
+      "path": "src/physics/cubismphysicsjson.ts",
+      "source_blob": "308b10f4e6e1195b29868fabacd82656853e879f",
+      "bytes": 17868,
+      "sha256": "cc52bf67990131e322626729a044640b016e57b42dde80c0dfd4054af815d9b2"
+    },
+    {
+      "path": "src/rendering/cubismclippingmanager.ts",
+      "source_blob": "b3f6f7f79d62b1563d4c911e52863b673913fc10",
+      "bytes": 38519,
+      "sha256": "b38ca529a5bedac4eaa0d0ff04ae4ccaaaf3173d04250dc01af4e88e72730ec9"
+    },
+    {
+      "path": "src/rendering/cubismoffscreenmanager.ts",
+      "source_blob": "959a56af6b855a8b79ba8f81431f45e70f932924",
+      "bytes": 18723,
+      "sha256": "06c8d8c7c7fcdafd126f5f01881a023f8a4158c6222cf54e4672bd35a0609ebc"
+    },
+    {
+      "path": "src/rendering/cubismoffscreenrendertarget_webgl.ts",
+      "source_blob": "d1efae0fb58b52db240b360fd5e6724244bda8a3",
+      "bytes": 7489,
+      "sha256": "04ae8ccfa59c8dc1f43528ec0ceccd06b4180e582c802d14e38a1eaf14c0694c"
+    },
+    {
+      "path": "src/rendering/cubismrenderer.ts",
+      "source_blob": "246f0a9c0064ab28114237180cff9ed484183b3f",
+      "bytes": 13697,
+      "sha256": "42f6fa6343effdb9085cd1cd49b62f06f6e172483583c3cf325e0859aee8f9c8"
+    },
+    {
+      "path": "src/rendering/cubismrenderer_webgl.ts",
+      "source_blob": "9520878586d53cfe09d0642c6c6da21319644768",
+      "bytes": 62458,
+      "sha256": "f054aa514bf1ee4d162698de62bc3565d8e18ef348dd9234d6dab1e78bc0e678"
+    },
+    {
+      "path": "src/rendering/cubismrendertarget_webgl.ts",
+      "source_blob": "9fd11a7d10964951ee649357c593085afc5686db",
+      "bytes": 8511,
+      "sha256": "8948ac1fb66fd32a289d9e07929ef2d8e41c6deb103948e54faa6f45ebad8f21"
+    },
+    {
+      "path": "src/rendering/cubismshader_webgl.ts",
+      "source_blob": "b3d605d9db2ea0a52a53664b1ee9f8b1a60660b9",
+      "bytes": 70603,
+      "sha256": "daf9bfcbed82f4763e401fbc1ccf740e1da0a99943dbec6afb3cdfb6c3d94a32"
+    },
+    {
+      "path": "src/type/csmrectf.ts",
+      "source_blob": "074d727872861f996aa405364294b861d0ea9091",
+      "bytes": 2019,
+      "sha256": "c199fdc276d2d66ed3abd140b137a3e127fc52b5735869849d450eacd5f416d8"
+    },
+    {
+      "path": "src/utils/cubismarrayutils.ts",
+      "source_blob": "2f511a539669787c94ee3ad20e0a081065e74065",
+      "bytes": 1073,
+      "sha256": "0f63d3a9e6f25a097905503ccedfe21130b6b857238569341628f158d44afa60"
+    },
+    {
+      "path": "src/utils/cubismdebug.ts",
+      "source_blob": "4d6f1433a1ab36592ce00a308a7c29cd9823e437",
+      "bytes": 5369,
+      "sha256": "0a526141825d6a980d838e95fc6856a4362173674bb6469d8bd40d054e9e7520"
+    },
+    {
+      "path": "src/utils/cubismjson.ts",
+      "source_blob": "e87c5e90d498a3437bcbded08c6435f523eb90d6",
+      "bytes": 29319,
+      "sha256": "39d9f1806b7a6909098e1b8e2b7a1af567bbd0d6800b25beeaba4cb857c7b9f0"
+    },
+    {
+      "path": "src/utils/cubismjsonextension.ts",
+      "source_blob": "6a0a1c6fbc2ef50b803835ff9735361e2ae06cf5",
+      "bytes": 3691,
+      "sha256": "31e7a859c82c05e869651538077bb784737c459f6408a7aa3d460ba2697f3ddd"
+    },
+    {
+      "path": "src/utils/cubismstring.ts",
+      "source_blob": "eaeccd48c5496fc50098597ec97663c1a335f4ca",
+      "bytes": 3356,
+      "sha256": "746c4da878164ecb6444addf2934e9086897b08f0fb68fb1a5f85132f5f76a7c"
+    }
+  ]
+}

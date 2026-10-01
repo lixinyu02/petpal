@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "recordedAt": "2026-10-01T15:25:22.194Z",
+  "upstream": {
+    "repository": "https://github.com/tsunehimatoi/psd2live",
+    "commit": "2ac751fbb3ffdc8251a82e0d600d97afafafcaac",
+    "sourceArchiveSha256": "e97360577560c87ac6eae8bb2b96018a92cf2528af580a5b71385be9c7f4893e",
+    "sourceManifest": "scripts/authoring/psd2live-source-manifest.json",
+    "sourceFiles": 704,
+    "sourceUnmodified": true
+  },
+  "originalPsd": {
+    "path": "outputs/avatars/akari-cubism/akari.psd",
+    "sha256": "aa33d9aaaf37439f890f68f5c75e7f4983f2ed9f8f055704d1a983ad18e6f2a1",
+    "sourceLayers": 21
+  },
+  "editableCandidate": {
+    "path": "outputs/avatars/akari-cubism/akari.cmo3",
+    "sha256": "39cf15b67506a3e74656bf956eb46fa5163b1f4f77c4ecc7ef2ec4431e0615d2",
+    "officialEditorOpened": false,
+    "officialEditorSaved": false,
+    "officialEditorReexported": false,
+    "status": "generated-candidate; official Editor compatibility unverified"
+  },
+  "publishedRuntime": {
+    "mocPath": "public/avatars/akari-cubism/akari.moc3",
+    "mocSha256": "a48d4570dfd2fdb1f9d99afe94920759d78ac1cc016dfaf0f62c365ce0c307e0",
+    "texturePath": "public/avatars/akari-cubism/akari.2048/texture_00.png",
+    "textureSha256": "d7d3079b151d8508607af79d12d37b2f808a9b13b0f6acafb4927f745849d84b",
+    "mocVersion": 5,
+    "drawables": 23,
+    "deformers": 22,
+    "parameters": 20,
+    "vertices": 3838,
+    "triangles": 5049
+  },
+  "bindings": [
+    {
+      "parameter": "ParamCheek",
+      "sourceName": "blush",
+      "actualDrawableIds": [
+        "ArtMeshFaceDetail2"
+      ],
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "actualKeyValues": [
+        0,
+        1
+      ],
+      "keyCount": 2,
+      "validatedInterpolatedValues": [
+        0,
+        0.5,
+        1
+      ],
+      "isolationPassed": true,
+      "headFollowEndpoints": 4
+    },
+    {
+      "parameter": "ParamTear",
+      "sourceName": "tears",
+      "actualDrawableIds": [
+        "ArtMeshFaceDetail"
+      ],
+      "min": 0,
+      "max": 1,
+      "default": 0,
+      "actualKeyValues": [
+        0,
+        1
+      ],
+      "keyCount": 2,
+      "validatedInterpolatedValues": [
+        0,
+        0.5,
+        1
+      ],
+      "isolationPassed": true,
+      "headFollowEndpoints": 4
+    }
+  ],
+  "officialCore": {
+    "status": "pass",
+    "version": "6.0.1",
+    "coreSha256": "8741f739779b5d5210872bd3d7d99f0f1e56e6c87409e7d26d6bb4b80aa1ef47",
+    "consistency": 1,
+    "corruptMagicNegativeControl": "rejected",
+    "sampledPoses": 35,
+    "verificationScript": "scripts/authoring/verify-cubism-model.mjs"
+  },
+  "trackedAuthoringDelivery": {
+    "root": "scripts/authoring",
+    "buildScript": "scripts/authoring/Build-AkariCubism.ps1",
+    "independentRunner": "scripts/authoring/cubism/src/main/kotlin/PetPalAuthoring.kt",
+    "runnerLicense": "GPL-3.0-only",
+    "toolchain": {
+      "jdk": "Temurin 21.0.12.1",
+      "gradle": "9.8.0",
+      "kotlin": "2.4.10"
+    },
+    "deliveryBuildStatus": "pass; offline build and fresh export verified",
+    "freshExportComparisons": [
+      {
+        "path": "akari.2048/texture_00.png",
+        "sha256": "d7d3079b151d8508607af79d12d37b2f808a9b13b0f6acafb4927f745849d84b",
+        "unchangedFromOriginal": true
+      },
+      {
+        "path": "akari.blink.motion3.json",
+        "sha256": "399f91b7bfac0666f589ab7c6daace5e33e5c6d6e7c6e7ca4024b6db48a65110",
+        "unchangedFromOriginal": true
+      },
+      {
+        "path": "akari.cdi3.json",
+        "sha256": "55feec9586e8a6b647d4cb8835649afc2b55d523480d9399e1513b5e146ce0ff",
+        "unchangedFromOriginal": true
+      },
+      {
+        "path": "akari.cmo3",
+        "sha256": "a7dde42e96a43f1db8a8524cdd33be37075b7d3772b43ebfd6f281eb5af6d2ca",
+        "unchangedFromOriginal": false
+      },
+      {
+        "path": "akari.idle.motion3.json",
+        "sha256": "a32ca6a85d2ae68d5b71ba4d7a74db5ce35a5b634882bd0f83ce84363f597722",
+        "unchangedFromOriginal": true
+      },
+      {
+        "path": "akari.moc3",
+        "sha256": "a48d4570dfd2fdb1f9d99afe94920759d78ac1cc016dfaf0f62c365ce0c307e0",
+        "unchangedFromOriginal": true
+      },
+      {
+        "path": "akari.model3.json",
+        "sha256": "c6c415b919216cc82bed6c8f758e57306b71a27af92bcee9153b0eae9ae16560",
+        "unchangedFromOriginal": true
+      },
+      {
+        "path": "akari.nod.motion3.json",
+        "sha256": "bfd9a247d5ec8479145c2dddfd5fdbf03e1c46df8d7460f07badd146c1e19418",
+        "unchangedFromOriginal": true
+      },
+      {
+        "path": "akari.physics3.json",
+        "sha256": "385846be2c653e6bf3eda4a4e49353ba7c8ea6051a0e88aa86b5e2db749b30e1",
+        "unchangedFromOriginal": true
+      },
+      {
+        "path": "akari.psd2live.json",
+        "sha256": "72c96c50516edeea92292e9ff09872ed37acbaec9048c0c6a2fd36efdf6399cd",
+        "unchangedFromOriginal": true
+      },
+      {
+        "path": "akari.shake.motion3.json",
+        "sha256": "9714b72b47dba8e33b6b08d0f9e84c77309a6ce6c98d2a3815c3a59d69163b01",
+        "unchangedFromOriginal": true
+      }
+    ],
+    "reproducibility": {
+      "runtimeFilesByteIdentical": 10,
+      "editorProjectByteIdentical": false,
+      "editorProjectDifferenceReason": "Upstream CMO3 writer contains clock stamps and random GUID generation; recorded hashes identify each delivered candidate, not a byte deterministic CMO3 promise."
+    },
+    "deliveryChecks": {
+      "powerShell51Syntax": "pass",
+      "offlineRunnerCompile": "pass",
+      "freshActualModelExport": "pass",
+      "officialCoreOnFreshModel": "pass; 35 poses",
+      "officialCoreOnPublishedModel": "pass; 35 poses",
+      "exactEmotionKeyCount": "2 for each ParamCheek/ParamTear",
+      "existingOutputPreserved": "pass; rejected nonempty output before compiling",
+      "invalidSourceArchiveRejected": "pass; partial archive hash mismatch rejected before creating output directory",
+      "positiveSourceExtraction": "not executed in this delivery check; new codeload download did not complete",
+      "frozenExistingSourceAudit": "pass; all 704 members matched sizes and SHA256"
+    }
+  },
+  "scope": "Original asset compilation and actual official Core execution only. Browser/WebView behavior and product deployment are separate acceptance. No official Cubism Editor acceptance has been performed."
+}
