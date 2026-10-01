@@ -60,7 +60,7 @@ export function createAvatarPerformance() {
   let output = neutral(), input = { utteranceId: '', text: '', phase: 'idle' };
   let queue = [], current = null, hidden = false, external = false, externalActive = false, externalIndex = -1, externalAudio = null;
   let externalEmotion = null, externalExpression = null;
-  let emotionKind = null, emotionRemaining = 0, motionTime = 0, blinkAt = 3.1, blinkRemaining = 0, blinkNumber = 0;
+  let emotionKind = null, emotionRemaining = 0, motionTime = 0, nodPhase = 0, blinkAt = 3.1, blinkRemaining = 0, blinkNumber = 0;
   let reaction = null, winkAge = null, winkCooldown = 0, motionReduced = false, sleeping = false;
   const gestures=createAvatarGestures();
   const microacting=createAvatarMicroacting();
@@ -70,12 +70,12 @@ export function createAvatarPerformance() {
   const consumed = new Map();
   const reacted = new Set();
   const clearMouth = () => { queue = []; current = null; output.mouthOpen = 0; output.mouthShape = 'rest'; output.speaking = false; };
-  const clearGestures = (clearHead=true) => { gestures.cancel(); gestureFromSpeech=false; output.gesture='none'; output.gestureProgress=output.bodyLean=output.bodyLift=output.bodyTurn=output.headShake=output.shoulderLift=0; if(clearHead)output.headTilt=output.headNod=0; };
+  const clearGestures = (clearHead=true) => { gestures.cancel(); gestureFromSpeech=false; output.gesture='none'; output.gestureProgress=output.bodyLean=output.bodyLift=output.bodyTurn=output.headShake=output.shoulderLift=0; if(clearHead){output.headTilt=output.headNod=0;nodPhase=0;} };
   // Idle overlays never become part of the underlying facial smoothing state.
   // Removing one restores the exact pose before it, even on a zero-time input.
   const removeMicro = () => { if(microBase){Object.assign(output,microBase);microBase=null;} output.microExpression='none';output.microProgress=0; };
   const clearMicro = () => { removeMicro();microacting.cancel(); };
-  const resetPose = () => { clearMouth(); gestures.reset(); microacting.reset();microBase=null;petNumber=0;gestureFromSpeech=false; output = neutral(); emotionKind = null; emotionRemaining = 0; reaction = null; winkAge = null; winkCooldown = 0; motionTime = 0; blinkAt = 3.1; blinkRemaining = 0; blinkNumber = 0; };
+  const resetPose = () => { clearMouth(); gestures.reset(); microacting.reset();microBase=null;petNumber=0;gestureFromSpeech=false; output = neutral(); emotionKind = null; emotionRemaining = 0; reaction = null; winkAge = null; winkCooldown = 0; motionTime = nodPhase = 0; blinkAt = 3.1; blinkRemaining = 0; blinkNumber = 0; };
   const rememberLength = (id, length) => {
     const previous = consumed.get(id) ?? 0;
     consumed.delete(id); consumed.set(id, Math.max(length, previous));
@@ -98,7 +98,7 @@ export function createAvatarPerformance() {
     const changed = next.utteranceId !== input.utteranceId;
     const rewritten = !changed && !next.text.startsWith(input.text);
     const previousLength = Math.max(changed ? 0 : input.text.length, consumed.get(next.utteranceId) ?? 0);
-    const priorExternal = external, priorActive = externalActive, priorIndex = externalIndex;
+    const priorExternal = external, priorActive = externalActive, priorIndex = externalIndex, priorAudio = externalAudio;
     // New replies invalidate only their speech queue. Facial channels and the
     // blink clock continue smoothly instead of flashing through a neutral pose.
     if (changed || rewritten) { clearMouth(); emotionKind = null; emotionRemaining = 0; }
@@ -123,11 +123,15 @@ export function createAvatarPerformance() {
         clearMouth(); emotionKind = null; emotionRemaining = 0;
       }
       else if (changed || !priorExternal || !priorActive || !wasSpeaking || externalIndex > priorIndex) {
-        clearMouth();
+        // Character boundaries estimate the next shape, not a silence in the
+        // PCM. Keep an audible mouth open when only that estimate advances.
+        const continuousPcm = !changed && !rewritten && priorExternal && priorActive && wasSpeaking && priorAudio > .025 && externalAudio > .025;
+        if (!continuousPcm) clearMouth();
         const value = cue(String.fromCodePoint(next.text.codePointAt(externalIndex)));
         current = { ...value, remaining: Math.min(.22, value.duration + .07) };
         boundaryAdvanced = true;
       } else if (externalIndex < priorIndex) clearMouth();
+      if (externalAudio !== null && externalAudio <= .025) clearMouth();
     } else {
       if (priorExternal) clearMouth();
       if (appended) enqueue(appended);
@@ -248,7 +252,10 @@ export function createAvatarPerformance() {
         output.blinkLeft = clamp(blink); output.blinkRight = clamp(Math.max(wink, blink * (selected === 'shy' ? .92 : 1)));
         output.headTilt = clamp(ease(output.headTilt, Math.sin(motionTime * .75) * .08 + poseTarget('headTilt')+gesture.headTilt, elapsed, 8),-1,1);
         const voiceMotion=output.speaking?(externalAudio!==null?output.voiceEnergy:.5):0;
-        output.headNod = clamp(ease(output.headNod, Math.sin(motionTime * (1.4+voiceMotion*(selected==='excited'?4:2.6))) * (.018+voiceMotion*(selected==='excited'?.11:.065))+gesture.headNod, elapsed, 12),-1,1);
+        // Integrate the changing frequency. Multiplying all elapsed time by
+        // the latest energy would jump phase whenever the voice grows louder.
+        nodPhase = (nodPhase + dt * (1.4+voiceMotion*(selected==='excited'?4:2.6))) % (Math.PI * 2);
+        output.headNod = clamp(ease(output.headNod, Math.sin(nodPhase) * (.018+voiceMotion*(selected==='excited'?.11:.065))+gesture.headNod, elapsed, 12),-1,1);
         output.gazeOffsetX = ease(output.gazeOffsetX, poseTarget('gazeOffsetX'), elapsed, 5);
         output.gazeOffsetY = ease(output.gazeOffsetY, poseTarget('gazeOffsetY'), elapsed, 5);
       }

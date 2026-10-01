@@ -48,3 +48,13 @@ Android 独立悬浮 WebView 只读 APK 内资源、没有 native JS 桥、禁�
 - 选择 anime 时不应继续运行隐藏的 Three.js 猫；选择 cat 时销毁 2D 动画实例。熄屏、页面隐藏、窗口关闭时暂停或释放各自资源。
 
 本轮只借鉴公开项目的结构经验，没有复制其实现代码或角色资产。若以后复制 MIT 代码，需要保留对应版权与许可证。
+
+## 2026-10-01 动作迭代复核
+
+本轮重新读取官方 Cubism Framework / Samples、pixi-live2d-display、Kalidokit、MediaPipe Face Landmarker 和 three-vrm 的公开文档，未安装或运行其代码。官方 Framework / Samples 当前声明兼容 Cubism 5.3；实际模型仍需 `.model3.json`、`.moc3`、纹理及对应物理/动作资源。现有八张整幅表情 WebP 没有独立发丝、眼球或身体绑定，接入 SDK 本身不会补齐这些模型数据。
+
+pixi-live2d-display 的 npm stable 0.4.0 与 Pixi 6 配套，0.5.0-beta 面向 Pixi 7；README、master 与 npm 发布版本不能混用，接入时需锁定完整组合。Kalidokit 官方已标记 deprecated；MediaPipe 提供面部 landmarks / blendshapes，需要另行映射到角色参数，也不能替代模型绑定。three-vrm 则要求 VRM 3D 资产，不适用于现有立绘。Cubism Core、Framework 与角色素材继续分别核对许可；允许用户导入任意模型的产品还需核对 Expandable Application 的专门条款，不能套用一般小企业发行豁免。
+
+因此 issue-72 沿用原创人物与现有渲染器：增加眼、头、身体的不同响应速度，积分呼吸相位，按真实头姿驱动发梢，修复 PCM 换字闭嘴与点头相位跳变。WebGL 与 DOM 共用动作状态；DOM 是较小的刚性人物移动，不具备局部虹膜或发丝位移。本轮没有新增 Cubism 模型导入、面捕、SDK 或摄像头权限。
+
+复核来源：[CubismWebFramework](https://github.com/Live2D/CubismWebFramework)、[CubismWebSamples](https://github.com/Live2D/CubismWebSamples)、[官方模型参数更新](https://github.com/Live2D/CubismWebSamples/blob/develop/Samples/TypeScript/Demo/src/lappmodel.ts)、[pixi-live2d-display](https://github.com/guansss/pixi-live2d-display)、[Kalidokit](https://github.com/yeemachine/kalidokit)、[MediaPipe Face Landmarker Web](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker/web_js)、[three-vrm](https://github.com/pixiv/three-vrm)。本轮访问均为 HTTP 200，版本信息应在正式接入时再次核实。

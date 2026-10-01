@@ -7,6 +7,7 @@ import { loadAvatarImage, loadAvatarImages, type AvatarImageName } from './anime
 import { animeEmotionMix, animeMouthLayerMix } from './anime-emotion-render.mjs';
 import { animeHeadNodOffset, animePoseTransform, sampleAnimeShoulderWeight } from './anime-pose-render.mjs';
 import { sampleAnimeHairWeights, createAnimeHairMotion } from './anime-rig.mjs';
+import { createAvatarPresence } from './presence.mjs';
 import { createVisibleSceneLoop, updateSceneDataset } from './scene-loop.mjs';
 import { bindCompanionGestures, portraitCoordinates, portraitContains } from '../pet/interaction.mjs';
 import { createCompanionFeedback } from '../pet/gesture-feedback.mjs';
@@ -19,24 +20,24 @@ varying vec2 vUv;
 attribute vec2 hairWeights;
 attribute float shoulderWeight;
 uniform vec2 hairLeft, hairRight;
-uniform float clockTime, motion, gazeX, gazeY, affection, resting, headTilt, headNodOffset, shoulderOffset;
+uniform float clockTime, motion, headX, headY, breath, affection, resting, headTilt, headNodOffset, shoulderOffset;
 void main() {
   vUv = uv;
   vec3 p = position;
   float head = smoothstep(.51, .68, uv.y);
   float awake = 1.0 - resting;
-  float breathe = sin(clockTime * mix(1.6, 1.05, resting)) * .004 * motion * mix(1.0, .28, resting);
+  float breathe = breath * .0065 * motion;
   p.y += breathe * smoothstep(.08, .55, uv.y);
   p.x *= 1.0 + breathe * (1.0 - head) * .45;
   p.y += shoulderOffset * shoulderWeight * awake * motion;
   // Local strands move before the shared head transform; their roots follow the head.
   p.xy += hairLeft * hairWeights.x + hairRight * hairWeights.y;
-  float tilt = ((sin(clockTime * .65) * .007 + gazeX * .014 + affection * .018 + headTilt * .055) * awake - resting * .035) * motion;
+  float tilt = ((headX * .022 + affection * .018 + headTilt * .055) * awake - resting * .035) * motion;
   vec2 pivot = vec2(0.0, .25);
   vec2 h = p.xy - pivot;
   p.xy += (mat2(cos(tilt), sin(tilt), -sin(tilt), cos(tilt)) * h - h) * head;
-  p.x += gazeX * .014 * head * motion;
-  p.y += (gazeY * .012 - resting * .025 - headNodOffset * awake) * head * motion;
+  p.x += headX * .025 * head * motion;
+  p.y += (headY * .020 - resting * .025 - headNodOffset * awake) * head * motion;
   p.y += sin(clockTime * 2.0) * affection * .008 * motion;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
 }`;
@@ -187,6 +188,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     geometry.setAttribute('hairWeights', new THREE.BufferAttribute(hairWeights, 2));
     geometry.setAttribute('shoulderWeight',new THREE.BufferAttribute(shoulderWeights,1));
     const hairMotion = createAnimeHairMotion();
+    const presence = createAvatarPresence();
     let pointerX = 0, pointerY = 0, gazeX = 0, gazeY = 0, interactionSequence = 0;
     const performance = createAvatarPerformance();
     let localInput: PerformanceInput = { utteranceId: 'idle', text: '', phase: 'idle' };
@@ -194,6 +196,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     const uniforms = {
       baseMap: { value: null as THREE.Texture | null }, blinkMap: { value: null as THREE.Texture | null }, talkMap: { value: null as THREE.Texture | null }, roundMap: { value: null as THREE.Texture | null }, curiousMap: { value: null as THREE.Texture | null }, warmMap: { value: null as THREE.Texture | null }, sadMap: { value: null as THREE.Texture | null }, poutMap: { value: null as THREE.Texture | null },
       clockTime: { value: 0 }, motion: { value: 1 }, gazeX: { value: 0 }, gazeY: { value: 0 }, affection: { value: 0 }, resting: { value: 0 }, blinkLeft: { value: 0 }, blinkRight: { value: 0 }, mouth: { value: 0 }, mouthRound: { value: 0 }, mouthWide: { value: 0 }, warm: { value: 0 }, curious: { value: 0 }, surprised: { value: 0 }, browRaise: { value: 0 }, browTilt: { value: 0 }, blush: { value: 0 }, smile: { value: 0 }, headTilt: { value: 0 }, headNodOffset: { value: 0 }, hairLeft: { value: new THREE.Vector2() }, hairRight: { value: new THREE.Vector2() },
+      headX: { value: 0 }, headY: { value: 0 }, breath: { value: 0 },
       sadness: { value: 0 }, downcast: { value: 0 }, tears: { value: 0 }, sparkle: { value: 0 }, shy: { value: 0 },
       smug: { value: 0 }, pout: { value: 0 }, upperWarmth: { value: 0 }, eyeScaleLeft: { value: 1 }, eyeScaleRight: { value: 1 }, browLeftLift: { value: 0 }, browRightLift: { value: 0 }, browFocus: { value: 0 }, shoulderOffset: { value: 0 },
     };
@@ -270,6 +273,11 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       if (!visible) {
         performance.setInput(callbacks.current.performanceInput || localInput);
         performance.step(0,{hidden:true});
+        presence.reset(); hairMotion.reset();
+        pointerX = pointerY = gazeX = gazeY = 0;
+        uniforms.hairLeft.value.set(0,0); uniforms.hairRight.value.set(0,0);
+        uniforms.blinkLeft.value=uniforms.blinkRight.value=uniforms.mouth.value=0;
+        uniforms.mouthRound.value=uniforms.mouthWide.value=0;
       }
       frameLoop.setActive(visible);
     };
@@ -326,25 +334,34 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       const pose = performance.step(elapsed,{reducedMotion:media.matches,hidden:false,sleeping:asleep});
       const affection = action === 'pet' || action === 'jump' ? Math.sin(Math.min(1,(time-actionStart)/2.7)*Math.PI) : 0;
       const emotion = animeEmotionMix(pose,{sleeping:asleep});
-      const body=animePoseTransform(pose,{sleeping:asleep,reducedMotion:media.matches});
+      const follow=presence.step(elapsed,{
+        gazeX:THREE.MathUtils.clamp(pointerX+pose.gazeOffsetX,-1,1),
+        gazeY:THREE.MathUtils.clamp(pointerY+pose.gazeOffsetY,-1,1),
+        headTilt:pose.headTilt,headNod:pose.headNod,voiceEnergy:pose.voiceEnergy,
+        phase:input.phase,sleeping:asleep,reducedMotion:media.matches,
+      });
+      const gestureBody=animePoseTransform(pose,{sleeping:asleep,reducedMotion:media.matches});
+      const body={...gestureBody,xPercent:gestureBody.xPercent+follow.bodyXPercent,
+        yPercent:gestureBody.yPercent+follow.bodyYPercent,
+        rotationDegrees:gestureBody.rotationDegrees+follow.bodyRotationDegrees};
       const headNodPercent=animeHeadNodOffset(pose.headNod,{sleeping:asleep,reducedMotion:media.matches});
       const blinkLeft = emotion.blinkLeft;
       const blinkRight = emotion.blinkRight;
-      const targetX = asleep || media.matches ? 0 : THREE.MathUtils.clamp(pointerX + pose.gazeOffsetX,-1,1);
-      const targetY = asleep || media.matches ? 0 : THREE.MathUtils.clamp(pointerY + pose.gazeOffsetY,-1,1);
-      gazeX += (targetX-gazeX)*Math.min(1,dt*6); gazeY += (targetY-gazeY)*Math.min(1,dt*6);
-      if (media.matches) gazeX = gazeY = 0;
+      gazeX=follow.gazeX; gazeY=follow.gazeY;
       uniforms.clockTime.value = time; uniforms.motion.value = media.matches || asleep ? 0 : 1;
       uniforms.gazeX.value = gazeX; uniforms.gazeY.value = gazeY;
+      uniforms.headX.value=follow.headX; uniforms.headY.value=follow.headY;
+      uniforms.breath.value=follow.breath*follow.breathScale;
       uniforms.affection.value += (affection-uniforms.affection.value)*(1-Math.exp(-dt*8));
       uniforms.resting.value += ((action === 'sleep' ? 1 : 0)-uniforms.resting.value)*Math.min(1,dt*5);
       const approach = (uniform: {value:number},value:number,rate=10) => { uniform.value += (value-uniform.value)*(1-Math.exp(-dt*rate)); };
-      approach(uniforms.blinkLeft,blinkLeft,35); approach(uniforms.blinkRight,blinkRight,35);
+      if(asleep||media.matches){uniforms.blinkLeft.value=blinkLeft;uniforms.blinkRight.value=blinkRight;}
+      else {approach(uniforms.blinkLeft,blinkLeft,35);approach(uniforms.blinkRight,blinkRight,35);}
       uniforms.mouth.value = action === 'sleep' ? 0 : pose.mouthOpen;
       approach(uniforms.mouthRound,pose.mouthShape === 'O' ? 1 : 0,32); approach(uniforms.mouthWide,pose.mouthShape === 'E' ? 1 : 0,24);
       uniforms.warm.value = pose.warmAmount; uniforms.curious.value = pose.curiousAmount; uniforms.surprised.value = pose.surpriseAmount;
       uniforms.smile.value = emotion.smile; uniforms.browTilt.value = pose.browTilt;
-      uniforms.browRaise.value=pose.browRaise; uniforms.blush.value=emotion.blush; uniforms.headTilt.value=asleep ? 0 : pose.headTilt; uniforms.headNodOffset.value=headNodPercent*.03;
+      uniforms.browRaise.value=pose.browRaise; uniforms.blush.value=emotion.blush; uniforms.headTilt.value=follow.headTilt; uniforms.headNodOffset.value=headNodPercent*.03;
       uniforms.sadness.value=emotion.sadness; uniforms.downcast.value=emotion.downcast; uniforms.tears.value=emotion.tears; uniforms.sparkle.value=emotion.sparkle; uniforms.shy.value=emotion.shy;
       uniforms.smug.value=emotion.smug;uniforms.pout.value=emotion.pout;uniforms.upperWarmth.value=emotion.upperWarmth;
       uniforms.eyeScaleLeft.value=emotion.eyeScaleLeft;uniforms.eyeScaleRight.value=emotion.eyeScaleRight;
@@ -354,7 +371,8 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       // a downward y-axis; the orthographic WebGL scene uses an upward y-axis.
       model.position.set(body.xPercent*.02,-body.yPercent*.03,0);
       model.rotation.z=-body.rotationDegrees*Math.PI/180;model.scale.setScalar(body.scale);
-      const hair = hairMotion.step(dt,{reducedMotion:media.matches,resting:asleep ? 1 : 0,gazeX,headTilt:uniforms.headTilt.value});
+      const hair = hairMotion.step(dt,{reducedMotion:media.matches,resting:asleep ? 1 : 0,
+        gazeX:THREE.MathUtils.clamp(follow.headX+pose.headShake*.2,-1,1),headTilt:follow.headTilt});
       uniforms.hairLeft.value.set(hair.leftX,hair.leftY); uniforms.hairRight.value.set(hair.rightX,hair.rightY);
       if (renderer && !gpuFailed && canvas) {
         try {
@@ -401,7 +419,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
         const rest = uniforms.resting.value, awake = 1-rest;
         // DOM has a rigid portrait: a smaller same-direction lift avoids seams
         // around the neck/collar while preserving the shrug cue without a mesh.
-        fallbackModel.style.transform = media.matches || asleep ? 'none' : `translate(${body.xPercent}%,${body.yPercent+(headNodPercent+body.shoulderYPercent*.45)*awake}%) translate(${gazeX*1.2}px,${Math.sin(time*(1.6-.55*rest))*.8*(1-.72*rest)}px) rotate(${body.rotationDegrees+(pose.headTilt*1.2+gazeX*.3)*awake-rest*.6}deg) scale(${body.scale})`;
+        fallbackModel.style.transform = media.matches || asleep ? 'none' : `translate(${body.xPercent}%,${body.yPercent+(headNodPercent+body.shoulderYPercent*.45)*awake}%) translate(${follow.headX*.7}px,${-follow.headY*.8-uniforms.breath.value*.8}px) rotate(${body.rotationDegrees-(follow.headTilt*1.2+follow.headX*.3)*awake-rest*.6}deg) scale(${body.scale})`;
         fallback.dataset.renderFrames = String(++fallbackFrames);
       }
       const visible = gpuFailed ? fallback : canvas;
@@ -418,13 +436,15 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
           eyeScaleLeft: emotion.eyeScaleLeft.toFixed(3), eyeScaleRight: emotion.eyeScaleRight.toFixed(3), shoulderLift: pose.shoulderLift.toFixed(3), shoulderY: body.shoulderYPercent.toFixed(3),
           microExpression: pose.microExpression, microProgress: pose.microProgress.toFixed(3), gesture: body.gesture, gestureProgress: body.progress.toFixed(3),
           bodyX: body.xPercent.toFixed(3), bodyY: body.yPercent.toFixed(3), bodyRotation: body.rotationDegrees.toFixed(3), bodyScale: body.scale.toFixed(4), headNodY: headNodPercent.toFixed(3),
+          avatarPresence:'spring2d',headFollowX:follow.headX.toFixed(3),headFollowY:follow.headY.toFixed(3),headFollowTilt:follow.headTilt.toFixed(3),
+          bodyFollowX:follow.bodyXPercent.toFixed(3),breath:uniforms.breath.value.toFixed(3),motionEnabled:String(!media.matches&&!asleep),
         });
       }
       // A shader failure never counts as a successful WebGL frame. DOM readiness requires its loaded image.
       if (!ready && (frames > 0 || fallbackFrames > 0)) { ready = true; callbacks.current.onReady?.(); emitState(); }
     }; visibility();
     return () => {
-      disposed = true; frameLoop.dispose(); abort.abort(); performance.reset(); resizeObserver?.disconnect(); observer?.disconnect(); window.removeEventListener('resize', resize); document.removeEventListener('visibilitychange', visibility);
+      disposed = true; frameLoop.dispose(); abort.abort(); performance.reset(); presence.reset(); hairMotion.reset(); resizeObserver?.disconnect(); observer?.disconnect(); window.removeEventListener('resize', resize); document.removeEventListener('visibilitychange', visibility);
       unbindGestures.forEach(unbind => unbind());
       feedback.dispose();
       releaseGpu(); geometry.dispose(); material.dispose(); canvas?.remove(); fallback.remove();
