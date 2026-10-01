@@ -23,6 +23,7 @@ import { RemoteCodexBridge } from './remote-codex.mjs';
 import { createChatAssistant, normalizeChatAssistant } from './chat-assistant.mjs';
 import { mountMusicMcpRoutes } from './music-mcp-routes.mjs';
 import { mountComputerUseMcpRoutes } from './computer-use-mcp-routes.mjs';
+import { mountOpenCliRoutes } from './opencli-routes.mjs';
 import { MODEL_REQUEST_BYTES } from './model-request-limits.mjs';
 import { createNotificationService } from './notifications.mjs';
 
@@ -670,6 +671,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.get('/api/codex/status', async (req, res) => { requireCodex(req.user); const value = await userCodexStatus(req.user); requireCurrentAuth(req); requireCodex(req.user); res.json(value); });
   mountMusicMcpRoutes({app,manager:localTools.musicMcp,requireAdmin,requireCurrentAuth,probes});
   mountComputerUseMcpRoutes({app,manager:localTools.computerUseMcp,requireAdmin,requireCurrentAuth,probes});
+  mountOpenCliRoutes({app,manager:localTools.opencliManager,requireAdmin,requireCurrentAuth,probes});
   app.get('/api/desktop-tools/status', async (req, res) => { requireAdmin(req.user); const value = await localTools.status(); requireCurrentAuth(req); res.json(redactCodex(value)); });
   app.post('/api/desktop-tools/action', async (req, res) => {
     requireAdmin(req.user);
@@ -682,7 +684,9 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     res.on('close', () => { if (!res.writableEnded) controller.abort(); });
     try {
       requireCurrentAuth(req); controller.signal.throwIfAborted();
-      const value = await localTools.execute(req.body.tool, req.body.arguments, { signal: controller.signal });
+      const value = req.body.tool === 'petpal_browser' && localTools.opencliManager
+        ? await localTools.opencliManager.executeBrowser(req.body.arguments,{signal:controller.signal})
+        : await localTools.execute(req.body.tool, req.body.arguments, { signal: controller.signal });
       requireCurrentAuth(req); controller.signal.throwIfAborted();
       res.json(redactCodex(value));
     } catch (error) {

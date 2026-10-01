@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowUpRight, Check, Globe2, Loader2, Music2, Pause, Play, RefreshCw, ShieldCheck, SkipBack, SkipForward, Terminal } from 'lucide-react';
+import { ArrowUpRight, Check, Loader2, Music2, Pause, Play, RefreshCw, ShieldCheck, SkipBack, SkipForward, Terminal } from 'lucide-react';
 import { api, getSessionEpoch, isSessionChanged, type CodexConfig, type DesktopToolsStatus, type MusicAction, type MusicPlayer, type ReasoningEffort, type User } from './api';
-import { canControlPlayer, canOpenMusicSite, codexConfigDraft as draftFrom, codexConfigPatch, playerStateLabel, reasoningEfforts, type CodexConfigDraft } from './desktop-settings.mjs';
+import { canControlPlayer, codexConfigDraft as draftFrom, codexConfigPatch, playerStateLabel, reasoningEfforts, type CodexConfigDraft } from './desktop-settings.mjs';
 import './desktop-assistant.css';
 
 const musicActions = [
@@ -14,7 +14,7 @@ const bridgeStates = {stopped:'尚未启动',owned:'由小伴管理',shared:'已
 
 export default function DesktopAssistantSettings({connected,user,onConfigSaved}:{connected:boolean;user?:User;onConfigSaved?():Promise<unknown>}) {
   const [config,setConfig]=useState<CodexConfig|null>(null),[draft,setDraft]=useState<CodexConfigDraft|null>(null);
-  const [tools,setTools]=useState<DesktopToolsStatus|null>(null),[profileId,setProfileId]=useState('');
+  const [tools,setTools]=useState<DesktopToolsStatus|null>(null);
   const [configBusy,setConfigBusy]=useState(false),[toolsBusy,setToolsBusy]=useState(false),[actionBusy,setActionBusy]=useState('');
   const [configError,setConfigError]=useState(''),[toolsError,setToolsError]=useState('');
   const [configNotice,setConfigNotice]=useState(''),[actionNotice,setActionNotice]=useState('');
@@ -34,7 +34,7 @@ export default function DesktopAssistantSettings({connected,user,onConfigSaved}:
   async function loadTools(){
     if(!enabled||!current())return;
     const request=controller(),revision=++loadRevision.current.tools;setToolsBusy(true);setToolsError('');
-    try{const next=await api<DesktopToolsStatus>('/desktop-tools/status',{signal:request.signal});if(current(request)&&revision===loadRevision.current.tools){setTools(next);setProfileId(previous=>next.opencli.profiles.some(profile=>profile.id===previous&&profile.connected)?previous:next.opencli.selectedProfileId||'');}}
+    try{const next=await api<DesktopToolsStatus>('/desktop-tools/status',{signal:request.signal});if(current(request)&&revision===loadRevision.current.tools){setTools(next);}}
     catch(error){if(current(request)&&!isSessionChanged(error))setToolsError((error as Error).message);}
     finally{controllers.current.delete(request);if(current(request)&&revision===loadRevision.current.tools)setToolsBusy(false);}
   }
@@ -66,7 +66,7 @@ export default function DesktopAssistantSettings({connected,user,onConfigSaved}:
       if(result.ok===false)throw new Error(result.message||result.error||'操作未完成，请检查工具状态。');
       if(tool==='petpal_music_command')setActionNotice(result.message||'播放器已确认接收操作，请查看最新媒体状态。');
       else if(args.action==='open')setActionNotice(result.tab?.url?`已打开 ${result.tab.url}`:'已提交网页打开请求，请查看浏览器中的结果。');
-      else if(args.action==='close'){setProfileId('');setActionNotice('已断开浏览器连接并清除所选档案。小伴使用的页面已关闭；共享浏览器桥保持运行。');}
+      else if(args.action==='close'){setActionNotice('已断开浏览器连接并清除所选档案。小伴使用的页面已关闭；共享浏览器桥保持运行。');}
       else setActionNotice(result.ready?'浏览器档案已连接，可打开音乐官网。':result.message||'已完成连接检查，请选择在线浏览器档案后连接。');
       await loadTools();
     }catch(error){if(current(request)&&!isSessionChanged(error))setToolsError((error as Error).message);}
@@ -77,9 +77,6 @@ export default function DesktopAssistantSettings({connected,user,onConfigSaved}:
   if(!owner)return null;
   const busy=configBusy||toolsBusy||!!actionBusy;
   const actionDisabled=busy||!!tools?.busy;
-  const opencli=tools?.opencli,selectedOnline=!!opencli?.profiles.some(profile=>profile.id===profileId&&profile.connected);
-  const browserReady=canOpenMusicSite(opencli,profileId);
-  const browserAttached=opencli?.daemon.state==='owned'||opencli?.daemon.state==='shared';
   return <section className="settings-section desktop-assistant" aria-label="电脑助手配置">
     <div className="section-title"><div><h2>电脑助手</h2><p>配置 Codex，管理服务主机上的音乐和浏览器工具。</p></div><ShieldCheck size={24}/></div>
     {!connected&&<p className="assistant-unavailable">登录主机管理员账号后，可以读取配置和使用工具。</p>}
@@ -104,16 +101,6 @@ export default function DesktopAssistantSettings({connected,user,onConfigSaved}:
       {tools?.music.players.map(player=><div className="assistant-player" key={player.id}><div><h4>{player.name}</h4><span className="assistant-state">{playerStateLabel(player)}</span>{player.message&&<p>{player.message}</p>}</div><div className="assistant-actions">{musicActions.map(({action:next,label,Icon})=><button type="button" className="secondary-button" key={next} aria-label={`${player.name}：${label}`} disabled={!enabled||actionDisabled||!canControlPlayer(player,next)} onClick={()=>control(player,next)}>{actionBusy===`${player.id}:${next}`?<Loader2 size={14} className="spin"/>:<Icon size={14}/>}<span>{label}</span></button>)}</div></div>)}
       <p className="field-help">这里提供打开、播放、暂停和切歌。播放器需公开系统媒体会话；本地曲库搜索不在此功能范围内。刷新状态不会启动或播放音乐。</p>
       {actionNotice&&<p className="assistant-message" role="status"><Check size={16}/>{actionNotice}</p>}
-    </section>
-    <section className="assistant-section" aria-labelledby="assistant-browser-title">
-      <div className="assistant-section-heading"><div><h3 id="assistant-browser-title"><Globe2 size={19}/>OpenCLI 网页工具</h3><p>连接 Chrome 的 Browser Bridge，再打开音乐官网。</p></div><span className="assistant-state">{opencli?.version?`OpenCLI ${opencli.version}`:'等待状态'}</span></div>
-      {opencli&&<><dl className="assistant-bridge-status"><dt>内置运行时</dt><dd>{opencli.available?'已就绪':'当前不可用'}</dd><dt>浏览器桥</dt><dd>{bridgeStates[opencli.daemon.state]}</dd><dt>扩展连接</dt><dd>{opencli.extension.connected?'已检测到连接':'尚未连接'}</dd><dt>当前档案</dt><dd>{opencli.profiles.find(profile=>profile.id===opencli.selectedProfileId)?.label||'尚未选择'}</dd></dl>{opencli.message&&<p className="assistant-unavailable">{opencli.message}</p>}
-        <label>浏览器档案<select aria-label="OpenCLI 浏览器档案" value={profileId} disabled={!enabled||busy} onChange={event=>setProfileId(event.target.value)}><option value="">请选择在线档案</option>{opencli.profiles.map(profile=><option key={profile.id} value={profile.id} disabled={!profile.connected}>{profile.label}{profile.connected?'':'（离线）'}</option>)}</select></label>
-        <div className="assistant-actions"><button type="button" className="secondary-button" disabled={!enabled||actionDisabled||!opencli.available||(opencli.daemon.state==='external'&&!opencli.daemon.compatible)||(!!profileId&&!selectedOnline)} onClick={()=>void action('petpal_browser',{action:'connect',...(profileId?{profileId}:{})},'browser:connect')}>{actionBusy==='browser:connect'?<Loader2 size={14} className="spin"/>:<Globe2 size={14}/>}<span>{profileId?'连接所选档案':'启动连接检查'}</span></button><button type="button" className="secondary-button" disabled={!enabled||actionDisabled||!browserAttached} onClick={()=>void action('petpal_browser',{action:'close'},'browser:close')}>{actionBusy==='browser:close'&&<Loader2 size={14} className="spin"/>}断开浏览器</button>{officialSites.map(site=><button type="button" className="secondary-button" key={site.url} disabled={!enabled||actionDisabled||!browserReady} onClick={()=>void action('petpal_browser',{action:'open',profileId,url:site.url},site.url)}><ArrowUpRight size={14}/>{site.name}</button>)}</div>
-      </>}
-      <div className="assistant-links"><a href="https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk" target="_blank" rel="noreferrer">安装官方 Browser Bridge 扩展 ↗</a><a href="https://github.com/jackwener/opencli" target="_blank" rel="noreferrer">OpenCLI 使用说明 ↗</a></div>
-      <p className="field-help">安装扩展并打开相应 Chrome 档案后，先检查连接，再明确选择档案。OpenCLI 不包含 QQ 音乐、网易云音乐专用适配器；网页操作通过 Codex 的确认卡执行。</p>
-      <p className="field-help">兼容的浏览器桥可共享连接。打开官网时，OpenCLI 可能复用其标签组内未被其他任务使用的空闲页面。</p>
     </section>
   </section>;
 }

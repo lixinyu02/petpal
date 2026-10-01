@@ -4,6 +4,7 @@ asar: true
 asarUnpack:
   - node_modules/**
   - server/native/**
+  - server/opencli*.mjs
 directories:
   output: releases/desktop
 files:

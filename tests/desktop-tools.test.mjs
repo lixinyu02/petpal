@@ -30,6 +30,20 @@ test('central MCP missing conversation identity never falls back to owner creden
   await assert.rejects(tools.execute('petpal_music_mcp_tools',{player:'qqmusic'},{conversationId:'missing'}),/所属账号/);
   assert.equal(calls,0);await tools.close();
 });
+
+test('OpenCLI discovery and queries use the scoped manager and missing identity cannot access owner browser',async()=>{
+  let queries=0,browsers=0;
+  const manager={sites:async()=>({sites:[]}),query:async()=>{queries++;return {ok:true,rows:[]};},executeBrowser:async()=>{browsers++;return {ok:true};},status:async()=>({ready:false}),close:async()=>{}};
+  const tools=createDesktopTools({dataDir:'.unused-fixture',computerUseMcp,musicMcp:{close:async()=>{}},music:{},opencliManager:manager,musicMcpScope:'owner',scopeForConversation:id=>id==='owned-conversation'?'owner':null});
+  assert.equal(tools.describe('petpal_opencli_sites',{}).approvalRequired,false);
+  assert.equal(tools.describe('petpal_opencli_query',{site:'npm',command:'package',arguments:{name:'react'}}).approvalRequired,true);
+  await tools.execute('petpal_opencli_query',{site:'npm',command:'package',arguments:{name:'react'}},{conversationId:'owned-conversation'});
+  for(const conversationId of [undefined,'missing']){
+    await assert.rejects(tools.execute('petpal_opencli_query',{site:'npm',command:'package',arguments:{name:'react'}},{conversationId}),/所属账号/);
+    await assert.rejects(tools.execute('petpal_browser',{action:'connect'},{conversationId}),/所属账号/);
+  }
+  assert.equal(queries,1);assert.equal(browsers,0);await tools.close();
+});
 test('registry serializes side effects and releases busy state on failure',async()=>{
   let release;const tools=fixture({execute:()=>new Promise(resolve=>{release=resolve;})});
   const first=tools.execute('petpal_music_command',{player:'netease',action:'play'});

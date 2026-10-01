@@ -91,6 +91,7 @@ export class MusicMcpManager {
     this.scopeHash = createHash('sha256').update(scope).digest('hex').slice(0, 32);
     this.profileRoot = path.join(this.dataDir, 'music-mcp', this.scopeHash);
     this.sessions = new Map(); this.operations = new Set(); this.closing = new Set(); this.children = new Set(); this.messages = new Map(); this.closed = false; this.revision = null;
+    this.initialConfigPromise = null;
     this.schemaValidator = new AjvJsonSchemaValidator();
   }
   get busy() { return this.operations.size > 0; }
@@ -267,7 +268,17 @@ export class MusicMcpManager {
   }
   async _refresh() {
     let config = await this._read();
-    if (!config) config = await this._lock(async () => { const existing = await this._read(); if (existing) return existing; const initial = defaultConfig(this.platform); await this._write(initial); return initial; });
+    if (!config) {
+      // Passive first reads share this manager's creation work, including the
+      // interval between acquiring the lock file and writing its receipt.
+      // Locks from other managers retain their existing fail-closed checks.
+      const initializing = this.initialConfigPromise ??= this._lock(async () => {
+        const existing = await this._read(); if (existing) return existing;
+        const initial = defaultConfig(this.platform); await this._write(initial); return initial;
+      });
+      try { config = await initializing; }
+      finally { if (this.initialConfigPromise === initializing) this.initialConfigPromise = null; }
+    }
     const changed = this.revision !== null && this.revision !== config.revision;
     if (changed) { for (const operation of this.operations) operation.controller.abort(failure(409, '音乐 MCP 配置已变化，请重新连接。', 'config_changed')); await Promise.allSettled([...this.sessions.keys()].map(player => this._disconnectSession(player))); }
     this.revision = config.revision;

@@ -7,6 +7,7 @@ import { createDesktopTools } from '../server/desktop-tools.mjs';
 import { normalizeAgentPermissions } from '../server/agent-permissions.mjs';
 import { inspectImage, IMAGE_LIMIT } from '../server/attachments.mjs';
 import { normalizeReasoningEffort } from '../server/providers.mjs';
+import { validateBrowserAction } from '../server/opencli.mjs';
 
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value);
@@ -88,6 +89,13 @@ export function createComputerUseMcpHandlers(executor,isAllowed) {
   return Object.fromEntries(['config','status','configure','connect','disconnect','cancel'].map(action=>
     [`petpal:computer-use:${action}`,(event,body)=>{if(!isAllowed(event))throw new Error('Computer Use 仅允许可信主窗口管理。');return executor.manageComputerUseMcp(action,body);}]));
 }
+export function createOpenCliHandlers(executor, isAllowed) {
+  return Object.fromEntries(['config', 'status', 'configure', 'action', 'sites', 'cancel'].map(action =>
+    [`petpal:opencli:${action}`, (event, body) => {
+      if (!isAllowed(event)) throw new Error('OpenCLI 仅允许可信主窗口管理。');
+      return executor.manageOpenCli(action, body);
+    }]));
+}
 
 /** One outbound executor belongs to a verified central login, never a renderer request. */
 export class DesktopExecutor {
@@ -109,7 +117,8 @@ export class DesktopExecutor {
   _tools(ctx) {
     this._assert(ctx);
     return ctx.tools ??= this.toolsFactory({ dataDir: path.join(ctx.directory, 'tools'),
-      musicMcpDataDir: this.musicMcpDataDir, musicMcpScope: `${ctx.connection.instanceId}:${ctx.connection.userId}` });
+      musicMcpDataDir: this.musicMcpDataDir, opencliDataDir: this.musicMcpDataDir,
+      musicMcpScope: `${ctx.connection.instanceId}:${ctx.connection.userId}` });
   }
 
   async _musicIdentity(ctx) {
@@ -181,6 +190,63 @@ export class DesktopExecutor {
       else{await manager[action]({signal:controller.signal});controller.signal.throwIfAborted();await this._musicIdentity(ctx);result=await manager.status();}
       controller.signal.throwIfAborted();await this._musicIdentity(ctx);return result;
     }finally{ctx.controller.signal.removeEventListener('abort',abort);if(ctx.computerUseOperation===operation)ctx.computerUseOperation=null;finish();}
+  }
+  async manageOpenCli(action, body) {
+    if (!['config', 'status', 'configure', 'action', 'sites', 'cancel'].includes(action)) throw invalid();
+    if (['config', 'status', 'cancel'].includes(action) && body !== undefined) throw invalid();
+    if (action === 'configure' && (!object(body) || Object.keys(body).length !== 2 || !uuid(body.revision) || typeof body.enabled !== 'boolean')) throw invalid();
+    if (action === 'sites') {
+      if (body === undefined) body = {};
+      if (!object(body) || Object.keys(body).some(key => !['site', 'command'].includes(key)) ||
+          Object.values(body).some(value => typeof value !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,95}$/.test(value))) throw invalid();
+    }
+    if (action === 'action') body = validateBrowserAction(body);
+    const ctx = this.current;
+    if (!ctx || this.visible.state !== 'online') throw new Error('请先登录并连接这台执行电脑。');
+    const identity = async () => {
+      try { await this._musicIdentity(ctx); }
+      catch (error) {
+        if (error.message === '音乐 MCP 设置需要当前账号的完整 Agent 权限。') throw new Error('OpenCLI 设置需要当前账号的完整 Agent 权限。');
+        throw error;
+      }
+    };
+    if (action === 'cancel') {
+      if (ctx.openCliCancellation) throw new Error('OpenCLI 正在停止请求，请等待。');
+      const pending = ctx.openCliOperation, controller = new AbortController(), abort = () => controller.abort();
+      let finish;
+      const cancellation = { controller, done: new Promise(resolve => { finish = resolve; }) };
+      ctx.openCliCancellation = cancellation; ctx.controller.signal.addEventListener('abort', abort, { once: true });
+      try {
+        await identity(); controller.signal.throwIfAborted();
+        pending?.controller.abort(); await pending?.done;
+        controller.signal.throwIfAborted(); await identity();
+        const result = await this._tools(ctx).opencliManager.status();
+        controller.signal.throwIfAborted(); await identity(); return result;
+      } finally {
+        ctx.controller.signal.removeEventListener('abort', abort);
+        if (ctx.openCliCancellation === cancellation) ctx.openCliCancellation = null; finish();
+      }
+    }
+    if (ctx.openCliOperation || ctx.openCliCancellation) throw new Error('OpenCLI 正在处理请求，请等待或停止。');
+    const modifies = ['configure', 'action'].includes(action);
+    if (ctx.run && modifies) throw new Error('请等当前 Agent 任务结束后再修改 OpenCLI 或操作浏览器。');
+    const controller = new AbortController(), abort = () => controller.abort(); let finish;
+    const operation = { controller, done: new Promise(resolve => { finish = resolve; }) };
+    ctx.openCliOperation = operation; ctx.controller.signal.addEventListener('abort', abort, { once: true });
+    try {
+      await identity(); controller.signal.throwIfAborted();
+      if (ctx.run && modifies) throw new Error('请等当前 Agent 任务结束后再修改 OpenCLI 或操作浏览器。');
+      const manager = this._tools(ctx).opencliManager;
+      let result;
+      if (action === 'configure') result = await manager.configure(body);
+      else if (action === 'action') result = await manager.executeBrowser(body, { signal: controller.signal });
+      else if (action === 'sites') result = await manager.sites(body);
+      else result = await manager[action]();
+      controller.signal.throwIfAborted(); await identity(); return result;
+    } finally {
+      ctx.controller.signal.removeEventListener('abort', abort);
+      if (ctx.openCliOperation === operation) ctx.openCliOperation = null; finish();
+    }
   }
   _queue(work) { const result = this.transition.catch(() => {}).then(work); this.transition = result.catch(() => {}); return result; }
   _assert(ctx) { if (this.closed || this.current !== ctx || ctx.generation !== this.generation || ctx.controller.signal.aborted) throw stopped(); }
@@ -342,6 +408,11 @@ export class DesktopExecutor {
     if (!await this._receipt(ctx, command)) return;
     this._assert(ctx);
     if (command.type === 'run') {
+      // An incoming task waits for this computer's settings operation to finish;
+      // neither UI configuration nor browser probes may race with Agent tools.
+      while (ctx.openCliOperation || ctx.openCliCancellation) {
+        await Promise.all([ctx.openCliOperation?.done, ctx.openCliCancellation?.done]); this._assert(ctx);
+      }
       if (ctx.run) throw invalid();
       const permissions = normalizeAgentPermissions(command.permissions);
       if (permissions.access === 'full-access' && ctx.account.agentAccess !== 'full' && !ctx.account.isOwner) throw invalid();
@@ -462,7 +533,7 @@ export class DesktopExecutor {
     ctx.retired = true; ctx.controller.abort(); ctx.run?.controller.abort();
     ctx.retiring = (async () => {
       await Promise.allSettled([ctx.run?.bridge?.close(), ctx.tools?.close()]);
-      await Promise.allSettled([ctx.run?.done, ctx.musicOperation?.done, ctx.computerUseOperation?.done, ...ctx.loops]);
+      await Promise.allSettled([ctx.run?.done, ctx.musicOperation?.done, ctx.computerUseOperation?.done, ctx.openCliOperation?.done, ctx.openCliCancellation?.done, ...ctx.loops]);
       if (ctx.connectionId) await this._unregister(ctx).catch(() => {});
       ctx.connection.token = ''; ctx.run = null;
     })();

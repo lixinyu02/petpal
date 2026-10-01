@@ -30,6 +30,10 @@ const syntheticSecrets = new Map([
   ['tests/server-updates.test.mjs', new Set(['server-update-fixture-owner', 'isolated-update-password'])],
   ['tests/music-mcp-routes.test.mjs', new Set(['music-mount-fixture-bootstrap'])],
   ['tests/music-mcp.test.mjs', new Set(['private-account-one'])],
+  ['tests/opencli-executor.test.mjs', new Set(['synthetic-opencli-session'])],
+  ['tests/computer-use-integration.test.mjs', new Set(['computer-fixture-bootstrap', 'synthetic-session'])],
+  ['tests/notifications-api.test.mjs', new Set(['fixture-notifications-password'])],
+  ['tests/task-notification-controller.test.mjs', new Set(['foreground-only-secret'])],
   ['tests/users.test.mjs', new Set(['isolated-test-owner-token', 'test-password-123', 'fixture-provider-private-key', 'new-desktop-bootstrap-token', 'alice-private-voice-key', 'alice-private-asr-key', 'replacement-password', 'owner-new-password', 'incorrect-password', 'replacement-local-owner-token'])],
 ]);
 /** Pure inspection: diagnostics include only the path and fixed reason, never matched values. */
@@ -49,7 +53,10 @@ export function inspectSourceEntry(entry, content) {
     ['JWT value',/\beyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}/],
   ])if(pattern.test(text))reject(reason);
   if(!/\.(?:png|gif|ico|jar|jpe?g|webp|woff2?|ttf)$/i.test(entry.path)){
-    if(/[A-Za-z]:[\\/]+Users[\\/]+[^\s'"`]+|\/(?:home|Users)\/[A-Za-z0-9_.-]+\/(?:\.codex|\.config)/.test(text))reject('personal configuration path');
+    // This reviewed environment fixture deliberately tests host-profile isolation.
+    // Exempt only its exact synthetic profile, never other paths in that file.
+    const pathText=entry.path==='tests/computer-use-mcp.test.mjs'?text.replaceAll(['C:','Users','actual'].join('\\\\'),'<synthetic-profile>'):text;
+    if(/[A-Za-z]:[\\/]+Users[\\/]+[^\s'"`]+|\/(?:home|Users)\/[A-Za-z0-9_.-]+\/(?:\.codex|\.config)/.test(pathText))reject('personal configuration path');
     // Quoted JSON keys and values must close with the same quote that opened them.
     for(const match of text.matchAll(/(?:(['"])(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|token|secret)\1|\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|token|secret)\b)\s*[:=]\s*(['"])([^'"\r\n]{16,})\2/gi)){
       if(!allowed.has(match[3])&&!/\$\{|^(?:Bearer |<|process\.)/.test(match[3]))reject('unreviewed literal credential');

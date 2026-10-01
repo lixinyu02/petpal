@@ -62,6 +62,14 @@ contextBridge.exposeInMainWorld('petpal', Object.freeze({
     disconnect: () => ipcRenderer.invoke('petpal:computer-use:disconnect'),
     cancel: () => ipcRenderer.invoke('petpal:computer-use:cancel'),
   }),
+  opencli: Object.freeze({
+    config: () => ipcRenderer.invoke('petpal:opencli:config'),
+    status: () => ipcRenderer.invoke('petpal:opencli:status'),
+    configure: body => ipcRenderer.invoke('petpal:opencli:configure', body),
+    action: body => ipcRenderer.invoke('petpal:opencli:action', body),
+    sites: body => ipcRenderer.invoke('petpal:opencli:sites', body),
+    cancel: () => ipcRenderer.invoke('petpal:opencli:cancel'),
+  }),
   updates: Object.freeze({
     status: () => updateCall('status'),
     check: () => updateCall('check'),
