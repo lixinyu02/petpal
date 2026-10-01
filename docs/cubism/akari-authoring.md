@@ -1,6 +1,6 @@
 # Akari Cubism 资产来源与重建
 
-本文件记录 2026-10-01 的 classic 21 层模型及其原始导出；当前默认使用 V2 连续身体模型，重建流程见 [V2 作者说明](akari-continuous-body.md)。以下 classic 参数和哈希保留为历史依据。
+本文件记录 2026-10-01 的 classic 21 层模型及其原始导出；当前源码默认目标使用 V4 `stable-portrait`，重建流程见 [V4 作者说明](akari-unified-hair.md)。V4 复用这里的脸与五官源和 [V2 连续身体源](akari-continuous-body.md)，另生成统一前发；以下 classic 参数和哈希保留为历史依据。
 
 Akari 的美术由 PetPal 的 imagegen 流程生成，奶油白与浅橘配色延续原角色。模型由原创分层 PSD 编译生成；没有复制官方样例人物或第三方 MOC3。源 PNG、分层坐标、21 层 PSD 与机械打包说明在 [`outputs/avatars/akari-cubism`](../../outputs/avatars/akari-cubism/README.md)。
 
@@ -24,7 +24,7 @@ Akari 的美术由 PetPal 的 imagegen 流程生成，奶油白与浅橘配色�
 | 自编参数绑定 runner | [`scripts/authoring/cubism/src/main/kotlin/PetPalAuthoring.kt`](../../scripts/authoring/cubism/src/main/kotlin/PetPalAuthoring.kt) |
 | 重建入口 | [`Build-AkariCubism.ps1`](../../scripts/authoring/Build-AkariCubism.ps1) |
 | 官方 Core 检查 | [`verify-cubism-model.mjs`](../../scripts/authoring/verify-cubism-model.mjs) |
-| 当前交付来源摘要 | [`akari-authoring-provenance.json`](akari-authoring-provenance.json) |
+| classic 历史来源摘要 | [`akari-authoring-provenance.json`](akari-authoring-provenance.json) |
 
 runner 使用冻结工具的公开 API，没有修改上游源文件。它先 inspect 真实 PSD，按真实 layer ID 绑定 `blush`／`tears`，拒绝缺层或没有像素的素材，然后导出模型并校验真实参数范围。源码在仓库里，编译缓存、工具依赖和输出放在忽略的 `.tools/`；PetPal 的 Node 依赖和四端运行包不包含该 GPL 编译器。
 
@@ -67,7 +67,7 @@ runner 使用冻结工具的公开 API，没有修改上游源文件。它先 in
      --require-emotions
    ```
 
-   检查当前默认模型可将第一个参数改为 `public/avatars/akari-cubism-v2/akari.model3.json`；检查历史 classic 则使用 `public/avatars/akari-cubism/akari.model3.json`，receipt 仍写 `.tools/`。只有 `status: pass` 表示检查通过。验证脚本不修改模型，官方 Core 在无文件／网络接口的 VM 中执行。
+   检查当前源码默认目标模型可将第一个参数改为 `public/avatars/akari-cubism-v4/akari.model3.json`；历史 V3 使用 `public/avatars/akari-cubism-v3/akari.model3.json`，历史 V2／classic 则分别使用 `public/avatars/akari-cubism-v2/akari.model3.json`／`public/avatars/akari-cubism/akari.model3.json`，receipt 仍写 `.tools/`。只有 `status: pass` 表示检查通过。验证脚本不修改模型，官方 Core 在无文件／网络接口的 VM 中执行。
 
 5. 在实际浏览器／设备上检查外观、动效、口型与情绪，再审核要更新的 runtime 文件。CMO3 如需供官方 Editor 继续编辑，应单独完成打开、保存与再导出验收。
 

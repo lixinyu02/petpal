@@ -1,0 +1,822 @@
+{
+  "schema": 1,
+  "method": "Classic face and feature sources plus V2 continuous body retained; optional anchored eye and iris reduction; one generated unified front hair; nearest RGBA sampling and PSD encoding only",
+  "canvas": [
+    1024,
+    1536
+  ],
+  "eyeAdjustment": {
+    "scale": 0.85,
+    "irisScale": 0.92
+  },
+  "layouts": [
+    {
+      "file": "layout.json",
+      "sha256": "364e845817479cdc65583fcd1dc564bf3491096afe3ed27880ee55b3dc41b94c"
+    },
+    {
+      "file": "../akari-cubism/layout.json",
+      "sha256": "8e8ef13682305dfcccad1b3e94ffbc387731ece446d2f56981a05205373189bd"
+    },
+    {
+      "file": "../akari-cubism-v2/layout.json",
+      "sha256": "591e1b9dee5eee2f86c01ec90bb0e041eba063ad515fa61d9bc25863dbd93714"
+    }
+  ],
+  "sourceReceipts": [
+    {
+      "file": "../akari-cubism/pack-receipt.json",
+      "sha256": "1d7b837f1aee80d5033497b3a9d3f6d616fb878367743350daa93659ae0cae7a"
+    },
+    {
+      "file": "../akari-cubism-v2/pack-receipt.json",
+      "sha256": "8aefc37e4b47f2665309ef7316e713c83ecb32a073dedbcfcb62f841f8ae6a3a"
+    }
+  ],
+  "bodySha256": "301ecb2c7539fbde65a448f94dba7e6f3352ed26fa14416b65ba0cb03824f74c",
+  "frontHairSha256": "7d137f65b9383f863a9fb4ca7efd1d086c3ebb670801ce4eace58e0f7e4c0577",
+  "psdSha256": "4ef62d6405976149cbd614dd4ccb240f226e06f4c4798eaf57239052948cb01a",
+  "neutralLayoutSha256": "292adb3a9954c23ea2bdeb5b710ea6e2769d9dcf617a5ac3c905c38c62d7e178",
+  "readback": {
+    "status": "pass",
+    "layerCount": 19,
+    "checks": [
+      "canvas",
+      "layer names and order",
+      "layer rectangles",
+      "exact decoded RGBA bytes"
+    ]
+  },
+  "layers": [
+    {
+      "name": "back hair",
+      "file": "../akari-cubism/layers/back hair.png",
+      "sha256": "d73b71edb497ad592ca125b47119374838273d60898fbb48bc7368fea9ffb51c",
+      "decodedSize": [
+        680,
+        744
+      ],
+      "source": [
+        0,
+        0,
+        680,
+        744
+      ],
+      "target": [
+        170,
+        14,
+        680,
+        744
+      ],
+      "effectiveTarget": [
+        170,
+        14,
+        680,
+        744
+      ],
+      "transform": {
+        "kind": "none"
+      },
+      "rgbaSha256": "69bce2b643e4d4794e6f45b29a47024e6d1cec7a682c8a0784565de1c5eb1d29",
+      "reused": true
+    },
+    {
+      "name": "topwear",
+      "file": "../akari-cubism-v2/body-continuous.png",
+      "sha256": "301ecb2c7539fbde65a448f94dba7e6f3352ed26fa14416b65ba0cb03824f74c",
+      "decodedSize": [
+        1133,
+        1388
+      ],
+      "source": [
+        0,
+        0,
+        1133,
+        1388
+      ],
+      "target": [
+        92,
+        489,
+        840,
+        1029
+      ],
+      "effectiveTarget": [
+        92,
+        489,
+        840,
+        1029
+      ],
+      "transform": {
+        "kind": "layout-sampling",
+        "scale": [
+          0.7413945278022948,
+          0.7413544668587896
+        ]
+      },
+      "rgbaSha256": "c0c3347adc4565ed8b87a4016736fe1821c8bbcc86447e114b2be0b4c8c68e3e",
+      "reused": true
+    },
+    {
+      "name": "face",
+      "file": "../akari-cubism/layers/face.png",
+      "sha256": "8a288088863a5367dc7172a741488e0cde4d0db6a46d50ca82c4299c0223b1e8",
+      "decodedSize": [
+        366,
+        415
+      ],
+      "source": [
+        0,
+        0,
+        366,
+        415
+      ],
+      "target": [
+        329,
+        134,
+        366,
+        415
+      ],
+      "effectiveTarget": [
+        329,
+        134,
+        366,
+        415
+      ],
+      "transform": {
+        "kind": "none"
+      },
+      "rgbaSha256": "e81f69dfef9bfe57a39533b4e13574d38042839005f5def5d6bda62c31cb1529",
+      "reused": true
+    },
+    {
+      "name": "blush",
+      "file": "../akari-cubism/layers/blush.png",
+      "sha256": "cc78c1c95bf58cc03268e9f5bc8988a18bd3b7060a64e44907eb19bec113ac2c",
+      "decodedSize": [
+        270,
+        54
+      ],
+      "source": [
+        0,
+        0,
+        270,
+        54
+      ],
+      "target": [
+        378,
+        400,
+        270,
+        54
+      ],
+      "effectiveTarget": [
+        378,
+        400,
+        270,
+        54
+      ],
+      "transform": {
+        "kind": "none"
+      },
+      "rgbaSha256": "9869d9d573257e33b04943ded6c26f4cb645770983c09012b37ad66326708c76",
+      "reused": true
+    },
+    {
+      "name": "eyewhite-r",
+      "file": "../akari-cubism/layers/eyewhite-r.png",
+      "sha256": "3c8df15d386b4876042d9223757b0f46fe9ac3718534efa292cfe70a026b9bf2",
+      "decodedSize": [
+        110,
+        67
+      ],
+      "source": [
+        0,
+        0,
+        110,
+        67
+      ],
+      "target": [
+        384,
+        336,
+        94,
+        57
+      ],
+      "effectiveTarget": [
+        384,
+        336,
+        94,
+        57
+      ],
+      "transform": {
+        "kind": "eye-group-scale",
+        "side": "r",
+        "anchor": [
+          431,
+          364.5
+        ],
+        "scale": 0.85,
+        "originalTarget": [
+          376,
+          331,
+          110,
+          67
+        ],
+        "groupTarget": [
+          384,
+          336,
+          94,
+          57
+        ]
+      },
+      "rgbaSha256": "6fd56e67ed1a117d27056ee80f2c7ec5e1cf4442c6b19abe187e229dcf2b2970",
+      "reused": true
+    },
+    {
+      "name": "eyewhite-l",
+      "file": "../akari-cubism/layers/eyewhite-l.png",
+      "sha256": "ac202b979c777c462132e3269848678e688b94e589ac23cdc6b159dfd0bfbf5e",
+      "decodedSize": [
+        110,
+        64
+      ],
+      "source": [
+        0,
+        0,
+        110,
+        64
+      ],
+      "target": [
+        548,
+        336,
+        94,
+        54
+      ],
+      "effectiveTarget": [
+        548,
+        336,
+        94,
+        54
+      ],
+      "transform": {
+        "kind": "eye-group-scale",
+        "side": "l",
+        "anchor": [
+          595,
+          363
+        ],
+        "scale": 0.85,
+        "originalTarget": [
+          540,
+          331,
+          110,
+          64
+        ],
+        "groupTarget": [
+          548,
+          336,
+          94,
+          54
+        ]
+      },
+      "rgbaSha256": "7a4b3222338c331ce80109895f93bd7b889e53515a53f190b6d311b4eeccac34",
+      "reused": true
+    },
+    {
+      "name": "irides-r",
+      "file": "../akari-cubism/layers/irides-r.png",
+      "sha256": "c4492aed104c6d954775c0b7d26e984f4bac96f67e6d4bedb7a1df116a26ba43",
+      "decodedSize": [
+        66,
+        63
+      ],
+      "source": [
+        0,
+        0,
+        66,
+        63
+      ],
+      "target": [
+        405,
+        337,
+        52,
+        50
+      ],
+      "effectiveTarget": [
+        405,
+        337,
+        52,
+        50
+      ],
+      "transform": {
+        "kind": "eye-group-scale",
+        "side": "r",
+        "anchor": [
+          431,
+          364.5
+        ],
+        "scale": 0.85,
+        "originalTarget": [
+          398,
+          330,
+          66,
+          63
+        ],
+        "groupTarget": [
+          403,
+          335,
+          56,
+          54
+        ],
+        "irisAnchor": [
+          431,
+          362
+        ],
+        "irisScale": 0.92
+      },
+      "rgbaSha256": "bbf1a76339119b70078878a031ed8ee5c7bbc0db114f41414db22ffb5a76d930",
+      "reused": true
+    },
+    {
+      "name": "irides-l",
+      "file": "../akari-cubism/layers/irides-l.png",
+      "sha256": "9ebf96368884825d7569e2731ecc814fca1ca239b015934d2c1254d3d644d4e5",
+      "decodedSize": [
+        66,
+        61
+      ],
+      "source": [
+        0,
+        0,
+        66,
+        61
+      ],
+      "target": [
+        569,
+        337,
+        52,
+        48
+      ],
+      "effectiveTarget": [
+        569,
+        337,
+        52,
+        48
+      ],
+      "transform": {
+        "kind": "eye-group-scale",
+        "side": "l",
+        "anchor": [
+          595,
+          363
+        ],
+        "scale": 0.85,
+        "originalTarget": [
+          562,
+          330,
+          66,
+          61
+        ],
+        "groupTarget": [
+          567,
+          335,
+          56,
+          52
+        ],
+        "irisAnchor": [
+          595,
+          361
+        ],
+        "irisScale": 0.92
+      },
+      "rgbaSha256": "7125a65dc7405e9c3fb1189b61618eab70df5897d6f83944ff8836637b2614fa",
+      "reused": true
+    },
+    {
+      "name": "eyelash-r",
+      "file": "../akari-cubism/layers/eyelash-r.png",
+      "sha256": "c44bdceee67844acda0c944a2c50c4f15715b2c9e247f96d73829fd6dab53c70",
+      "decodedSize": [
+        130,
+        64
+      ],
+      "source": [
+        0,
+        0,
+        130,
+        64
+      ],
+      "target": [
+        376,
+        329,
+        111,
+        54
+      ],
+      "effectiveTarget": [
+        376,
+        329,
+        111,
+        54
+      ],
+      "transform": {
+        "kind": "eye-group-scale",
+        "side": "r",
+        "anchor": [
+          431,
+          364.5
+        ],
+        "scale": 0.85,
+        "originalTarget": [
+          366,
+          323,
+          130,
+          64
+        ],
+        "groupTarget": [
+          376,
+          329,
+          111,
+          54
+        ]
+      },
+      "rgbaSha256": "336d84e34ff7a0804b3fd7d794d51982ec2abd6c9943a2d5a66370b81ac67ea7",
+      "reused": true
+    },
+    {
+      "name": "eyelash-l",
+      "file": "../akari-cubism/layers/eyelash-l.png",
+      "sha256": "4edae0fcbb0581ba456bde722f48c303707e78ca3fb18e4f8e5007b8f527d56b",
+      "decodedSize": [
+        134,
+        63
+      ],
+      "source": [
+        0,
+        0,
+        134,
+        63
+      ],
+      "target": [
+        538,
+        329,
+        114,
+        54
+      ],
+      "effectiveTarget": [
+        538,
+        329,
+        114,
+        54
+      ],
+      "transform": {
+        "kind": "eye-group-scale",
+        "side": "l",
+        "anchor": [
+          595,
+          363
+        ],
+        "scale": 0.85,
+        "originalTarget": [
+          528,
+          323,
+          134,
+          63
+        ],
+        "groupTarget": [
+          538,
+          329,
+          114,
+          54
+        ]
+      },
+      "rgbaSha256": "decedac23c8f596cd4258e5c4176439e45beb765be8bd721fa12628d4cfcddf2",
+      "reused": true
+    },
+    {
+      "name": "eye close-r",
+      "file": "../akari-cubism/layers/eye close-r.png",
+      "sha256": "075b1b1e969b782dcaf53921020e1acde704001123979363478c5e7505ea456a",
+      "decodedSize": [
+        130,
+        43
+      ],
+      "source": [
+        0,
+        0,
+        130,
+        43
+      ],
+      "target": [
+        376,
+        350,
+        111,
+        37
+      ],
+      "effectiveTarget": [
+        376,
+        350,
+        111,
+        37
+      ],
+      "transform": {
+        "kind": "eye-group-scale",
+        "side": "r",
+        "anchor": [
+          431,
+          364.5
+        ],
+        "scale": 0.85,
+        "originalTarget": [
+          366,
+          348,
+          130,
+          43
+        ],
+        "groupTarget": [
+          376,
+          350,
+          111,
+          37
+        ]
+      },
+      "rgbaSha256": "a48f1e0ec2fef5fcd5e4843c1b87669849f89ddd3a674dac13d1227c7d6c3714",
+      "reused": true
+    },
+    {
+      "name": "eye close-l",
+      "file": "../akari-cubism/layers/eye close-l.png",
+      "sha256": "3aeed54d864bbb66cfd1cb4fc7910c8c1ccb9d65c0b3ad6b91347ad8cc725a96",
+      "decodedSize": [
+        134,
+        44
+      ],
+      "source": [
+        0,
+        0,
+        134,
+        44
+      ],
+      "target": [
+        538,
+        350,
+        114,
+        37
+      ],
+      "effectiveTarget": [
+        538,
+        350,
+        114,
+        37
+      ],
+      "transform": {
+        "kind": "eye-group-scale",
+        "side": "l",
+        "anchor": [
+          595,
+          363
+        ],
+        "scale": 0.85,
+        "originalTarget": [
+          528,
+          348,
+          134,
+          44
+        ],
+        "groupTarget": [
+          538,
+          350,
+          114,
+          37
+        ]
+      },
+      "rgbaSha256": "5f4871fc26a4eae6922e1497ec395425b3028bd07df28834d012860622875034",
+      "reused": true
+    },
+    {
+      "name": "tears",
+      "file": "../akari-cubism/layers/tears.png",
+      "sha256": "53b618c2b437f39ebba44f1b889c307b38f6ceabd7f7d9b88099d712ccfc8dc3",
+      "decodedSize": [
+        226,
+        29
+      ],
+      "source": [
+        0,
+        0,
+        226,
+        29
+      ],
+      "target": [
+        399,
+        376,
+        226,
+        29
+      ],
+      "effectiveTarget": [
+        399,
+        376,
+        226,
+        29
+      ],
+      "transform": {
+        "kind": "none"
+      },
+      "rgbaSha256": "283c9c41cf3c8258d0bbd6769380664ef44540bcccffcf88727269c62d1504ec",
+      "reused": true
+    },
+    {
+      "name": "eyebrow-r",
+      "file": "../akari-cubism/layers/eyebrow-r.png",
+      "sha256": "bd40a6861228e827fd126f6c271fe06f478cf0b64b3b5fdd865fcb20dcc3ca3e",
+      "decodedSize": [
+        113,
+        40
+      ],
+      "source": [
+        0,
+        0,
+        113,
+        40
+      ],
+      "target": [
+        374,
+        292,
+        113,
+        40
+      ],
+      "effectiveTarget": [
+        374,
+        292,
+        113,
+        40
+      ],
+      "transform": {
+        "kind": "none"
+      },
+      "rgbaSha256": "3c407b967d557ff127a31b999d4a77bec84554e7e3076d1449ed37a67268c350",
+      "reused": true
+    },
+    {
+      "name": "eyebrow-l",
+      "file": "../akari-cubism/layers/eyebrow-l.png",
+      "sha256": "b3d552bad815c19247b2d47a87cfda211eb1789e3456570fdb42d3013f514289",
+      "decodedSize": [
+        113,
+        36
+      ],
+      "source": [
+        0,
+        0,
+        113,
+        36
+      ],
+      "target": [
+        538,
+        292,
+        113,
+        36
+      ],
+      "effectiveTarget": [
+        538,
+        292,
+        113,
+        36
+      ],
+      "transform": {
+        "kind": "none"
+      },
+      "rgbaSha256": "5220e95215bc9cc32324a919d0b8ca0d4b9cb0580f80f69d49262a192e0543e2",
+      "reused": true
+    },
+    {
+      "name": "mouth open",
+      "file": "../akari-cubism/layers/mouth open.png",
+      "sha256": "ea1e4d1bdd6b32a89fa5ff9c5eb21f54a80b58ed2da0c9937308a39905560f50",
+      "decodedSize": [
+        72,
+        58
+      ],
+      "source": [
+        0,
+        0,
+        72,
+        58
+      ],
+      "target": [
+        476,
+        451,
+        72,
+        58
+      ],
+      "effectiveTarget": [
+        476,
+        451,
+        72,
+        58
+      ],
+      "transform": {
+        "kind": "none"
+      },
+      "rgbaSha256": "526471140ca6c6bed3f166c95f71dc5105ec280584c1f620a6b904e5bce8d287",
+      "reused": true
+    },
+    {
+      "name": "nose",
+      "file": "../akari-cubism/layers/nose.png",
+      "sha256": "3454955f09c85754cd184bde8d708afe91be8061b334b33c7fb8b12d17e84011",
+      "decodedSize": [
+        13,
+        25
+      ],
+      "source": [
+        0,
+        0,
+        13,
+        25
+      ],
+      "target": [
+        506,
+        410,
+        13,
+        25
+      ],
+      "effectiveTarget": [
+        506,
+        410,
+        13,
+        25
+      ],
+      "transform": {
+        "kind": "none"
+      },
+      "rgbaSha256": "9ccb165edbb132dcbd716da75e2e78c2de169af9d583d4328c11d62f95aee557",
+      "reused": true
+    },
+    {
+      "name": "mouth close",
+      "file": "../akari-cubism/layers/mouth close.png",
+      "sha256": "db3ea784b910ba6658a36d87e367908b7ed8d41939cd5022e7be7977b92f1f47",
+      "decodedSize": [
+        78,
+        21
+      ],
+      "source": [
+        0,
+        0,
+        78,
+        21
+      ],
+      "target": [
+        473,
+        474,
+        78,
+        21
+      ],
+      "effectiveTarget": [
+        473,
+        474,
+        78,
+        21
+      ],
+      "transform": {
+        "kind": "none"
+      },
+      "rgbaSha256": "11af641359c8b7c9805ba441b633e54a86080555ab1c5e9da166b487d7009067",
+      "reused": true
+    },
+    {
+      "name": "front hair",
+      "file": "front-hair.png",
+      "sha256": "7d137f65b9383f863a9fb4ca7efd1d086c3ebb670801ce4eace58e0f7e4c0577",
+      "decodedSize": [
+        1024,
+        1536
+      ],
+      "source": [
+        4,
+        22,
+        1020,
+        1248
+      ],
+      "target": [
+        170,
+        4,
+        680,
+        832
+      ],
+      "effectiveTarget": [
+        170,
+        4,
+        680,
+        832
+      ],
+      "transform": {
+        "kind": "layout-sampling",
+        "scale": [
+          0.6666666666666666,
+          0.6666666666666666
+        ]
+      },
+      "rgbaSha256": "cfab3de83ea6685650b75844dcc58a259d64a2091d62be7fb253951ab218b67f",
+      "reused": false
+    }
+  ]
+}

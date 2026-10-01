@@ -66,7 +66,7 @@ test('Cubism native interaction keeps authored face curves, independent blink an
   assert.equal(result.motionManager.stops, 0);
   near(result.get('ParamAngleX'), 4.8);
   near(result.get('ParamAngleZ'), -3);
-  near(result.get('ParamBodyAngleX'), 3.6);
+  near(result.get('ParamBodyAngleX'), 2);
   near(result.get('ParamEyeLOpen'), .3);
   near(result.get('ParamEyeROpen'), .15);
   near(result.get('ParamCheek'), .5);

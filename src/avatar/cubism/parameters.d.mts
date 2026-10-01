@@ -1,7 +1,8 @@
 import type { AvatarPerformanceSnapshot } from '../performance.mjs';
 import type { AvatarPresencePose } from '../presence.mjs';
 export type CubismTargets = Record<string, number>;
-export function cubismParameterTargets(pose?: Partial<AvatarPerformanceSnapshot>, follow?: Partial<AvatarPresencePose>, options?: { sleeping?: boolean; hidden?: boolean; reducedMotion?: boolean; nativeMotion?: string; nativeParameters?: Iterable<string>; supportedParameters?: string[] }): CubismTargets;
+export type CubismDeformationProfile = 'standard' | 'akari-stable';
+export function cubismParameterTargets(pose?: Partial<AvatarPerformanceSnapshot>, follow?: Partial<AvatarPresencePose>, options?: { sleeping?: boolean; hidden?: boolean; reducedMotion?: boolean; nativeMotion?: string; nativeParameters?: Iterable<string>; nativeReactionParameters?: Iterable<string>; supportedParameters?: string[]; deformationProfile?: CubismDeformationProfile }): CubismTargets;
 export interface CubismParameterModel {
   getParameterCount(): number;
   getParameterIndex(id: unknown): number;

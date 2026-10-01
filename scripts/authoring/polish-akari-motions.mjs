@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 const args = process.argv.slice(2);
 assert(args.length <= 1, 'Usage: node scripts/authoring/polish-akari-motions.mjs [existing-model-directory]');
 const projectRoot = fs.realpathSync(path.resolve(import.meta.dirname, '../..'));
-const requested = path.resolve(projectRoot, args[0] || 'public/avatars/akari-cubism-v2');
+const requested = path.resolve(projectRoot, args[0] || 'public/avatars/akari-cubism-v4');
 assert(fs.existsSync(requested) && fs.statSync(requested).isDirectory(), 'Target must be an existing model directory');
 const root = fs.realpathSync(requested);
 assert(root.startsWith(projectRoot + path.sep), 'Target must remain inside the PetPal checkout');
@@ -38,16 +38,27 @@ const verifiedProfiles = [
     mocSha256: '29185d2b500ac0b2e1e15f2b053b3fd6444ba72e93a8b33a388f4da8edb04f0b',
     textureSha256: 'e1f468582ecf6a000068128deaa74c2878ec2c01a2529d3c89ef307cc9d62020',
   },
+  {
+    name: 'stable-portrait',
+    mocSha256: 'a2d249efa9d9cccd357555aae59afcca3f5d951d619bc52bde8001eb2a46ced4',
+    textureSha256: 'a1a6d18d18ee055c41eb679047cb0b8db282b347852ce5c4fb0226099feead2e',
+  },
+  {
+    name: 'stable-portrait',
+    mocSha256: 'a2dd75ed234fb45cd97c6f1e26cc156c13bb8b671a9f70b7e7a21e882349ed26',
+    textureSha256: 'bdf66abcce40b3178e1383cf3dac4805675f3ec95d5c9a264fae018a896dbc6f',
+  },
 ];
 const mocSha256 = sha256(fs.readFileSync(asset(manifest.FileReferences.Moc)));
 const textureSha256 = sha256(fs.readFileSync(asset(manifest.FileReferences.Textures[0])));
 // A supported MOC and a supported atlas must be from the same verified export.
 const profile = verifiedProfiles.find(item => item.mocSha256 === mocSha256 && item.textureSha256 === textureSha256);
-assert(profile, 'Overlay requires a complete verified classic or continuous-body MOC/texture pair');
+assert(profile, 'Overlay requires a complete verified authoring MOC/texture pair');
 const physicsPath = asset(manifest.FileReferences.Physics);
 const physics = JSON.parse(fs.readFileSync(physicsPath, 'utf8'));
 assert.equal(physics.Version, 3);
-assert.deepEqual(physics.PhysicsSettings.map(item => item.Id), ['PhysicsHairBack', 'PhysicsHairFront', 'PhysicsEyeJelly']);
+assert.deepEqual(physics.PhysicsSettings.map(item => item.Id), profile.name === 'stable-portrait'
+  ? ['PhysicsHairBack', 'PhysicsHairFront'] : ['PhysicsHairBack', 'PhysicsHairFront', 'PhysicsEyeJelly']);
 const supported = new Map([
   ['ParamAngleX', [-45, 45]], ['ParamAngleY', [-30, 30]], ['ParamAngleZ', [-30, 30]],
   ['ParamBodyAngleX', [-10, 10]], ['ParamBodyAngleY', [-10, 10]], ['ParamBodyAngleZ', [-10, 10]],
@@ -91,7 +102,8 @@ function writeMotion(name, duration, loop, fadeIn, fadeOut, keys) {
     Version: 3,
     Meta: { Duration: duration, Fps: 30, Loop: loop, AreBeziersRestricted: true,
       CurveCount: curves.length, TotalSegmentCount: segments, TotalPointCount: segments * 3 + curves.length,
-      UserDataCount: 0, TotalUserDataSize: 0 },
+      UserDataCount: 0, TotalUserDataSize: 0,
+      ...(profile.name === 'stable-portrait' ? { FadeInTime: fadeIn, FadeOutTime: fadeOut } : {}) },
     FadeInTime: fadeIn, FadeOutTime: fadeOut, Curves: curves,
   };
   stage(`akari.${name}.motion3.json`, motion);

@@ -3,7 +3,7 @@ import { createCubismParameterBridge, cubismParameterTargets } from './parameter
 
 export const CUBISM_RUNTIME_ROOT = '/avatars/cubism-runtime/';
 export const CUBISM_CORE_URL = '/vendor/live2d/live2dcubismcore.min.js';
-const DEFAULT_MODEL = '/avatars/akari-cubism-v2/akari.model3.json';
+const DEFAULT_MODEL = '/avatars/akari-cubism-v4/akari.model3.json';
 const FRAMEWORK_EXPORTS = ['CubismFramework', 'CubismModelSettingJson', 'CubismMoc', 'CubismUserModel', 'CubismMatrix44', 'CubismShaderManager_WebGL', 'releaseCubismContext'];
 let corePromise, modulePromise;
 const runtimes = new WeakMap();
@@ -145,7 +145,7 @@ const EYELIDS = ['ParamEyeLOpen', 'ParamEyeROpen'];
 const FACE = ['ParamEyeLSmile', 'ParamEyeRSmile', 'ParamEyeBallForm', 'ParamBrowLY', 'ParamBrowRY', 'ParamBrowLAngle', 'ParamBrowRAngle', 'ParamCheek', 'ParamTear', 'ParamExcited', 'ParamSad', 'ParamShoulderY'];
 
 /** Owns frame composition independently of WebGL, using the official queues. */
-export function createCubismFrameController({ model, avatar, bridge, motions = new Map(), expressions = new Map() }) {
+export function createCubismFrameController({ model, avatar, bridge, motions = new Map(), expressions = new Map(), deformationProfile = 'standard' }) {
   let expressionName = '', motionName = '', motionGroup = '', gestureName = 'none', muted = false, mouthForm = 0;
   const motionRecords = new Map([...motions.entries()].map(([name, record]) => [record.motion, { ...record, group: name.slice(0, name.lastIndexOf('_')) }]));
   const expressionRecords = new Map([...expressions.values()].map(record => [record.motion, record]));
@@ -205,13 +205,14 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
       const motionLayers = still ? [] : active(avatar._motionManager, motionRecords, motionRecords.get(motions.get(motionName)?.motion));
       const expressionLayers = still ? [] : active(avatar._expressionManager, expressionRecords, expressions.get(expressionName));
       const own = new Set([...motionLayers, ...expressionLayers].flatMap(record => [...record.parameters]));
+      const nativeReactionParameters = new Set(motionLayers.filter(record => record.group !== 'Idle').flatMap(record => [...record.parameters]).filter(name => ANGLES.includes(name)));
       const reaction = motionLayers.find(record => record.group !== 'Idle')?.group || '';
-      const targets = cubismParameterTargets(pose, follow, { ...options, nativeMotion: reaction || motionGroup, nativeParameters: [...own], supportedParameters: bridge.supported });
+      const targets = cubismParameterTargets(pose, follow, { ...options, nativeMotion: reaction || motionGroup, nativeParameters: [...own], nativeReactionParameters, supportedParameters: bridge.supported, deformationProfile });
       bridge.apply(targets, {
         additive: [...ANGLES, ...GAZE].filter(name => own.has(name)),
         multiply: EYELIDS.filter(name => own.has(name)),
         dominant: FACE.filter(name => own.has(name)),
-        preserve: own.has('ParamBreath') ? ['ParamBreath'] : [],
+        preserve: [...(own.has('ParamBreath') ? ['ParamBreath'] : []), ...(own.has('ParamEyeBallForm') ? ['ParamEyeBallForm'] : [])],
       });
       if (!still && avatar._physics) avatar._physics.evaluate(model, seconds);
       if (avatar._pose) avatar._pose.updateParameters(model, seconds);
@@ -327,7 +328,10 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
     // assumes 0..width and would incorrectly move this centered MOC off-screen.
     modelMatrix.setPosition(-(canvasInfo.CanvasWidth / 2 - canvasInfo.CanvasOriginX) / canvasInfo.PixelsPerUnit * authoredScale,
       -(canvasInfo.CanvasOriginY - canvasInfo.CanvasHeight / 2) / canvasInfo.PixelsPerUnit * authoredScale);
-    const controller = createCubismFrameController({ model, avatar, bridge, motions, expressions });
+    // A user-supplied model must never inherit limits from its file name or
+    // supported parameter IDs. Only this bundled, reviewed model opts in.
+    const deformationProfile = ['/avatars/akari-cubism-v3/akari.model3.json', '/avatars/akari-cubism-v4/akari.model3.json'].includes(modelPath.pathname) ? 'akari-stable' : 'standard';
+    const controller = createCubismFrameController({ model, avatar, bridge, motions, expressions, deformationProfile });
     return {
       mocVersion, coreVersion: core.Version.csmGetVersion(), supportedParameters: bridge.supported,
       get motionGroup() { return controller.motionGroup; },

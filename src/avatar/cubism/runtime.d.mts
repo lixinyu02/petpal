@@ -1,6 +1,6 @@
 import type { AvatarPerformanceSnapshot } from '../performance.mjs';
 import type { AvatarPresencePose } from '../presence.mjs';
-import type { CubismParameterBridge, CubismParameterModel } from './parameters.mjs';
+import type { CubismDeformationProfile, CubismParameterBridge, CubismParameterModel } from './parameters.mjs';
 export const CUBISM_RUNTIME_ROOT: string;
 export const CUBISM_CORE_URL: string;
 export type CubismFrameOptions = { sleeping?: boolean; hidden?: boolean; reducedMotion?: boolean };
@@ -27,6 +27,7 @@ export function createCubismFrameController(options: {
   bridge: CubismParameterBridge;
   motions?: Map<string, CubismMotionRecord>;
   expressions?: Map<string, CubismMotionRecord>;
+  deformationProfile?: CubismDeformationProfile;
 }): CubismFrameController;
 export interface CubismAvatar {
   mocVersion: number; coreVersion: number; supportedParameters: string[];

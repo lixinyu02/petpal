@@ -3,9 +3,12 @@ const clamp = (value, low = -1, high = 1) => Math.min(high, Math.max(low, finite
 const unit = value => clamp(value, 0, 1);
 
 /** Renderer-independent intent. This is parameter control, not a fabricated MOC. */
-export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = false, hidden = false, reducedMotion = false, nativeMotion = '', nativeParameters, supportedParameters } = {}) {
+export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = false, hidden = false, reducedMotion = false, nativeMotion = '', nativeParameters, nativeReactionParameters, supportedParameters, deformationProfile = 'standard' } = {}) {
   const still = sleeping || hidden || reducedMotion;
   const own = new Set(nativeParameters || []);
+  // Non-idle authored angles include outgoing motions until their fade ends.
+  // Pointer follow must not add a second turn to those same joints.
+  const exclusive = new Set(nativeReactionParameters || []);
   const reactionOwns = name => nativeMotion !== '' && nativeMotion !== 'Idle' && own.has(name);
   const blinkL = sleeping ? 1 : unit(pose.blinkLeft);
   const blinkR = sleeping ? 1 : unit(pose.blinkRight);
@@ -17,19 +20,21 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
   // difference keeps its asymmetric cues visible without a virtual parameter.
   const browDifference = supportedParameters && !supportedParameters.includes('ParamBrowLAngle') && !supportedParameters.includes('ParamBrowRAngle') ? clamp(pose.browTilt) * .12 : 0;
   return {
-    ParamAngleX: still ? 0 : clamp(follow.headX) * 12 + (nativeMotion === 'Shake' || reactionOwns('ParamAngleX') ? 0 : clamp(pose.headShake) * 3),
-    ParamAngleY: still ? 0 : clamp(follow.headY) * 9 - (nativeMotion === 'Nod' || reactionOwns('ParamAngleY') ? 0 : clamp(pose.headNod) * 5),
-    ParamAngleZ: sleeping ? -5 : still || reactionOwns('ParamAngleZ') ? 0 : clamp(follow.headTilt) * 8,
+    ParamAngleX: still || exclusive.has('ParamAngleX') ? 0 : clamp(follow.headX) * 12 + (nativeMotion === 'Shake' || reactionOwns('ParamAngleX') ? 0 : clamp(pose.headShake) * 3),
+    ParamAngleY: still || exclusive.has('ParamAngleY') ? 0 : clamp(follow.headY) * 9 - (nativeMotion === 'Nod' || reactionOwns('ParamAngleY') ? 0 : clamp(pose.headNod) * 5),
+    ParamAngleZ: sleeping ? -5 : still || exclusive.has('ParamAngleZ') || reactionOwns('ParamAngleZ') ? 0 : clamp(follow.headTilt) * 8,
     ParamEyeBallX: still ? 0 : clamp(follow.gazeX),
     ParamEyeBallY: still ? 0 : clamp(follow.gazeY),
-    ParamBodyAngleX: still ? 0 : clamp(follow.bodyXPercent) * 4 + (reactionOwns('ParamBodyAngleX') ? 0 : clamp(pose.bodyTurn) * 3),
-    ParamBodyAngleY: still || reactionOwns('ParamBodyAngleY') ? 0 : clamp(pose.bodyLean) * 3,
-    ParamBodyAngleZ: still || reactionOwns('ParamBodyAngleZ') ? 0 : -clamp(follow.bodyRotationDegrees) * 3,
+    ParamBodyAngleX: still || exclusive.has('ParamBodyAngleX') ? 0 : clamp(follow.bodyXPercent) * 4 + (reactionOwns('ParamBodyAngleX') ? 0 : clamp(pose.bodyTurn) * 3),
+    ParamBodyAngleY: still || exclusive.has('ParamBodyAngleY') || reactionOwns('ParamBodyAngleY') ? 0 : clamp(pose.bodyLean) * 3,
+    ParamBodyAngleZ: still || exclusive.has('ParamBodyAngleZ') || reactionOwns('ParamBodyAngleZ') ? 0 : -clamp(follow.bodyRotationDegrees) * 3,
     ParamEyeLOpen: hidden ? 1 : (1 - blinkL) * eyelid,
     ParamEyeROpen: hidden ? 1 : (1 - blinkR) * eyelid,
     ParamEyeLSmile: sleeping || hidden ? 0 : unit(pose.eyeSmile),
     ParamEyeRSmile: sleeping || hidden ? 0 : unit(pose.eyeSmile),
-    ParamEyeBallForm: sleeping || hidden ? 0 : unit(pose.eyeSmile),
+    // EyeBallForm is iris squash/stretch, not the smile eyelid parameter.
+    // Keep an independent authored/physics value through the bridge below.
+    ParamEyeBallForm: 0,
     ParamBrowLY: hidden ? 0 : clamp(pose.browRaise) * .7 + browDifference,
     ParamBrowRY: hidden ? 0 : clamp(pose.browRaise) * .7 - browDifference,
     ParamBrowLAngle: hidden ? 0 : clamp(pose.browTilt) * .7,
@@ -42,7 +47,9 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
     ParamSad: sleeping || hidden ? 0 : sad,
     ParamMouthForm: hidden || sleeping ? 0 : clamp(mouthForm),
     // Absolute application after motion/expression/physics guarantees immediate closure.
-    ParamMouthOpenY: quiet ? 0 : unit(pose.mouthOpen),
+    // This limit is only for our reviewed automatic rig. Imported Cubism
+    // models retain their full authored opening range.
+    ParamMouthOpenY: quiet ? 0 : Math.min(deformationProfile === 'akari-stable' ? .6 : 1, unit(pose.mouthOpen)),
   };
 }
 

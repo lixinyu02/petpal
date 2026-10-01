@@ -1,0 +1,154 @@
+{
+  "version": 3,
+  "iterationDate": "2026-10-02",
+  "modelVersion": "Akari V3",
+  "role": "Historical stable-portrait dynamic correction; V4 is the current default target",
+  "upstream": {
+    "repository": "https://github.com/tsunehimatoi/psd2live",
+    "commit": "2ac751fbb3ffdc8251a82e0d600d97afafafcaac",
+    "sourceFiles": 704,
+    "sourceUnmodified": true,
+    "sourceManifest": "scripts/authoring/psd2live-source-manifest.json"
+  },
+  "artwork": {
+    "inputPsd": {
+      "path": "outputs/avatars/akari-cubism-v2/akari.psd",
+      "bytes": 7116632,
+      "sha256": "ff47f7fb5348877ea6972eae13f1067188aece2682b2a35b31a3c8e523ca291a"
+    },
+    "sourceLayers": 20,
+    "faceAndHairReused": true,
+    "continuousBodyFrom": "outputs/avatars/akari-cubism-v2/body-continuous.png",
+    "newImageGeneration": false
+  },
+  "authoring": {
+    "receipt": {
+      "path": "evidence/cubism-deformation-20261002/authoring-final-receipt.json",
+      "bytes": 3097,
+      "sha256": "e87d0c41b8a823303541abbd39a74329132c9b9b7c31fd79d58ef61e5f3e5bfb"
+    },
+    "receiptScope": "Authentic V3 authoring receipt; generatedFiles are the original compiler output before motion overlay",
+    "status": "generated",
+    "generatedAt": "2026-10-01T21:40:29.6286935Z",
+    "upstream": "https://github.com/tsunehimatoi/psd2live",
+    "commit": "2ac751fbb3ffdc8251a82e0d600d97afafafcaac",
+    "frozenSourceFiles": 704,
+    "sourceUnmodified": true,
+    "authoringProfile": "stable-portrait",
+    "inputPsdSha256": "ff47f7fb5348877ea6972eae13f1067188aece2682b2a35b31a3c8e523ca291a",
+    "runnerSources": [
+      {
+        "path": "scripts/authoring/cubism/build.gradle.kts",
+        "sha256": "ed9f33a22b252d7139a81f50052b39fed052f0f8505d11932f0e05e376c6a7f9"
+      },
+      {
+        "path": "scripts/authoring/cubism/LICENSE.GPL-3.0",
+        "sha256": "22f65f0ba65b3fb08b8f2b681d5cefa436690fe67747fa9ad4674c75695643a4"
+      },
+      {
+        "path": "scripts/authoring/cubism/settings.gradle.kts",
+        "sha256": "2a8c2947bc76ea15fc8991912ecf491350e31e3d857407821bbe1deba732f70c"
+      },
+      {
+        "path": "scripts/authoring/cubism/src/main/kotlin/PetPalAuthoring.kt",
+        "sha256": "64d1d702a121b04b624a9d406d32eef6761df402386891e726fab0f0d1949d6b"
+      }
+    ],
+    "generatedFiles": [
+      {
+        "path": "akari.blink.motion3.json",
+        "bytes": 1155,
+        "sha256": "399f91b7bfac0666f589ab7c6daace5e33e5c6d6e7c6e7ca4024b6db48a65110"
+      },
+      {
+        "path": "akari.cdi3.json",
+        "bytes": 4211,
+        "sha256": "899b1661dddce465d72381c5ce76dfdb3aeb895bee622c38394a1bc1780ae07d"
+      },
+      {
+        "path": "akari.cmo3",
+        "bytes": 5059984,
+        "sha256": "9b1edfd8ada619172a0ca30a9f2c4c088a6acd03314d065aa05adcf3170e65c9"
+      },
+      {
+        "path": "akari.idle.motion3.json",
+        "bytes": 18820,
+        "sha256": "a32ca6a85d2ae68d5b71ba4d7a74db5ce35a5b634882bd0f83ce84363f597722"
+      },
+      {
+        "path": "akari.moc3",
+        "bytes": 149952,
+        "sha256": "a2d249efa9d9cccd357555aae59afcca3f5d951d619bc52bde8001eb2a46ced4"
+      },
+      {
+        "path": "akari.model3.json",
+        "bytes": 717,
+        "sha256": "c6c415b919216cc82bed6c8f758e57306b71a27af92bcee9153b0eae9ae16560"
+      },
+      {
+        "path": "akari.nod.motion3.json",
+        "bytes": 1751,
+        "sha256": "bfd9a247d5ec8479145c2dddfd5fdbf03e1c46df8d7460f07badd146c1e19418"
+      },
+      {
+        "path": "akari.physics3.json",
+        "bytes": 6072,
+        "sha256": "3c9299431c1f86d2fe936b84a9920c6bb9af3a3a87d2edec3f561fbee327abe7"
+      },
+      {
+        "path": "akari.psd2live.json",
+        "bytes": 3828,
+        "sha256": "5320dd1df6594a420cab15c3b9613fcd30396284bb9d7edfcd0e9c0bad6e8dc4"
+      },
+      {
+        "path": "akari.shake.motion3.json",
+        "bytes": 1571,
+        "sha256": "9714b72b47dba8e33b6b08d0f9e84c77309a6ce6c98d2a3815c3a59d69163b01"
+      },
+      {
+        "path": "akari.2048/texture_00.png",
+        "bytes": 2443662,
+        "sha256": "a1a6d18d18ee055c41eb679047cb0b8db282b347852ce5c4fb0226099feead2e"
+      }
+    ],
+    "officialCoreValidation": "Run verify-cubism-model.mjs separately",
+    "editorValidation": "CMO3 has not been validated in official Cubism Editor",
+    "runtimeBoundary": "Authoring compiler and runner are not embedded in PetPal app packages"
+  },
+  "editableCandidate": {
+    "path": "outputs/avatars/akari-cubism-v3/akari.cmo3",
+    "bytes": 5059984,
+    "sha256": "9b1edfd8ada619172a0ca30a9f2c4c088a6acd03314d065aa05adcf3170e65c9",
+    "officialEditorOpened": false,
+    "officialEditorSaved": false,
+    "officialEditorReexported": false,
+    "status": "generated candidate; official Editor compatibility unverified"
+  },
+  "historicalRuntime": {
+    "directory": "public/avatars/akari-cubism-v3",
+    "moc": {
+      "path": "public/avatars/akari-cubism-v3/akari.moc3",
+      "bytes": 149952,
+      "sha256": "a2d249efa9d9cccd357555aae59afcca3f5d951d619bc52bde8001eb2a46ced4"
+    },
+    "texture": {
+      "path": "public/avatars/akari-cubism-v3/akari.2048/texture_00.png",
+      "bytes": 2443662,
+      "sha256": "a1a6d18d18ee055c41eb679047cb0b8db282b347852ce5c4fb0226099feead2e"
+    },
+    "modelAndOverlayHashesAreSeparateFromRawAuthoring": true
+  },
+  "historicalValidation": {
+    "documentation": "docs/cubism/validation.md",
+    "officialCore": "Historical V3 Core and geometry checks passed, as separately recorded in validation.md",
+    "browserAndDeployment": "Historical V3 Chrome, real TTS and deployment checks, as separately recorded in validation.md",
+    "userVisualAcceptance": "rejected for oversized forehead, insufficient bangs coverage and overly large eyes; historical technical checks do not establish aesthetic acceptance",
+    "v4ValidationInherited": false
+  },
+  "rebuild": {
+    "profile": "stable-portrait",
+    "inputPsdRequired": "outputs/avatars/akari-cubism-v2/akari.psd",
+    "reason": "stable-portrait now defaults to V4; explicit V2 input is required for historical V3",
+    "documentation": "docs/cubism/akari-stable-portrait.md"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "width": 1024,
+  "height": 1536,
+  "frontHair": {
+    "file": "front-hair.png",
+    "source": [4, 22, 1020, 1248],
+    "target": [170, 4, 680, 832]
+  },
+  "eyeAdjustment": {
+    "scale": 0.85,
+    "irisScale": 0.92
+  },
+  "bodySource": "../akari-cubism-v2/body-continuous.png",
+  "reusedLayers": "../akari-cubism/layout.json except neck, topwear and the two front hair layers",
+  "method": "Single unified foreground hair replaces both inconsistent crowns and the ear painted into the old right hair; preserve face and all feature positions."
+}

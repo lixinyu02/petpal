@@ -5,10 +5,10 @@ import vm from 'node:vm';
 import { acquireCubismFramework, createCubismFrameController, waitForCubismCore } from '../src/avatar/cubism/runtime.mjs';
 import { createCubismParameterBridge } from '../src/avatar/cubism/parameters.mjs';
 
-const assetRoot = new URL('../public/avatars/akari-cubism-v2/', import.meta.url);
+const assetRoot = new URL('../public/avatars/akari-cubism-v4/', import.meta.url);
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 
-test('actual licensed Core and Framework compose v2 authored reactions, exit cleanly, and cancel every native queue', async () => {
+test('actual licensed Core and Framework compose v4 authored reactions, exit cleanly, and cancel every native queue', async () => {
   const source = await fs.readFile(new URL('../public/vendor/live2d/live2dcubismcore.min.js', import.meta.url), 'utf8');
   const sandbox = { console, setTimeout, clearTimeout, TextDecoder, TextEncoder, atob, btoa, window: {}, document: { currentScript: { src: 'https://petpal.test/vendor/live2d/live2dcubismcore.min.js' } } };
   vm.runInNewContext(source, sandbox, { timeout: 2000, filename: 'licensed-live2dcubismcore.min.js' });
@@ -25,6 +25,7 @@ test('actual licensed Core and Framework compose v2 authored reactions, exit cle
     assert.equal(framework.CubismMoc.hasMocConsistency(moc), true);
     avatar = new framework.CubismUserModel(); avatar.loadModel(moc, true);
     const model = avatar.getModel();
+    assert.deepEqual(Array.from(model.getModel().drawables.ids).filter(id => /^ArtMeshFrontHair(?:\d+)?$/u.test(id)), ['ArtMeshFrontHair']);
     if (manifest.FileReferences.Physics) {
       const physics = buffer(await fs.readFile(new URL(manifest.FileReferences.Physics, assetRoot)));
       avatar.loadPhysics(physics, physics.byteLength);
@@ -41,7 +42,7 @@ test('actual licensed Core and Framework compose v2 authored reactions, exit cle
       }
     }
     const bridge = createCubismParameterBridge(model, framework.CubismFramework.getIdManager());
-    const controller = createCubismFrameController({ model, avatar, bridge, motions });
+    const controller = createCubismFrameController({ model, avatar, bridge, motions, deformationProfile: 'akari-stable' });
     assert.ok(bridge.supported.includes('ParamCheek'));
     assert.ok(bridge.supported.includes('ParamBrowLY'));
     const read = name => bridge.read(name);
@@ -72,14 +73,14 @@ test('actual licensed Core and Framework compose v2 authored reactions, exit cle
     controller.react('pet');
     controller.update(1 / 30, { speaking: true, mouthOpen: .7, mouthShape: 'O' });
     assert.ok(avatar._motionManager.getCubismMotionQueueEntries().length >= 2);
-    assert.ok(Math.abs(read('ParamMouthOpenY') - .7) < .0001);
+    assert.ok(Math.abs(read('ParamMouthOpenY') - .6) < .0001);
     controller.update(0, { speaking: true, mouthOpen: .7 }, {}, { hidden: true });
     assert.equal(avatar._motionManager.getCubismMotionQueueEntries().length, 0);
     assert.equal(avatar._expressionManager.getCubismMotionQueueEntries().length, 0);
     assert.equal(read('ParamMouthOpenY'), 0);
     assert.equal(read('ParamCheek'), 0);
     controller.update(0, { speaking: true, mouthOpen: .7 }, {}, { reducedMotion: true });
-    assert.ok(Math.abs(read('ParamMouthOpenY') - .7) < .0001);
+    assert.ok(Math.abs(read('ParamMouthOpenY') - .6) < .0001);
     controller.update(0, { speaking: true, mouthOpen: .7 }, {}, { sleeping: true });
     assert.equal(read('ParamMouthOpenY'), 0); assert.equal(read('ParamEyeLOpen'), 0); assert.equal(read('ParamEyeROpen'), 0);
     // Exercise real ExpressionMotion blending as well as the authored motion

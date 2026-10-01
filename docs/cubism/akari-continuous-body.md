@@ -1,6 +1,8 @@
 # Akari 连续颈肩模型
 
-2026-10-02 的修正以原 Akari 为基础，保留脸、头发、眼睛和情绪图层，将颈部、锁骨、胸口、衣服、双手与裙底合成一个连续美术层。当前资源位于 `public/avatars/akari-cubism-v2/`；可编辑源位于 [`outputs/avatars/akari-cubism-v2`](../../outputs/avatars/akari-cubism-v2/README.md)。
+本文件记录 V2 的美术来源与 `continuous-body` 重建合同。当前源码默认目标使用 [V4 统一前发 stable-portrait](akari-unified-hair.md)，复用这里的连续身体 PNG，并保留 [V3 的动态绑定修复](akari-stable-portrait.md)；下述 V2 导出参数、模型指标与验收不代表 V3／V4 结果。
+
+2026-10-02 的 V2 修正以原 Akari 为基础，保留脸、头发、眼睛和情绪图层，将颈部、锁骨、胸口、衣服、双手与裙底合成一个连续美术层。历史资源位于 `public/avatars/akari-cubism-v2/`；可编辑源位于 [`outputs/avatars/akari-cubism-v2`](../../outputs/avatars/akari-cubism-v2/README.md)。
 
 ## 变形原因与修正
 
@@ -12,7 +14,7 @@
 
 ## Authoring profile
 
-[`Build-AkariCubism.ps1`](../../scripts/authoring/Build-AkariCubism.ps1) 提供 `classic|continuous-body`，默认仍为 `classic`，以保留历史模型重建方法。未传 `-InputPsd` 时按 profile 自动选择对应 classic／v2 PSD，也可显式指定仓库内的输入。`continuous-body` 必须有一个含像素的 `topwear` 且不存在独立 `neck`，否则停止导出。
+[`Build-AkariCubism.ps1`](../../scripts/authoring/Build-AkariCubism.ps1) 提供 `classic|continuous-body|stable-portrait`，命令默认仍为 `classic`，以保留历史模型重建方法。未传 `-InputPsd` 时，classic 选择原 PSD，continuous-body 选择 V2 连续身体 PSD，stable-portrait 选择 V4 统一前发 PSD；也可显式指定仓库内的输入。复现历史 V3 必须显式传入 V2 PSD。后两种 profile 必须有一个含像素的 `topwear` 且不存在独立 `neck`，否则停止导出。
 
 | 配置 | classic | continuous-body |
 | --- | --- | --- |
@@ -70,7 +72,7 @@
 
 5. 在浏览器和目标 WebView 检查静态颈肩、转头、摸头、招呼、表情、口型及生命周期。完成后再审核要发布的成员。Core 几何通过不能代替这些画面验收；本文件不作为部署回执。
 
-## 交付哈希与验收边界
+## V2 历史交付哈希与验收边界
 
 | 成员 | SHA-256 |
 | --- | --- |
@@ -79,9 +81,9 @@
 | `akari.moc3` | `29185d2b500ac0b2e1e15f2b053b3fd6444ba72e93a8b33a388f4da8edb04f0b` |
 | `texture_00.png` | `e1f468582ecf6a000068128deaa74c2878ec2c01a2529d3c89ef307cc9d62020` |
 
-完整字节数、源脚本和当前 runtime 成员 hash 见 [来源摘要](akari-motion-polish-provenance.json)。官方 Core 6.0.1 的一致性返回 1、损坏 magic 负例被拒绝，35 个姿态与真实情绪绑定采样通过。真实 Framework 的动作合成／结束复位／队列取消由 native-frame 回归检查。浏览器与真实 TTS／设备验收仍应使用各自实际结果，模拟口型不能当作上游语音验收。
+V2 交付当时的字节数、源脚本和 runtime 成员 hash 见 [V2 来源摘要](akari-motion-polish-provenance.json)。该候选的官方 Core 6.0.1 一致性返回 1、损坏 magic 负例被拒绝，35 个姿态与真实情绪绑定采样通过；真实 Framework 的动作合成／结束复位／队列取消由当时的 native-frame 回归检查。V3 已更换绑定与模型，不能继承这些历史结果。浏览器与真实 TTS／设备验收仍应使用各自实际结果，模拟口型不能当作上游语音验收。
 
-新 `akari.cmo3` 是可编辑候选，尚未在官方 Cubism Editor 打开、保存或再导出。CMO3 含导出时间和 GUID，整文件 hash 用于标识此次交付，不能承诺每次重建相同。
+V2 的 `akari.cmo3` 是可编辑候选，尚未在官方 Cubism Editor 打开、保存或再导出。CMO3 含导出时间和 GUID，整文件 hash 用于标识该次交付，不能承诺每次重建相同。
 
 ## 许可边界
 

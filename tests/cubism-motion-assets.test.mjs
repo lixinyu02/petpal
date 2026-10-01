@@ -6,7 +6,7 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const bundle = path.join(root, 'public/avatars/akari-cubism-v2');
+const bundle = path.join(root, 'public/avatars/akari-cubism-v4');
 const readBytes = name => {
   const bytes = fs.readFileSync(path.join(bundle, name));
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -34,6 +34,7 @@ before(async () => {
   const moc = core.Moc.fromArrayBuffer(readBytes(manifest.FileReferences.Moc));
   const model = core.Model.fromMoc(moc);
   try {
+    assert.deepEqual(Array.from(model.drawables.ids).filter(id => /^ArtMeshFrontHair(?:\d+)?$/u.test(id)), ['ArtMeshFrontHair']);
     actualParameters = new Map(Array.from(model.parameters.ids, (id, index) => [id, {
       min: model.parameters.minimumValues[index], max: model.parameters.maximumValues[index],
       default: model.parameters.defaultValues[index],

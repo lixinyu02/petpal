@@ -24,7 +24,7 @@ const development = Boolean((import.meta as ImportMeta & { env?: { DEV?: boolean
 
 /** A real Cubism surface, with the stable original character while loading or unsupported. */
 export default function CubismScene(props: CubismSceneProps) {
-  const { modelUrl = '/avatars/akari-cubism-v2/akari.model3.json', command, compact = false, interactive = true, className = '' } = props;
+  const { modelUrl = '/avatars/akari-cubism-v4/akari.model3.json', command, compact = false, interactive = true, className = '' } = props;
   const host = useRef<HTMLDivElement>(null);
   const callbacks = useRef(props); callbacks.current = props;
   const requested = useRef(command); requested.current = command;

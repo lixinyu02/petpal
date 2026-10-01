@@ -5,7 +5,7 @@ param(
   [string]$GradleUserHome,
   [string]$InputPsd,
   [string]$OutputDirectory,
-  [ValidateSet('classic', 'continuous-body')][string]$Profile = 'classic',
+  [ValidateSet('classic', 'continuous-body', 'stable-portrait')][string]$Profile = 'classic',
   [switch]$BuildUpstream,
   [switch]$Offline
 )
@@ -15,7 +15,7 @@ $taskManifest = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'psd2live
 if (-not $SourceDirectory) { $SourceDirectory = Join-Path $taskRoot '.tools\psd2live-source' }
 if (-not $GradleUserHome) { $GradleUserHome = Join-Path $taskRoot '.tools\psd2live-gradle' }
 if (-not $InputPsd) {
-  $taskAvatarSource = if ($Profile -eq 'continuous-body') { 'akari-cubism-v2' } else { 'akari-cubism' }
+  $taskAvatarSource = if ($Profile -eq 'stable-portrait') { 'akari-cubism-v4' } elseif ($Profile -eq 'continuous-body') { 'akari-cubism-v2' } else { 'akari-cubism' }
   $InputPsd = Join-Path $taskRoot "outputs\avatars\$taskAvatarSource\akari.psd"
 }
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $taskRoot '.tools\cubism-authoring\model' }

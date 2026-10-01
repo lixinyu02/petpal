@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "tool": "image_gen.imagegen",
+  "date": "2026-10-02",
+  "mode": "edit",
+  "transparentBackground": true,
+  "file": "front-hair.png",
+  "sha256": "7d137f65b9383f863a9fb4ca7efd1d086c3ebb670801ce4eace58e0f7e4c0577",
+  "reference": "../akari-cubism/reference.png",
+  "initialGeneration": "One unified foreground hairstyle matching original peach orange curls and cream bow, with one crown, no face, skin, eyes, ears, clothing or backdrop, and true alpha. Replaces both mismatched old front-hair parts.",
+  "finalPrompt": "Use case: precise-object-edit. Image 1 is the edit target: transparent foreground hair overlay. Image 2 is an identity/style reference showing the intended natural bangs covering the forehead. EDIT ONLY the bangs around the center and viewer-right of the face opening in Image 1. Preserve its 1024x1536 canvas, entire outer silhouette, centered crown, peach orange wavy curls, cream bow, hair length, shading and transparency. Current central/viewer-right opening starts too high around y220, creating an abnormally tall exposed forehead when assembled onto the Live2D model. Add natural side-swept tapered bang strands from the existing crown across the EMPTY upper face opening x535..655, so the narrow forehead opening at x550..630 begins no higher than y355..385. These bangs should extend to a graceful edge around y395, blending continuously into existing left bangs and right temple hair, WITHOUT a large triangular bald gap. Keep the future eye zone below y455 empty/fully transparent. Match the reference forehead coverage of Image 2. Output only hair/bow on TRUE alpha; no face, skin, eyes, eyebrows, ears, body, clothing, backdrop, cast shadow, matte fringe or text. Do not move or resize the overall hair. Keep all regions outside the upper central bang gap as close to Image 1 as possible.",
+  "registration": "Native PSD packaging crops [4,22,1020,1248] and scales uniformly by 2/3 into [170,4,680,832]. Image generation was inspected after registration; exact requested geometry is not assumed.",
+  "invariants": "Reuse original face and all feature layers, original back hair, and the V2 continuous body. No generated face or clothing is consumed."
+}
