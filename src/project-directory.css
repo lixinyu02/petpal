@@ -1,0 +1,21 @@
+.agent-project-directory{margin-top:7px;max-width:100%;min-width:0}
+.agent-project-directory>summary{max-width:100%;min-height:38px;padding:5px 7px;white-space:normal;align-items:flex-start}
+.agent-project-directory>summary>svg{margin-top:4px}
+.agent-project-summary{display:flex;align-items:baseline;gap:9px;flex:1;min-width:0;font-size:11px;line-height:1.7}
+.agent-project-summary>span{flex-shrink:0;color:#819078}
+.agent-project-summary>strong{min-width:0;font-weight:500;color:#526e54;overflow-wrap:anywhere;word-break:break-word;max-height:3.4em;overflow:hidden}
+.agent-project-host{font-size:11px!important;color:#7e8a73;overflow-wrap:anywhere}
+.agent-project-host>span{display:block;font-size:10px}
+.agent-project-form{display:grid;gap:7px;margin:13px 0 10px;min-width:0}
+.agent-project-form>label{font-size:11px;color:#5f775b}
+.agent-project-form>input{width:100%;min-width:0;box-sizing:border-box;min-height:42px;padding:8px 10px;border:1px solid #dbe4d5;border-radius:7px;background:#f8faf5;color:#3f6048;font-size:13px}
+.agent-project-form>input:disabled{color:#8e9989;background:#f2f5ef}
+.agent-project-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:3px}
+.agent-project-actions>button{min-height:38px;padding:7px 11px;border-radius:7px;font-size:12px;color:#5e795c}
+.agent-project-actions>button[type=submit]{background:#e4eddc;color:#335b40}
+.agent-project-actions>button:disabled{opacity:.48;cursor:default}
+.agent-project-directory .agent-project-note{color:#839075;font-size:11px}
+.agent-project-directory .agent-project-error{color:#a56850;font-size:11px}
+.chat-assistant-options>.agent-project-directory{margin-top:-5px;flex-shrink:0}
+.agent-queue-project{display:block;margin-top:4px;overflow-wrap:anywhere;word-break:break-word}
+@media(max-width:650px){.agent-project-directory>summary{min-height:44px}.agent-project-summary{gap:7px}.agent-project-form>input{font-size:16px;min-height:44px}.agent-project-actions>button{min-height:44px}.agent-project-directory>.workspace-disclosure-content{max-width:calc(100vw - 24px)}}

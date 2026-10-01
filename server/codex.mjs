@@ -11,6 +11,7 @@ import { createCodexTransport } from './codex-transport.mjs';
 import { AGENT_ACCESS, AGENT_APPROVAL, defaultAgentPermissions, normalizeAgentPermissions, codexPermissionParams } from './agent-permissions.mjs';
 import { normalizeReasoningEffort } from './providers.mjs';
 import { dynamicToolContentItems } from './dynamic-tool-output.mjs';
+import { resolveProjectDirectory } from './project-directory.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -528,7 +529,7 @@ export class CodexBridge {
     return { turnId: result.turnId };
   }
 
-  async run({ prompt = '', threadId, conversationId, model, effort, permissions, images, signal, onEvent } = {}) {
+  async run({ prompt = '', threadId, conversationId, model, effort, permissions, images, projectDirectory, projectAccess = 'workspace', signal, onEvent } = {}) {
     const input = userInput(prompt, images);
     permissions = normalizeAgentPermissions(permissions);
     if (model !== undefined && (typeof model !== 'string' || !model.trim() || model.length > 160 || /[\x00-\x1f\x7f]/.test(model))) throw new Error('Agent 模型 ID 无效。');
@@ -547,8 +548,11 @@ export class CodexBridge {
       if (signal?.aborted) throw abortError();
       model ??= this.apiMode ? this.config.model : undefined;
       effort = effort || (this.apiMode ? this.config.reasoningEffort : '');
-      const { sandboxPolicy, ...threadPermissions } = codexPermissionParams(permissions, this.workspaceRoot);
-      const threadParams = { cwd: this.workspaceRoot, ...threadPermissions, ...(model ? { model } : {}), developerInstructions: '根据本轮访问范围执行任务。音乐优先使用 PetPal 桌面工具；搜索、队列、音量、歌词先通过 petpal_music_mcp_tools 获取本机真实工具与参数，再用 petpal_music_mcp_call。网易云 MCP 仅支持 Windows；播放/暂停/上一首/下一首使用 petpal_music_command 的指定客户端媒体会话，不使用全局热键。QQ MCP 只提供查询和播放链接，返回 URL 不代表桌面已经播放；排行榜用 detail(type=top)。未启用时提示用户在该电脑的电脑助手设置中准备 MCP，不自行安装或更改配置。网页查询先调用 petpal_opencli_sites 获取选中执行电脑的可调用命令与参数，再调用 petpal_opencli_query；这是包内 OpenCLI，公开查询不需要 Chrome 扩展。库存存在不等于可调用或已联网验收，不执行未开放命令，不用 shell/npx/自建HTTP脚本替代。OpenCLI 关闭时提示在该执行电脑的电脑助手设置启用，不自行改配置。音乐网页操作使用 petpal_browser，需要扩展与显式Chrome档案。桌面操作使用 petpal_computer_use_tools 发现当前执行电脑的真实工具与 schema，再调用 petpal_computer_use_call。先发现应用和窗口，再检查 Accessibility；需要视觉信息时获取目标窗口截图，根据最近的 Accessibility/截图执行鼠标键盘或窗口操作，操作后重新读取状态验证结果。过时的窗口、控件和坐标不可复用；截图失败时不得凭猜测点击。Computer Use 未启用时提示配置，不运行 npx 安装，不修改 MCP 启动参数或环境。受限权限不允许操作主机软件。失败时如实说明，不得声称已完成。', ...(this.apiMode ? { modelProvider: 'petpal' } : {}) };
+      if (!['workspace', 'full'].includes(projectAccess)) throw new Error('项目目录访问范围无效。');
+      const workingDirectory = await resolveProjectDirectory(projectDirectory, { workspaceRoot: this.workspaceRoot, allowExternal: projectAccess === 'full' });
+      if (signal?.aborted) throw abortError();
+      const { sandboxPolicy, ...threadPermissions } = codexPermissionParams(permissions, workingDirectory);
+      const threadParams = { cwd: workingDirectory, ...threadPermissions, ...(model ? { model } : {}), developerInstructions: '根据本轮访问范围执行任务。音乐优先使用 PetPal 桌面工具；搜索、队列、音量、歌词先通过 petpal_music_mcp_tools 获取本机真实工具与参数，再用 petpal_music_mcp_call。网易云 MCP 仅支持 Windows；播放/暂停/上一首/下一首使用 petpal_music_command 的指定客户端媒体会话，不使用全局热键。QQ MCP 只提供查询和播放链接，返回 URL 不代表桌面已经播放；排行榜用 detail(type=top)。未启用时提示用户在该电脑的电脑助手设置中准备 MCP，不自行安装或更改配置。网页查询先调用 petpal_opencli_sites 获取选中执行电脑的可调用命令与参数，再调用 petpal_opencli_query；这是包内 OpenCLI，公开查询不需要 Chrome 扩展。库存存在不等于可调用或已联网验收，不执行未开放命令，不用 shell/npx/自建HTTP脚本替代。OpenCLI 关闭时提示在该执行电脑的电脑助手设置启用，不自行改配置。音乐网页操作使用 petpal_browser，需要扩展与显式Chrome档案。桌面操作使用 petpal_computer_use_tools 发现当前执行电脑的真实工具与 schema，再调用 petpal_computer_use_call。先发现应用和窗口，再检查 Accessibility；需要视觉信息时获取目标窗口截图，根据最近的 Accessibility/截图执行鼠标键盘或窗口操作，操作后重新读取状态验证结果。过时的窗口、控件和坐标不可复用；截图失败时不得凭猜测点击。Computer Use 未启用时提示配置，不运行 npx 安装，不修改 MCP 启动参数或环境。受限权限不允许操作主机软件。失败时如实说明，不得声称已完成。', ...(this.apiMode ? { modelProvider: 'petpal' } : {}) };
       const result = await this._rpc(threadId ? 'thread/resume' : 'thread/start', { ...threadParams, ...(threadId ? { threadId } : { dynamicTools: this.desktopTools?.specs ?? [] }) });
       const actualId = result.thread?.id;
       if (typeof actualId !== 'string' || !actualId) throw new Error('Codex 未返回有效会话 ID');
@@ -567,7 +571,7 @@ export class CodexBridge {
       this._emit(run, 'status', { state: 'starting', message: '正在启动 Codex 任务' });
       if (signal?.aborted || run.aborted) throw abortError();
       const started = await this._rpc('turn/start', {
-        threadId: actualId, input, cwd: this.workspaceRoot,
+        threadId: actualId, input, cwd: workingDirectory,
         approvalPolicy: threadPermissions.approvalPolicy, approvalsReviewer: threadPermissions.approvalsReviewer, sandboxPolicy,
         ...(model ? { model } : {}),
         ...(effort ? { effort } : {}),

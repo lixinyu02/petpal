@@ -51,7 +51,8 @@ export function createVoiceConversation(options) {
   }
   async function answer(job,text){
     if(!valid(job))return;
-    const chatRequest=options.getChatRequest?.();
+    let chatRequest;
+    try{chatRequest=options.getChatRequest?.();}catch(error){if(valid(job))fail(job,error);return;}
     const turn=new AbortController(),sequence=++job.sequence;job.turn=turn;
     const active=()=>valid(job)&&job.sequence===sequence&&!turn.signal.aborted;
     const splitter=createSentenceSplitter(180);let full='',terminal=false,piece=0;

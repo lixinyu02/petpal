@@ -170,11 +170,11 @@ async function protocolFixture(t, options = {}) {
     fetchImpl: async (url, init) => {
       requests.push({ url, init });
       if (url.endsWith('/auth/me')) return Response.json({ instanceId: 'instance-one', user: { id: 'user-one', canUseCodex: true, agentAccess: 'full' } });
-      if (url.endsWith('/register')) return Response.json({ hostId: 'host-one', connectionId: 'connection-one', leaseMs: 30000, pollMs: 20000 });
+      if (url.endsWith('/register')) return options.onRegister?.(JSON.parse(init.body)) ?? Response.json({ hostId: 'host-one', connectionId: 'connection-one', leaseMs: 30000, pollMs: 20000 });
       if (url.endsWith('/events')) { const event = JSON.parse(init.body); events.push(event); await options.onEvent?.(event); return Response.json({ ok: true }); }
       if (init.method === 'DELETE') return Response.json({ ok: true });
       return options.otherFetch?.(url, init) ?? new Response('Not found', { status: 404 });
-    }, ...Object.fromEntries(Object.entries(options).filter(([key]) => !['onEvent', 'otherFetch'].includes(key))) });
+    }, ...Object.fromEntries(Object.entries(options).filter(([key]) => !['onEvent', 'otherFetch', 'onRegister'].includes(key))) });
   t.after(() => manager.close()); await manager.connect(input()); return { manager, events, requests, toolOptions };
 }
 
@@ -196,6 +196,61 @@ test('a durable run receipt precedes execution; exact replay never starts a seco
   assert.doesNotMatch(await readFile(path.join(ctx.directory, 'receipts', receipts[0]), 'utf8'), /central-session-secret|run-only-secret|Look around/);
   assert.ok(f.requests.filter(item => item.url.endsWith('/events')).every(item => item.init.headers.Authorization === 'Bearer central-session-secret'));
   await assert.rejects(f.manager._command(ctx, { ...command, prompt: 'changed replay' })); assert.equal(runs, 1);
+});
+
+test('desktop advertises project-directory support, with a single pre-connection 400 fallback for old servers', async t => {
+  const modern = await protocolFixture(t);
+  assert.deepEqual(JSON.parse(modern.requests.find(item=>item.url.endsWith('/register')).init.body).capabilities,{projectDirectory:true});
+  const bodies=[];
+  const older = await protocolFixture(t,{onRegister:body=>{
+    bodies.push(body);
+    return body.capabilities ? Response.json({error:'unknown field'},{status:400}) : Response.json({hostId:'host-one',connectionId:'connection-one',leaseMs:30000,pollMs:20000});
+  }});
+  assert.equal(older.manager.status().state,'online');assert.equal(bodies.length,2);
+  assert.deepEqual(bodies[0].capabilities,{projectDirectory:true});assert.equal(Object.hasOwn(bodies[1],'capabilities'),false);
+  assert.deepEqual({...bodies[0],capabilities:undefined},{...bodies[1],capabilities:undefined});
+  let attempts=0;
+  older.manager.fetch=async()=>{attempts++;return Response.json({error:'bad request'},{status:400});};
+  await assert.rejects(older.manager._register(older.manager.current),{status:400});assert.equal(attempts,1);
+});
+
+test('registration does not fall back after authentication rejection or transport uncertainty', async t => {
+  for(const status of [401,403,500]) {
+    const f=await protocolFixture(t),ctx=f.manager.current;delete ctx.connectionId;
+    let requests=0;f.manager.fetch=async()=>{requests++;return Response.json({error:'not capability negotiation'},{status});};
+    await assert.rejects(f.manager._register(ctx),{status});assert.equal(requests,1);
+  }
+  const f=await protocolFixture(t),ctx=f.manager.current;delete ctx.connectionId;
+  let requests=0;f.manager.fetch=async()=>{requests++;throw new TypeError('network lost');};
+  await assert.rejects(f.manager._register(ctx),{retryable:true});assert.equal(requests,1);
+});
+
+test('project directory and authorization reach bridge.run without changing its private runtime', async t => {
+  let options,received;
+  const f=await protocolFixture(t,{bridgeFactory:value=>{options=value;return {async run(value){received=value;return {threadId:'thread-one',text:'read marker'};},async close(){}};}});
+  const ctx=f.manager.current,projectDirectory=path.join(f.manager.dataDir,'chosen-project');
+  await f.manager._command(ctx,runCommand({projectDirectory,projectAccess:'full'}));await ctx.run.done;
+  assert.equal(received.projectDirectory,projectDirectory);assert.equal(received.projectAccess,'full');assert.equal(received.permissions.access,'read-only');
+  assert.equal(options.workspaceRoot,path.join(ctx.directory,'workspace'));assert.equal(options.dataDir,ctx.directory);
+  assert.equal(f.events.at(-1).event,'complete');
+});
+
+test('default run omits project fields while malformed directory pairs never construct a bridge', async t => {
+  let constructions=0,received;
+  const f=await protocolFixture(t,{bridgeFactory:()=>{constructions++;return {async run(value){received=value;return {threadId:'thread-one',text:''};},async close(){}};}});
+  const ctx=f.manager.current,directory=path.join(f.manager.dataDir,'project');
+  for(const extra of [{projectDirectory:directory},{projectAccess:'full'},{projectDirectory:'',projectAccess:'full'},{projectDirectory:'relative',projectAccess:'workspace'},{projectDirectory:directory,projectAccess:'bypass'}]) await assert.rejects(f.manager._command(ctx,runCommand(extra)));
+  assert.equal(constructions,0);assert.equal(f.events.length,0);
+  await f.manager._command(ctx,runCommand());await ctx.run.done;
+  assert.equal(Object.hasOwn(received,'projectDirectory'),false);assert.equal(Object.hasOwn(received,'projectAccess'),false);
+});
+
+test('directory validation failures have a safe specific receipt and never fall back to another directory', async t => {
+  let runs=0;
+  const f=await protocolFixture(t,{bridgeFactory:()=>({async run(){runs++;throw Object.assign(new Error('private host path and diagnostics'),{code:'project_directory_forbidden'});},async close(){}})});
+  const ctx=f.manager.current;
+  await f.manager._command(ctx,runCommand({projectDirectory:path.join(f.manager.dataDir,'project'),projectAccess:'workspace'}));await ctx.run.done;
+  const error=f.events.at(-1);assert.equal(error.event,'error');assert.match(error.data.message,/项目目录/);assert.doesNotMatch(error.data.message,/private host path|diagnostics/);assert.equal(runs,1);
 });
 
 test('steer and approval stay on the active bridge and stop is reported only after it really closes', async t => {

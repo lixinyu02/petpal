@@ -13,5 +13,6 @@ export default defineConfig({
     configureServer(server){server.middlewares.use('/version.json',(_req,res)=>{res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');res.end(versionJson);});},
   }],
   server: { port: 5173, strictPort: true, proxy: { '/api': 'http://127.0.0.1:4318' } },
-  build: { outDir: 'dist' },
+  // The service keeps published downloads here. A build must never remove them.
+  build: { outDir: 'dist', emptyOutDir: false },
 });

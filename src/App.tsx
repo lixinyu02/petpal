@@ -9,6 +9,8 @@ import {useChatScroll} from './useChatScroll';
 import { ModelPicker, ExecutionTarget, AgentOnboarding } from './WorkspaceControls';
 import AgentPermissions, { defaultAgentPermissions } from './AgentPermissions';
 import AgentQueue from './AgentQueue';
+import ProjectDirectory, {useProjectDirectory} from './ProjectDirectory';
+import {executionProjectDirectory,projectDirectoryIssue} from './project-directory-preferences.mjs';
 import {ChatAssistantControls,ChatAssistantTasks,useChatAssistant} from './ChatAssistant';
 import {mergeAssistantTask,mergeChatAssistantConversation} from './chat-assistant-preferences.mjs';
 import { executionHostLock, readExecutionHost, resolveExecutionHostId, saveExecutionHost } from './execution-hosts.mjs';
@@ -75,7 +77,7 @@ export default function App() {
   const [agentSubmitting,setAgentSubmitting]=useState(false);
   const [sendChoice,setSendChoice]=useState<'steer'|'submit'>('steer');
   const agentSendLock=useRef(false);
-  const agentSubmissionRef=useRef<{id:string;conversationId:string;kind:'submit'|'steer';payload:{content:string;attachmentIds:string[];permissions:Permissions;providerId:string|null;hostId:string;expectedTurnId?:string|null}}|null>(null);
+  const agentSubmissionRef=useRef<{id:string;conversationId:string;kind:'submit'|'steer';payload:{content:string;attachmentIds:string[];permissions:Permissions;providerId:string|null;hostId:string;projectDirectory?:string;expectedTurnId?:string|null}}|null>(null);
   const [unconfirmed,setUnconfirmed]=useState(false);
   const draftRef=useRef(draft);draftRef.current=draft;
   const attachments=useAttachments();
@@ -125,10 +127,14 @@ export default function App() {
   const selectedHostId=resolveExecutionHostId({requestedId:agentHostId,lockedId:lockedHostId,localHostId,defaultHostId});
   const selectedHost=agentHosts.find(host=>host.id===selectedHostId);
   const hostBusy=agentRunning||agentUnknown||!!conversation?.agent?.queue.length;
+  const conversationProjectHostId=conversation?.agentHostId||conversation?.threadHostId||'central';
+  const projectDirectory=useProjectDirectory({scope:hostScope,hostId:selectedHostId,conversationId:conversation?.mode==='codex'?conversation.id:'',conversationValue:conversation?.mode==='codex'&&conversationProjectHostId===selectedHostId&&(conversation.messages.length||conversation.agent?.run||conversation.threadHostId)?(conversation.agentProjectDirectory??conversation.threadProjectDirectory??''):undefined});
+  const activeProjectDirectory=executionProjectDirectory(conversation?.agent,agentSubmissionRef.current)??projectDirectory.value;
+  const projectIssue=projectDirectoryIssue(activeProjectDirectory,selectedHost);
   const selectedCodex=useMemo(()=>selectedHost?.kind==='desktop'?{...state.codex,...selectedHost.codex}:state.codex,[state.codex,selectedHost?.kind,selectedHost?.codex]);
   const activeAgentProvider=state.providers.find(item=>item.id===activeProviderId);
   const agentSupportsImages=activeAgentProvider?.supportsImages!==false;
-  const canSendAgent=!!selectedHost?.online&&!!selectedCodex.available&&!hostsError&&!agentUnknown;
+  const canSendAgent=!!selectedHost?.online&&!!selectedCodex.available&&!hostsError&&!agentUnknown&&!projectIssue;
   const shownApprovals=currentMode==='codex'?conversation?.agent?.approvals||[]:approvals;
   const chatScroll=useChatScroll({scrollRef,conversationId:conversation?.id||'',active:ready&&view==='chat'&&!petOnly,messages:conversation?.messages,approvalKey:shownApprovals.map(item=>item.id).join(',')});
   const lastReply = useMemo(()=>{
@@ -280,7 +286,8 @@ export default function App() {
 
     if (currentMode === 'chat' && !provider) { setView('settings'); setNotice('添加一个模型连接，就可以开始聊天了。'); return; }
     if(images.length&&provider?.supportsImages===false){setError('这个模型仅支持文字，请移除图片或切换模型。');return;}
-    const assistantSnapshot=chatAssistant.snapshot();
+    let assistantSnapshot;
+    try{assistantSnapshot=chatAssistant.snapshot();}catch(cause){setError((cause as Error).message);return;}
     const assistantRequest=assistantSnapshot?{assistant:assistantSnapshot,submissionId:crypto.randomUUID()}:undefined;
     chatScroll.latest();
     stopPresentation();
@@ -420,7 +427,7 @@ export default function App() {
     if(!state.user?.canUseCodex){setError('请联系管理员开通 Agent。');return;}
     if(!state.user.isOwner&&!agentProviderId){setError('当前主机没有分配给你的 Agent 模型，请联系管理员。');return;}
     if(!agentSubmissionRef.current&&images.length&&!agentSupportsImages){setError('这个 Agent 模型仅支持文字，请移除图片或切换模型。');return;}
-    if(!agentSubmissionRef.current&&!canSendAgent){setError(agentUnknown?'这台电脑的执行状态尚未确认，请先检查原任务。':hostsError||(!selectedHost?.online?'所选电脑未在线，请在该电脑登录同一账号后重试。':'所选电脑的 Codex 尚未就绪，请检查客户端。'));return;}
+    if(!agentSubmissionRef.current&&!canSendAgent){setError(projectIssue|| (agentUnknown?'这台电脑的执行状态尚未确认，请先检查原任务。':hostsError||(!selectedHost?.online?'所选电脑未在线，请在该电脑登录同一账号后重试。':'所选电脑的 Codex 尚未就绪，请检查客户端。')));return;}
     const submissionHostId=selectedHostId;
     chatScroll.latest();
     agentSendLock.current=true;setAgentSubmitting(true);setError('');stopPresentation();speech.prepare();
@@ -432,7 +439,8 @@ export default function App() {
         const run=target.agent?.run,isRunning=run?.status==='running'||run?.status==='stopping';
         const kind=isRunning&&sendChoice==='steer'?'steer':'submit';
         if(kind==='steer'&&!run?.turnId)throw new Error('Agent 正在准备这轮任务，请稍候，或选择排队。');
-        const payload={content,attachmentIds:images.map(item=>item.id),permissions:isRunning?run.permissions:permissions,providerId:isRunning?run.providerId:agentProviderId||null,hostId:isRunning?run.hostId||defaultHostId:submissionHostId,...(kind==='steer'?{expectedTurnId:run!.turnId}:{})};
+        const directory=isRunning?run.projectDirectory||'':activeProjectDirectory;
+        const payload={content,attachmentIds:images.map(item=>item.id),permissions:isRunning?run.permissions:permissions,providerId:isRunning?run.providerId:agentProviderId||null,hostId:isRunning?run.hostId||defaultHostId:submissionHostId,...(directory?{projectDirectory:directory}:{}),...(kind==='steer'?{expectedTurnId:run!.turnId}:{})};
         agentSubmissionRef.current={id:crypto.randomUUID(),conversationId:target.id,kind,payload};
       }
       const pending=agentSubmissionRef.current;
@@ -505,6 +513,7 @@ export default function App() {
               <ModelPicker providers={agentProviders} value={activeProviderId} onChange={id=>void changeModel(id)} disabled={working||agentUnknown||agentSubmitting||switchingModel||unconfirmed} label="Agent 模型" fallbackLabel={(agentRunning?conversation?.agent?.run?.model:state.codex.model)||'Codex 主机配置'} fallbackOption={state.user?.isOwner?{label:(agentRunning?conversation?.agent?.run?.model:state.codex.model)||'Codex 主机配置',description:'使用主机默认模型与推理强度'}:undefined}/>
               <ExecutionTarget hosts={agentHosts} value={selectedHostId} onChange={changeHost} disabled={busy||agentSubmitting||hostBusy||unconfirmed} loading={hostsLoading} error={hostsError} localHostId={localHostId} lockReason={unconfirmed?'上次任务提交正在等待确认，执行电脑保持不变。':hostBusy?'正在执行或排队的任务已固定电脑，结束后可以切换。':'当前提交或回复完成后，可以切换执行电脑。'} onRefresh={()=>setHostRefresh(value=>value+1)} onDownload={()=>setView('downloads')}/>
             </div>}
+            {currentMode==='codex'&&<ProjectDirectory value={activeProjectDirectory} host={selectedHost} user={state.user} disabled={busy||agentSubmitting||hostBusy||unconfirmed} lockReason={unconfirmed?'上次提交仍在等待确认，目录保持不变。':'正在执行、排队或状态待确认，目录保持不变。'} onChange={value=>{if(!busyRef.current&&!agentSendLock.current&&!hostBusy&&!unconfirmed){projectDirectory.change(value);setError('');setNotice(value?'下一条任务会在指定项目目录执行。':'下一条任务会使用默认工作区。');}}}/>}
             {currentMode==='codex' && nativeExecutor?.state==='reconnecting' && <p className="execution-reconnect" role="status"><Loader2 size={13} className="spin" aria-hidden="true"/>此电脑连接中断，正在重连。原任务保持暂停。</p>}
           </div>
           <div className="chat-reading-area"><div className="chat-scroll" ref={scrollRef} onScroll={chatScroll.onScroll} tabIndex={0} role="region" aria-label="对话消息" aria-live="polite" aria-busy={working}><div className="chat-scroll-content" ref={chatScroll.contentRef}>

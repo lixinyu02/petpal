@@ -1,3 +1,4 @@
+import {projectDirectoryIssue,projectDirectoryValue,readProjectDirectory,saveProjectDirectory} from './project-directory-preferences.mjs';
 const prefix = 'petpal.chat-assistant.';
 const hostId = value => typeof value === 'string' && value.length <= 160 ? value : '';
 const providerId = value => typeof value === 'string' && value.length <= 160 ? value : '';
@@ -7,12 +8,14 @@ export function readChatAssistantPreferences(storage, scope) {
   if (!scope) return {hostId:'',providerId:''};
   try {
     const value=JSON.parse(storage?.getItem(prefix+encodeURIComponent(scope))||'null');
-    return {hostId:hostId(value?.hostId),providerId:providerId(value?.providerId)};
+    const selectedHost=hostId(value?.hostId),directory=readProjectDirectory(storage,scope,selectedHost);
+    return {hostId:selectedHost,providerId:providerId(value?.providerId),...(directory?{projectDirectory:directory}:{})};
   } catch { return {hostId:'',providerId:''}; }
 }
 export function saveChatAssistantPreferences(storage, scope, value) {
   if (!scope) return;
   try { storage?.setItem(prefix+encodeURIComponent(scope),JSON.stringify({hostId:hostId(value.hostId),providerId:providerId(value.providerId)})); } catch {}
+  saveProjectDirectory(storage,scope,hostId(value.hostId),value.projectDirectory||'');
 }
 export function chatAssistantTargetIssue(value, hosts, providers=[], owner=false) {
   const selected=hosts.find(host=>host.id===value.hostId);
@@ -23,9 +26,15 @@ export function chatAssistantTargetIssue(value, hosts, providers=[], owner=false
   if (value.providerId&&!providers.some(item=>item.id===value.providerId)) return '此前选择的 Agent 模型已不可用，请重新选择。';
   return '';
 }
-export function snapshotChatAssistant(value, allowed) {
+export function snapshotChatAssistant(value, allowed, hosts) {
   if (!allowed||!value.enabled||!hostId(value.hostId)) return undefined;
-  return {enabled:true,hostId:hostId(value.hostId),providerId:providerId(value.providerId)||null,permissions:{access:value.permissions.access,approval:value.permissions.approval}};
+  const directory=projectDirectoryValue(value.projectDirectory);
+  if(value.projectDirectory&&(typeof value.projectDirectory!=='string'||value.projectDirectory.length>4096||/[\x00-\x1f\x7f]/.test(value.projectDirectory)||directory!==value.projectDirectory.trim()))throw new Error('项目目录格式无效，请重新设置。');
+  if(directory&&hosts){const issue=projectDirectoryIssue(directory,hosts.find(host=>host.id===value.hostId));if(issue)throw new Error(issue);}
+  return {enabled:true,hostId:hostId(value.hostId),providerId:providerId(value.providerId)||null,permissions:{access:value.permissions.access,approval:value.permissions.approval},...(directory?{projectDirectory:directory}:{})};
+}
+export function chatAssistantForHost(value, selectedHost, storage, scope) {
+  return {...value,hostId:hostId(selectedHost),projectDirectory:readProjectDirectory(storage,scope,hostId(selectedHost))};
 }
 export function mergeAssistantTask(tasks, task) {
   if (!task||typeof task.id!=='string'||!task.id||!['deciding','queued','running','completed','cancelled','error','unknown'].includes(task.status)) return tasks;

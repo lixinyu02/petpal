@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { normalizeAgentPermissions } from './agent-permissions.mjs';
 import { normalizeAttachmentIds } from './attachments.mjs';
+import { validateProjectDirectoryText, validateStoredProjectDirectory } from './project-directory.mjs';
 
 const fail = (status, message, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -17,13 +18,14 @@ const content = (value, attachments = []) => {
 /** Execution settings come from the user's selection, never model arguments. */
 export function normalizeChatAssistant(value, submissionId) {
   if (value === undefined) return null;
-  if (!object(value) || Object.keys(value).some(key => !['enabled', 'hostId', 'providerId', 'permissions'].includes(key)) || typeof value.enabled !== 'boolean') throw fail(400, '聊天协作设置无效。');
+  if (!object(value) || Object.keys(value).some(key => !['enabled', 'hostId', 'providerId', 'permissions', 'projectDirectory'].includes(key)) || typeof value.enabled !== 'boolean') throw fail(400, '聊天协作设置无效。');
   if (!value.enabled) return null;
   if (!uuid(submissionId) || value.hostId !== 'central' && !uuid(value.hostId) || value.providerId !== undefined && value.providerId !== null && (typeof value.providerId !== 'string' || !value.providerId || value.providerId.length > 128)) throw fail(400, '请预选执行电脑、Agent 模型和有效的提交编号。');
-  return Object.freeze({ hostId: value.hostId, providerId: value.providerId ?? null, permissions: Object.freeze(normalizeAgentPermissions(value.permissions)), submissionId });
+  const projectDirectory = validateProjectDirectoryText(value.projectDirectory);
+  return Object.freeze({ hostId: value.hostId, providerId: value.providerId ?? null, permissions: Object.freeze(normalizeAgentPermissions(value.permissions)), submissionId, ...(projectDirectory ? { projectDirectory } : {}) });
 }
 
-export const publicAssistantTask = task => Object.fromEntries(['id', 'conversationId', 'hostId', 'hostName', 'status', 'message', 'createdAt', 'finishedAt'].filter(key => task[key] !== undefined).map(key => [key, task[key]]));
+export const publicAssistantTask = task => Object.fromEntries(['id', 'conversationId', 'hostId', 'hostName', 'status', 'message', 'createdAt', 'finishedAt', 'projectDirectory'].filter(key => task[key] !== undefined).map(key => [key, task[key]]));
 export const assistantTasksSnapshot = conversation => (conversation.assistantTasks ?? []).filter(task => task.conversationId || task.status !== 'completed').map(publicAssistantTask);
 
 /** A restart cannot authorize a second model decision or a second Agent submission. */
@@ -39,7 +41,7 @@ export function restoreAssistantTasks(conversation, hosts, conversations = []) {
   for (const task of conversation.assistantTasks) {
     if (!object(task) || !uuid(task.id) || !uuid(task.submissionId) || ids.has(task.id) || submissions.has(task.submissionId) || !statuses.has(task.status) || !/^[a-f\d]{64}$/.test(task.fingerprint) || !uuid(task.codexRevision) || typeof task.createdAt !== 'string' || typeof task.message !== 'string' || task.message.length > 500 || typeof task.hostName !== 'string' || task.hostName.length > 120 || task.providerId !== null && (typeof task.providerId !== 'string' || !task.providerId || task.providerId.length > 128) ||
       task.hostId !== 'central' && !hosts.some(host => host.id === task.hostId && host.userId === conversation.userId) || !object(task.permissions) || !Array.isArray(task.attachmentIds) || task.finishedAt !== undefined && typeof task.finishedAt !== 'string' || task.resultMessageId !== undefined && !conversation.messages?.some(message => message.id === task.resultMessageId && message.role === 'assistant' && message.assistantTaskId === task.id)) throw new Error('本地聊天协作回执或电脑归属无效。');
-    normalizeAgentPermissions(task.permissions); normalizeAttachmentIds(task.attachmentIds);
+    normalizeAgentPermissions(task.permissions); normalizeAttachmentIds(task.attachmentIds); validateStoredProjectDirectory(task.projectDirectory);
     if (task.conversationId !== undefined) {
       const child = conversations.find(item => item.id === task.conversationId);
       if (!uuid(task.conversationId) || children.has(task.conversationId) || !child || child.mode !== 'codex' || child.userId !== conversation.userId || child.backgroundParentId !== conversation.id) throw new Error('本地聊天协作子会话归属无效。');
@@ -64,7 +66,7 @@ export function createChatAssistant({ store, agentTasks, authorize, resolveHost,
     if (closed) throw fail(503, '聊天协作正在退出。');
     if (!store.state.conversations.includes(chat) || chat.mode !== 'chat' || chat.userId !== auth.userId) throw fail(404, '聊天协作会话不存在。');
   };
-  const fingerprint = (userContent, options, attachmentIds) => createHash('sha256').update(JSON.stringify({ content: userContent, hostId: options.hostId, providerId: options.providerId, permissions: options.permissions, attachmentIds })).digest('hex');
+  const fingerprint = (userContent, options, attachmentIds) => createHash('sha256').update(JSON.stringify({ content: userContent, hostId: options.hostId, providerId: options.providerId, permissions: options.permissions, attachmentIds, ...(options.projectDirectory ? { projectDirectory: options.projectDirectory } : {}) })).digest('hex');
   const find = record => {
     const chat = store.state.conversations.find(item => item.assistantTasks?.includes(record));
     if (!chat) throw fail(404, '聊天协作回执不存在。'); return chat;
@@ -73,7 +75,7 @@ export function createChatAssistant({ store, agentTasks, authorize, resolveHost,
   function release(record) { const job=jobs.get(record.id);if(job)clearTimeout(job.expiry);jobs.delete(record.id); }
 
   async function prepare(chat, auth, options, userContent, attachments = []) {
-    const normalized = normalizeChatAssistant({ enabled: true, hostId: options?.hostId, providerId: options?.providerId, permissions: options?.permissions }, options?.submissionId);
+    const normalized = normalizeChatAssistant({ enabled: true, hostId: options?.hostId, providerId: options?.providerId, permissions: options?.permissions, projectDirectory: options?.projectDirectory }, options?.submissionId);
     const attachmentIds = normalizeAttachmentIds(attachments), text = content(userContent, attachmentIds), digest = fingerprint(text, normalized, attachmentIds);
     return lock(chat.id, async () => {
       assertChat(chat, auth); const expiresAt=authorize(auth, normalized, chat);
@@ -87,7 +89,7 @@ export function createChatAssistant({ store, agentTasks, authorize, resolveHost,
       if ((chat.assistantTasks?.length ?? 0) >= 250) throw fail(400, '本会话协作任务已达上限，请新建聊天。');
       const host = resolveHost(auth.userId, normalized.hostId, { requireOnline: false }), codexRevision=revision();
       if (!uuid(codexRevision)) throw fail(409, '后台 Agent 配置尚未就绪。');
-      const record={id:randomUUID(),submissionId:normalized.submissionId,fingerprint:digest,hostId:normalized.hostId,hostName:short(host.hostName).slice(0,120),providerId:normalized.providerId,permissions:{...normalized.permissions},attachmentIds,codexRevision,status:'deciding',message:'正在判断是否需要后台 Agent。',createdAt:stamp()};
+      const record={id:randomUUID(),submissionId:normalized.submissionId,fingerprint:digest,hostId:normalized.hostId,hostName:short(host.hostName).slice(0,120),providerId:normalized.providerId,permissions:{...normalized.permissions},attachmentIds,codexRevision,status:'deciding',message:'正在判断是否需要后台 Agent。',createdAt:stamp(),...(normalized.projectDirectory?{projectDirectory:normalized.projectDirectory}:{})};
       chat.assistantTasks ??= []; chat.assistantTasks.push(record); update(chat);
       try { await store.save(); } catch(error) { chat.assistantTasks.splice(chat.assistantTasks.indexOf(record),1);throw error; }
       const job={...auth,auth:{...auth},options:normalized,record,chat,entry:{conversationId:chat.id,auth:{...auth},hostId:normalized.hostId}};jobs.set(record.id,job);
@@ -111,7 +113,7 @@ export function createChatAssistant({ store, agentTasks, authorize, resolveHost,
       try{await store.save();}catch(error){store.state.conversations.splice(store.state.conversations.indexOf(child),1);delete record.conversationId;record.status='error';record.message='保存后台任务失败，尚未派发。';record.finishedAt=stamp();release(record);throw error;}
       try{
         authorize(job.auth,job.options,chat);
-        await agentTasks.submit(child,{submissionId:record.id,content:text,attachmentIds:[...record.attachmentIds],permissions:{...job.options.permissions},providerId:job.options.providerId,hostId:job.options.hostId},{...job.auth});
+        await agentTasks.submit(child,{submissionId:record.id,content:text,attachmentIds:[...record.attachmentIds],permissions:{...job.options.permissions},providerId:job.options.providerId,hostId:job.options.hostId,...(job.options.projectDirectory?{projectDirectory:job.options.projectDirectory}:{})},{...job.auth});
       }catch(error){record.status='error';record.message=short(redact(error?.message||'后台 Agent 任务未能派发。'));record.finishedAt=stamp();update(chat);await store.save();release(record);throw error;}
       await refresh(chat);return publicAssistantTask(record);
     });

@@ -172,7 +172,7 @@ const requiredFiles = [
   'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/native/music-windows.ps1', 'server/opencli.mjs',
   'tests/music.test.mjs', 'tests/desktop-tools.test.mjs', 'tests/opencli.test.mjs', 'NOTICE',
 ];
-requiredFiles.push('desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs');
+requiredFiles.push('desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs');
 for (const required of requiredFiles) if (!selected.has(required)) throw new Error(`Required source entry missing: ${required}`);
 const pendingCompanionRoots = requiredCompanionRoots.filter(directory => ![...selected].some(file => file.startsWith(`${directory}/`)));
 if (!checkOnly && pendingCompanionRoots.length) throw new Error(`Required companion source/assets missing: ${pendingCompanionRoots.join(', ')}`);

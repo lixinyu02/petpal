@@ -19,6 +19,7 @@ import { normalizeAgentPermissions } from './agent-permissions.mjs';
 import { createAttachmentService, normalizeAttachmentIds, IMAGE_LIMIT } from './attachments.mjs';
 import { createDownloadsCatalog } from './downloads.mjs';
 import { createExecutors } from './executors.mjs';
+import { normalizeProjectDirectory } from './project-directory.mjs';
 import { RemoteCodexBridge } from './remote-codex.mjs';
 import { createChatAssistant, normalizeChatAssistant } from './chat-assistant.mjs';
 import { mountMusicMcpRoutes } from './music-mcp-routes.mjs';
@@ -159,7 +160,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const status = redactCodex(await readCodexStatus());
     return { ...(isOwner(user) ? status : { available: status.available, running: status.running, authenticated: status.authenticated, configured: status.configured, error: status.error, message: status.message }), ...publicCodexConfig(state.codexConfig), eligibleProviderIds: eligibleProviders(user) };
   };
-  const visibleConversation = conversation => ({ id: conversation.id, title: conversation.title, mode: conversation.mode, providerId: conversation.providerId, ...(conversation.backgroundParentId ? { backgroundParentId: conversation.backgroundParentId } : {}), messages: conversation.messages.map(message => ({ ...message, ...(message.attachmentIds?.length ? { attachments: imageAttachments.metadata(conversation.userId, message.attachmentIds) } : {}) })), createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, ...(conversation.assistantTasks?.length ? { assistantTasks: chatAssistant.snapshot(conversation) } : {}), ...(conversation.threadId ? { threadId: conversation.threadId } : {}), ...(conversation.mode === 'codex' ? { codexRevision: conversation.codexRevision, codexConfigChanged: conversation.codexRevision !== state.codexConfig.revision, agentHostId: conversation.agentHostId ?? 'central', threadHostId: conversation.threadHostId ?? 'central', agent: agentTasks.snapshot(conversation) } : {}) });
+  const visibleConversation = conversation => ({ id: conversation.id, title: conversation.title, mode: conversation.mode, providerId: conversation.providerId, ...(conversation.backgroundParentId ? { backgroundParentId: conversation.backgroundParentId } : {}), messages: conversation.messages.map(message => ({ ...message, ...(message.attachmentIds?.length ? { attachments: imageAttachments.metadata(conversation.userId, message.attachmentIds) } : {}) })), createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, ...(conversation.assistantTasks?.length ? { assistantTasks: chatAssistant.snapshot(conversation) } : {}), ...(conversation.threadId ? { threadId: conversation.threadId } : {}), ...(conversation.mode === 'codex' ? { codexRevision: conversation.codexRevision, codexConfigChanged: conversation.codexRevision !== state.codexConfig.revision, agentHostId: conversation.agentHostId ?? 'central', threadHostId: conversation.threadHostId ?? 'central', ...(conversation.agentProjectDirectory ? { agentProjectDirectory: conversation.agentProjectDirectory } : {}), ...(conversation.threadProjectDirectory ? { threadProjectDirectory: conversation.threadProjectDirectory } : {}), agent: agentTasks.snapshot(conversation) } : {}) });
   const publicState = async user => {
     await Promise.all(state.conversations.filter(item => item.userId === user.id && item.mode === 'chat' && item.assistantTasks?.length).map(item => chatAssistant.refresh(item)));
     return { instanceId: state.instanceId, user: visibleUser(user), settings: settingsFor(user), providers: state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider => visibleProvider(provider, user)), conversations: state.conversations.filter(item => item.userId === user.id).map(visibleConversation), codex: await userCodexStatus(user) };
@@ -205,6 +206,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const authorizeAgentEntry = entry => {
       const { user, expiresAt } = authorizeAgentIdentity(entry.auth);
       requirePermissions(user, entry.permissions);
+      if (entry.projectDirectory && entry.projectAccess === 'full' && !isOwner(user) && user.agentAccess !== 'full') throw failure(403, '外部项目的 Agent 授权已撤销，请重新选择默认工作区。');
       const conversation = state.conversations.find(item => item.id === entry.conversationId && item.userId === user.id);
       if (!conversation || conversation.mode !== 'codex' || conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Agent 会话已删除或配置已变化，请新建会话。');
       imageAttachments.metadata(user.id, entry.attachmentIds);
@@ -227,7 +229,14 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     return { ...identity, sourceCreatedAt: Number.isFinite(issued) ? issued : 0 };
   } });
   const agentTasks = createAgentTasks({ store, active, approvals, getBridge: entry => entry?.hostId && entry.hostId !== 'central' ? new RemoteCodexBridge(executors, entry) : bridge, redact: redactCodex, resolveModel: resolveAgentModel, resolveImages: imageAttachments.images, resolveHost: executors.target,
-    authorize: entry => { const expiresAt = authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId ?? 'central'); return expiresAt; },
+    resolveProject: (userId, hostId, value) => {
+      const host = executors.hostFor(userId, hostId), projectDirectory = normalizeProjectDirectory(value, host.platform);
+      if (!projectDirectory) return {};
+      executors.target(userId, hostId, projectDirectory);
+      const user = state.users.find(item => item.id === userId);
+      return { projectDirectory, projectAccess: isOwner(user ?? {}) || user?.agentAccess === 'full' ? 'full' : 'workspace' };
+    },
+    authorize: entry => { const expiresAt = authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId ?? 'central', entry.projectDirectory); return expiresAt; },
     authorizeRemoval: entry => authorizeAgentIdentity(entry.auth).expiresAt,
   });
   const chatAssistant = createChatAssistant({ store, agentTasks, revision: () => state.codexConfig.revision,
@@ -244,7 +253,9 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       requirePermissions(user, options.permissions);
       if (!state.conversations.includes(conversation) || conversation.userId !== user.id || conversation.mode !== 'chat') throw failure(404, '后台任务所属聊天不存在。');
       resolveAgentModel(user.id, options.providerId);
-      if (!executors.list(user.id).some(host => host.id === options.hostId)) throw failure(404, '执行电脑不存在或不属于当前账号。');
+      const host = executors.list(user.id).find(host => host.id === options.hostId);
+      if (!host) throw failure(404, '执行电脑不存在或不属于当前账号。');
+      if (options.projectDirectory) { normalizeProjectDirectory(options.projectDirectory, host.platform); if (host.kind !== 'central' && !host.codex?.projectDirectory) throw failure(409, '所选电脑客户端尚不支持项目目录，请升级客户端或使用默认工作区。'); }
       return expiresAt;
     }, redact: redactCodex });
   const providerIds = value => {
@@ -305,7 +316,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     res.json(await notifications.remove(executorAuth(req), req.params.deviceId));
   });
   app.get('/api/agent/hosts', async (req, res) => {
-    requireCodex(req.user); const hosts = executors.list(req.user.id); hosts[0] = { ...hosts[0], codex: await userCodexStatus(req.user) }; requireCurrentAuth(req); res.json({ hosts });
+    requireCodex(req.user); const hosts = executors.list(req.user.id); hosts[0] = { ...hosts[0], codex: { ...await userCodexStatus(req.user), projectDirectory: true } }; requireCurrentAuth(req); res.json({ hosts });
   });
   app.post('/api/agent/executors/register', async (req, res) => { requireCodex(req.user); res.json(await executors.register(executorAuth(req), req.body)); });
   app.post('/api/agent/executors/:connectionId/heartbeat', (req, res) => { if (Object.keys(req.body).length) throw failure(400, '续租不接受附加字段。'); res.json(executors.heartbeat(req.params.connectionId, executorAuth(req))); });
@@ -738,6 +749,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       if (!isOwner(req.user)) throw failure(403, '成员账号须使用支持已授权模型选择的 Agent 客户端。');
       if (conversation.agent?.run?.status === 'unknown') throw failure(409, '上次远程执行状态未知，本会话不会开始新任务。');
       if ([conversation.agentHostId, conversation.threadHostId, ...conversation.agent?.queue?.map(entry => entry.hostId) ?? []].some(hostId => hostId && hostId !== 'central')) throw failure(409, '这个会话包含桌面执行任务，请使用支持执行电脑选择的 Agent 客户端。');
+      if (req.body.projectDirectory || conversation.agentProjectDirectory || conversation.threadProjectDirectory || conversation.agent?.queue?.some(entry => entry.projectDirectory)) throw failure(409, '这个会话包含项目目录，请使用支持项目目录的 Agent 客户端提交。');
       if (configChanging) throw failure(409, 'Codex 配置正在切换，请稍后重试。');
       if (conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Codex 配置已变化；为避免跨接口或凭据恢复旧任务，请新建工作会话。');
     }

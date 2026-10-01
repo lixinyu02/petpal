@@ -23,7 +23,7 @@ const electronVersion = metadata.devDependencies.electron;
 const codexVersion = metadata.dependencies['@openai/codex'];
 const opencliVersion = metadata.dependencies['@jackwener/opencli'];
 const requiredApplicationSource = ['server/updates.mjs', 'desktop/updates.mjs', 'server/app.mjs', 'server/auth.mjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/index.mjs', 'server/providers.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'NOTICE'];
-requiredApplicationSource.push('server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs');
+requiredApplicationSource.push('server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs');
 requiredApplicationSource.push('server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs');
 requiredApplicationSource.push('server/computer-use-mcp.mjs','server/computer-use-tool-names.mjs','server/computer-use-mcp-routes.mjs','server/dynamic-tool-output.mjs','server/model-request-limits.mjs');
 requiredApplicationSource.push('server/native/computer-use/LICENSE','server/native/computer-use/patches/linux-x11-window-geometry.patch');

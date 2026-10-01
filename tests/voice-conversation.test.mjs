@@ -47,6 +47,13 @@ test('voice background settings are captured before slow conversation creation a
   h.streams[1].onEvent({type:'done',data:{}});h.streams[1].resolve();await second;h.machine.dispose();
 });
 
+test('invalid background project settings stop voice input before creating or submitting a Chat request',async()=>{
+  const h=harness({getChatRequest:()=>{throw new Error('这台电脑尚不支持自定义项目目录，请更新客户端。');}});
+  await h.machine.start();h.feed();await flush();const finishing=h.machine.finishUtterance();h.sessions[0].final.resolve('在项目里检查文件');await finishing;
+  assert.equal(h.machine.snapshot().phase,'error');assert.equal(h.machine.snapshot().active,false);assert.match(h.machine.snapshot().error,/项目目录/);
+  assert.equal(h.chats.length,0);assert.equal(h.streams.length,0);assert.equal(h.counts.captureStops,1);h.machine.dispose();
+});
+
 test('900ms pause automatically submits once; interrupt aborts old ASR and ignores late transcript',async()=>{
   const h=harness();await h.machine.start();h.feed();await flush();for(let i=0;i<4;i++)h.feed(0);await flush();
   assert.equal(h.sessions[0].ends,1);assert.equal(h.machine.snapshot().phase,'recognizing');

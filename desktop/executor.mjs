@@ -8,6 +8,7 @@ import { normalizeAgentPermissions } from '../server/agent-permissions.mjs';
 import { inspectImage, IMAGE_LIMIT } from '../server/attachments.mjs';
 import { normalizeReasoningEffort } from '../server/providers.mjs';
 import { validateBrowserAction } from '../server/opencli.mjs';
+import { normalizeProjectDirectory } from '../server/project-directory.mjs';
 
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value);
@@ -336,7 +337,16 @@ export class DesktopExecutor {
   }
 
   async _register(ctx) {
-    const registration = await this._json(ctx, '/api/agent/executors/register', { deviceId: ctx.deviceId, ...this.metadata });
+    const body = { deviceId: ctx.deviceId, ...this.metadata };
+    let registration;
+    try { registration = await this._json(ctx, '/api/agent/executors/register', { ...body, capabilities: { projectDirectory: true } }); }
+    catch (error) {
+      // Older servers reject unknown registration fields before creating a
+      // connection. Only that negotiation boundary may fall back; never runs.
+      this._assert(ctx);
+      if (error.status !== 400 || ctx.connectionId) throw error;
+      registration = await this._json(ctx, '/api/agent/executors/register', body);
+    }
     if (!identifier(registration.hostId) || !identifier(registration.connectionId) ||
         !Number.isSafeInteger(registration.leaseMs) || registration.leaseMs < 3000 || registration.leaseMs > 120000 ||
         !Number.isSafeInteger(registration.pollMs) || registration.pollMs < 1000 || registration.pollMs > 60000) throw invalid();
@@ -380,7 +390,7 @@ export class DesktopExecutor {
   _validateCommand(command) {
     if (!object(command) || !identifier(command.id) || !identifier(command.runId)) throw invalid();
     const allowed = {
-      run: ['id', 'type', 'runId', 'conversationId', 'prompt', 'threadId', 'permissions', 'model', 'effort', 'codexRevision', 'relayToken', 'attachments'],
+      run: ['id', 'type', 'runId', 'conversationId', 'prompt', 'threadId', 'projectDirectory', 'projectAccess', 'permissions', 'model', 'effort', 'codexRevision', 'relayToken', 'attachments'],
       steer: ['id', 'type', 'runId', 'expectedTurnId', 'content', 'attachments'],
       approve: ['id', 'type', 'runId', 'approvalId', 'decision'], stop: ['id', 'type', 'runId'],
     }[command.type];
@@ -391,6 +401,11 @@ export class DesktopExecutor {
           typeof command.model !== 'string' || !command.model.trim() || command.model.length > 160 || /[\x00-\x1f\x7f]/.test(command.model) ||
           typeof command.relayToken !== 'string' || !command.relayToken || command.relayToken.length > 4096 || /[\x00-\x20\x7f]/.test(command.relayToken)) throw invalid();
       normalizeAgentPermissions(command.permissions); normalizeReasoningEffort(command.effort);
+      if (Object.hasOwn(command, 'projectDirectory') !== Object.hasOwn(command, 'projectAccess')) throw invalid();
+      if (Object.hasOwn(command, 'projectDirectory')) {
+        if (typeof command.projectDirectory !== 'string' || !command.projectDirectory.trim() || !['full', 'workspace'].includes(command.projectAccess)) throw invalid();
+        normalizeProjectDirectory(command.projectDirectory, this.metadata.platform);
+      }
     }
     if (command.type === 'steer' && (!identifier(command.expectedTurnId) || typeof command.content !== 'string' || command.content.length > 32000)) throw invalid();
     if (command.type === 'approve' && (!identifier(command.approvalId) || !['accept', 'decline'].includes(command.decision))) throw invalid();
@@ -492,6 +507,7 @@ export class DesktopExecutor {
       run.bridge = this.bridgeFactory({ dataDir: ctx.directory, workspaceRoot: path.join(ctx.directory, 'workspace'), config, desktopTools: ctx.tools });
       this._assert(ctx); run.controller.signal.throwIfAborted();
       result = await run.bridge.run({ conversationId: command.conversationId, prompt: command.prompt, threadId: command.threadId,
+        ...(command.projectDirectory ? { projectDirectory: command.projectDirectory, projectAccess: command.projectAccess } : {}),
         model: command.model, effort: command.effort || '', permissions: command.permissions, images, signal: run.controller.signal,
         onEvent: (event, data) => {
           if (ctx.controller.signal.aborted || run.controller.signal.aborted) return;
@@ -514,7 +530,9 @@ export class DesktopExecutor {
     }
     if (ctx.controller.signal.aborted) { run.relayToken = ''; return; }
     if (run.stopping || run.controller.signal.aborted) await this._event(ctx, run, 'stopped', {});
-    else if (failure) await this._event(ctx, run, 'error', { message: '执行电脑未能完成任务，请检查该电脑的 Codex 与网络状态。' });
+    else if (failure) await this._event(ctx, run, 'error', { message: /^project_directory_(?:invalid|unavailable|forbidden)$/.test(failure.code || '')
+      ? '项目目录不可用或超出账号工作区权限，请在执行电脑确认现有目录与访问授权；本次任务未自动改用其他目录。'
+      : '执行电脑未能完成任务，请检查该电脑的 Codex 与网络状态。' });
     else {
       if (!identifier(result?.threadId)) throw invalid();
       if (!run.outputBytes && result.text) {

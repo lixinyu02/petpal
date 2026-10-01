@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -162,6 +162,37 @@ test('streams one response, resumes same thread, overrides unsafe inherited sett
 test('final-only messages are surfaced without requiring a delta notification', { timeout: 10_000 }, async (t) => {
   const { bridge } = await setup(t);
   assert.equal((await bridge.run({ prompt: 'final-only' })).text, '完整回复');
+});
+
+test('API mode uses isolated per-run project cwd and writable roots without mutating the shared workspace', { timeout: 15_000 }, async t => {
+  const { bridge, messages } = await setup(t, 'normal', true);
+  await bridge.status();
+  const original = bridge.workspaceRoot;
+  const projects = [path.join(path.dirname(original), 'project-a'), path.join(path.dirname(original), 'project-b')];
+  for (const project of projects) await mkdir(project, { recursive: true });
+  const permissions = { access: 'workspace-write', approval: 'ask' };
+  const results = await Promise.all(projects.map((projectDirectory, index) => bridge.run({ prompt: 'hello', conversationId: `project-${index}`, projectDirectory, projectAccess: 'full', permissions })));
+  await bridge.run({ prompt: 'hello', conversationId: 'project-0', threadId: results[0].threadId, projectDirectory: projects[0], projectAccess: 'full', permissions });
+  assert.equal(bridge.workspaceRoot, original);
+  const canonical = await Promise.all(projects.map(project => realpath(project)));
+  const rpc = (await messages()).filter(m => ['thread/start', 'thread/resume', 'turn/start'].includes(m.method));
+  assert.equal(rpc.filter(m => m.method === 'thread/start').length, 2);
+  assert.equal(rpc.find(m => m.method === 'thread/resume').params.cwd, canonical[0]);
+  for (const project of canonical) assert.ok(rpc.some(m => m.method === 'thread/start' && m.params.cwd === project));
+  for (const message of rpc) {
+    assert.ok(canonical.includes(message.params.cwd));
+    if (message.method === 'turn/start') assert.deepEqual(message.params.sandboxPolicy.writableRoots, [message.params.cwd]);
+  }
+});
+
+test('invalid or unauthorized projects never start a Codex thread or fall back to default', { timeout: 10_000 }, async t => {
+  const { bridge, messages } = await setup(t);
+  await bridge.status();
+  const external = path.join(path.dirname(bridge.workspaceRoot), 'external');
+  await mkdir(external);
+  await assert.rejects(bridge.run({ prompt: 'hello', projectDirectory: external }), { code: 'project_directory_forbidden' });
+  await assert.rejects(bridge.run({ prompt: 'hello', projectDirectory: path.join(external, 'missing'), projectAccess: 'full' }), { code: 'project_directory_unavailable' });
+  assert.equal((await messages()).filter(m => ['thread/start', 'thread/resume', 'turn/start'].includes(m.method)).length, 0);
 });
 
 for (const [prompt, kind, decision] of [['approval', 'command', 'accept'], ['file-approval', 'fileChange', 'decline']]) {

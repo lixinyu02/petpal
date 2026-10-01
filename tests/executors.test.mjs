@@ -46,6 +46,53 @@ test('registration validates fields, platform and persisted ownership',async t=>
   const corrupt=structuredClone(f.store.state);corrupt.executionHosts[0].userId='foreign';assert.throws(()=>validateExecutionHosts(corrupt));
 });
 
+test('project-directory capability belongs to the live connection and never the persisted host',async t=>{
+  const f=fixture(t),deviceId=randomUUID();
+  for(const capabilities of [{projectDirectory:false},{projectDirectory:true,other:true},'projectDirectory',{}]) await assert.rejects(f.registration({capabilities}),{status:400});
+  const supported=await f.registration({deviceId,capabilities:{projectDirectory:true}});
+  assert.equal(f.manager.list(f.userId).find(host=>host.id===supported.hostId).codex.projectDirectory,true);
+  assert.equal(Object.hasOwn(f.store.state.executionHosts[0],'capabilities'),false);
+  assert.equal(validateExecutionHosts(f.store.state),false);
+  assert.deepEqual(f.manager.target(f.userId,supported.hostId,'C:\\projects\\cat'),{hostId:supported.hostId,hostName:'My Windows PC'});
+  assert.throws(()=>f.manager.target(f.otherUserId,supported.hostId,'C:\\projects\\cat'),{status:404});
+  const older=await f.registration({deviceId});
+  assert.equal(f.manager.list(f.userId).find(host=>host.id===older.hostId).codex.projectDirectory,false);
+  assert.throws(()=>f.manager.target(f.userId,older.hostId,'C:\\projects\\cat'),{status:409,code:'executor_project_directory_unsupported'});
+  assert.deepEqual(f.manager.target(f.userId,older.hostId),{hostId:older.hostId,hostName:'My Windows PC'});
+  f.manager.disconnect(older.connectionId,f.auth);
+  assert.equal(f.manager.list(f.userId).find(host=>host.id===older.hostId).codex.projectDirectory,false);
+});
+
+test('old executors keep default commands; an explicit directory cannot bind without capability',async t=>{
+  const f=fixture(t),registered=await f.registration(),run=await f.begin(registered);
+  assert.equal(Object.hasOwn(run.command,'projectDirectory'),false);assert.equal(Object.hasOwn(run.command,'projectAccess'),false);
+  run.event('started');run.event('complete',{text:''});await run.completion;
+  const entry={...f.entry(registered.hostId),projectDirectory:'C:\\projects\\cat',projectAccess:'full'};
+  assert.throws(()=>f.manager.bind(entry),{status:409,code:'executor_project_directory_unsupported'});
+  assert.deepEqual((await f.manager.poll(registered.connectionId,f.auth)).commands,[]);
+});
+
+test('directory syntax follows the selected executor platform before capability or dispatch',async t=>{
+  const f=fixture(t),windows=await f.registration({capabilities:{projectDirectory:true}}),linux=await f.registration({platform:'linux',capabilities:{projectDirectory:true}});
+  assert.throws(()=>f.manager.target(f.userId,windows.hostId,'/home/project'),{code:'project_directory_invalid'});
+  assert.throws(()=>f.manager.target(f.userId,linux.hostId,'C:\\projects\\cat'),{code:'project_directory_invalid'});
+  assert.deepEqual(f.manager.target(f.userId,linux.hostId,'/home/project'),{hostId:linux.hostId,hostName:'My Windows PC'});
+});
+
+test('explicit project directory and backend-derived grant are frozen into the supported command',async t=>{
+  const f=fixture(t),registered=await f.registration({capabilities:{projectDirectory:true}});
+  const entry={...f.entry(registered.hostId),projectDirectory:'C:\\projects\\cat',projectAccess:'full'},bridge=f.manager.bind(entry);
+  await assert.rejects(bridge.run({projectDirectory:'C:\\different',projectAccess:'full'}),{status:409});
+  await assert.rejects(bridge.run({projectDirectory:entry.projectDirectory,projectAccess:'workspace'}),{status:409});
+  assert.deepEqual((await f.manager.poll(registered.connectionId,f.auth)).commands,[]);
+  const completion=bridge.run({conversationId:entry.conversationId,prompt:'read marker',projectDirectory:entry.projectDirectory,projectAccess:'full',permissions:{access:'read-only',approval:'ask'}});completion.catch(()=>{});
+  const command=(await f.manager.poll(registered.connectionId,f.auth)).commands[0];
+  assert.equal(command.projectDirectory,entry.projectDirectory);assert.equal(command.projectAccess,'full');assert.equal(command.permissions.access,'read-only');
+  f.manager.events(registered.connectionId,f.auth,{runId:entry.id,sequence:1,event:'started',data:{}});
+  f.manager.events(registered.connectionId,f.auth,{runId:entry.id,sequence:2,event:'complete',data:{text:''}});await completion;
+  assert.throws(()=>f.manager.bind({...entry,id:randomUUID(),projectAccess:'renderer-claimed'}),{code:'project_directory_invalid'});
+});
+
 test('run command contains no central credentials and is delivered once',async t=>{
   const f=fixture(t),registered=await f.registration(),run=await f.begin(registered);
   assert.equal(run.command.model,'model-1');assert.equal(run.command.relayToken.length,43);
