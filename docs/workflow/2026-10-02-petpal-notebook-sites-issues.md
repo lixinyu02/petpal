@@ -8,12 +8,12 @@
 
 - Goal: 为 notebook 明确列出的十三个网站提供受控 Agent 接入。
 - Ordering rule: Complete issues in sequence. 同一 issue 内独立组件由子代理并行实现。
-- Current status: issue-1 done；issue-2 in_progress。用户追加缺少 Chrome 时的安装引导，列为 issue-3，统一在 issue-4 部署。
+- Current status: issue-1/2 done；issue-3 in_progress。用户追加缺少 Chrome 时的安装引导，统一在 issue-4 部署。
 
 ## Issue List
 
 - [x] issue-1 接入浏览器网站策略、账号配置和 UI
-- [ ] issue-2 回归与真实浏览器验收
+- [x] issue-2 回归与真实浏览器验收
 - [ ] issue-3 Chrome / Browser Bridge 安装引导
 - [ ] issue-4 网页与后端部署
 
@@ -26,7 +26,7 @@
 - 验收标准: 十三个网站提供固定只读命令；六个自建站点使用明确默认域名并支持网址覆盖；旧公开查询与配置保持兼容；凭据不进入审批或输出
 - 状态: done
 - 验证方式: 158/158 相关测试与 TypeScript/Vite build 通过；原生新配置、CAS兼容与关闭失败恢复已补回归
-- commit: 本 issue 提交
+- commit: eb0fb50
 
 ## issue-2
 
@@ -35,9 +35,9 @@
 - 范围: 相关回归、真实 Bridge 就绪情况、Chrome 网站访问、响应式 UI 与源码私密审查
 - 依赖: issue-1
 - 验收标准: 可访问页面记录可见内容；登录/验证码/Bridge 缺失和策略阻止明确；不把页面访问当 Agent 查询通过
-- 状态: todo
-- 验证方式: Chrome 插件、网络/后端接口及自动化回归
-- commit: pending
+- 状态: done（Agent→Bridge真实查询环境未就绪，已记录，不算通过）
+- 验证方式: Chrome页面、隔离管理UI、412×960 DOM与158/158回归；完整限制见acceptance
+- commit: 本 issue 提交
 
 ## issue-3
 
