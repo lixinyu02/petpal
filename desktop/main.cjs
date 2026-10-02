@@ -208,7 +208,11 @@ async function inspectAvatarWindow(win, requireWorld, kind, expectedCatEnabled) 
       const visible = bounds?.width > 0 && bounds?.height > 0 && bounds.right > 0 && bounds.bottom > 0 && bounds.left < innerWidth && bounds.top < innerHeight
         && canvas.getAttribute('aria-hidden') !== 'true' && style.display !== 'none' && style.visibility === 'visible' && !document.hidden;
       const ready = ${requireWorld ? `!!document.querySelector('.companion-world[data-ready="true"][data-companion-kind="${kind}"]')` : 'true'};
-      const expectedRenderer = ${JSON.stringify(kind)} === 'anime' ? canvas?.dataset.avatarRenderer === 'mesh2d' : canvas?.dataset.avatarRenderer !== 'mesh2d';
+      const cubism = document.querySelector('.cubism-scene[data-avatar-mode="cubism"]');
+      const modelLoaded = performance.getEntriesByType('resource').some(entry => new URL(entry.name).pathname === '/avatars/akari-cubism-v11/akari.moc3');
+      const expectedRenderer = ${JSON.stringify(kind)} === 'anime'
+        ? canvas?.dataset.avatarRenderer === 'cubism' && !!cubism && modelLoaded && Number(canvas.dataset.mocVersion) > 0
+        : !['mesh2d', 'cubism'].includes(canvas?.dataset.avatarRenderer);
       let display; try { display = JSON.parse(localStorage.getItem('petpal.displayCompanion') || 'null'); } catch {}
       const displayReady = ${typeof expectedCatEnabled === 'boolean' ? `display?.version === 2 && display.kind === ${JSON.stringify(kind)} && display.catEnabled === ${JSON.stringify(expectedCatEnabled)}` : 'true'};
       if (ready && visible && expectedRenderer && displayReady && canvases.length === 1 && canvas.dataset.petCount === '1' && Number(canvas.dataset.renderFrames) >= 2) {
@@ -221,7 +225,8 @@ async function inspectAvatarWindow(win, requireWorld, kind, expectedCatEnabled) 
           canvasBounds: { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height }, visible: true,
           storedKind: localStorage.getItem('petpal.companionKind'),
           display: display && { version: display.version, kind: display.kind, catEnabled: display.catEnabled },
-          blink: canvas.dataset.blink, speaking: canvas.dataset.speaking,
+          blink: canvas.dataset.blink ?? canvas.dataset.blinkLeft, speaking: canvas.dataset.speaking,
+          cubismModel: modelLoaded ? 'akari-cubism-v11' : null, mocVersion: canvas.dataset.mocVersion, coreVersion: canvas.dataset.coreVersion,
           expression: canvas.dataset.expression, mouthShape: canvas.dataset.mouthShape, mouthOpen: canvas.dataset.mouthOpen,
           phase: canvas.dataset.phase, speechSource: canvas.dataset.speechSource
         });
@@ -440,7 +445,7 @@ async function waitForPose(action, stableMilliseconds = 120) {
       const canvas = document.querySelector('canvas[data-renderer="webgl"]');
       if (canvas?.dataset.petAction === ${JSON.stringify(action)}) {
         since ||= Date.now();
-        if (Date.now() - since >= ${JSON.stringify(stableMilliseconds)}) return resolve({ action: canvas.dataset.petAction, renderFrames: Number(canvas.dataset.renderFrames), x: canvas.dataset.petX, blink: canvas.dataset.blink, speaking: canvas.dataset.speaking });
+        if (Date.now() - since >= ${JSON.stringify(stableMilliseconds)}) return resolve({ action: canvas.dataset.petAction, renderFrames: Number(canvas.dataset.renderFrames), x: canvas.dataset.petX, blink: canvas.dataset.blink ?? canvas.dataset.blinkLeft, speaking: canvas.dataset.speaking });
       } else since = 0;
       if (Date.now() >= deadline) reject(new Error('Expected review pose did not appear'));
       else setTimeout(check, 40);

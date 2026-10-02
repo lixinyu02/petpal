@@ -876,6 +876,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.use('/api', (req, res) => res.status(404).json({ error: '接口不存在。' }));
   if (staticDir) {
     const directory = path.resolve(staticDir);
+    // Client package URLs are files, never SPA routes. In particular, an
+    // archived package must return 404 instead of a successful HTML download.
+    app.use('/downloads', express.static(path.join(directory, 'downloads'), { dotfiles: 'deny', index: false, redirect: false }),
+      (req, res) => res.status(404).json({ error: '安装包不存在或已归档，请从下载中心获取最新正式版。' }));
     app.use(express.static(directory, { dotfiles: 'deny', index: 'index.html' }));
     app.get('/{*splat}', (req, res, next) => { res.sendFile(path.join(directory, 'index.html'), error => error && next(error)); });
   }

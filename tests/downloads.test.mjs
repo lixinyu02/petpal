@@ -12,13 +12,13 @@ const published = [
 const json = (value, options) => new Response(JSON.stringify(value), options);
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
 
-test('actual published stable and prerelease metadata yields exact public packages without inventing Ubuntu', () => {
+test('actual published metadata exposes only stable packages without filling absent platforms from previews', () => {
   const packages = publishedDownloadPackages(published);
-  assert.equal(packages.length, 2);
-  assert.deepEqual(packages.map(item => [item.platform, item.version, item.channel, item.format]), [['android', '0.6.2', 'preview', 'apk'], ['windows', '0.6.1', 'stable', 'portable-exe']]);
-  assert.equal(packages[0].bytes, 21561010); assert.equal(packages[0].debug, true); assert.equal(packages[0].arch, 'universal');
-  assert.equal(packages[0].sha256, 'e2c12c270f4f047460b8eb60fcb6ee853622cfe5469d4b920b730c8c0b86e314');
-  assert.equal(packages[1].url, published[1].assets[0].browser_download_url);
+  assert.equal(packages.length, 1);
+  assert.deepEqual(packages.map(item => [item.platform, item.version, item.channel, item.format]), [['windows', '0.6.1', 'stable', 'portable-exe']]);
+  assert.equal(packages[0].bytes, 180858957); assert.equal(packages[0].debug, false); assert.equal(packages[0].arch, 'x64');
+  assert.equal(packages[0].sha256, 'f34f8d7ead1e418cb33dbe48fdd13f6ec445997b8e308a5373b99b6d4d30fd68');
+  assert.equal(packages[0].url, published[1].assets[0].browser_download_url);
   assert.equal(packages.some(item => item.platform === 'ubuntu'), false);
 });
 
@@ -39,9 +39,10 @@ test('Windows ZIP and EXE packages keep their architecture, with ZIP preferred o
   const zipDigest = 'a'.repeat(64);
   const fixture = release(tag, names.map((name, id) => asset(name, tag, { id: id + 80, ...(name.endsWith('.zip') ? { digest: `sha256:${zipDigest}` } : {}) })));
   const current = release('v0.9.2', [asset('PetPal-0.9.2-Windows-x64.exe', 'v0.9.2', { id: 90 })], { published_at: '2026-09-30T01:00:00Z' });
-  const packages = publishedDownloadPackages([fixture, current]);
-  assert.equal(packages.length, 5);
-  assert.equal(packages[0].version, '0.9.2', 'an older ZIP must not displace a newer release');
+  const newest = publishedDownloadPackages([fixture, current]);
+  assert.equal(newest.length, 1);
+  assert.equal(newest[0].version, '0.9.2', 'an older ZIP or architecture must not fill a newer release');
+  const packages = publishedDownloadPackages([fixture]);
   for (const arch of ['x64', 'arm64']) {
     const sameRelease = packages.filter(item => item.version === '0.9.1' && item.arch === arch);
     assert.deepEqual(sameRelease.map(item => item.format), ['portable-zip', 'portable-exe']);
@@ -50,7 +51,34 @@ test('Windows ZIP and EXE packages keep their architecture, with ZIP preferred o
     assert.equal(sameRelease[0].sha256, zipDigest);
     assert.equal(sameRelease[0].debug, false);
   }
-  assert.equal(packages.filter(item => item.format === 'portable-exe').length, 3, 'EXE remains selectable');
+  assert.equal(packages.filter(item => item.format === 'portable-exe').length, 2, 'EXE remains selectable');
+});
+
+test('global highest numeric stable version wins over release dates, order, lexical sorting and misleading preview flags', () => {
+  const old=release('v0.9.99',[asset('PetPal-0.9.99-Windows-x64.zip','v0.9.99',{id:11})],{published_at:'2026-10-03T15:00:00Z'});
+  const current=release('v0.10.0',[asset('PetPal-0.10.0-Android-release.apk','v0.10.0',{id:12})],{published_at:'2026-01-01T00:00:00Z'});
+  const higherDraft=release('v1.0.0',[asset('PetPal-1.0.0-Windows-x64.zip','v1.0.0',{id:13})],{draft:true});
+  const higherPreview=release('v2.0.0',[asset('PetPal-2.0.0-Windows-x64.zip','v2.0.0',{id:14})],{prerelease:true});
+  const suffixes=['v3.0.0-preview.1','v3.0.0-rc1','v3.0.0-alpha','v3.0.0+build.1','v03.0.0'].map(tag=>release(tag,[asset(`PetPal-${tag.slice(1)}-Windows-x64.zip`,tag,{id:15})]));
+  const all=[old,higherDraft,current,higherPreview,...suffixes];
+  for(const list of [all,[...all].reverse()]){
+    const packages=publishedDownloadPackages(list);assert.equal(packages.length,1);assert.equal(packages[0].version,'0.10.0');assert.equal(packages[0].platform,'android');assert.equal(packages[0].debug,false);
+  }
+  assert.deepEqual(publishedDownloadPackages([higherDraft,higherPreview,...suffixes]),[]);
+});
+
+test('a latest stable release with absent or invalid assets stays empty instead of falling back', () => {
+  const previous=release('v0.9.6',[asset('PetPal-0.9.6-Windows-x64.zip','v0.9.6')]);
+  const current=release('v0.9.7',[asset('PetPal-0.9.7-Windows-x64.zip','v0.9.7',{browser_download_url:'https://evil.test/package.zip'})]);
+  for(const patch of [{},{assets:[]},{assets:null},{published_at:null},{assets:Array(101).fill(current.assets[0])}])assert.deepEqual(publishedDownloadPackages([previous,{...current,...patch}]),[]);
+});
+
+test('one latest version keeps all supported platforms, architectures and Windows formats', () => {
+  const tag='v0.9.7',names=['Android-release.apk','Windows-x64.zip','Windows-x64.exe','Windows-arm64.zip','Windows-arm64.exe','Ubuntu-x64.tar.gz','Ubuntu-arm64.tar.gz'];
+  const packages=publishedDownloadPackages([release(tag,names.map((suffix,index)=>asset(`PetPal-0.9.7-${suffix}`,tag,{id:200+index}))),...published]);
+  assert.equal(packages.length,names.length);assert.ok(packages.every(item=>item.version==='0.9.7'&&item.channel==='stable'));
+  assert.deepEqual(new Set(packages.map(item=>item.platform)),new Set(['android','windows','ubuntu']));
+  for(const arch of ['x64','arm64'])assert.deepEqual(packages.filter(item=>item.platform==='windows'&&item.arch===arch).map(item=>item.format),['portable-zip','portable-exe']);
 });
 
 test('Windows ZIP accepts only an exact uploaded release asset, retaining version and trusted-URL validation', () => {
@@ -91,7 +119,7 @@ test('fixed GitHub endpoint has no credentials or redirects, concurrent reads sh
   } }); t.after(() => catalog.close());
   const a = catalog.list({ url: 'https://evil.test' }), b = catalog.list();
   ready.resolve(); const first = await a, second = await b;
-  assert.equal(calls, 1); assert.equal(second.packages.length, 2); assert.equal(first.error, null);
+  assert.equal(calls, 1); assert.equal(second.packages.length, 1); assert.equal(first.error, null);
   first.packages[0].url = 'https://evil.test'; assert.notEqual((await catalog.list()).packages[0].url, first.packages[0].url);
   clock += 101; await catalog.list(); assert.equal(calls, 2);
 });
@@ -120,6 +148,7 @@ test('invalid, excessive and truncated metadata fail closed with visible errors'
     async () => new Response('[{"unfinished"'),
     async () => new Response('[]', { headers: { 'content-length': '1000' } }),
     async () => new Response(' '.repeat(101)),
+    async () => json([], { headers: { link: '<https://api.github.com/repos/lixinyu02/petpal/releases?per_page=100&page=2>; rel="next"' } }),
   ]) {
     const catalog = createDownloadsCatalog({ fetchImpl, responseLimit: 100 }); t.after(() => catalog.close());
     const result = await catalog.list(); assert.ok(result.error); assert.deepEqual(result.packages, []);
