@@ -48,7 +48,7 @@ function factoryWebGlStub() {
   return context;
 }
 
-test('production avatar factory defaults to V11, keeps legacy limits, and isolates portrait controls from imported paths', async () => {
+test('production avatar factory defaults to V12, keeps legacy limits, and isolates portrait controls from imported paths', async () => {
   const source = await fs.readFile(new URL('../public/vendor/live2d/live2dcubismcore.min.js', import.meta.url), 'utf8');
   const sandbox = { console, setTimeout, clearTimeout, TextDecoder, TextEncoder, atob, btoa, window: {}, document: { currentScript: { src: 'https://petpal.test/vendor/live2d/live2dcubismcore.min.js' } } };
   vm.runInNewContext(source, sandbox, { timeout: 2000 });
@@ -73,7 +73,7 @@ test('production avatar factory defaults to V11, keeps legacy limits, and isolat
     requests.push(url.pathname);
     // Give imported-path controls the exact bundled model bytes, so only the
     // production pathname classification differs from the built-in case.
-    const pathname = url.pathname.replace(/^\/avatars\/user\/(akari-cubism-v(?:[6789]|10|11))\//u, '/avatars/$1/');
+    const pathname = url.pathname.replace(/^\/avatars\/user\/(akari-cubism-v(?:[6789]|10|11|12))\//u, '/avatars/$1/');
     assert.ok(pathname.startsWith('/avatars/') || pathname.startsWith('/vendor/'));
     const bytes = await fs.readFile(new URL(`../public${pathname}`, import.meta.url));
     return new Response(bytes, { headers: { 'Content-Length': String(bytes.length) } });
@@ -96,7 +96,8 @@ test('production avatar factory defaults to V11, keeps legacy limits, and isolat
   let avatar;
   try {
     for (const [modelUrl, expected, requestedManifest, referenceLayered = false] of [
-      [undefined, .9, '/avatars/akari-cubism-v11/akari.model3.json', true],
+      [undefined, .9, '/avatars/akari-cubism-v12/akari.model3.json', true],
+      ['/avatars/akari-cubism-v12/akari.model3.json', .9, '/avatars/akari-cubism-v12/akari.model3.json', true],
       ['/avatars/akari-cubism-v10/akari.model3.json', .9, '/avatars/akari-cubism-v10/akari.model3.json', true],
       ['/avatars/akari-cubism-v11/akari.model3.json', .9, '/avatars/akari-cubism-v11/akari.model3.json', true],
       ['/avatars/akari-cubism-v9/akari.model3.json', .9, '/avatars/akari-cubism-v9/akari.model3.json', true],
@@ -112,6 +113,7 @@ test('production avatar factory defaults to V11, keeps legacy limits, and isolat
       ['/avatars/user/akari-cubism-v9/akari.model3.json', .9, '/avatars/user/akari-cubism-v9/akari.model3.json'],
       ['/avatars/user/akari-cubism-v10/akari.model3.json', .9, '/avatars/user/akari-cubism-v10/akari.model3.json'],
       ['/avatars/user/akari-cubism-v11/akari.model3.json', .9, '/avatars/user/akari-cubism-v11/akari.model3.json'],
+      ['/avatars/user/akari-cubism-v12/akari.model3.json', .9, '/avatars/user/akari-cubism-v12/akari.model3.json'],
     ]) {
       const context = factoryWebGlStub(), location = new URL(`${origin}/`);
       const canvas = { width: 256, height: 384, ownerDocument: { defaultView: { Live2DCubismCore: core, location } }, getContext: type => { assert.equal(type, 'webgl2'); return context; } };
@@ -129,13 +131,13 @@ test('production avatar factory defaults to V11, keeps legacy limits, and isolat
       avatar.update(.1, { speaking: true, mouthOpen: .9, mouthShape: 'A' }, {});
       close(model.parameters.values[mouth], expected);
       const facialV10 = requestedManifest.includes('-v10/');
-      const featuresV11 = requestedManifest.includes('-v11/');
-      if (featuresV11) {
-        assert.equal(ids.length, 22, 'V11 must expose its actual 22 native controls');
+      const featuresRig = /-v(?:11|12)\//.test(requestedManifest);
+      if (featuresRig) {
+        assert.equal(ids.length, 22, 'Feature rigs must expose its actual 22 native controls');
         close(read('ParamMouthA'), referenceLayered ? 1 : .9);
         assert.equal(read('ParamMouthO'), 0);
         for (const missing of ['ParamWarm', 'ParamSad', 'ParamPout', 'ParamShy', 'ParamSurprise', 'ParamRelaxed', 'ParamMouthForm']) {
-          assert.equal(ids.includes(missing), false, 'V11 cannot simulate native controls with virtual parameter indices');
+          assert.equal(ids.includes(missing), false, 'Feature rigs cannot simulate native controls with virtual parameter indices');
           assert.equal(avatar.supportedParameters.includes(missing), false);
         }
         avatar.update(.1, { eyeSmile: 1, blinkLeft: .4, blinkRight: .2, browRaise: .6, browTilt: .5,
@@ -169,7 +171,7 @@ test('production avatar factory defaults to V11, keeps legacy limits, and isolat
       }
       avatar.update(0, { speaking: false, voiceEnergy: 1 }, {});
       assert.equal(model.parameters.values[mouth], 0);
-      if (featuresV11) {
+      if (featuresRig) {
         for (const name of ['ParamMouthA', 'ParamMouthO']) assert.equal(read(name), 0);
         avatar.update(0, { eyeSmile: 1, browRaise: 1, browTilt: 1, speaking: true, mouthOpen: 1, mouthShape: 'O' }, { gazeX: 1, gazeY: 1 }, { hidden: true });
         for (const name of ['ParamMouthOpenY', 'ParamMouthA', 'ParamMouthO', 'ParamEyeBallX', 'ParamEyeBallY', 'ParamBrowLY', 'ParamBrowRY', 'ParamBrowLAngle', 'ParamBrowRAngle']) assert.equal(read(name), 0);

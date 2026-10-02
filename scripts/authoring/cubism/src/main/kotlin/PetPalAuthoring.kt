@@ -321,13 +321,13 @@ private val referenceFeatureParameters = listOf(
 )
 private val referenceFeatureIds = referenceFeatureParameters.map { it.id }.toSet()
 
-private data class ReferenceFrame(val left: Float, val top: Float, val width: Float, val height: Float)
+internal data class ReferenceFrame(val left: Float, val top: Float, val width: Float, val height: Float)
 private fun referenceRootFrame(model: PuppetModel): ReferenceFrame {
   val root = model.deformers.single { it.id.raw == "DeformBodyXY" } as Deformer.Warp
   val points = neutralCell(requireNotNull(root.geometryGrid), model).form.controlPoints
   return ReferenceFrame(points[0], points[1], points[root.columns * 2] - points[0], points[root.rows * (root.columns + 1) * 2 + 1] - points[1])
 }
-private fun referenceHeadFrame(model: PuppetModel): ReferenceFrame {
+internal fun referenceHeadFrame(model: PuppetModel): ReferenceFrame {
   val root = referenceRootFrame(model)
   val rotation = model.deformers.single { it.id.raw == "DeformHeadRotation" } as Deformer.Rotation
   require(abs(rotation.baseAngle) < 0.00001f) { "Reference pixels require an upright, unrotated source calibration" }
@@ -947,11 +947,12 @@ private fun writeReferenceMetadata(output: Path, model: PuppetModel, gestures: B
 fun main(arguments: Array<String>) {
   require(arguments.size in 2..3) { "Usage: <layered-PSD> <local-output-directory> [classic|continuous-body|stable-portrait|reference-layered|reference-gestures|reference-expressions|reference-features]" }
   val profile = arguments.getOrElse(2) { "classic" }
-  require(profile in setOf("classic", "continuous-body", "stable-portrait", "reference-layered", "reference-gestures", "reference-expressions", "reference-features")) { "Unknown authoring profile: $profile" }
-  val referenceFeatures = profile == "reference-features"
+  require(profile in setOf("classic", "continuous-body", "stable-portrait", "reference-layered", "reference-gestures", "reference-expressions", "reference-features", "reference-natural-lids")) { "Unknown authoring profile: $profile" }
+  val naturalLids = profile == "reference-natural-lids"
+  val referenceFeatures = profile == "reference-features" || naturalLids
   val referenceExpressions = profile == "reference-expressions"
-  val referenceGestures = profile in setOf("reference-gestures", "reference-expressions", "reference-features")
-  val referenceLayered = profile in setOf("reference-layered", "reference-gestures", "reference-expressions", "reference-features")
+  val referenceGestures = profile in setOf("reference-gestures", "reference-expressions", "reference-features") || naturalLids
+  val referenceLayered = profile in setOf("reference-layered", "reference-gestures", "reference-expressions", "reference-features") || naturalLids
   val stablePortrait = profile == "stable-portrait"
   val continuousBody = profile in setOf("continuous-body", "stable-portrait")
   I18n.setLanguage(AppLanguage.ENGLISH, persist = false)
@@ -1056,6 +1057,7 @@ fun main(arguments: Array<String>) {
     if (referenceExpressions) println("Reference expressions: three additional local facial patches share the rigid head frame, start transparent, and remain below blink and A/O speaking mouth patches")
     if (referenceFeatures) println("Reference features: independent iris geometry with native eye-white masks; five continuous eyelid keys; independent two-axis eyebrows; no whole-face expression patches or new mouth-form geometry")
   }
+  if (naturalLids) exportNaturalEyelids(result, output, exportConfig)
   println("Exported ${result.exportedFiles.size} files; ${model.parameters.size} parameters; ${model.drawables.size} drawables; profile=$profile")
   result.warnings.forEach { System.err.println("Warning: $it") }
 }

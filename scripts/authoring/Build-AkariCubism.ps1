@@ -5,7 +5,7 @@ param(
   [string]$GradleUserHome,
   [string]$InputPsd,
   [string]$OutputDirectory,
-  [ValidateSet('classic', 'continuous-body', 'stable-portrait', 'reference-layered', 'reference-gestures', 'reference-expressions', 'reference-features')][string]$Profile = 'classic',
+  [ValidateSet('classic', 'continuous-body', 'stable-portrait', 'reference-layered', 'reference-gestures', 'reference-expressions', 'reference-features', 'reference-natural-lids')][string]$Profile = 'classic',
   [switch]$BuildUpstream,
   [switch]$Offline
 )
@@ -16,7 +16,7 @@ if (-not $SourceDirectory) { $SourceDirectory = Join-Path $taskRoot '.tools\psd2
 if (-not $GradleUserHome) { $GradleUserHome = Join-Path $taskRoot '.tools\psd2live-gradle' }
 if (-not $InputPsd) {
   # V8 gestures intentionally reuse the exact V7 layered artwork; only native geometry changes.
-  $taskAvatarSource = if ($Profile -eq 'reference-features') { 'akari-cubism-v11' } elseif ($Profile -eq 'reference-expressions') { 'akari-cubism-v10' } elseif ($Profile -in @('reference-layered', 'reference-gestures')) { 'akari-cubism-v7' } elseif ($Profile -eq 'stable-portrait') { 'akari-cubism-v6' } elseif ($Profile -eq 'continuous-body') { 'akari-cubism-v2' } else { 'akari-cubism' }
+  $taskAvatarSource = if ($Profile -in @('reference-features', 'reference-natural-lids')) { 'akari-cubism-v11' } elseif ($Profile -eq 'reference-expressions') { 'akari-cubism-v10' } elseif ($Profile -in @('reference-layered', 'reference-gestures')) { 'akari-cubism-v7' } elseif ($Profile -eq 'stable-portrait') { 'akari-cubism-v6' } elseif ($Profile -eq 'continuous-body') { 'akari-cubism-v2' } else { 'akari-cubism' }
   $InputPsd = Join-Path $taskRoot "outputs\avatars\$taskAvatarSource\akari.psd"
 }
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $taskRoot '.tools\cubism-authoring\model' }

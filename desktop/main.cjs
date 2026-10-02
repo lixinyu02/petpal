@@ -209,7 +209,7 @@ async function inspectAvatarWindow(win, requireWorld, kind, expectedCatEnabled) 
         && canvas.getAttribute('aria-hidden') !== 'true' && style.display !== 'none' && style.visibility === 'visible' && !document.hidden;
       const ready = ${requireWorld ? `!!document.querySelector('.companion-world[data-ready="true"][data-companion-kind="${kind}"]')` : 'true'};
       const cubism = document.querySelector('.cubism-scene[data-avatar-mode="cubism"]');
-      const modelLoaded = performance.getEntriesByType('resource').some(entry => new URL(entry.name).pathname === '/avatars/akari-cubism-v11/akari.moc3');
+      const modelLoaded = performance.getEntriesByType('resource').some(entry => new URL(entry.name).pathname === '/avatars/akari-cubism-v12/akari.moc3');
       const expectedRenderer = ${JSON.stringify(kind)} === 'anime'
         ? canvas?.dataset.avatarRenderer === 'cubism' && !!cubism && modelLoaded && Number(canvas.dataset.mocVersion) > 0
         : !['mesh2d', 'cubism'].includes(canvas?.dataset.avatarRenderer);
@@ -226,7 +226,7 @@ async function inspectAvatarWindow(win, requireWorld, kind, expectedCatEnabled) 
           storedKind: localStorage.getItem('petpal.companionKind'),
           display: display && { version: display.version, kind: display.kind, catEnabled: display.catEnabled },
           blink: canvas.dataset.blink ?? canvas.dataset.blinkLeft, speaking: canvas.dataset.speaking,
-          cubismModel: modelLoaded ? 'akari-cubism-v11' : null, mocVersion: canvas.dataset.mocVersion, coreVersion: canvas.dataset.coreVersion,
+          cubismModel: modelLoaded ? 'akari-cubism-v12' : null, mocVersion: canvas.dataset.mocVersion, coreVersion: canvas.dataset.coreVersion,
           expression: canvas.dataset.expression, mouthShape: canvas.dataset.mouthShape, mouthOpen: canvas.dataset.mouthOpen,
           phase: canvas.dataset.phase, speechSource: canvas.dataset.speechSource
         });

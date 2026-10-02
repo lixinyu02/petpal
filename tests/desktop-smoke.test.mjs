@@ -15,7 +15,7 @@ function smokeFunction(name, environment) {
   return context[name];
 }
 
-test('desktop release smoke requires a live native Cubism V11 model and rejects fallback', async () => {
+test('desktop release smoke requires a live native Cubism V12 model and rejects fallback', async () => {
   async function inspect({ renderer = 'cubism', native = true, moc = true } = {}) {
     let time = 0;
     const canvas = {
@@ -26,7 +26,7 @@ test('desktop release smoke requires a live native Cubism V11 model and rejects 
     };
     const win = { webContents: { executeJavaScript: code => vm.runInNewContext(code, {
       document: { hidden: false, querySelectorAll: () => [canvas], querySelector: selector => selector.startsWith('.cubism-scene') ? native : true },
-      performance: { getEntriesByType: () => moc ? [{ name: 'http://localhost/avatars/akari-cubism-v11/akari.moc3' }] : [] },
+      performance: { getEntriesByType: () => moc ? [{ name: 'http://localhost/avatars/akari-cubism-v12/akari.moc3' }] : [] },
       localStorage: { getItem: key => key === 'petpal.displayCompanion' ? JSON.stringify({ version: 2, kind: 'anime', catEnabled: false }) : null },
       getComputedStyle: () => ({ display: 'block', visibility: 'visible' }), URL,
       innerWidth: 400, innerHeight: 600, devicePixelRatio: 1, Date: { now: () => time },
@@ -36,7 +36,7 @@ test('desktop release smoke requires a live native Cubism V11 model and rejects 
   }
   const ready = await inspect();
   assert.equal(ready.renderer, 'cubism');
-  assert.equal(ready.cubismModel, 'akari-cubism-v11');
+  assert.equal(ready.cubismModel, 'akari-cubism-v12');
   assert.equal(ready.blink, '0.25');
   for (const setup of [{ renderer: 'mesh2d' }, { native: false }, { moc: false }]) {
     await assert.rejects(inspect(setup), /did not become ready/);

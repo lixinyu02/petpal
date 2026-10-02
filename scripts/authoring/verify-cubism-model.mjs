@@ -9,9 +9,10 @@ assert(manifestArg, 'Usage: node verify-official-core.mjs <model3.json> [receipt
 const projectRoot = path.resolve(import.meta.dirname, '../..');
 const profileIndex = flags.indexOf('--profile');
 const authoringProfile = profileIndex >= 0 ? flags[profileIndex + 1] : 'standard';
-assert(['standard', 'reference-layered', 'reference-gestures', 'reference-expressions', 'reference-features'].includes(authoringProfile), 'Unknown verification profile');
-const referenceLayered = ['reference-layered', 'reference-gestures', 'reference-expressions', 'reference-features'].includes(authoringProfile);
-const referenceFeatures = authoringProfile === 'reference-features';
+assert(['standard', 'reference-layered', 'reference-gestures', 'reference-expressions', 'reference-features', 'reference-natural-lids'].includes(authoringProfile), 'Unknown verification profile');
+const referenceLayered = ['reference-layered', 'reference-gestures', 'reference-expressions', 'reference-features', 'reference-natural-lids'].includes(authoringProfile);
+const referenceFeatures = ['reference-features', 'reference-natural-lids'].includes(authoringProfile);
+const naturalEyelids = authoringProfile === 'reference-natural-lids';
 const referenceExpressions = authoringProfile === 'reference-expressions';
 const referenceEmotionBindings = referenceFeatures ? [] : [['ParamWarm', 'warm'], ['ParamSad', 'sad'], ['ParamPout', 'pout'],
   ...(referenceExpressions ? [['ParamShy', 'shy'], ['ParamSurprise', 'surprise'], ['ParamRelaxed', 'relaxed']] : [])];
@@ -85,7 +86,7 @@ try {
   const required = referenceLayered
     ? ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX', 'ParamBodyAngleY', 'ParamBodyAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamMouthOpenY', 'ParamBreath', 'ParamHairFront', 'ParamMouthA', 'ParamMouthO', ...referenceEmotionBindings.slice(0, 3).map(([id]) => id)]
     : ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamEyeBallX', 'ParamEyeBallY', 'ParamMouthOpenY', 'ParamBreath'];
-  if (['reference-gestures', 'reference-expressions', 'reference-features'].includes(authoringProfile)) required.push('ParamHandsLift', 'ParamHandsSway', 'ParamSleeveEase');
+  if (['reference-gestures', 'reference-expressions', 'reference-features', 'reference-natural-lids'].includes(authoringProfile)) required.push('ParamHandsLift', 'ParamHandsSway', 'ParamSleeveEase');
   if (referenceExpressions) required.push('ParamShy', 'ParamSurprise', 'ParamRelaxed');
   if (referenceFeatures) required.push('ParamEyeBallX', 'ParamEyeBallY', 'ParamBrowLY', 'ParamBrowRY', 'ParamBrowLAngle', 'ParamBrowRAngle');
   for (const id of required) assert(parameters.some(parameter => parameter.id === id), `Required rig parameter missing: ${id}`);
@@ -287,7 +288,10 @@ try {
         assert(sameGeometry(pose.positions[iris], neutral.positions[iris]), 'Eyelid closure must crop the iris, never squash it');
         for (const index of [white, upper, lower]) {
           if (open < 1) assert(!sameGeometry(pose.positions[index], neutral.positions[index]), 'Eyelid needs native geometry through partial closure');
-          assert(pose.positions[index].every((coordinate, i) => i % 2 || Math.abs(coordinate - neutral.positions[index][i]) < 1e-6), 'Eyelid changes eye width');
+          // With the revised column topology, 101 actual Core closure samples measured a
+          // 0.04343px maximum X reconstruction error (end keys <0.000023px). Keep the
+          // existing <0.08 source-pixel bake tolerance, not a unit-dependent epsilon.
+          assert(pose.positions[index].every((coordinate, i) => i % 2 || Math.abs(coordinate - neutral.positions[index][i]) * canvas.PixelsPerUnit < nativePixelTolerance), 'Eyelid changes eye width');
           const area = (points, a, b, c) => (points[b] - points[a]) * (points[c + 1] - points[a + 1]) - (points[b + 1] - points[a + 1]) * (points[c] - points[a]);
           const indices = model.drawables.indices[index];
           for (let triangle = 0; triangle < indices.length; triangle += 3) {
@@ -298,6 +302,13 @@ try {
           }
         }
         eyeSamples.set(open, pose);
+        if (naturalEyelids) {
+          assert.equal(pose.opacities[lower], 1, 'Natural lower eyelid must not dissolve');
+          if (open > 0) {
+            assert.equal(pose.opacities[iris], 1, 'Natural blink must crop the iris rather than dissolve it');
+            assert.equal(pose.opacities[white], 1, 'Natural blink must close the aperture rather than dissolve it');
+          }
+        }
         featureGeometry.push({ side, parameter: openParameter, value: open, nativeGeometry: true, irisShapePreserved: true });
       }
       // Mid-interval samples must be actual Core interpolation, not texture/visibility steps.

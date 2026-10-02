@@ -3,7 +3,7 @@ import { createCubismParameterBridge, cubismParameterTargets } from './parameter
 
 export const CUBISM_RUNTIME_ROOT = '/avatars/cubism-runtime/';
 export const CUBISM_CORE_URL = '/vendor/live2d/live2dcubismcore.min.js';
-const DEFAULT_MODEL = '/avatars/akari-cubism-v11/akari.model3.json';
+const DEFAULT_MODEL = '/avatars/akari-cubism-v12/akari.model3.json';
 const FRAMEWORK_EXPORTS = ['CubismFramework', 'CubismModelSettingJson', 'CubismMoc', 'CubismUserModel', 'CubismMatrix44', 'CubismShaderManager_WebGL', 'releaseCubismContext'];
 let corePromise, modulePromise;
 const runtimes = new WeakMap();
@@ -290,13 +290,18 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
       // another idle blink into it produces double blinks and long closures.
       // Preserve the authored eyelids of reactions (including outgoing fades).
       const reactionEyes = new Set(motionLayers.filter(record => record.group !== 'Idle').flatMap(record => [...record.parameters]));
+      // TapHead's 0.26 hold was authored for the older opaque blink patches.
+      // On continuous V11 lids it becomes a long squint, amplified again by
+      // emotion/blink multiplication. Keep live lids authoritative throughout
+      // this touch and its fade; the same native head/hand motion still plays.
+      const liveTouchEyes = deformationProfile === 'reference-features' && motionLayers.some(record => record.group === 'TapHead');
       const winkEyes = motionLayers.some(record => record.group === 'Wink' && record.parameters.has('ParamEyeROpen')) ? ['ParamEyeROpen'] : [];
       const nativeReactionParameters = new Set(motionLayers.filter(record => record.group !== 'Idle').flatMap(record => [...record.parameters]).filter(name => ANGLES.includes(name)));
       const reaction = motionLayers.find(record => record.group !== 'Idle')?.group || '';
       const targets = cubismParameterTargets(pose, follow, { ...options, nativeMotion: reaction || motionGroup, nativeParameters: [...own], nativeReactionParameters, supportedParameters: bridge.supported, deformationProfile });
       bridge.apply(targets, {
         additive: [...ANGLES, ...GAZE].filter(name => own.has(name)),
-        multiply: EYELIDS.filter(name => own.has(name) && !winkEyes.includes(name) && (!referencePortrait || reactionEyes.has(name))),
+        multiply: EYELIDS.filter(name => !liveTouchEyes && own.has(name) && !winkEyes.includes(name) && (!referencePortrait || reactionEyes.has(name))),
         dominant: FACE.filter(name => own.has(name)),
         preserve: [...(own.has('ParamBreath') ? ['ParamBreath'] : []), ...(own.has('ParamEyeBallForm') ? ['ParamEyeBallForm'] : []), ...HANDS.filter(name => own.has(name)), ...winkEyes],
       });
@@ -429,7 +434,7 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
       -(canvasInfo.CanvasOriginY - canvasInfo.CanvasHeight / 2) / canvasInfo.PixelsPerUnit * authoredScale);
     // A user-supplied model must never inherit limits from its file name or
     // supported parameter IDs. Only this bundled, reviewed model opts in.
-    const deformationProfile = modelPath.pathname === '/avatars/akari-cubism-v11/akari.model3.json' ? 'reference-features'
+    const deformationProfile = ['/avatars/akari-cubism-v11/akari.model3.json', '/avatars/akari-cubism-v12/akari.model3.json'].includes(modelPath.pathname) ? 'reference-features'
       : ['/avatars/akari-cubism-v7/akari.model3.json', '/avatars/akari-cubism-v8/akari.model3.json', '/avatars/akari-cubism-v9/akari.model3.json', '/avatars/akari-cubism-v10/akari.model3.json'].includes(modelPath.pathname) ? 'reference-layered'
       : ['/avatars/akari-cubism-v3/akari.model3.json', '/avatars/akari-cubism-v4/akari.model3.json', '/avatars/akari-cubism-v5/akari.model3.json', '/avatars/akari-cubism-v6/akari.model3.json'].includes(modelPath.pathname) ? 'akari-stable' : 'standard';
     const controller = createCubismFrameController({ model, avatar, bridge, motions, expressions, deformationProfile });

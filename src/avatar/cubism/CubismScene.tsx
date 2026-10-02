@@ -24,8 +24,8 @@ const development = Boolean((import.meta as ImportMeta & { env?: { DEV?: boolean
 
 /** A real Cubism surface, with the stable original character while loading or unsupported. */
 export default function CubismScene(props: CubismSceneProps) {
-  const { modelUrl = '/avatars/akari-cubism-v11/akari.model3.json', command, compact = false, interactive = true, className = '' } = props;
-  const referencePortrait = /^\/avatars\/akari-cubism-v(?:7|8|9|10|11)\/akari\.model3\.json$/.test(modelUrl);
+  const { modelUrl = '/avatars/akari-cubism-v12/akari.model3.json', command, compact = false, interactive = true, className = '' } = props;
+  const referencePortrait = /^\/avatars\/akari-cubism-v(?:7|8|9|10|11|12)\/akari\.model3\.json$/.test(modelUrl);
   const host = useRef<HTMLDivElement>(null);
   const callbacks = useRef(props); callbacks.current = props;
   const requested = useRef(command); requested.current = command;
@@ -169,7 +169,7 @@ export default function CubismScene(props: CubismSceneProps) {
   }, [modelUrl, compact, interactive]);
 
   useEffect(() => { if (props.performanceInput) quietInput.current?.(props.performanceInput); }, [props.performanceInput]);
-  return <div ref={host} className={`pet-three-scene anime-scene cubism-scene ${className}`} data-character-style={['/avatars/akari-cubism-v7/akari.model3.json', '/avatars/akari-cubism-v8/akari.model3.json', '/avatars/akari-cubism-v9/akari.model3.json', '/avatars/akari-cubism-v10/akari.model3.json', '/avatars/akari-cubism-v11/akari.model3.json'].includes(modelUrl) ? 'akari-soft' : undefined}>
+  return <div ref={host} className={`pet-three-scene anime-scene cubism-scene ${className}`} data-character-style={referencePortrait ? 'akari-soft' : undefined}>
     {mode !== 'cubism' && <AnimeScene {...props} className="cubism-fallback" onReady={ready} />}
   </div>;
 }
