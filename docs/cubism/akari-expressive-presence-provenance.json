@@ -1,0 +1,263 @@
+{
+  "version": 9,
+  "date": "2026-10-02",
+  "kind": "motion-and-presence-release",
+  "rigVersion": 8,
+  "rigProfile": "reference-gestures",
+  "rigProvenance": "docs/cubism/akari-hand-gestures-provenance.json",
+  "artworkChanged": false,
+  "newRigExport": false,
+  "newParameters": false,
+  "sourcePsd": "outputs/avatars/akari-cubism-v7/akari.psd",
+  "editorCandidate": "outputs/avatars/akari-cubism-v8/akari.cmo3",
+  "generator": {
+    "path": "scripts/authoring/prepare-akari-expression-motions.mjs",
+    "bytes": 8675,
+    "sha256": "90836167e5ab7afbaaf345a12eed04ae7302a9bc7f69abacc8ac4e7ae5bccb2b"
+  },
+  "reusedFiles": [
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.moc3",
+      "bytes": 761024,
+      "sha256": "29ebb1c652f658b2033996583409b920beecd94d2c2b3667b6c67e6820694246",
+      "from": "public/avatars/akari-cubism-v8/akari.moc3"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.2048/texture_00.png",
+      "bytes": 3754174,
+      "sha256": "7c3d2c7ab8762a0012f38977edbe3fc865d3c47cd8a0f194fee30574ddd94c66",
+      "from": "public/avatars/akari-cubism-v8/akari.2048/texture_00.png"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.physics3.json",
+      "bytes": 3269,
+      "sha256": "b3a0a73c830ad0729f0c86e1096167763a0214014f741aa858d4150971a3eded",
+      "from": "public/avatars/akari-cubism-v8/akari.physics3.json"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.cdi3.json",
+      "bytes": 3530,
+      "sha256": "75ddaf005b497ad93cef0ab4e144df3c3462c2ceef43eb0bf557b9ff1bcf59ae",
+      "from": "public/avatars/akari-cubism-v8/akari.cdi3.json"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.psd2live.json",
+      "bytes": 6662,
+      "sha256": "de04af57052cf2069e6f23ba7731905bb7114ae632e6f222a52ee3fe6b0dc847",
+      "from": "public/avatars/akari-cubism-v8/akari.psd2live.json"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.idle.motion3.json",
+      "bytes": 13699,
+      "sha256": "4898654305a525d6031df126eef53c8555aab89c940f96b3e3666f699ff56c69",
+      "from": "public/avatars/akari-cubism-v8/akari.idle.motion3.json"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.blink.motion3.json",
+      "bytes": 796,
+      "sha256": "3aeaeeae3c1f0bf77320db4f2e3c5a6fdfe20bc6aa394ff8f29676d33377e34c",
+      "from": "public/avatars/akari-cubism-v8/akari.blink.motion3.json"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.nod.motion3.json",
+      "bytes": 1180,
+      "sha256": "99ffb3b7330169eed05c156359f23f2852cb88d005d42034ae955e989da3f601",
+      "from": "public/avatars/akari-cubism-v8/akari.nod.motion3.json"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.shake.motion3.json",
+      "bytes": 1050,
+      "sha256": "714c60b27c378ba114c363b6ae942bcb51d5d56eb7a329c50d8b74fd01ba439e",
+      "from": "public/avatars/akari-cubism-v8/akari.shake.motion3.json"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.taphead.motion3.json",
+      "bytes": 4398,
+      "sha256": "b503171905c7960acdd09cf2c1e7640a1c6739e89ce838d7274fe361f6de9e3a",
+      "from": "public/avatars/akari-cubism-v8/akari.taphead.motion3.json"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.greet.motion3.json",
+      "bytes": 4294,
+      "sha256": "a926fe730f7d6de5ddaa4f0c78f3da2c10b0a9adc667a30e28e75d13a10c5aaf",
+      "from": "public/avatars/akari-cubism-v8/akari.greet.motion3.json"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.shy.motion3.json",
+      "bytes": 2810,
+      "sha256": "db3a9e5635f5bae707ad1a4a423a5b903962fc5d72bd6b80e82e88923096aeaa",
+      "from": "public/avatars/akari-cubism-v8/akari.shy.motion3.json"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.sway.motion3.json",
+      "bytes": 2594,
+      "sha256": "b212b91b4fa81b0b0d649193e962069b70af0f9708df0fc0b9af5129f353e190",
+      "from": "public/avatars/akari-cubism-v8/akari.sway.motion3.json"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.bow.motion3.json",
+      "bytes": 2202,
+      "sha256": "19aa6d3d38a4a921875fe732eca94b0984c7f4003dbb89fbb371239744225c05",
+      "from": "public/avatars/akari-cubism-v8/akari.bow.motion3.json"
+    }
+  ],
+  "runtime": [
+    {
+      "path": "public/avatars/akari-cubism-v9/README.md",
+      "bytes": 1141,
+      "sha256": "42fdd6bbd3021a0a92712921bb423fd26989546ee008dbd815015a4fe456fff0"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.2048/texture_00.png",
+      "bytes": 3754174,
+      "sha256": "7c3d2c7ab8762a0012f38977edbe3fc865d3c47cd8a0f194fee30574ddd94c66"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.blink.motion3.json",
+      "bytes": 796,
+      "sha256": "3aeaeeae3c1f0bf77320db4f2e3c5a6fdfe20bc6aa394ff8f29676d33377e34c"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.bow.motion3.json",
+      "bytes": 2202,
+      "sha256": "19aa6d3d38a4a921875fe732eca94b0984c7f4003dbb89fbb371239744225c05"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.cdi3.json",
+      "bytes": 3530,
+      "sha256": "75ddaf005b497ad93cef0ab4e144df3c3462c2ceef43eb0bf557b9ff1bcf59ae"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.curious.motion3.json",
+      "bytes": 2233,
+      "sha256": "a829e41b61a1d9176a170a8cee6f3791d77b12aa28354bc3a44a8d9741f4c652"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.doze.motion3.json",
+      "bytes": 2798,
+      "sha256": "f5bb79969a8bed90bd94edc9a522ff7c42b9b74d686f55ded7a91a7f382ec86e"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.greet.motion3.json",
+      "bytes": 4294,
+      "sha256": "a926fe730f7d6de5ddaa4f0c78f3da2c10b0a9adc667a30e28e75d13a10c5aaf"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.idle.motion3.json",
+      "bytes": 13699,
+      "sha256": "4898654305a525d6031df126eef53c8555aab89c940f96b3e3666f699ff56c69"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.listen.motion3.json",
+      "bytes": 2375,
+      "sha256": "afce371c760d7d00872a3489e5efb122337bf30ad5d037948705dac64bd3a860"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.moc3",
+      "bytes": 761024,
+      "sha256": "29ebb1c652f658b2033996583409b920beecd94d2c2b3667b6c67e6820694246"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.model3.json",
+      "bytes": 2684,
+      "sha256": "c461b49aa1b2910398cfe65f55fb0064a1519ea07bf9035572d72a9559660c68"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.nod.motion3.json",
+      "bytes": 1180,
+      "sha256": "99ffb3b7330169eed05c156359f23f2852cb88d005d42034ae955e989da3f601"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.physics3.json",
+      "bytes": 3269,
+      "sha256": "b3a0a73c830ad0729f0c86e1096167763a0214014f741aa858d4150971a3eded"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.psd2live.json",
+      "bytes": 6662,
+      "sha256": "de04af57052cf2069e6f23ba7731905bb7114ae632e6f222a52ee3fe6b0dc847"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.reassure.motion3.json",
+      "bytes": 2389,
+      "sha256": "fd18587c1fd52dc20168ae4d79dec44d2bd12640250f677de3281dec10114fda"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.shake.motion3.json",
+      "bytes": 1050,
+      "sha256": "714c60b27c378ba114c363b6ae942bcb51d5d56eb7a329c50d8b74fd01ba439e"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.shy.motion3.json",
+      "bytes": 2810,
+      "sha256": "db3a9e5635f5bae707ad1a4a423a5b903962fc5d72bd6b80e82e88923096aeaa"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.surprise.motion3.json",
+      "bytes": 2356,
+      "sha256": "967bdf292c425c78cbb498d078ef5455c59963d3ca78c5fb1f46bf0cebfdc0b9"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.sway.motion3.json",
+      "bytes": 2594,
+      "sha256": "b212b91b4fa81b0b0d649193e962069b70af0f9708df0fc0b9af5129f353e190"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.taphead.motion3.json",
+      "bytes": 4398,
+      "sha256": "b503171905c7960acdd09cf2c1e7640a1c6739e89ce838d7274fe361f6de9e3a"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.think.motion3.json",
+      "bytes": 2659,
+      "sha256": "966ba7f3a05e509b21537fbbc6c522cbc6471ddb42167f9424f0a82dfc33a18f"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v9/akari.wink.motion3.json",
+      "bytes": 2010,
+      "sha256": "bca75e3b94a7425792860e41c7a745d4c1e0674e288e0d7bceedefb75774aa97"
+    }
+  ],
+  "groups": [
+    "Idle",
+    "Blink",
+    "Nod",
+    "Shake",
+    "TapHead",
+    "Greet",
+    "Shy",
+    "Sway",
+    "Bow",
+    "Curious",
+    "Think",
+    "Listen",
+    "Surprise",
+    "Reassure",
+    "Wink",
+    "Doze"
+  ],
+  "validation": {
+    "officialCore": "6.0.1",
+    "mocVersion": 5,
+    "parameters": 19,
+    "drawables": 11,
+    "vertices": 2550,
+    "corePoses": 64,
+    "regressionTests": 271,
+    "coreReceipt": {
+      "path": "evidence/cubism-presence-20261002/core.json",
+      "bytes": 32155,
+      "sha256": "e3a85e18a7cefd3fca01adc039e61d230192cd69af60ca334c1c818fd8951046"
+    },
+    "officialEditorRoundtrip": false,
+    "physicalDevices": false,
+    "realSpeechServiceRetested": false
+  },
+  "boundaries": {
+    "independentEyeGaze": false,
+    "continuousEyelidGeometry": false,
+    "independentFingers": false,
+    "fullArmWave": false,
+    "notes": "V8 rig and original portrait reused. New native motions and semantic/idle performance; no claim of new facial topology."
+  }
+}

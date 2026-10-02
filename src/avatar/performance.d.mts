@@ -1,8 +1,8 @@
 import type { SpeechEmotion } from './speech-emotion.mjs';
 export type PerformancePhase = 'idle' | 'listening' | 'thinking' | 'speaking' | 'error';
 export type AvatarExpression = 'neutral' | 'warm' | 'curious' | 'thoughtful' | 'surprised' | 'shy' | 'happy' | 'playful' | 'concerned' | 'sad' | 'downcast' | 'excited' | 'smug' | 'pout' | 'relieved' | 'determined' | 'hesitant' | 'sleepy' | 'expectant' | 'aggrieved' | 'tender';
-export type AvatarGesture = 'none' | 'nod' | 'shake' | 'tilt' | 'shy' | 'bounce' | 'recoil' | 'settle' | 'leanIn' | 'shrug' | 'bow' | 'peek' | 'sway' | 'doze';
-export type AvatarMicroExpression = 'none' | 'glance' | 'softBlink' | 'softSmile';
+export type AvatarGesture = 'none' | 'nod' | 'shake' | 'tilt' | 'shy' | 'bounce' | 'recoil' | 'settle' | 'leanIn' | 'shrug' | 'bow' | 'peek' | 'sway' | 'doze' | 'wink';
+export type AvatarMicroExpression = 'none' | 'glance' | 'softBlink' | 'softSmile' | 'doubleBlink' | 'headTilt' | 'breathPause';
 export interface AvatarReaction { id: string; kind: 'pet' | 'greet' | 'wake' }
 export type MouthShape = 'rest' | 'A' | 'E' | 'O' | 'M';
 export interface PerformanceInput {
@@ -52,6 +52,8 @@ export interface AvatarPerformanceSnapshot {
   headNod: number;
   /** A single semantic or touch reaction, never a repeating idle animation. */
   gesture:AvatarGesture;
+  /** Stable while one actual cue runs, new for every accepted cue, empty at rest. */
+  gestureCueId:string;
   gestureProgress:number;
   /** -1..1: positive lean approaches viewer, lift moves up, turn/shake move screen-right. */
   bodyLean:number;
@@ -60,7 +62,7 @@ export interface AvatarPerformanceSnapshot {
   headShake:number;
   /** 0..1 controlled shoulder elevation; never moves the neck or face. */
   shoulderLift:number;
-  /** Low-priority idle overlay; poses are already included in gaze, blink and smile channels. */
+  /** Low-priority idle overlay; poses are already included in face, head and body channels. */
   microExpression:AvatarMicroExpression;
   microProgress:number;
   /** Signed -1..1 expression gaze offset; zero during reduced motion. */

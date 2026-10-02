@@ -1,8 +1,9 @@
 const clamp=value=>Math.max(0,Math.min(1,value));
 const smooth=value=>{const x=clamp(value);return x*x*(3-2*x);};
-const INITIAL_WAIT=8.5,intervals=[11,13,10.5],kinds=['glance','softBlink','softSmile'];
-const durations={glance:2,softBlink:1.1,softSmile:2.4};
-const rest=()=>({microExpression:'none',microProgress:0,gazeOffsetX:0,blink:0,smileAmount:0,warmAmount:0});
+const INITIAL_WAIT=8.5,intervals=[11,13,10.5],kinds=['glance','softBlink','softSmile','doubleBlink','headTilt','breathPause'];
+const durations={glance:2,softBlink:1.1,softSmile:2.4,doubleBlink:1.15,headTilt:2.6,breathPause:2.8};
+const rest=()=>({microExpression:'none',microProgress:0,gazeOffsetX:0,blink:0,smileAmount:0,warmAmount:0,headTilt:0,headNod:0,bodyLean:0,bodyLift:0});
+const blinkPulse=(progress,start,end)=>progress>start&&progress<end?Math.sin((progress-start)/(end-start)*Math.PI):0;
 
 /** Low-priority idle cues; interruption starts a fresh quiet interval, never a queue. */
 export function createAvatarMicroacting(){
@@ -30,7 +31,10 @@ export function createAvatarMicroacting(){
     const output={...rest(),microExpression:active.kind,microProgress:clamp(progress)};
     if(active.kind==='glance')output.gazeOffsetX=.34*amount*active.direction;
     else if(active.kind==='softBlink')output.blink=amount;
-    else{output.smileAmount=.22*amount;output.warmAmount=.12*amount;}
+    else if(active.kind==='softSmile'){output.smileAmount=.22*amount;output.warmAmount=.12*amount;}
+    else if(active.kind==='doubleBlink')output.blink=Math.max(blinkPulse(progress,.12,.32),blinkPulse(progress,.47,.69));
+    else if(active.kind==='headTilt'){output.headTilt=.075*amount*active.direction;output.gazeOffsetX=.045*amount*active.direction;}
+    else if(active.kind==='breathPause'){output.headNod=.035*amount;output.bodyLean=.025*amount;output.bodyLift=-.03*amount;}
     return output;
   }
   function reset(){cancel();sequence=0;}

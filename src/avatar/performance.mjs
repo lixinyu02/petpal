@@ -10,6 +10,7 @@ const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 const ease = (value, target, dt, rate = 12) => value + (target - value) * (1 - Math.exp(-dt * rate));
 const FACE_CHANNELS = ['warmAmount', 'curiousAmount', 'surpriseAmount', 'concernAmount', 'smileAmount', 'sadAmount', 'downcastAmount', 'excitedAmount', 'shyAmount', 'smugAmount', 'poutAmount', 'reliefAmount', 'determinedAmount', 'hesitantAmount', 'sleepyAmount', 'expectantAmount', 'aggrievedAmount', 'tenderAmount', 'eyeSmile', 'tearAmount'];
 const NEGATIVE_EXPRESSIONS = new Set(['sad','downcast','concerned','pout','determined','hesitant','aggrieved']);
+const BRIGHT_GESTURES = new Set(['wink','bounce','sway']);
 // Authenticated voice metadata selects the mood. PCM energy only drives the
 // mouth/voice cadence, never which gesture or emotion is performed.
 const SPOKEN_GESTURES = { happy: 'sway', excited: 'bounce', tender: 'sway', shy: 'shy' };
@@ -45,7 +46,7 @@ const expressions = {
   concerned: { warmAmount: .18, curiousAmount: .18, concernAmount: 1, smileAmount: .05, browRaise: .14, browTilt: .42, gazeOffsetX: -.05, gazeOffsetY: -.1, headTilt: -.07 },
 };
 const reactions = { pet: { expression: 'happy', duration: 1.65, amount: .62 }, greet: { expression: 'playful', duration: 1.55, amount: .72 }, wake: { expression: 'warm', duration: 1.2, amount: .38 } };
-const neutral = () => ({ expression: 'neutral', expressionAmount: 0, warmAmount: 0, curiousAmount: 0, surpriseAmount: 0, concernAmount: 0, smileAmount: 0, sadAmount: 0, downcastAmount: 0, excitedAmount: 0, shyAmount: 0, smugAmount: 0, poutAmount: 0, reliefAmount: 0, determinedAmount: 0, hesitantAmount: 0, sleepyAmount: 0, expectantAmount: 0, aggrievedAmount: 0, tenderAmount: 0, eyeSmile: 0, tearAmount: 0, voiceEnergy: 0, mouthOpen: 0, mouthShape: 'rest', blinkLeft: 0, blinkRight: 0, browRaise: 0, browTilt: 0, blush: 0, headTilt: 0, headNod: 0, gazeOffsetX: 0, gazeOffsetY: 0, gesture: 'none', gestureProgress: 0, bodyLean: 0, bodyLift: 0, bodyTurn: 0, headShake: 0, shoulderLift: 0, microExpression: 'none', microProgress: 0, speaking: false });
+const neutral = () => ({ expression: 'neutral', expressionAmount: 0, warmAmount: 0, curiousAmount: 0, surpriseAmount: 0, concernAmount: 0, smileAmount: 0, sadAmount: 0, downcastAmount: 0, excitedAmount: 0, shyAmount: 0, smugAmount: 0, poutAmount: 0, reliefAmount: 0, determinedAmount: 0, hesitantAmount: 0, sleepyAmount: 0, expectantAmount: 0, aggrievedAmount: 0, tenderAmount: 0, eyeSmile: 0, tearAmount: 0, voiceEnergy: 0, mouthOpen: 0, mouthShape: 'rest', blinkLeft: 0, blinkRight: 0, browRaise: 0, browTilt: 0, blush: 0, headTilt: 0, headNod: 0, gazeOffsetX: 0, gazeOffsetY: 0, gesture: 'none', gestureCueId: '', gestureProgress: 0, bodyLean: 0, bodyLift: 0, bodyTurn: 0, headShake: 0, shoulderLift: 0, microExpression: 'none', microProgress: 0, speaking: false });
 
 function cue(character) {
   if (!character) return { shape: 'rest', open: 0, duration: .06 };
@@ -74,7 +75,7 @@ export function createAvatarPerformance() {
   const gestures=createAvatarGestures();
   const microacting=createAvatarMicroacting();
   let microBase=null,petNumber=0;
-  let gestureFromSpeech=false;
+  let gestureFromSpeech=false,gestureFromPhase=false,gestureSequence=0,gestureCueId='',gestureKind='',phaseSequence=0;
   // Remember consumed lengths, not old message bodies. Reset/cancel must not replay a visited reply.
   const consumed = new Map();
   const reacted = new Set();
@@ -86,12 +87,19 @@ export function createAvatarPerformance() {
     return true;
   };
   const clearMouth = () => { queue = []; current = null; output.mouthOpen = 0; output.mouthShape = 'rest'; output.speaking = false; };
-  const clearGestures = (clearHead=true) => { gestures.cancel(); gestureFromSpeech=false; output.gesture='none'; output.gestureProgress=output.bodyLean=output.bodyLift=output.bodyTurn=output.headShake=output.shoulderLift=0; if(clearHead){output.headTilt=output.headNod=0;nodPhase=0;} };
+  const clearGestures = (clearHead=true) => { gestures.cancel(); gestureFromSpeech=gestureFromPhase=false; gestureKind=gestureCueId=output.gestureCueId=''; output.gesture='none'; output.gestureProgress=output.bodyLean=output.bodyLift=output.bodyTurn=output.headShake=output.shoulderLift=0; if(clearHead){output.headTilt=output.headNod=0;nodPhase=0;} };
+  const triggerGesture = (id,kind,enabled,source) => {
+    if(!gestures.trigger(id,kind,enabled))return false;
+    gestureFromSpeech=source==='speech';gestureFromPhase=source==='phase';
+    gestureKind=kind;
+    gestureCueId=`gesture-${++gestureSequence}`;
+    return true;
+  };
   // Idle overlays never become part of the underlying facial smoothing state.
   // Removing one restores the exact pose before it, even on a zero-time input.
   const removeMicro = () => { if(microBase){Object.assign(output,microBase);microBase=null;} output.microExpression='none';output.microProgress=0; };
   const clearMicro = () => { removeMicro();microacting.cancel(); };
-  const resetPose = () => { clearMouth(); gestures.reset(); microacting.reset();microBase=null;petNumber=0;gestureFromSpeech=false; output = neutral(); emotionKind = null; emotionRemaining = 0; reaction = null; winkAge = null; winkCooldown = 0; motionTime = nodPhase = 0; blinkAt = 3.1; blinkRemaining = 0; blinkNumber = 0; };
+  const resetPose = () => { clearMouth(); gestures.reset(); microacting.reset();microBase=null;petNumber=0;gestureFromSpeech=gestureFromPhase=false;gestureKind=gestureCueId=''; output = neutral(); emotionKind = null; emotionRemaining = 0; reaction = null; winkAge = null; winkCooldown = 0; motionTime = nodPhase = 0; blinkAt = 3.1; blinkRemaining = 0; blinkNumber = 0; };
   const rememberLength = (id, length) => {
     const previous = consumed.get(id) ?? 0;
     consumed.delete(id); consumed.set(id, Math.max(length, previous));
@@ -120,6 +128,10 @@ export function createAvatarPerformance() {
     if (changed || rewritten) { clearMouth(); emotionKind = null; emotionRemaining = 0; }
     const appended = rewritten ? '' : next.text.slice(Math.min(previousLength, next.text.length));
     const wasSpeaking = input.phase === 'speaking';
+    const phaseChanged=next.phase!==input.phase;
+    // Phase actions belong to one entry, not to text chunks or new utterance
+    // IDs while waiting. Cancel only their own action when the phase ends.
+    if(phaseChanged&&(gestureFromPhase||gestureFromSpeech)){clearGestures();gestures.reset();}
     input = { utteranceId: next.utteranceId, text: next.text, phase: next.phase };
     rememberLength(next.utteranceId, next.text.length);
     external = next.speech !== undefined;
@@ -132,7 +144,12 @@ export function createAvatarPerformance() {
     // A stable upstream emotion is published every frame. Only a changed
     // authority cancels the old semantic action, not every PCM snapshot.
     if(gestureFromSpeech&&(changed||rewritten||(externalExpression!==null&&externalExpression!==priorExpression)))clearGestures(false);
-    if(hidden||sleeping||motionReduced||(wasSpeaking&&next.phase!=='speaking')||(next.phase==='speaking'&&external&&(!externalActive||externalIndex<0||externalIndex>=next.text.length)))clearGestures();
+    if(hidden||sleeping||motionReduced||(wasSpeaking&&next.phase!=='speaking'&&!reaction)||(next.phase==='speaking'&&external&&(!externalActive||externalIndex<0||externalIndex>=next.text.length)))clearGestures();
+    if(phaseChanged){
+      const phaseId=`phase:${++phaseSequence}`;
+      const phaseGesture=next.phase==='thinking'?'tilt':next.phase==='listening'?'leanIn':null;
+      if(phaseGesture)triggerGesture(phaseId,phaseGesture,!hidden&&!sleeping&&!motionReduced&&!reaction,'phase');
+    }
     let boundaryAdvanced = false;
     if (next.phase !== 'speaking' || hidden || sleeping) { clearMouth(); emotionKind = null; emotionRemaining = 0; }
     else if (external) {
@@ -160,6 +177,8 @@ export function createAvatarPerformance() {
       if (value) { emotionKind = value; emotionRemaining = 2.1; }
       else if (external) { emotionKind = null; emotionRemaining = 0; }
     }
+    const negativeCue=NEGATIVE_EXPRESSIONS.has(externalExpression??emotionKind);
+    if(gestureFromSpeech&&negativeCue&&BRIGHT_GESTURES.has(gestureKind))clearGestures(false);
     // Keep the current semantic cue while actual PCM is still audible, even
     // between estimated character boundaries. Energy never selects an emotion.
     if(externalActive&&externalAudio>.025&&emotionKind)emotionRemaining=Math.max(emotionRemaining,.4);
@@ -173,12 +192,13 @@ export function createAvatarPerformance() {
       const index=external?externalIndex:next.text.length-1;
       const sentenceStart=speechSentenceStart(next.text,index);
       const semantic=externalEmotion?null:gestureAtSpeechBoundary(next.text,index);
-      const gesture=externalEmotion?SPOKEN_GESTURES[externalExpression]:semantic?.gesture;
+      const suggestedGesture=externalEmotion?SPOKEN_GESTURES[externalExpression]:semantic?.gesture;
+      const gesture=negativeCue&&BRIGHT_GESTURES.has(suggestedGesture)?null:suggestedGesture;
       // Authoritative neutral/negative lines also consume their sentence, so
       // later metadata or setting changes cannot add a delayed happy gesture.
       if(sentenceStart!==null&&(externalEmotion||gesture||cueBlocked)){
         const id=`speech:${next.utteranceId}:${sentenceStart}`;
-        if(consumeSpeechCue(id)&&gesture&&gestures.trigger(id,gesture,!cueBlocked&&!reaction))gestureFromSpeech=true;
+        if(consumeSpeechCue(id)&&gesture)triggerGesture(id,gesture,!cueBlocked&&!reaction,'speech');
       }
     }
   }
@@ -198,9 +218,9 @@ export function createAvatarPerformance() {
     const gesture=negative?'settle':event.kind==='pet'?(tenderPet?'sway':'tilt'):event.kind==='greet'?'nod':'settle';
     // A deliberate touch takes precedence over an automatic spoken gesture.
     // reset clears its cooldown but retains the gesture's consumed IDs.
-    if(gestureFromSpeech){clearGestures(false);gestures.reset();}
-    const started=gestures.trigger(`reaction:${event.id}`,gesture,!motionReduced&&!(input.phase==='speaking'&&external&&!externalActive));
-    if(started){gestureFromSpeech=false;if(event.kind==='pet'&&!negative)petNumber++;}
+    if(gestureFromSpeech||gestureFromPhase){clearGestures(false);gestures.reset();}
+    const started=triggerGesture(`reaction:${event.id}`,gesture,!motionReduced&&!(input.phase==='speaking'&&external&&!externalActive),'manual');
+    if(started&&event.kind==='pet'&&!negative)petNumber++;
     reaction = { ...reactions[event.kind], ...(started&&tenderPet?{expression:'tender',duration:2.2,amount:.7}:{}), age: 0 };
     if (event.kind === 'greet' && winkCooldown <= 0) {
       winkCooldown = 2.4;
@@ -237,6 +257,7 @@ export function createAvatarPerformance() {
     if (dt > 0) {
       const gesture=gestures.step(elapsed,{blocked:motionReduced||(input.phase==='speaking'&&external&&!externalActive)});
       for(const channel of ['gesture','gestureProgress','bodyLean','bodyLift','bodyTurn','headShake','shoulderLift'])output[channel]=gesture[channel];
+      output.gestureCueId=gesture.gesture==='none'?'':gestureCueId;
       if (input.phase === 'speaking') {
         let remainingDt = dt;
         while (remainingDt > 0) {
@@ -296,10 +317,11 @@ export function createAvatarPerformance() {
     }
     const micro=microacting.step(elapsed,{enabled:!motionReduced&&input.phase==='idle'&&!externalActive&&!reaction&&output.gesture==='none'&&emotionRemaining<=0});
     if(micro.microExpression!=='none'){
-      microBase={gazeOffsetX:output.gazeOffsetX,blinkLeft:output.blinkLeft,blinkRight:output.blinkRight,smileAmount:output.smileAmount,warmAmount:output.warmAmount};
+      microBase={gazeOffsetX:output.gazeOffsetX,blinkLeft:output.blinkLeft,blinkRight:output.blinkRight,smileAmount:output.smileAmount,warmAmount:output.warmAmount,headTilt:output.headTilt,headNod:output.headNod,bodyLean:output.bodyLean,bodyLift:output.bodyLift};
       output.gazeOffsetX=clamp(output.gazeOffsetX+micro.gazeOffsetX,-1,1);
       output.blinkLeft=Math.max(output.blinkLeft,micro.blink);output.blinkRight=Math.max(output.blinkRight,micro.blink);
       output.smileAmount=Math.max(output.smileAmount,micro.smileAmount);output.warmAmount=Math.max(output.warmAmount,micro.warmAmount);
+      for(const channel of ['headTilt','headNod','bodyLean','bodyLift'])output[channel]=clamp(output[channel]+micro[channel],-1,1);
       output.microExpression=micro.microExpression;output.microProgress=micro.microProgress;
     }
     return { ...output };

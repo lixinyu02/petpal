@@ -6,6 +6,10 @@ export interface AvatarMicroactingPose{
   blink:number;
   smileAmount:number;
   warmAmount:number;
+  headTilt:number;
+  headNod:number;
+  bodyLean:number;
+  bodyLift:number;
 }
 export function createAvatarMicroacting():{
   step(elapsedSeconds:number,options?:{enabled?:boolean}):AvatarMicroactingPose;

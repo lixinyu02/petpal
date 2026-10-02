@@ -3,9 +3,9 @@ import { emotionAtSpeechBoundary } from './emotion.mjs';
 const clamp=(value,min=0,max=1)=>Math.min(max,Math.max(min,value));
 const smooth=value=>{const t=clamp(value);return t*t*(3-2*t);};
 const rest=()=>({gesture:'none',gestureProgress:0,bodyLean:0,bodyLift:0,bodyTurn:0,headShake:0,headTilt:0,headNod:0,shoulderLift:0});
-const durations={nod:1.1,shake:1.3,tilt:1.6,shy:1.8,bounce:1.15,recoil:1.25,settle:1.9,leanIn:1.9,shrug:1.6,bow:1.7,peek:1.8,sway:2.2,doze:2.4};
-const expressiveGestures={curious:'tilt',thoughtful:'tilt',shy:'shy',happy:'bounce',excited:'bounce',surprised:'recoil',warm:'nod',smug:'tilt',pout:'shake',relieved:'settle',determined:'nod',hesitant:'shrug',sleepy:'doze',expectant:'leanIn',aggrieved:'shrug',tender:'sway'};
-const explicitGestures={leanIn:/我在(?:认真)?听|我听着|靠近一点(?:听|看)|说给我听/gu,bow:/真的很感谢|十分感谢|谢谢你(?:帮|照顾)|鞠(?:个)?躬/gu,peek:/偷偷看|偷偷探|探头看|看一眼/gu};
+const durations={nod:1.1,shake:1.3,tilt:1.6,shy:1.8,bounce:1.15,recoil:1.25,settle:1.9,leanIn:1.9,shrug:1.6,bow:1.7,peek:1.8,sway:2.2,doze:2.4,wink:1.35};
+const expressiveGestures={curious:'tilt',thoughtful:'tilt',shy:'shy',happy:'bounce',excited:'bounce',surprised:'recoil',warm:'nod',smug:'tilt',pout:'shake',relieved:'settle',determined:'nod',hesitant:'shrug',sleepy:'doze',expectant:'leanIn',aggrieved:'shrug',tender:'sway',playful:'wink'};
+const explicitGestures={leanIn:/我在(?:认真)?听|我听着|靠近一点(?:听|看)|说给我听/gu,bow:/真的很感谢|十分感谢|谢谢你(?:帮|照顾)|鞠(?:个)?躬/gu,peek:/偷偷看|偷偷探|探头看|看一眼/gu,settle:/没关系|辛苦了|抱歉|\bsorry\b|it['’]s okay/giu};
 function explicitGesture(text){
   for(const [kind,pattern]of Object.entries(explicitGestures))for(const match of text.matchAll(pattern)){
     if(!/(?:不(?:要|用|必|想|会)?|别|没(?:有)?)(?:再|很|太|去)?\s*$/u.test(text.slice(Math.max(0,match.index-16),match.index)))return kind;
@@ -81,6 +81,9 @@ export function createAvatarGestures() {
       case 'peek':output.bodyTurn=.58*amount;output.headTilt=.22*amount;output.bodyLean=.18*amount;output.headShake=.14*amount;break;
       case 'sway':output.bodyTurn=.5*amount*Math.sin(progress*2*Math.PI);output.headTilt=.14*amount*Math.sin(progress*2*Math.PI);output.bodyLift=.05*amount;break;
       case 'doze':output.bodyLean=.25*amount;output.headNod=.65*amount;output.bodyLift=-.12*amount;output.shoulderLift=.18*amount;break;
+      // The native Wink motion owns its right-eye closure. Do not also start
+      // the short performance wink used by a deliberate greeting.
+      case 'wink':output.headTilt=-.16*amount;output.bodyTurn=.12*amount;break;
     }
     return output;
   }

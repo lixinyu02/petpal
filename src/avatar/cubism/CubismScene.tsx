@@ -24,7 +24,7 @@ const development = Boolean((import.meta as ImportMeta & { env?: { DEV?: boolean
 
 /** A real Cubism surface, with the stable original character while loading or unsupported. */
 export default function CubismScene(props: CubismSceneProps) {
-  const { modelUrl = '/avatars/akari-cubism-v8/akari.model3.json', command, compact = false, interactive = true, className = '' } = props;
+  const { modelUrl = '/avatars/akari-cubism-v9/akari.model3.json', command, compact = false, interactive = true, className = '' } = props;
   const host = useRef<HTMLDivElement>(null);
   const callbacks = useRef(props); callbacks.current = props;
   const requested = useRef(command); requested.current = command;
@@ -140,7 +140,7 @@ export default function CubismScene(props: CubismSceneProps) {
         renderFrames: String(++frames), phase: input.phase, petAction: action, petReady: 'true', expression: pose.expression,
         mouthOpen: (sleeping ? 0 : pose.mouthOpen).toFixed(3), mouthShape: pose.mouthShape,
         blinkLeft: (sleeping ? 1 : pose.blinkLeft).toFixed(3), blinkRight: (sleeping ? 1 : pose.blinkRight).toFixed(3),
-        speechSource: input.speech ? 'playback-progress' : 'text-progress', gesture: pose.gesture, microExpression: pose.microExpression,
+        speechSource: input.speech ? 'playback-progress' : 'text-progress', gesture: pose.gesture, gestureCueId: pose.gestureCueId, microExpression: pose.microExpression,
         avatarPresence: 'cubism', gazeX: gazeX.toFixed(3), gazeY: gazeY.toFixed(3), headFollowX: follow.headX.toFixed(3), headFollowY: follow.headY.toFixed(3),
         motionGroup: runtime.motionGroup,
         breath: follow.breath.toFixed(3), motionEnabled: String(!media.matches && !sleeping), mocVersion: String(runtime.mocVersion), coreVersion: String(runtime.coreVersion),
@@ -162,7 +162,7 @@ export default function CubismScene(props: CubismSceneProps) {
   }, [modelUrl, compact, interactive]);
 
   useEffect(() => { if (props.performanceInput) quietInput.current?.(props.performanceInput); }, [props.performanceInput]);
-  return <div ref={host} className={`pet-three-scene anime-scene cubism-scene ${className}`} data-character-style={['/avatars/akari-cubism-v7/akari.model3.json', '/avatars/akari-cubism-v8/akari.model3.json'].includes(modelUrl) ? 'akari-soft' : undefined}>
+  return <div ref={host} className={`pet-three-scene anime-scene cubism-scene ${className}`} data-character-style={['/avatars/akari-cubism-v7/akari.model3.json', '/avatars/akari-cubism-v8/akari.model3.json', '/avatars/akari-cubism-v9/akari.model3.json'].includes(modelUrl) ? 'akari-soft' : undefined}>
     {mode !== 'cubism' && <AnimeScene {...props} className="cubism-fallback" onReady={ready} />}
   </div>;
 }

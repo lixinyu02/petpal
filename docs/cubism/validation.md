@@ -1,6 +1,10 @@
 # 原创 Cubism 网页验收
 
-## 当前 V8 reference-gestures：2026-10-02（网页已上线）
+## 当前 V9 expressive-presence：2026-10-02（网页已上线）
+
+默认角色为真实 Cubism V9 动作包，完整复用 V8 骨架和原画；增加七组语境动作、三种低频待机神态及既有表情贴片的细分映射。271 项相关回归、官方 Core、Chrome 连续状态、412×960 与 170 个公网资源哈希核对通过。详见 [V9 验收](expressive-presence-validation.md) 和 [动作说明](akari-expressive-presence.md)。
+
+## 历史 V8 reference-gestures：2026-10-02（当时网页已上线）
 
 默认角色为真实 Cubism V8，沿用 V7 的脸部、刘海与原图，补入合手轻抬、左右轻摆、衣袖跟随，以及 Shy／Sway／Bow 原生动作。相关回归 248/248、Core／Chrome／412×960 与正式 HTTPS 资源读回通过。完整结果、语音测试范围和手部能力限制见 [V8 验收](hand-gestures-validation.md)。
 

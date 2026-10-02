@@ -3,6 +3,10 @@ import type { AvatarPresencePose } from '../presence.mjs';
 import type { CubismDeformationProfile, CubismParameterBridge, CubismParameterModel } from './parameters.mjs';
 export const CUBISM_RUNTIME_ROOT: string;
 export const CUBISM_CORE_URL: string;
+export function loadCubismMotionAssets<T extends { url: string }>(items: T[], options: {
+  signal?: AbortSignal;
+  fetchBytes?: (url: string, options: { signal: AbortSignal; maxBytes: number }) => Promise<ArrayBuffer>;
+}, consume: (item: T, bytes: ArrayBuffer) => void | Promise<void>): Promise<void>;
 export type CubismFrameOptions = {
   sleeping?: boolean; hidden?: boolean; reducedMotion?: boolean;
   utteranceId?: string; phase?: string; speechActive?: boolean;

@@ -15,11 +15,16 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
   const smile = unit(pose.smileAmount), sad = unit(Math.max(finite(pose.sadAmount), finite(pose.downcastAmount)));
   const warm = unit(pose.warmAmount), pout = unit(pose.poutAmount);
   const referenceLayered = deformationProfile === 'reference-layered';
+  // This portrait has three real local expression patches, not independent
+  // brow/iris controls. Fold secondary intent gently into those existing
+  // patches, while retaining stronger directly-authored Warm/Sad channels.
+  const patchWarm = referenceLayered ? Math.max(warm, unit(pose.reliefAmount) * .45, unit(pose.tenderAmount) * .5, unit(pose.shyAmount) * .28, smile * .3, unit(pose.smugAmount) * .2) : warm;
+  const patchSad = referenceLayered ? Math.max(sad, unit(pose.concernAmount) * .24, unit(pose.aggrievedAmount) * .42, unit(pose.hesitantAmount) * .14) : sad;
   // Whole local expression patches must not paint competing eyes/eyebrows.
   // Keep the winning channel's already-smoothed intensity; older rigs retain
   // their independent Sad parameter and all existing facial controls.
-  const availableWarm = !supportedParameters || supportedParameters.includes('ParamWarm') ? warm : 0;
-  const availableSad = !supportedParameters || supportedParameters.includes('ParamSad') ? sad : 0;
+  const availableWarm = !supportedParameters || supportedParameters.includes('ParamWarm') ? patchWarm : 0;
+  const availableSad = !supportedParameters || supportedParameters.includes('ParamSad') ? patchSad : 0;
   const availablePout = !supportedParameters || supportedParameters.includes('ParamPout') ? pout : 0;
   const dominantEmotion = availableSad > availableWarm && availableSad >= availablePout ? 'sad' : availablePout > availableWarm ? 'pout' : 'warm';
   const quiet = sleeping || hidden || !pose.speaking;
@@ -67,8 +72,8 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
     ParamSleeveEase: 0,
     ParamTear: sleeping || hidden ? 0 : unit(pose.tearAmount),
     ParamExcited: sleeping || hidden ? 0 : unit(pose.excitedAmount),
-    ParamWarm: sleeping || hidden || referenceLayered && dominantEmotion !== 'warm' ? 0 : warm,
-    ParamSad: sleeping || hidden || referenceLayered && dominantEmotion !== 'sad' ? 0 : sad,
+    ParamWarm: sleeping || hidden || referenceLayered && dominantEmotion !== 'warm' ? 0 : patchWarm,
+    ParamSad: sleeping || hidden || referenceLayered && dominantEmotion !== 'sad' ? 0 : patchSad,
     ParamPout: sleeping || hidden || referenceLayered && dominantEmotion !== 'pout' ? 0 : pout,
     ParamMouthForm: hidden || sleeping ? 0 : clamp(mouthForm),
     // Absolute application after motion/expression/physics guarantees immediate closure.
