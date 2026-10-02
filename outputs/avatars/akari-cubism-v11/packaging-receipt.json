@@ -1,0 +1,264 @@
+{
+  "authoringProfile": "reference-features",
+  "rawDirectory": ".tools/cubism-authoring/reference-v11-attempt4",
+  "inputPsdSha256": "9a23fbcdd859b75681960fedde5ca57f542a938ae4ee557726e0f7f6c223e0a9",
+  "mocSha256": "a193b01b60f3238fee982b558bc56a67e834dc2d3f0039a501ae423b8e21d5dd",
+  "coreVersion": 100663297,
+  "parameters": [
+    {
+      "id": "ParamAngleX",
+      "min": -45,
+      "max": 45,
+      "default": 0
+    },
+    {
+      "id": "ParamAngleY",
+      "min": -30,
+      "max": 30,
+      "default": 0
+    },
+    {
+      "id": "ParamAngleZ",
+      "min": -30,
+      "max": 30,
+      "default": 0
+    },
+    {
+      "id": "ParamBodyAngleX",
+      "min": -10,
+      "max": 10,
+      "default": 0
+    },
+    {
+      "id": "ParamBodyAngleY",
+      "min": -10,
+      "max": 10,
+      "default": 0
+    },
+    {
+      "id": "ParamBodyAngleZ",
+      "min": -10,
+      "max": 10,
+      "default": 0
+    },
+    {
+      "id": "ParamEyeLOpen",
+      "min": 0,
+      "max": 1,
+      "default": 1
+    },
+    {
+      "id": "ParamEyeROpen",
+      "min": 0,
+      "max": 1,
+      "default": 1
+    },
+    {
+      "id": "ParamEyeBallX",
+      "min": -1,
+      "max": 1,
+      "default": 0
+    },
+    {
+      "id": "ParamEyeBallY",
+      "min": -1,
+      "max": 1,
+      "default": 0
+    },
+    {
+      "id": "ParamBrowLY",
+      "min": -1,
+      "max": 1,
+      "default": 0
+    },
+    {
+      "id": "ParamBrowRY",
+      "min": -1,
+      "max": 1,
+      "default": 0
+    },
+    {
+      "id": "ParamMouthOpenY",
+      "min": 0,
+      "max": 1,
+      "default": 0
+    },
+    {
+      "id": "ParamBreath",
+      "min": 0,
+      "max": 1,
+      "default": 0
+    },
+    {
+      "id": "ParamHairFront",
+      "min": -1,
+      "max": 1,
+      "default": 0
+    },
+    {
+      "id": "ParamMouthA",
+      "min": 0,
+      "max": 1,
+      "default": 0
+    },
+    {
+      "id": "ParamMouthO",
+      "min": 0,
+      "max": 1,
+      "default": 0
+    },
+    {
+      "id": "ParamHandsLift",
+      "min": 0,
+      "max": 1,
+      "default": 0
+    },
+    {
+      "id": "ParamHandsSway",
+      "min": -1,
+      "max": 1,
+      "default": 0
+    },
+    {
+      "id": "ParamSleeveEase",
+      "min": 0,
+      "max": 1,
+      "default": 0
+    },
+    {
+      "id": "ParamBrowLAngle",
+      "min": -1,
+      "max": 1,
+      "default": 0
+    },
+    {
+      "id": "ParamBrowRAngle",
+      "min": -1,
+      "max": 1,
+      "default": 0
+    }
+  ],
+  "drawableCount": 16,
+  "vertexCount": 3261,
+  "filteredMotionSource": "public/avatars/akari-cubism-v10",
+  "motionGroups": 16,
+  "runtimeFiles": [
+    {
+      "path": "akari.moc3",
+      "bytes": 911680,
+      "sha256": "a193b01b60f3238fee982b558bc56a67e834dc2d3f0039a501ae423b8e21d5dd"
+    },
+    {
+      "path": "akari.2048/texture_00.png",
+      "bytes": 3142568,
+      "sha256": "f38011cf7cd81fe3f09008dfa988b397ef5d82fafb88155b34f9cf8d52586977"
+    },
+    {
+      "path": "akari.physics3.json",
+      "bytes": 3269,
+      "sha256": "b3a0a73c830ad0729f0c86e1096167763a0214014f741aa858d4150971a3eded"
+    },
+    {
+      "path": "akari.cdi3.json",
+      "bytes": 4286,
+      "sha256": "8c001aca178b05901c89c6833c5f58011389e01f64b8dbdb0098f0b117166c24"
+    },
+    {
+      "path": "akari.psd2live.json",
+      "bytes": 9325,
+      "sha256": "a0206fed4e689ae15c0128974f07e287fb46ede05907c9c7513f3cb6a500f6bd"
+    },
+    {
+      "path": "akari.idle.motion3.json",
+      "bytes": 13699,
+      "sha256": "4898654305a525d6031df126eef53c8555aab89c940f96b3e3666f699ff56c69"
+    },
+    {
+      "path": "akari.blink.motion3.json",
+      "bytes": 796,
+      "sha256": "3aeaeeae3c1f0bf77320db4f2e3c5a6fdfe20bc6aa394ff8f29676d33377e34c"
+    },
+    {
+      "path": "akari.nod.motion3.json",
+      "bytes": 1180,
+      "sha256": "99ffb3b7330169eed05c156359f23f2852cb88d005d42034ae955e989da3f601"
+    },
+    {
+      "path": "akari.shake.motion3.json",
+      "bytes": 1050,
+      "sha256": "714c60b27c378ba114c363b6ae942bcb51d5d56eb7a329c50d8b74fd01ba439e"
+    },
+    {
+      "path": "akari.taphead.motion3.json",
+      "bytes": 4398,
+      "sha256": "b503171905c7960acdd09cf2c1e7640a1c6739e89ce838d7274fe361f6de9e3a"
+    },
+    {
+      "path": "akari.greet.motion3.json",
+      "bytes": 4294,
+      "sha256": "a926fe730f7d6de5ddaa4f0c78f3da2c10b0a9adc667a30e28e75d13a10c5aaf"
+    },
+    {
+      "path": "akari.shy.motion3.json",
+      "bytes": 2810,
+      "sha256": "db3a9e5635f5bae707ad1a4a423a5b903962fc5d72bd6b80e82e88923096aeaa"
+    },
+    {
+      "path": "akari.sway.motion3.json",
+      "bytes": 2594,
+      "sha256": "b212b91b4fa81b0b0d649193e962069b70af0f9708df0fc0b9af5129f353e190"
+    },
+    {
+      "path": "akari.bow.motion3.json",
+      "bytes": 2202,
+      "sha256": "19aa6d3d38a4a921875fe732eca94b0984c7f4003dbb89fbb371239744225c05"
+    },
+    {
+      "path": "akari.curious.motion3.json",
+      "bytes": 2233,
+      "sha256": "a829e41b61a1d9176a170a8cee6f3791d77b12aa28354bc3a44a8d9741f4c652"
+    },
+    {
+      "path": "akari.think.motion3.json",
+      "bytes": 2659,
+      "sha256": "966ba7f3a05e509b21537fbbc6c522cbc6471ddb42167f9424f0a82dfc33a18f"
+    },
+    {
+      "path": "akari.listen.motion3.json",
+      "bytes": 2375,
+      "sha256": "afce371c760d7d00872a3489e5efb122337bf30ad5d037948705dac64bd3a860"
+    },
+    {
+      "path": "akari.surprise.motion3.json",
+      "bytes": 2356,
+      "sha256": "967bdf292c425c78cbb498d078ef5455c59963d3ca78c5fb1f46bf0cebfdc0b9"
+    },
+    {
+      "path": "akari.reassure.motion3.json",
+      "bytes": 2389,
+      "sha256": "fd18587c1fd52dc20168ae4d79dec44d2bd12640250f677de3281dec10114fda"
+    },
+    {
+      "path": "akari.wink.motion3.json",
+      "bytes": 2010,
+      "sha256": "bca75e3b94a7425792860e41c7a745d4c1e0674e288e0d7bceedefb75774aa97"
+    },
+    {
+      "path": "akari.doze.motion3.json",
+      "bytes": 2798,
+      "sha256": "f5bb79969a8bed90bd94edc9a522ff7c42b9b74d686f55ded7a91a7f382ec86e"
+    },
+    {
+      "path": "akari.model3.json",
+      "bytes": 2684,
+      "sha256": "c461b49aa1b2910398cfe65f55fb0064a1519ea07bf9035572d72a9559660c68"
+    },
+    {
+      "path": "README.md",
+      "bytes": 790,
+      "sha256": "6e62c4922d9f83cefefc10d69cbc5d27e3128335ade8fac9d735d691f39d7f3d"
+    }
+  ],
+  "visualValidation": "Separate browser acceptance required",
+  "editorValidation": "CMO3 has not been validated in official Cubism Editor"
+}

@@ -3,7 +3,7 @@ export type PerformancePhase = 'idle' | 'listening' | 'thinking' | 'speaking' | 
 export type AvatarExpression = 'neutral' | 'warm' | 'curious' | 'thoughtful' | 'surprised' | 'shy' | 'happy' | 'playful' | 'concerned' | 'sad' | 'downcast' | 'excited' | 'smug' | 'pout' | 'relieved' | 'determined' | 'hesitant' | 'sleepy' | 'expectant' | 'aggrieved' | 'tender';
 export type AvatarGesture = 'none' | 'nod' | 'shake' | 'tilt' | 'shy' | 'bounce' | 'recoil' | 'settle' | 'leanIn' | 'shrug' | 'bow' | 'peek' | 'sway' | 'doze' | 'wink';
 export type AvatarMicroExpression = 'none' | 'glance' | 'softBlink' | 'softSmile' | 'doubleBlink' | 'headTilt' | 'breathPause';
-export interface AvatarReaction { id: string; kind: 'pet' | 'greet' | 'wake' }
+export interface AvatarReaction { id: string; kind: 'pet' | 'hand' | 'greet' | 'wake' }
 export type MouthShape = 'rest' | 'A' | 'E' | 'O' | 'M';
 export interface PerformanceInput {
   utteranceId: string;

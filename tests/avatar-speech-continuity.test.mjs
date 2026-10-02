@@ -82,12 +82,10 @@ test('small voice energy changes cannot rephase a long-running nod', () => {
   }
 });
 
-test('nod phase restarts after lifecycle cancellation without replaying time spent inactive', () => {
-  for (const interruption of ['hidden', 'sleeping', 'reducedMotion', 'buffering', 'stop', 'reset']) {
+test('nod phase restarts after hard lifecycle cancellation without replaying time spent inactive', () => {
+  for (const interruption of ['hidden', 'sleeping', 'reducedMotion', 'reset']) {
     const controller = audible(); advance(controller, 120);
     if (interruption === 'reset') controller.reset();
-    else if (interruption === 'buffering') controller.setInput(input({}, { active: false }));
-    else if (interruption === 'stop') controller.setInput(input({ phase: 'idle' }));
     else controller.step(0, { [interruption]: true });
     assert.equal(controller.step(0, { [interruption]: ['hidden', 'sleeping', 'reducedMotion'].includes(interruption) }).headNod, 0, interruption);
     controller.step(0); controller.setInput(input());
@@ -96,5 +94,21 @@ test('nod phase restarts after lifecycle cancellation without replaying time spe
       const resumed = controller.step(1 / 30), expected = fresh.step(1 / 30);
       assert.ok(Math.abs(resumed.headNod - expected.headNod) < 1e-12, `${interruption} frame ${frame}`);
     }
+  }
+});
+
+test('visible stop and buffering preserve the current nod through a smooth geometric return while closing the mouth', () => {
+  for (const interruption of ['buffering', 'stop']) {
+    const controller = audible(); const before = advance(controller, 12);
+    controller.setInput(interruption === 'buffering' ? input({}, { active: false }) : input({ phase: 'idle' }));
+    const stopped = controller.step(0);
+    assert.equal(stopped.headNod, before.headNod); assert.equal(stopped.mouthOpen, 0); assert.equal(stopped.gesture, 'none');
+    let previous = stopped;
+    for (let frame = 0; frame < 30; frame++) {
+      const next = controller.step(1 / 30);
+      assert.ok(Math.abs(next.headNod - previous.headNod) < .04, 'cancellation cannot snap the rendered head');
+      assert.equal(next.mouthOpen, 0); previous = next;
+    }
+    assert.ok(Math.abs(previous.headNod) < .025);
   }
 });

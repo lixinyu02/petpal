@@ -9,10 +9,11 @@ assert(manifestArg, 'Usage: node verify-official-core.mjs <model3.json> [receipt
 const projectRoot = path.resolve(import.meta.dirname, '../..');
 const profileIndex = flags.indexOf('--profile');
 const authoringProfile = profileIndex >= 0 ? flags[profileIndex + 1] : 'standard';
-assert(['standard', 'reference-layered', 'reference-gestures', 'reference-expressions'].includes(authoringProfile), 'Unknown verification profile');
-const referenceLayered = ['reference-layered', 'reference-gestures', 'reference-expressions'].includes(authoringProfile);
+assert(['standard', 'reference-layered', 'reference-gestures', 'reference-expressions', 'reference-features'].includes(authoringProfile), 'Unknown verification profile');
+const referenceLayered = ['reference-layered', 'reference-gestures', 'reference-expressions', 'reference-features'].includes(authoringProfile);
+const referenceFeatures = authoringProfile === 'reference-features';
 const referenceExpressions = authoringProfile === 'reference-expressions';
-const referenceEmotionBindings = [['ParamWarm', 'warm'], ['ParamSad', 'sad'], ['ParamPout', 'pout'],
+const referenceEmotionBindings = referenceFeatures ? [] : [['ParamWarm', 'warm'], ['ParamSad', 'sad'], ['ParamPout', 'pout'],
   ...(referenceExpressions ? [['ParamShy', 'shy'], ['ParamSurprise', 'surprise'], ['ParamRelaxed', 'relaxed']] : [])];
 const coreFlagIndex = flags.indexOf('--core');
 const corePath = coreFlagIndex >= 0
@@ -82,10 +83,11 @@ try {
     assert(parameter.min <= parameter.default && parameter.default <= parameter.max, `Invalid parameter range: ${parameter.id}`);
   }
   const required = referenceLayered
-    ? ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX', 'ParamBodyAngleY', 'ParamBodyAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamMouthOpenY', 'ParamBreath', 'ParamHairFront', 'ParamMouthA', 'ParamMouthO', 'ParamWarm', 'ParamSad', 'ParamPout']
+    ? ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX', 'ParamBodyAngleY', 'ParamBodyAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamMouthOpenY', 'ParamBreath', 'ParamHairFront', 'ParamMouthA', 'ParamMouthO', ...referenceEmotionBindings.slice(0, 3).map(([id]) => id)]
     : ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamEyeBallX', 'ParamEyeBallY', 'ParamMouthOpenY', 'ParamBreath'];
-  if (['reference-gestures', 'reference-expressions'].includes(authoringProfile)) required.push('ParamHandsLift', 'ParamHandsSway', 'ParamSleeveEase');
+  if (['reference-gestures', 'reference-expressions', 'reference-features'].includes(authoringProfile)) required.push('ParamHandsLift', 'ParamHandsSway', 'ParamSleeveEase');
   if (referenceExpressions) required.push('ParamShy', 'ParamSurprise', 'ParamRelaxed');
+  if (referenceFeatures) required.push('ParamEyeBallX', 'ParamEyeBallY', 'ParamBrowLY', 'ParamBrowRY', 'ParamBrowLAngle', 'ParamBrowRAngle');
   for (const id of required) assert(parameters.some(parameter => parameter.id === id), `Required rig parameter missing: ${id}`);
   const indexById = new Map(parameters.map((parameter, index) => [parameter.id, index]));
   const emotionParameters = referenceLayered ? referenceEmotionBindings.map(([id]) => id) : ['ParamCheek', 'ParamTear'];
@@ -249,6 +251,105 @@ try {
       }
     }
   }
+  const featureGeometry = [];
+  if (referenceFeatures) {
+    // MOC3 bake/reconstruction through the retained V10 head lattice introduces subpixel
+    // quantization (measured <0.05 source px). Keep a <0.1px bound, not float identity.
+    const nativePixelTolerance = .08;
+    const expectedLayers = ['topwear', 'face', 'front hair 1', 'front hair 2', 'mouth-a', 'mouth-o',
+      ...['left', 'right'].flatMap(side => ['eyebrow', 'eye-white', 'iris', 'eyelash-upper', 'eyelash-lower'].map(name => `${name}-${side}`))];
+    assert.equal(model.drawables.count, 16, 'Features profile requires separate native eye, iris, lash and brow drawings');
+    assert.deepEqual(displayInfo.Drawables.map(drawable => drawable.Name.trim().toLowerCase()).sort(), expectedLayers.sort());
+    const sourceIndex = name => drawableIndexById.get(displayInfo.Drawables.find(drawable => drawable.Name.trim().toLowerCase() === name)?.Id);
+    const sameGeometry = (a, b) => a.every((value, index) => Math.abs(value - b[index]) <= 1e-6);
+    const unchangedOthers = (pose, allowed) => {
+      for (let d = 0; d < pose.positions.length; d++) if (!allowed.includes(d)) assert(sameGeometry(pose.positions[d], neutral.positions[d]), `Feature geometry escaped its own drawings: ${model.drawables.ids[d]}`);
+    };
+    const irisIndices = ['left', 'right'].map(side => sourceIndex(`iris-${side}`));
+    for (const [side, key] of [['left', 'L'], ['right', 'R']]) {
+      const iris = sourceIndex(`iris-${side}`), white = sourceIndex(`eye-white-${side}`);
+      const upper = sourceIndex(`eyelash-upper-${side}`), lower = sourceIndex(`eyelash-lower-${side}`), brow = sourceIndex(`eyebrow-${side}`);
+      assert.deepEqual(Array.from(model.drawables.masks[iris]), [white], 'Iris must use its own real Cubism clipping mask');
+      for (const [parameter, axis, budget] of [['ParamEyeBallX', 0, 3.1], ['ParamEyeBallY', 1, 2.1]]) for (const value of [-1, -.5, .5, 1]) {
+        const pose = samplePose(`native-${side}-${parameter}-${value}`, { [parameter]: value });
+        const delta = pose.positions[iris].map((coordinate, i) => (coordinate - neutral.positions[iris][i]) * canvas.PixelsPerUnit);
+        const shift = delta[axis];
+        assert(Math.abs(shift) > Math.abs(value) * (budget - .2) && Math.abs(shift) <= budget, 'Iris gaze must visibly translate within its authored pixel budget');
+        for (let i = 0; i < delta.length; i++) assert(Math.abs(delta[i] - (i % 2 === axis ? shift : 0)) < nativePixelTolerance, 'Iris geometry must translate rigidly rather than stretch');
+        unchangedOthers(pose, irisIndices);
+        assert.deepEqual(pose.opacities, neutral.opacities, 'Gaze must not swap facial opacity');
+        featureGeometry.push({ side, parameter, value, sourcePixels: shift, nativeClipDrawable: model.drawables.ids[white], isolated: true });
+      }
+      const openParameter = `ParamEye${key}Open`, eyeSamples = new Map();
+      for (const open of [0, .125, .25, .375, .5, .625, .75, .875, 1]) {
+        const pose = samplePose(`native-${side}-open-${open}`, { [openParameter]: open });
+        unchangedOthers(pose, [white, upper, lower]);
+        assert(sameGeometry(pose.positions[iris], neutral.positions[iris]), 'Eyelid closure must crop the iris, never squash it');
+        for (const index of [white, upper, lower]) {
+          if (open < 1) assert(!sameGeometry(pose.positions[index], neutral.positions[index]), 'Eyelid needs native geometry through partial closure');
+          assert(pose.positions[index].every((coordinate, i) => i % 2 || Math.abs(coordinate - neutral.positions[index][i]) < 1e-6), 'Eyelid changes eye width');
+          const area = (points, a, b, c) => (points[b] - points[a]) * (points[c + 1] - points[a + 1]) - (points[b + 1] - points[a + 1]) * (points[c] - points[a]);
+          const indices = model.drawables.indices[index];
+          for (let triangle = 0; triangle < indices.length; triangle += 3) {
+            const a = indices[triangle] * 2, b = indices[triangle + 1] * 2, c = indices[triangle + 2] * 2;
+            const baselineArea = area(neutral.positions[index], a, b, c);
+            if (Math.abs(baselineArea) * canvas.PixelsPerUnit ** 2 < .1) continue;
+            assert(area(pose.positions[index], a, b, c) / baselineArea > .001, `Native eyelid triangle folded: ${model.drawables.ids[index]}/${open}/${triangle}`);
+          }
+        }
+        eyeSamples.set(open, pose);
+        featureGeometry.push({ side, parameter: openParameter, value: open, nativeGeometry: true, irisShapePreserved: true });
+      }
+      // Mid-interval samples must be actual Core interpolation, not texture/visibility steps.
+      for (const middle of [.125, .375, .625, .875]) for (const index of [white, upper, lower]) {
+        const a = eyeSamples.get(middle - .125).positions[index], b = eyeSamples.get(middle + .125).positions[index];
+        const actual = eyeSamples.get(middle).positions[index];
+        assert(actual.every((value, i) => Math.abs(value - (a[i] + b[i]) / 2) * canvas.PixelsPerUnit < nativePixelTolerance), 'Native eyelid interpolation has a discontinuity');
+      }
+      assert.equal(eyeSamples.get(0).opacities[iris], 0, 'Fully closed eye must hide the iris sliver');
+      assert.equal(eyeSamples.get(0).opacities[white], 0, 'Fully closed eye must hide the white sliver');
+      assert.equal(eyeSamples.get(0).opacities[upper], 1, 'Closure must retain the authored upper lash line');
+      for (const parameter of [`ParamBrow${key}Y`, `ParamBrow${key}Angle`]) for (const value of [-1, -.5, .5, 1]) {
+        const pose = samplePose(`native-${parameter}-${value}`, { [parameter]: value });
+        unchangedOthers(pose, [brow]);
+        assert(!sameGeometry(pose.positions[brow], neutral.positions[brow]), 'Brow parameter lacks independent native geometry');
+        assert.deepEqual(pose.opacities, neutral.opacities, 'Brow expression must use native geometry, not facial opacity');
+        if (parameter.endsWith('Y')) {
+          const delta = pose.positions[brow].map((coordinate, i) => (coordinate - neutral.positions[brow][i]) * canvas.PixelsPerUnit);
+          assert(Math.abs(delta[1]) > Math.abs(value) * 3.9 && Math.abs(delta[1]) < 4.1);
+          for (let i = 0; i < delta.length; i++) assert(Math.abs(delta[i] - (i % 2 ? delta[1] : 0)) < nativePixelTolerance, 'Brow height must translate rigidly');
+        } else {
+          const before = neutral.positions[brow], after = pose.positions[brow];
+          let far = 2;
+          for (let i = 4; i < before.length; i += 2) if (Math.hypot(before[i] - before[0], before[i + 1] - before[1]) > Math.hypot(before[far] - before[0], before[far + 1] - before[1])) far = i;
+          const ax = before[far] - before[0], ay = before[far + 1] - before[1];
+          const bx = after[far] - after[0], by = after[far + 1] - after[1];
+          const degrees = Math.atan2(ax * by - ay * bx, ax * bx + ay * by) * 180 / Math.PI;
+          assert(Math.abs(Math.abs(degrees) - Math.abs(value) * 4) < .10, 'Brow angle must realize its actual bounded native rotation');
+          const ratio = Math.hypot(bx, by) / Math.hypot(ax, ay);
+          assert(ratio > .998 && ratio < 1.002, 'Brow angle must preserve line proportions');
+        }
+        featureGeometry.push({ side, parameter, value, isolated: true, nativeGeometry: true });
+      }
+    }
+    for (const x of [-1, 0, 1]) for (const open of [0, .5, 1]) sampledDeltas.push(deltaFromNeutral(samplePose(`features-combined-${x}-${open}`, {
+      ParamEyeBallX: x, ParamEyeBallY: -x, ParamEyeLOpen: open, ParamEyeROpen: 1 - open,
+      ParamBrowLY: x, ParamBrowRY: -x, ParamBrowLAngle: x, ParamBrowRAngle: -x,
+      ParamAngleX: x * 45, ParamAngleY: x * 30, ParamAngleZ: x * 30,
+      ParamHandsLift: open, ParamHandsSway: x, ParamMouthA: 1, ParamMouthOpenY: open,
+    })));
+    let randomSeed = 0x11facade;
+    const random = () => { randomSeed = (1664525 * randomSeed + 1013904223) >>> 0; return randomSeed / 0x100000000; };
+    for (let i = 0; i < 48; i++) sampledDeltas.push(deltaFromNeutral(samplePose(`features-random-${i}`, {
+      ParamEyeBallX: random() * 2 - 1, ParamEyeBallY: random() * 2 - 1,
+      ParamEyeLOpen: random(), ParamEyeROpen: random(),
+      ParamBrowLY: random() * 2 - 1, ParamBrowRY: random() * 2 - 1,
+      ParamBrowLAngle: random() * 2 - 1, ParamBrowRAngle: random() * 2 - 1,
+      ParamAngleX: random() * 90 - 45, ParamAngleY: random() * 60 - 30,
+      ParamHandsLift: random(), ParamHandsSway: random() * 2 - 1,
+      ParamMouthOpenY: random(), ParamMouthA: i % 2, ParamMouthO: 1 - i % 2,
+    })));
+  }
   receipt = {
     status: 'pass', authoringProfile, officialCoreExecuted: true, officialCoreConsistency: consistency,
     corruptMagicNegativeControl: 'rejected', coreVersion: `${version >>> 24}.${(version >>> 16) & 0xff}.${version & 0xffff}`,
@@ -259,7 +360,7 @@ try {
     canvas: { width: canvas.CanvasWidth, height: canvas.CanvasHeight, originX: canvas.CanvasOriginX, originY: canvas.CanvasOriginY, pixelsPerUnit: canvas.PixelsPerUnit },
     layout: manifest.Layout ?? null, neutralBounds, neutralBoundsByDrawable,
     drawables: model.drawables.count, parts: model.parts.count, vertices: neutral.vertexCount, triangles: neutral.triangleCount,
-    parameters, sampledDeltas, emotionBindings, facialOcclusion, files, logs: coreLogs,
+    parameters, sampledDeltas, emotionBindings, facialOcclusion, featureGeometry, files, logs: coreLogs,
     scope: 'Official Core consistency, actual model instantiation and sampled mesh/parameter execution; browser rendering and visual quality require separate acceptance.',
   };
 } finally {

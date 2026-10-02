@@ -10,11 +10,19 @@
 .companion-hand-feedback[data-phase=stroke] .companion-hand-contact{animation:companion-hand-contact .62s ease-in-out infinite}
 .companion-hand-feedback[data-phase=release]{animation:companion-hand-release .19s ease-out forwards}
 .companion-hand-feedback[data-pointer-type=touch] .companion-hand-drawing{opacity:.94}
+.companion-hand-feedback[data-region=hand] .companion-hand-drawing{width:30px;height:34px;--hand-tilt:12deg;filter:drop-shadow(0 2px 2px #be917a20)}
+.companion-hand-feedback[data-region=hand] .companion-hand-contact{width:11px;height:11px;left:-5.5px;top:-5.5px;border-color:#d7aa91;background:#f9dccc45;opacity:.55}
+.companion-hand-feedback[data-region=hand][data-phase=stroke] .companion-hand-drawing{animation:companion-hand-touch .7s ease-in-out 1}
+.companion-hand-feedback[data-region=body] .companion-hand-drawing{display:none}
+.companion-hand-feedback[data-region=body] .companion-hand-contact{width:12px;height:12px;left:-6px;top:-6px;opacity:.65;transform:scale(1);border-color:#c2baa8;background:#fff9ee45}
+.companion-hand-feedback[data-region=body][data-phase=hover] .companion-hand-contact{opacity:.45}
+@keyframes companion-hand-touch{0%,100%{transform:scale(var(--hand-side),var(--hand-rise)) rotate(12deg)}50%{transform:scale(calc(var(--hand-side)*.94),calc(var(--hand-rise)*.94)) rotate(7deg)}}
 @keyframes companion-hand-stroke{0%,100%{transform:scale(var(--hand-side),var(--hand-rise)) rotate(-7deg)}50%{transform:scale(var(--hand-side),var(--hand-rise)) rotate(5deg)}}
 @keyframes companion-hand-contact{0%,100%{opacity:.28;transform:scale(.8)}50%{opacity:.65;transform:scale(1.3)}}
 @keyframes companion-hand-release{to{opacity:0}}
 .companion-hand-feedback[data-reduced-motion=true]{will-change:auto;animation:none}
-.companion-hand-feedback[data-reduced-motion=true] .companion-hand-drawing{animation:none;--hand-tilt:0deg}
-.companion-hand-feedback[data-reduced-motion=true] .companion-hand-contact{animation:none;transform:none;opacity:.5}
+.companion-hand-feedback[data-reduced-motion=true] .companion-hand-drawing{animation:none!important;--hand-tilt:0deg}
+.companion-hand-feedback[data-reduced-motion=true] .companion-hand-contact{animation:none!important;transform:none;opacity:.5}
 .companion-hand-feedback[data-reduced-motion=true][data-phase=hover] .companion-hand-contact{opacity:0}
+.companion-hand-feedback[data-reduced-motion=true][data-region=body][data-phase=hover] .companion-hand-contact{opacity:.45}
 @media(prefers-reduced-motion:reduce){.companion-hand-feedback,.companion-hand-drawing,.companion-hand-contact{animation:none!important}.companion-hand-feedback{will-change:auto}}

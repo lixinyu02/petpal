@@ -476,7 +476,7 @@ test('TTS performs only the current clause and does not replay a sentence while 
   set(text.indexOf('现在'));assert.equal(controller.step(.1).gesture,'settle');
 });
 
-test('hidden, stop, buffering and reduced motion immediately clear gestures and never replay the cancelled sentence',()=>{
+test('interruptions immediately clear gesture cues and mouth, gently return visible geometry, and never replay the cancelled sentence',()=>{
   for(const interruption of ['hidden','stop','buffering','reduced']){
     const controller=createAvatarPerformance(),text='太好了，今天真的很开心。',speech={active:true,charIndex:0,audioLevel:.5};
     controller.setInput(input(text,{speech}));const moving=run(controller,.3).at(-1);assert.equal(moving.gesture,'bounce');assert.ok(moving.bodyLift>.2);
@@ -484,7 +484,12 @@ test('hidden, stop, buffering and reduced motion immediately clear gestures and 
     else if(interruption==='reduced')controller.step(0,{reducedMotion:true});
     else controller.setInput(input(text,{phase:interruption==='stop'?'idle':'speaking',speech:{...speech,active:false}}));
     const stopped=controller.step(0,{hidden:interruption==='hidden',reducedMotion:interruption==='reduced'});
-    assert.equal(stopped.gesture,'none');for(const key of gestureChannels)assert.equal(stopped[key],0,`${interruption}.${key}`);
+    assert.equal(stopped.gesture,'none');assert.equal(stopped.gestureProgress,0);assert.equal(stopped.mouthOpen,interruption==='reduced'?moving.mouthOpen:0);
+    for(const key of gestureChannels.filter(key=>key!=='gestureProgress'))assert.equal(stopped[key],interruption==='stop'||interruption==='buffering'?moving[key]:0,`${interruption}.${key}`);
+    if(interruption==='stop'||interruption==='buffering'){
+      const returned=run(controller,.5).at(-1);
+      for(const key of gestureChannels)assert.equal(returned[key],0,`${interruption}.${key} returns through the short transition`);
+    }
     controller.step(0);controller.setInput(input(text,{speech:{...speech,charIndex:4}}));
     assert.ok(run(controller,3).every(frame=>frame.gesture==='none'),interruption);
     controller.setInput(input(text+'现在安心了。',{speech:{...speech,charIndex:text.length}}));

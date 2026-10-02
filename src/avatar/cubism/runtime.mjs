@@ -3,7 +3,7 @@ import { createCubismParameterBridge, cubismParameterTargets } from './parameter
 
 export const CUBISM_RUNTIME_ROOT = '/avatars/cubism-runtime/';
 export const CUBISM_CORE_URL = '/vendor/live2d/live2dcubismcore.min.js';
-const DEFAULT_MODEL = '/avatars/akari-cubism-v10/akari.model3.json';
+const DEFAULT_MODEL = '/avatars/akari-cubism-v11/akari.model3.json';
 const FRAMEWORK_EXPORTS = ['CubismFramework', 'CubismModelSettingJson', 'CubismMoc', 'CubismUserModel', 'CubismMatrix44', 'CubismShaderManager_WebGL', 'releaseCubismContext'];
 let corePromise, modulePromise;
 const runtimes = new WeakMap();
@@ -185,6 +185,8 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
   let motionSource = '', motionUtterance = '', motionPhase = '', motionCueId = '';
   const motionRecords = new Map([...motions.entries()].map(([name, record]) => [record.motion, { ...record, group: name.slice(0, name.lastIndexOf('_')) }]));
   const expressionRecords = new Map([...expressions.values()].map(record => [record.motion, record]));
+  const featureTransforms = deformationProfile === 'reference-features'
+    ? new Map([...ANGLES, ...HANDS].filter(name => bridge.supported.includes(name)).map(name => [name, bridge.read(name)])) : new Map();
   // Capture neutral once. Persisting each animated frame into the next frame's
   // baseline leaves interrupted sparse curves behind and recursively amplifies
   // fades. Expressions and physics must also never enter that neutral baseline.
@@ -263,7 +265,7 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
       }
       if (!still && avatar._motionManager.isFinished()) startMotion('Idle');
       model.loadParameters();
-      const referencePortrait = deformationProfile === 'reference-layered';
+      const referencePortrait = deformationProfile === 'reference-layered' || deformationProfile === 'reference-features';
       // Only a pure idle queue gets the slower clock; an outgoing reaction
       // keeps its authored timing through the end of its fade.
       const previousLayers = active(avatar._motionManager, motionRecords, motionRecords.get(motions.get(motionName)?.motion));
@@ -300,10 +302,20 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
       });
       if (!still && avatar._physics) avatar._physics.evaluate(model, seconds);
       if (avatar._pose) avatar._pose.updateParameters(model, seconds);
+      // Native reaction ownership ends on a queue boundary. The next live
+      // follow target can be far from the outgoing neutral key, so give this
+      // reviewed rig a short geometric handoff. Eyes and speech stay immediate.
+      if (featureTransforms.size) {
+        for (const [name, previous] of featureTransforms) {
+          const target = bridge.read(name);
+          if (Number.isFinite(target)) featureTransforms.set(name, still || !Number.isFinite(previous) ? target : previous + (target - previous) * (1 - Math.exp(-seconds * 16)));
+        }
+        bridge.apply(Object.fromEntries(featureTransforms));
+      }
       // Local face artwork is a single selection, even while native motion or
       // expression curves fade. Restore it after physics/pose so an outgoing
       // face cannot ghost over the current one; articulation still goes last.
-      if (referencePortrait) bridge.apply(Object.fromEntries(PORTRAIT_FACE_PATCHES.map(name => [name, targets[name]])));
+      if (deformationProfile === 'reference-layered') bridge.apply(Object.fromEntries(PORTRAIT_FACE_PATCHES.map(name => [name, targets[name]])));
       let form = targets.ParamMouthForm;
       // Quiet smiles in real gesture/expression curves remain visible, but a
       // speaking mouth belongs exclusively to the live articulation controller.
@@ -319,7 +331,7 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
     },
     react(kind) {
       if (muted) return;
-      const preferred = kind === 'pet' ? 'TapHead' : kind === 'greet' ? 'Greet' : 'Idle';
+      const preferred = kind === 'pet' ? 'TapHead' : kind === 'hand' ? 'Sway' : kind === 'greet' ? 'Greet' : 'Idle';
       startMotion([...motions.keys()].some(name => name.startsWith(`${preferred}_`)) ? preferred : kind === 'wake' ? 'Idle' : 'Nod', kind === 'wake' ? 'idle' : 'interaction');
     },
   };
@@ -417,7 +429,8 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
       -(canvasInfo.CanvasOriginY - canvasInfo.CanvasHeight / 2) / canvasInfo.PixelsPerUnit * authoredScale);
     // A user-supplied model must never inherit limits from its file name or
     // supported parameter IDs. Only this bundled, reviewed model opts in.
-    const deformationProfile = ['/avatars/akari-cubism-v7/akari.model3.json', '/avatars/akari-cubism-v8/akari.model3.json', '/avatars/akari-cubism-v9/akari.model3.json', '/avatars/akari-cubism-v10/akari.model3.json'].includes(modelPath.pathname) ? 'reference-layered'
+    const deformationProfile = modelPath.pathname === '/avatars/akari-cubism-v11/akari.model3.json' ? 'reference-features'
+      : ['/avatars/akari-cubism-v7/akari.model3.json', '/avatars/akari-cubism-v8/akari.model3.json', '/avatars/akari-cubism-v9/akari.model3.json', '/avatars/akari-cubism-v10/akari.model3.json'].includes(modelPath.pathname) ? 'reference-layered'
       : ['/avatars/akari-cubism-v3/akari.model3.json', '/avatars/akari-cubism-v4/akari.model3.json', '/avatars/akari-cubism-v5/akari.model3.json', '/avatars/akari-cubism-v6/akari.model3.json'].includes(modelPath.pathname) ? 'akari-stable' : 'standard';
     const controller = createCubismFrameController({ model, avatar, bridge, motions, expressions, deformationProfile });
     return {

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 PetPal contributors. Original authoring client, 2026-10-01.
 // Uses the public API of PSD2Live at 2ac751fbb3ffdc8251a82e0d600d97afafafcaac.
 import io.github.psd2live.core.LayerClassificationOverride
+import io.github.psd2live.core.ClassifiedLayer
 import io.github.psd2live.core.LayerType
 import io.github.psd2live.core.MeshSettings
 import io.github.psd2live.core.PSD2LivePipeline
@@ -308,6 +309,17 @@ private val referenceGestureParameters = listOf(
   RigParameterEdit("ParamSleeveEase", "Sleeves: gentle ease", 0f, 1f, 0f, created = true),
 )
 private val referenceGestureIds = referenceGestureParameters.map { it.id }.toSet()
+private val referenceFeatureLayers = setOf("eyebrow-right", "eyebrow-left", "eye-white-right", "eye-white-left", "iris-right", "iris-left", "eyelash-upper-right", "eyelash-upper-left", "eyelash-lower-right", "eyelash-lower-left")
+private val referenceFeatureBaseLayers = setOf("topwear", "face", "front hair 1", "front hair 2", "mouth-a", "mouth-o")
+private val referenceFeatureParameters = listOf(
+  RigParameterEdit("ParamEyeBallX", "Independent iris gaze X", -1f, 1f, 0f),
+  RigParameterEdit("ParamEyeBallY", "Independent iris gaze Y", -1f, 1f, 0f),
+  RigParameterEdit("ParamBrowLY", "Left eyebrow height", -1f, 1f, 0f),
+  RigParameterEdit("ParamBrowRY", "Right eyebrow height", -1f, 1f, 0f),
+  RigParameterEdit("ParamBrowLAngle", "Left eyebrow angle", -1f, 1f, 0f, created = true),
+  RigParameterEdit("ParamBrowRAngle", "Right eyebrow angle", -1f, 1f, 0f, created = true),
+)
+private val referenceFeatureIds = referenceFeatureParameters.map { it.id }.toSet()
 
 private data class ReferenceFrame(val left: Float, val top: Float, val width: Float, val height: Float)
 private fun referenceRootFrame(model: PuppetModel): ReferenceFrame {
@@ -507,39 +519,145 @@ private fun referenceLayeredEdits(model: PuppetModel): List<RigKeyformSetEdit> {
   return edits
 }
 
-private fun referenceLayeredConfig(pipeline: PSD2LivePipeline, input: Path, initial: PipelineConfig, gestures: Boolean = false, expressions: Boolean = false): Pair<PipelineConfig, PuppetModel> {
+/** Source alpha only supplies lash centre lines; the source pixels are never repainted here.
+ * Keep all feature meshes in the shared head frame rather than enabling the generated face rig. */
+private fun referenceFeatureEdits(model: PuppetModel, layers: Map<String, ClassifiedLayer>): List<RigKeyformSetEdit> {
+  val frame = referenceHeadFrame(model)
+  val edits = mutableListOf<RigKeyformSetEdit>()
+  fun centreLine(layer: ClassifiedLayer): (Float) -> Float {
+    val raster = layer.source.raster
+    val line = FloatArray(raster.width) { Float.NaN }
+    for (x in line.indices) {
+      var weight = 0f; var sum = 0f
+      for (y in 0 until raster.height) {
+        val alpha = (raster.rgba[(y * raster.width + x) * 4 + 3].toInt() and 255).toFloat()
+        weight += alpha; sum += (y + 0.5f) * alpha
+      }
+      if (weight > 0f) line[x] = layer.source.bounds.top + sum / weight
+    }
+    val first = line.indexOfFirst { it.isFinite() }; require(first >= 0) { "Empty eyelash feature" }
+    for (x in 0 until first) line[x] = line[first]
+    var previous = first
+    for (x in first + 1 until line.size) if (line[x].isFinite()) {
+      for (i in previous + 1 until x) line[i] = line[previous] + (line[x] - line[previous]) * (i - previous).toFloat() / (x - previous)
+      previous = x
+    }
+    for (x in previous + 1 until line.size) line[x] = line[previous]
+    return { canvasX ->
+      val x = (canvasX - layer.source.bounds.left).coerceIn(0f, line.lastIndex.toFloat())
+      val left = x.toInt(); val right = minOf(left + 1, line.lastIndex)
+      line[left] + (line[right] - line[left]) * (x - left)
+    }
+  }
+  for ((side, key) in listOf("left" to "L", "right" to "R")) {
+    val upper = centreLine(layers.getValue("eyelash-upper-$side"))
+    val lower = centreLine(layers.getValue("eyelash-lower-$side"))
+    val eye = layers.getValue("eye-white-$side").bounds
+    // Fit the shared closure line to the original lash centres. A noisy per-column target
+    // can fold irregular aperture triangles even though its analytic y-derivative is positive.
+    // This affine seam gives the white mesh a positive Jacobian for EVERY source triangle.
+    val sampleXs = (0..24).map { eye.left + eye.width * it / 24f }
+    val sampleYs = sampleXs.map { upper(it) * 0.30f + lower(it) * 0.70f }
+    val centerX = sampleXs.average().toFloat(); val centerY = sampleYs.average().toFloat()
+    val slope = sampleXs.indices.sumOf { ((sampleXs[it] - centerX) * (sampleYs[it] - centerY)).toDouble() }.toFloat() /
+      sampleXs.sumOf { ((it - centerX) * (it - centerX)).toDouble() }.toFloat()
+    fun seam(x: Float): Float = centerY + slope * (x - centerX)
+    fun affineLine(line: (Float) -> Float): (Float) -> Float {
+      val values = sampleXs.map(line); val mean = values.average().toFloat()
+      val gradient = sampleXs.indices.sumOf { ((sampleXs[it] - centerX) * (values[it] - mean)).toDouble() }.toFloat() /
+        sampleXs.sumOf { ((it - centerX) * (it - centerX)).toDouble() }.toFloat()
+      return { x -> mean + gradient * (x - centerX) }
+    }
+    val openParameter = "ParamEye${key}Open"
+    for (name in listOf("eye-white-$side", "eyelash-upper-$side", "eyelash-lower-$side")) {
+      val drawable = model.drawables.single { it.name.trim().lowercase() == name }
+      val mesh = requireNotNull(drawable.mesh)
+      val fullClose = FloatArray(mesh.positions.size)
+      val fittedLash = affineLine(if (name.startsWith("eyelash-upper")) upper else lower)
+      for (i in mesh.positions.indices step 2) {
+        val x = frame.left + mesh.positions[i] * frame.width
+        val y = frame.top + mesh.positions[i + 1] * frame.height
+        // Affine lid-line translation/shear retains each lash's original curve and thickness.
+        // Every source triangle keeps a positive Jacobian, including thin residual strokes.
+        fullClose[i + 1] = (if (name.startsWith("eye-white")) (seam(x) - y) * 0.96f else seam(x) - fittedLash(x)) / frame.height
+      }
+      for (open in listOf(0f, 0.25f, 0.5f, 0.75f, 1f)) {
+        val deltas = FloatArray(fullClose.size) { fullClose[it] * (1f - open) }
+        edits += RigKeyformSetEdit(RigTargetRef(RigTargetKind.ART_MESH, drawable.id.raw), mapOf(openParameter to open), geometry = RigKeyformGeometryEdit(positionDeltas = deltas.toList()))
+      }
+    }
+    val iris = model.drawables.single { it.name.trim().lowercase() == "iris-$side" }
+    val irisMesh = requireNotNull(iris.mesh)
+    for (x in listOf(-1f, 0f, 1f)) for (y in listOf(-1f, 0f, 1f)) {
+      val deltas = FloatArray(irisMesh.positions.size) { if (it % 2 == 0) x * 3f / frame.width else -y * 2f / frame.height }
+      edits += RigKeyformSetEdit(RigTargetRef(RigTargetKind.ART_MESH, iris.id.raw), mapOf("ParamEyeBallX" to x, "ParamEyeBallY" to y), geometry = RigKeyformGeometryEdit(positionDeltas = deltas.toList()))
+    }
+    // Geometry remains a non-degenerate sliver at exact closure; hide the sliver and lower line.
+    // All partial closures retain the native aperture mask and native lid geometry.
+    for (name in listOf("eye-white-$side", "iris-$side", "eyelash-lower-$side")) {
+      val drawable = model.drawables.single { it.name.trim().lowercase() == name }
+      for ((open, opacity) in listOf(0f to 0f, 0.25f to 1f, 1f to 1f)) edits += RigKeyformSetEdit(
+        RigTargetRef(RigTargetKind.ART_MESH, drawable.id.raw), mapOf(openParameter to open), channels = RigKeyformChannelsEdit(opacity = opacity))
+    }
+    val brow = model.drawables.single { it.name.trim().lowercase() == "eyebrow-$side" }
+    val browMesh = requireNotNull(brow.mesh)
+    val source = layers.getValue("eyebrow-$side")
+    for (height in listOf(-1f, 0f, 1f)) for (angle in listOf(-1f, 0f, 1f)) {
+      // Both axes use the same canvas rotation sign. Runtime L+/R- raises both inner ends.
+      val radians = Math.toRadians((angle * 4f).toDouble())
+      val cosine = cos(radians).toFloat(); val sine = sin(radians).toFloat()
+      val deltas = FloatArray(browMesh.positions.size)
+      for (i in browMesh.positions.indices step 2) {
+        val x = frame.left + browMesh.positions[i] * frame.width - source.centroidX
+        val y = frame.top + browMesh.positions[i + 1] * frame.height - source.centroidY
+        deltas[i] = (x * cosine - y * sine - x) / frame.width
+        deltas[i + 1] = (x * sine + y * cosine - y - height * 4f) / frame.height
+      }
+      edits += RigKeyformSetEdit(RigTargetRef(RigTargetKind.ART_MESH, brow.id.raw), mapOf("ParamBrow${key}Y" to height, "ParamBrow${key}Angle" to angle), geometry = RigKeyformGeometryEdit(positionDeltas = deltas.toList()))
+    }
+  }
+  return edits
+}
+
+private fun referenceLayeredConfig(pipeline: PSD2LivePipeline, input: Path, initial: PipelineConfig, gestures: Boolean = false, expressions: Boolean = false, features: Boolean = false): Pair<PipelineConfig, PuppetModel> {
   val inspected = pipeline.inspect(input, initial)
   require(inspected.source.widthPx == 1024 && inspected.source.heightPx == 1536) { "Reference profile is calibrated to the original 1024x1536 artwork" }
   val layers = inspected.layers.associateBy { it.source.name.trim().lowercase() }
-  require(layers.size == inspected.layers.size && layers.keys.containsAll(referenceRequiredLayers)) { "Reference PSD has duplicate or missing required layers" }
+  val requiredLayers = if (features) referenceFeatureBaseLayers + referenceFeatureLayers else referenceRequiredLayers
+  require(layers.size == inspected.layers.size && layers.keys.containsAll(requiredLayers)) { "Reference PSD has duplicate or missing required layers" }
   val allowedEmotions = referenceOriginalEmotions + if (expressions) referenceNewEmotions else emptySet()
-  require(layers.keys.all { it in referenceRequiredLayers || it in allowedEmotions }) { "Unexpected reference-layered source layer" }
+  require(layers.keys.all { it in requiredLayers || (!features && it in allowedEmotions) }) { "Unexpected reference-layered source layer" }
   require(layers.values.all { it.opaquePixels > 0 }) { "Reference source contains empty layers" }
-  if (gestures) require(layers.size == (if (expressions) 14 else 11) && layers.keys.containsAll(allowedEmotions)) { "Reference gestures require all original layers and the selected profile's complete expression set" }
+  if (gestures) require(layers.size == (if (features) 16 else if (expressions) 14 else 11) && (features || layers.keys.containsAll(allowedEmotions))) { "Reference gestures require the selected profile's complete layer set" }
   val overrides = layers.map { (name, layer) -> layer.source.id.raw to when (name) {
     "topwear" -> LayerClassificationOverride(tag = SemanticTag.TOPWEAR)
     "face" -> LayerClassificationOverride(tag = SemanticTag.FACE)
     "front hair 1", "front hair 2" -> LayerClassificationOverride(tag = SemanticTag.FRONT_HAIR)
+    in referenceFeatureLayers -> LayerClassificationOverride(tag = SemanticTag.FACE_DETAIL)
     else -> LayerClassificationOverride(type = LayerType.TOGGLE, tag = SemanticTag.FACE_DETAIL, parameter = referencePatchBindings.getValue(name))
   } }.toMap()
   val orders = layers.map { (name, layer) -> layer.source.id.raw to when (name) {
     "topwear" -> 100f; "face" -> 200f; "front hair 1", "front hair 2" -> 210f
-    "warm", "sad", "pout", "shy", "surprise", "relaxed" -> 300f; "blink-left", "blink-right" -> 310f; "mouth-a" -> 320f; else -> 330f
+    "warm", "sad", "pout", "shy", "surprise", "relaxed" -> 300f; "blink-left", "blink-right" -> 310f; "mouth-a" -> 320f
+    "eye-white-left", "eye-white-right" -> 280f; "iris-left", "iris-right" -> 285f
+    "eyebrow-left", "eyebrow-right" -> 290f; "eyelash-upper-left", "eyelash-upper-right", "eyelash-lower-left", "eyelash-lower-right" -> 295f
+    else -> 330f
   } }.toMap()
   val meshSettings = listOf("mouth-a", "mouth-o").associate { name ->
     layers.getValue(name).source.id.raw to MeshSettings(interiorDensity = 8f, edgeWidth = 3f, maxEdgeDistance = 4f)
   }.toMutableMap()
   if (gestures) meshSettings[layers.getValue("topwear").source.id.raw] = MeshSettings(interiorDensity = 16f, edgeWidth = 5f, maxEdgeDistance = 10f)
+  if (features) for (name in referenceFeatureLayers) meshSettings[layers.getValue(name).source.id.raw] = MeshSettings(interiorDensity = 5f, edgeWidth = 2f, maxEdgeDistance = 3f)
   var config = initial.copy(
     layerOverrides = overrides, drawOrderOverrides = orders,
-    parentOverrides = layers.filterKeys { it == "face" || it in referencePatchBindings }.values.associate { it.source.id.raw to "DeformHeadContainer" },
+    parentOverrides = layers.filterKeys { it == "face" || it in referencePatchBindings || it in referenceFeatureLayers }.values.associate { it.source.id.raw to "DeformHeadContainer" },
     layerVisibility = layers.values.associate { it.source.id.raw to true },
     meshOverrides = meshSettings,
   )
   val preview = pipeline.buildPreview(input, config).rig.puppet
   val headMeshes = preview.drawables.filter { it.parentDeformerId?.raw == "DeformHeadContainer" }.map { it.id.raw }
   val body = preview.drawables.single { it.name.trim().lowercase() == "topwear" }
-  require(body.parentDeformerId?.raw == "DeformBodyZBreath" && headMeshes.size == layers.keys.count { it == "face" || it in referencePatchBindings }) { "Reference layer parent frames changed" }
+  require(body.parentDeformerId?.raw == "DeformBodyZBreath" && headMeshes.size == layers.keys.count { it == "face" || it in referencePatchBindings || it in referenceFeatureLayers }) { "Reference layer parent frames changed" }
   config = config.copy(rigEdits = config.rigEdits.copy(
     warpEdits = listOf(
       // Public API requests are limited to <=32; matching the parent's 5x4 knots expands this
@@ -552,17 +670,23 @@ private fun referenceLayeredConfig(pipeline: PSD2LivePipeline, input: Path, init
     }),
   ))
   val baseline = pipeline.buildPreview(input, config).rig.puppet
+  val maskEdits = if (features) listOf("left", "right").map { side -> buildJsonObject {
+    put("action", "static"); put("kind", "mesh")
+    put("id", baseline.drawables.single { it.name.trim().lowercase() == "iris-$side" }.id.raw)
+    put("masked_by", JsonArray(listOf(JsonPrimitive(baseline.drawables.single { it.name.trim().lowercase() == "eye-white-$side" }.id.raw))))
+  } } else emptyList()
   return config.copy(rigEdits = config.rigEdits.copy(
-    parameterEdits = if (gestures) referenceGestureParameters else emptyList(),
-    keyformSetEdits = referenceLayeredEdits(baseline) + if (gestures) referenceGestureEdits(baseline) else emptyList(),
-    deletedParameterIds = referenceUnusedParameters,
+    parameterEdits = (if (gestures) referenceGestureParameters else emptyList()) + (if (features) referenceFeatureParameters else emptyList()),
+    structureEdits = config.rigEdits.structureEdits + maskEdits,
+    keyformSetEdits = referenceLayeredEdits(baseline) + (if (gestures) referenceGestureEdits(baseline) else emptyList()) + (if (features) referenceFeatureEdits(baseline, layers) else emptyList()),
+    deletedParameterIds = referenceUnusedParameters - (if (features) referenceFeatureIds else emptySet()),
   )) to baseline
 }
 
-private fun assertReferenceLayered(baseline: PuppetModel, exported: PuppetModel, gestures: Boolean = false, expressions: Boolean = false) {
+private fun assertReferenceLayered(baseline: PuppetModel, exported: PuppetModel, gestures: Boolean = false, expressions: Boolean = false, features: Boolean = false) {
   val headFrame = referenceHeadFrame(exported); val bodyFrame = referenceRootFrame(exported)
   val patchParameters = exported.drawables.mapNotNull { referencePatchBindings[it.name.trim().lowercase()] }.toSet()
-  val expectedParameters = referenceStandardBindings + patchParameters + if (gestures) referenceGestureIds else emptySet()
+  val expectedParameters = referenceStandardBindings + patchParameters + (if (gestures) referenceGestureIds else emptySet()) + (if (features) referenceFeatureIds else emptySet())
   require(exported.parameters.map { it.id.raw }.toSet() == expectedParameters) { "Reference export contains unbound or missing parameters" }
   for (before in baseline.deformers) {
     val after = exported.deformers.single { it.id == before.id }
@@ -610,7 +734,7 @@ private fun assertReferenceLayered(baseline: PuppetModel, exported: PuppetModel,
     require(before.parentDeformerId == after.parentDeformerId && requireNotNull(before.mesh).positions.contentEquals(requireNotNull(after.mesh).positions)) { "Reference drawable rest frame changed: ${after.name}" }
     val name = after.name.trim().lowercase()
     if (name == "topwear") require(after.parentDeformerId?.raw == "DeformReferenceBody")
-    else if (name in referencePatchBindings || name == "face") require(after.parentDeformerId?.raw == "DeformReferenceHead") { "Facial patch escaped shared head frame: $name" }
+    else if (name in referencePatchBindings || name in referenceFeatureLayers || name == "face") require(after.parentDeformerId?.raw == "DeformReferenceHead") { "Facial patch escaped shared head frame: $name" }
     if (name !in referencePatchBindings) continue
     val parameter = referencePatchBindings.getValue(name)
     val expectedDefault = if (name.startsWith("blink-")) 1f else 0f
@@ -629,13 +753,14 @@ private fun assertReferenceLayered(baseline: PuppetModel, exported: PuppetModel,
   }
   val headRotation = exported.deformers.single { it.id.raw == "DeformHeadRotation" } as Deformer.Rotation
   require(requireNotNull(headRotation.geometryGrid).cells.all { it.form.angle == 0f && it.form.scale == 1f }) { "Head rotation bypasses the fixed neck transition" }
-  if (gestures) assertReferenceGestures(exported, expressions)
+  if (gestures) assertReferenceGestures(exported, expressions, features)
+  if (features) assertReferenceFeatures(exported)
 }
 
 /** These checks concern the actual author's exported mesh/keyforms, not a screen overlay.
  * Official Core and browser pose checks are still required for the generated MOC3. */
-private fun assertReferenceGestures(model: PuppetModel, expressions: Boolean = false) {
-  require(model.drawables.size == if (expressions) 14 else 11) { "Hand gestures must retain the original eleven drawings plus only the selected expression patches" }
+private fun assertReferenceGestures(model: PuppetModel, expressions: Boolean = false, features: Boolean = false) {
+  require(model.drawables.size == if (features) 16 else if (expressions) 14 else 11) { "Hand gestures must retain only the selected profile's reviewed drawings" }
   for (spec in referenceGestureParameters) require(model.parameters.any {
     it.id.raw == spec.id && it.min == spec.min && it.max == spec.max && it.default == 0f
   }) { "Gesture parameter contract changed: ${spec.id}" }
@@ -708,16 +833,62 @@ private fun assertReferenceGestures(model: PuppetModel, expressions: Boolean = f
   }) { "Gesture parameter has no independent native geometry effect: $id" }
 }
 
+private fun assertReferenceFeatures(model: PuppetModel) {
+  require(model.drawables.map { it.name.trim().lowercase() }.toSet() == referenceFeatureBaseLayers + referenceFeatureLayers) { "Independent feature source contract changed" }
+  val frame = referenceHeadFrame(model)
+  for ((side, key) in listOf("left" to "L", "right" to "R")) {
+    fun drawable(name: String) = model.drawables.single { it.name.trim().lowercase() == "$name-$side" }
+    val iris = drawable("iris"); val white = drawable("eye-white")
+    require(iris.maskedBy == listOf(white.id)) { "Iris must use its own native eye-white clipping mask" }
+    val gaze = requireNotNull(iris.geometryGrid)
+    require(gaze.axes.map { it.parameterId.raw }.toSet() == setOf("ParamEyeBallX", "ParamEyeBallY") && gaze.cells.size == 9) { "Independent iris requires a two-axis native geometry grid" }
+    for (cell in gaze.cells) {
+      val values = coordinate(gaze, cell); val delta = cell.form.positionDeltas
+      for (i in delta.indices step 2) require(abs(delta[i] * frame.width - values.getValue("ParamEyeBallX") * 3f) < 0.001f && abs(delta[i + 1] * frame.height + values.getValue("ParamEyeBallY") * 2f) < 0.001f) { "Iris gaze scales or distorts its native bitmap" }
+    }
+    val eyeId = "ParamEye${key}Open"
+    require(model.parameters.any { it.id.raw == eyeId && it.min == 0f && it.max == 1f && it.default == 1f }) { "Feature eye parameter default/range changed" }
+    for (name in listOf("eye-white", "eyelash-upper", "eyelash-lower")) {
+      val item = drawable(name); val grid = requireNotNull(item.geometryGrid)
+      require(grid.axes.size == 1 && grid.axes.single().parameterId.raw == eyeId && grid.axes.single().keys.contentEquals(floatArrayOf(0f, 0.25f, 0.5f, 0.75f, 1f))) { "Independent eyelids require five continuous native geometry keys" }
+      require(neutralCell(grid, model).form.positionDeltas.all { it == 0f }) { "Open eye must preserve the original artwork positions" }
+      require(grid.cells.any { it.form.positionDeltas.any { value -> abs(value) > 0.000001f } }) { "Eyelid has no native geometry response" }
+      for (cell in grid.cells) for (i in cell.form.positionDeltas.indices step 2) require(cell.form.positionDeltas[i] == 0f && abs(cell.form.positionDeltas[i + 1]) * frame.height < 110f) { "Eyelid leaves its local vertical authoring budget" }
+      val mesh = requireNotNull(item.mesh)
+      fun area(points: FloatArray, a: Int, b: Int, c: Int) = (points[b] - points[a]) * (points[c + 1] - points[a + 1]) - (points[b + 1] - points[a + 1]) * (points[c] - points[a])
+      for (cell in grid.cells) {
+        val moved = FloatArray(mesh.positions.size) { mesh.positions[it] + cell.form.positionDeltas[it] }
+        for (triangle in mesh.indices.indices step 3) {
+          val a = mesh.indices[triangle] * 2; val b = mesh.indices[triangle + 1] * 2; val c = mesh.indices[triangle + 2] * 2
+          val originalArea = area(mesh.positions, a, b, c)
+          if (abs(originalArea) * frame.width * frame.height > 0.1f) require(area(moved, a, b, c) / originalArea > 0.001f) { "Eyelid native geometry folds a source triangle: ${item.name}" }
+        }
+      }
+    }
+    val brow = drawable("eyebrow"); val browGrid = requireNotNull(brow.geometryGrid)
+    require(browGrid.axes.map { it.parameterId.raw }.toSet() == setOf("ParamBrow${key}Y", "ParamBrow${key}Angle") && browGrid.cells.size == 9) { "Brow height and angle must be independent native axes" }
+    require(neutralCell(browGrid, model).form.positionDeltas.all { it == 0f }) { "Neutral brow geometry changed" }
+    val featureAxes = setOf(eyeId, "ParamBrow${key}Y", "ParamBrow${key}Angle")
+    for (item in model.drawables) {
+      val name = item.name.trim().lowercase()
+      if (name !in referenceFeatureLayers.filter { it.endsWith("-$side") }) require(item.geometryGrid?.axes.orEmpty().none { it.parameterId.raw in featureAxes }) { "Feature geometry leaks into another face/eye/body drawing" }
+      if (!name.startsWith("iris-")) require(item.geometryGrid?.axes.orEmpty().none { it.parameterId.raw in setOf("ParamEyeBallX", "ParamEyeBallY") }) { "Gaze translates a whole eye/face rather than the independent iris" }
+    }
+  }
+  for (spec in referenceFeatureParameters) require(model.parameters.any { it.id.raw == spec.id && it.min == spec.min && it.max == spec.max && it.default == spec.default }) { "Feature parameter contract changed: ${spec.id}" }
+}
+
 /** The frozen generator's metadata describes its PRESET base before our public authoring edits.
  * Correct only these verified profile facts after all authoring assertions succeed; preserve the
  * original diagnostics separately so provenance is not silently lost. */
-private fun writeReferenceMetadata(output: Path, model: PuppetModel, gestures: Boolean = false, expressions: Boolean = false) {
+private fun writeReferenceMetadata(output: Path, model: PuppetModel, gestures: Boolean = false, expressions: Boolean = false, features: Boolean = false) {
   Files.list(output).use { entries -> entries.filter { it.fileName.toString().endsWith(".psd2live.json") }.forEach { path ->
     val base = Json.parseToJsonElement(Files.readString(path)).jsonObject
     val baseWarnings = requireNotNull(base["warnings"]).jsonArray
     val warnings = baseWarnings.map { warning -> JsonPrimitive(when (val message = warning.jsonPrimitive.content) {
       "Eye semantic layers are missing; blink and gaze parameters will not be bound to any drawable." ->
-        "Reference-layered uses native local blink opacity bindings; independent eye-gaze and continuous eyelid geometry are not authored."
+        if (features) "Reference-features uses independent native iris geometry, eye-white clipping masks, continuous eyelid geometry and two-axis eyebrow geometry in the shared rigid head frame."
+        else "Reference-layered uses native local blink opacity bindings; independent eye-gaze and continuous eyelid geometry are not authored."
       "mouth/mouth_open/mouth_close is missing; lip-sync parameters will not be bound to any drawable." ->
         "Reference-layered uses ParamMouthOpenY local native lip geometry with ParamMouthA/O occlusion patches, not mouth PRESET layers."
       else -> message
@@ -729,11 +900,11 @@ private fun writeReferenceMetadata(output: Path, model: PuppetModel, gestures: B
       put("face", JsonPrimitive("DeformReferenceHead")); put("body", JsonPrimitive("DeformReferenceBody")); put("backHair", JsonArray(emptyList()))
     }
     val metadata = JsonObject(base.toMutableMap().apply {
-      put("petpalAuthoringProfile", JsonPrimitive(if (expressions) "reference-expressions" else if (gestures) "reference-gestures" else "reference-layered"))
+      put("petpalAuthoringProfile", JsonPrimitive(if (features) "reference-features" else if (expressions) "reference-expressions" else if (gestures) "reference-gestures" else "reference-layered"))
       put("generatedBaseWarnings", baseWarnings); put("warnings", JsonArray(warnings)); put("deformerHierarchy", JsonObject(hierarchy))
       put("nativeBoundParameterIds", JsonArray(model.parameters.map { JsonPrimitive(it.id.raw) }))
       if (gestures) put("gestureAuthoring", buildJsonObject {
-        put("source", if (expressions) "Original eleven V7 layers plus three local facial patches; original gesture geometry retained" else "Unchanged eleven-layer V7 PSD; refined topwear ArtMesh only")
+        put("source", if (features) "Original topwear and hair retained; independent facial feature layers; original gesture geometry retained" else if (expressions) "Original eleven V7 layers plus three local facial patches; original gesture geometry retained" else "Unchanged eleven-layer V7 PSD; refined topwear ArtMesh only")
         put("parameters", JsonArray(referenceGestureIds.map { JsonPrimitive(it) }))
         put("keyformCombinations", 27)
         put("handsSharedLiftPixels", 16)
@@ -757,6 +928,16 @@ private fun writeReferenceMetadata(output: Path, model: PuppetModel, gestures: B
         put("neutralOpacity", 0)
         put("independentFeatureGeometry", false)
       })
+      if (features) put("featureAuthoring", buildJsonObject {
+        put("layers", JsonArray(referenceFeatureLayers.map { JsonPrimitive(it) }))
+        put("parameters", JsonArray(referenceFeatureIds.map { JsonPrimitive(it) }))
+        put("parent", "DeformReferenceHead"); put("independentFeatureGeometry", true)
+        put("nativeIrisClipMasks", true); put("wholeFaceExpressionPatches", false)
+        put("irisTravelPixels", JsonArray(listOf(JsonPrimitive(3), JsonPrimitive(2))))
+        put("browHeightPixels", 4); put("browAngleDegrees", 4)
+        put("eyelidKeys", JsonArray(listOf(0, 0.25, 0.5, 0.75, 1).map { JsonPrimitive(it) }))
+        put("mouthBoundary", "Existing A/O lip patches and ParamMouthOpenY retained; no independent mouth-corner or mouth-form geometry")
+      })
     })
     Files.writeString(path, Json { prettyPrint = true }.encodeToString(JsonObject.serializer(), metadata) + "\n")
   } }
@@ -764,12 +945,13 @@ private fun writeReferenceMetadata(output: Path, model: PuppetModel, gestures: B
 
 // Independent authoring client for the frozen GPL tool. It is never part of the PetPal application.
 fun main(arguments: Array<String>) {
-  require(arguments.size in 2..3) { "Usage: <layered-PSD> <local-output-directory> [classic|continuous-body|stable-portrait|reference-layered|reference-gestures|reference-expressions]" }
+  require(arguments.size in 2..3) { "Usage: <layered-PSD> <local-output-directory> [classic|continuous-body|stable-portrait|reference-layered|reference-gestures|reference-expressions|reference-features]" }
   val profile = arguments.getOrElse(2) { "classic" }
-  require(profile in setOf("classic", "continuous-body", "stable-portrait", "reference-layered", "reference-gestures", "reference-expressions")) { "Unknown authoring profile: $profile" }
+  require(profile in setOf("classic", "continuous-body", "stable-portrait", "reference-layered", "reference-gestures", "reference-expressions", "reference-features")) { "Unknown authoring profile: $profile" }
+  val referenceFeatures = profile == "reference-features"
   val referenceExpressions = profile == "reference-expressions"
-  val referenceGestures = profile in setOf("reference-gestures", "reference-expressions")
-  val referenceLayered = profile in setOf("reference-layered", "reference-gestures", "reference-expressions")
+  val referenceGestures = profile in setOf("reference-gestures", "reference-expressions", "reference-features")
+  val referenceLayered = profile in setOf("reference-layered", "reference-gestures", "reference-expressions", "reference-features")
   val stablePortrait = profile == "stable-portrait"
   val continuousBody = profile in setOf("continuous-body", "stable-portrait")
   I18n.setLanguage(AppLanguage.ENGLISH, persist = false)
@@ -815,7 +997,7 @@ fun main(arguments: Array<String>) {
   var stableBaseline: PuppetModel? = null
   var referenceBaseline: PuppetModel? = null
   val exportConfig = if (referenceLayered) {
-    referenceLayeredConfig(pipeline, input, initialConfig, referenceGestures, referenceExpressions).also { referenceBaseline = it.second }.first
+    referenceLayeredConfig(pipeline, input, initialConfig, referenceGestures, referenceExpressions, referenceFeatures).also { referenceBaseline = it.second }.first
   } else if (continuousBody) {
     // Reinspect with the same classifications that run() will use. Reusing the earlier analysis
     // with new overrides would leave its semantic tags out of sync with the export configuration.
@@ -867,11 +1049,12 @@ fun main(arguments: Array<String>) {
     println("Stable portrait: neutral frames and parents retained; rigid body/head lattices; no independent face/hair perspective or iris jelly; anchored crown/fringe with 6px front and 8px rear tips; original blink and mouth keys retained")
   }
   if (referenceLayered) {
-    assertReferenceLayered(requireNotNull(referenceBaseline), model, referenceGestures, referenceExpressions)
-    writeReferenceMetadata(output, model, referenceGestures, referenceExpressions)
-    println("Reference layered: original pixels and facial proportions retained; shared face/patch head with fixed neck transition; independently pinned body; 1.25px anchored hair tips; real blink, A/O lip shapes and available emotion opacity bindings")
+    assertReferenceLayered(requireNotNull(referenceBaseline), model, referenceGestures, referenceExpressions, referenceFeatures)
+    writeReferenceMetadata(output, model, referenceGestures, referenceExpressions, referenceFeatures)
+    println("Reference layered: shared rigid head with fixed neck transition; independently pinned body; 1.25px anchored hair tips; A/O lip shapes retained")
     if (referenceGestures) println("Reference gestures: original clasped hands translate together up to 16px vertically and 6px horizontally; local 3px sleeve easing; fixed neckline and unchanged face/hair; not independent fingers or raised arms")
     if (referenceExpressions) println("Reference expressions: three additional local facial patches share the rigid head frame, start transparent, and remain below blink and A/O speaking mouth patches")
+    if (referenceFeatures) println("Reference features: independent iris geometry with native eye-white masks; five continuous eyelid keys; independent two-axis eyebrows; no whole-face expression patches or new mouth-form geometry")
   }
   println("Exported ${result.exportedFiles.size} files; ${model.parameters.size} parameters; ${model.drawables.size} drawables; profile=$profile")
   result.warnings.forEach { System.err.println("Warning: $it") }

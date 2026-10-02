@@ -18,7 +18,7 @@ export function createCompanionFeedback(container, { motionQuery = globalThis.ma
   container.appendChild(element);
   let owner = null, previous = null, timer, disposed = false, reduced = Boolean(motionQuery?.matches);
   const clearTimer = () => { unschedule(timer); timer = undefined; };
-  const hide = () => { clearTimer(); element.hidden = true; element.dataset.phase = 'idle'; owner = null; previous = null; };
+  const hide = () => { clearTimer(); element.hidden = true; element.dataset.phase = 'idle'; delete element.dataset.region; owner = null; previous = null; };
   const reduce = () => {
     reduced = Boolean(motionQuery?.matches); element.dataset.reducedMotion = String(reduced);
     if (reduced && element.dataset.phase === 'release') hide();
@@ -39,14 +39,15 @@ export function createCompanionFeedback(container, { motionQuery = globalThis.ma
     if (x < 0 || y < 0 || x > rect.width || y > rect.height) { if (!owner || owner === surface) hide(); return false; }
     // Rendering refreshes repeat the last pointer input. Only a new phase,
     // pointer or actual coordinate change should restart the movement timer.
-    const changed = owner !== surface || !previous || ['phase','x','y','id','pointerType'].some(key => previous[key] !== value[key]);
+    const changed = owner !== surface || !previous || ['phase','x','y','id','pointerType','region'].some(key => previous[key] !== value[key]);
     if (changed) clearTimer();
-    owner = surface; previous = { phase:value.phase, x:value.x, y:value.y, id:value.id, pointerType:value.pointerType };
+    owner = surface; previous = { phase:value.phase, x:value.x, y:value.y, id:value.id, pointerType:value.pointerType, region:value.region };
     // Keep the palm above and beside the contact point instead of covering eyes.
     // Mirror away from the right edge; near the top, extend below the contact.
     element.dataset.side = x > rect.width - 44 ? 'left' : 'right';
     element.dataset.vertical = y < 48 ? 'below' : 'above';
     element.dataset.pointerType = value.pointerType;
+    element.dataset.region = ['head','hand','body'].includes(value.region) ? value.region : 'default';
     element.style.transform = `translate3d(${x}px,${y}px,0)`;
     element.hidden = false;
     if (changed) {

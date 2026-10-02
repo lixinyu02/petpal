@@ -5,7 +5,7 @@ import type { PetAction, PetBehaviorState, PetInteraction } from '../../pet/beha
 import { createAvatarPerformance, type PerformanceInput } from '../performance.mjs';
 import { createAvatarPresence } from '../presence.mjs';
 import { createVisibleSceneLoop, updateSceneDataset } from '../scene-loop.mjs';
-import { bindCompanionGestures, portraitContains, portraitCoordinates } from '../../pet/interaction.mjs';
+import { bindCompanionGestures, portraitContains, portraitCoordinates, cubismPortraitCoordinates, portraitRegion, type CompanionGestureContext } from '../../pet/interaction.mjs';
 import { createCompanionFeedback } from '../../pet/gesture-feedback.mjs';
 import { animePoseTransform } from '../anime-pose-render.mjs';
 import { createCubismAvatar, type CubismAvatar } from './runtime.mjs';
@@ -24,7 +24,8 @@ const development = Boolean((import.meta as ImportMeta & { env?: { DEV?: boolean
 
 /** A real Cubism surface, with the stable original character while loading or unsupported. */
 export default function CubismScene(props: CubismSceneProps) {
-  const { modelUrl = '/avatars/akari-cubism-v10/akari.model3.json', command, compact = false, interactive = true, className = '' } = props;
+  const { modelUrl = '/avatars/akari-cubism-v11/akari.model3.json', command, compact = false, interactive = true, className = '' } = props;
+  const referencePortrait = /^\/avatars\/akari-cubism-v(?:7|8|9|10|11)\/akari\.model3\.json$/.test(modelUrl);
   const host = useRef<HTMLDivElement>(null);
   const callbacks = useRef(props); callbacks.current = props;
   const requested = useRef(command); requested.current = command;
@@ -52,7 +53,7 @@ export default function CubismScene(props: CubismSceneProps) {
     container.dataset.avatarMode = 'loading'; delete container.dataset.cubismFallbackReason;
     surface.dataset.renderer = 'webgl'; surface.dataset.avatarRenderer = 'cubism'; surface.dataset.petCount = '1';
     surface.setAttribute('role', interactive ? 'button' : 'img');
-    surface.setAttribute('aria-label', interactive ? '二次元伙伴小伴。轻触回应，双击打招呼，长按休息；Enter 或空格也可操作。' : '二次元伙伴小伴');
+    surface.setAttribute('aria-label', interactive ? referencePortrait ? '二次元伙伴小伴。头部轻抚，手部轻触，双击打招呼，长按休息；Enter 或空格也可操作。' : '二次元伙伴小伴。轻触回应，双击打招呼，长按休息；Enter 或空格也可操作。' : '二次元伙伴小伴');
     const emitState = () => callbacks.current.onState?.({ action, x: 0, facing: 1, lookX: gazeX, lookY: gazeY, actionTime: time - actionStart, actionProgress: 0, jumpHeight: 0, speed: 0, autonomous: false, paused: document.hidden || !inView, autonomyPaused: media.matches });
     const fail = (reason: string) => {
       if (disposed) return;
@@ -60,6 +61,7 @@ export default function CubismScene(props: CubismSceneProps) {
       runtime?.release(); runtime = undefined; performance.reset(); presence.reset();
       container.dataset.avatarMode = 'fallback'; container.dataset.cubismFallbackReason = reason;
       surface.style.visibility = 'hidden'; surface.setAttribute('aria-hidden', 'true'); surface.tabIndex = -1;
+      unbind.refresh();
       abort.abort(); setMode('fallback'); callbacks.current.onFallback?.(reason);
     };
     const resize = () => {
@@ -76,6 +78,7 @@ export default function CubismScene(props: CubismSceneProps) {
       const visible = !document.hidden && inView;
       last = 0;
       if (!visible) {
+        unbind.refresh();
         performance.setInput(callbacks.current.performanceInput || localInput);
         const pose = performance.step(0, { hidden: true }); presence.reset();
         pointerX = pointerY = gazeX = gazeY = 0;
@@ -90,24 +93,28 @@ export default function CubismScene(props: CubismSceneProps) {
     };
     const intersection = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => { inView = entries[0]?.isIntersecting !== false; visibility(); }) : undefined;
     intersection?.observe(container); document.addEventListener('visibilitychange', visibility);
-    const interact = (next: PetInteraction, userGesture = false) => {
+    const interact = (next: PetInteraction, userGesture = false, context?: CompanionGestureContext) => {
       if (action === 'sleep' && next !== 'wake' && next !== 'sleep') return;
       action = next === 'wake' ? 'idle' : next as PetAction; actionStart = time;
       localInput = { utteranceId: `cubism-interaction-${++sequence}`, text: '', phase: 'idle' };
       if (next === 'sleep') performance.reset();
       else if (next === 'pet' || next === 'jump' || next === 'wake' && userGesture) {
-        const kind = next === 'pet' ? 'pet' : next === 'jump' ? 'greet' : 'wake';
+        const kind = next === 'pet' ? context?.region === 'hand' ? 'hand' : context?.region === 'body' ? 'greet' : 'pet' : next === 'jump' ? 'greet' : 'wake';
         performance.react({ id: String(sequence), kind }); runtime?.react(kind);
       }
-      emitState(); if (userGesture) callbacks.current.onInteract?.(next);
+      if (context) { surface.dataset.interactionRegion = context.region; surface.dataset.interactionSource = context.source; }
+      emitState(); if (userGesture && context?.source !== 'hover') callbacks.current.onInteract?.(next);
     };
     const feedback = createCompanionFeedback(container, { motionQuery: media });
+    const hitCoordinates = (x: number, y: number) => (referencePortrait ? cubismPortraitCoordinates : portraitCoordinates)(surface.getBoundingClientRect(), x, y);
     const unbind = bindCompanionGestures(surface, {
-      enabled: () => interactive && Boolean(runtime) && !disposed && surface.getAttribute('aria-hidden') !== 'true',
-      hitTest: (x, y) => portraitContains(portraitCoordinates(container.getBoundingClientRect(), x, y)),
-      getAction: () => action, emit: next => interact(next, true),
+      enabled: () => interactive && Boolean(runtime) && !disposed && !document.hidden && inView && surface.getAttribute('aria-hidden') !== 'true',
+      hitTest: (x, y) => portraitContains(hitCoordinates(x, y)),
+      regionAt: referencePortrait ? (x, y) => portraitRegion(hitCoordinates(x, y)) : undefined,
+      getAction: () => action, emit: (next, context) => interact(next, true, context),
       onPointer: (x, y) => { const rect = container.getBoundingClientRect(); pointerX = clamp((x - rect.left) / Math.max(1, rect.width) * 2 - 1); pointerY = clamp(1 - (y - rect.top) / Math.max(1, rect.height) * 2); },
-      onLeave: () => { pointerX = pointerY = 0; }, onFeedback: value => feedback.update(value, surface),
+      onLeave: () => { pointerX = pointerY = 0; delete surface.dataset.hoverRegion; },
+      onFeedback: value => { if (value.phase === 'cancel') delete surface.dataset.hoverRegion; else if (value.region) surface.dataset.hoverRegion = value.region; return feedback.update(value, surface); },
     });
     const lost = (event: Event) => { event.preventDefault(); fail('webgl-context-lost'); };
     surface.addEventListener('webglcontextlost', lost);
@@ -162,7 +169,7 @@ export default function CubismScene(props: CubismSceneProps) {
   }, [modelUrl, compact, interactive]);
 
   useEffect(() => { if (props.performanceInput) quietInput.current?.(props.performanceInput); }, [props.performanceInput]);
-  return <div ref={host} className={`pet-three-scene anime-scene cubism-scene ${className}`} data-character-style={['/avatars/akari-cubism-v7/akari.model3.json', '/avatars/akari-cubism-v8/akari.model3.json', '/avatars/akari-cubism-v9/akari.model3.json', '/avatars/akari-cubism-v10/akari.model3.json'].includes(modelUrl) ? 'akari-soft' : undefined}>
+  return <div ref={host} className={`pet-three-scene anime-scene cubism-scene ${className}`} data-character-style={['/avatars/akari-cubism-v7/akari.model3.json', '/avatars/akari-cubism-v8/akari.model3.json', '/avatars/akari-cubism-v9/akari.model3.json', '/avatars/akari-cubism-v10/akari.model3.json', '/avatars/akari-cubism-v11/akari.model3.json'].includes(modelUrl) ? 'akari-soft' : undefined}>
     {mode !== 'cubism' && <AnimeScene {...props} className="cubism-fallback" onReady={ready} />}
   </div>;
 }

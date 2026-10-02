@@ -14,7 +14,7 @@ export type CubismFrameOptions = {
 export interface CubismFrameController {
   readonly motionGroup: string;
   update(dt: number, pose: Partial<AvatarPerformanceSnapshot>, follow: Partial<AvatarPresencePose>, options?: CubismFrameOptions): void;
-  react(kind: 'pet' | 'greet' | 'wake'): void;
+  react(kind: 'pet' | 'hand' | 'greet' | 'wake'): void;
 }
 type CubismMotionRecord = { motion: object; parameters: Set<string> };
 interface CubismQueue {
@@ -40,7 +40,7 @@ export interface CubismAvatar {
   mocVersion: number; coreVersion: number; supportedParameters: string[];
   readonly motionGroup: string;
   update(dt: number, pose: AvatarPerformanceSnapshot, follow: AvatarPresencePose, options?: CubismFrameOptions): void;
-  react(kind: 'pet' | 'greet' | 'wake'): void;
+  react(kind: 'pet' | 'hand' | 'greet' | 'wake'): void;
   render(): void;
   release(): void;
 }

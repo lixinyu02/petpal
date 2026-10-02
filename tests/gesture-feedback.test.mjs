@@ -26,6 +26,15 @@ test('one decorative hand follows the contact point and mirrors away from the ri
   assert.equal(f.container.children.length,1);
 });
 
+test('one feedback element switches regional styling and cancellation removes stale region state', t => {
+  const f=fixture(t);
+  for(const region of ['head','hand','body']){
+    assert.equal(f.update({region}),true);assert.equal(f.element.dataset.region,region);assert.equal(f.container.children.length,1);
+  }
+  f.update({phase:'cancel'});assert.equal(f.element.dataset.region,undefined);assert.equal(f.element.hidden,true);
+  f.update();assert.equal(f.element.dataset.region,'default');
+});
+
 test('a motionless stroke becomes static after 220 ms and render refreshes cannot restart it', t => {
   const f=fixture(t); f.update({phase:'press'}); f.update({phase:'stroke',x:120});
   assert.equal(f.element.dataset.phase,'stroke'); const [id,timer]=[...f.timers][0]; assert.equal(timer.delay,220);

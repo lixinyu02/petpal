@@ -1,0 +1,262 @@
+{
+	"Version": 3,
+	"Parameters": [
+		{
+			"Id": "ParamAngleX",
+			"GroupId": "ParamGroupFace",
+			"Name": "Angle X"
+		},
+		{
+			"Id": "ParamAngleY",
+			"GroupId": "ParamGroupFace",
+			"Name": "Angle Y"
+		},
+		{
+			"Id": "ParamAngleZ",
+			"GroupId": "ParamGroupFace",
+			"Name": "Angle Z"
+		},
+		{
+			"Id": "ParamBodyAngleX",
+			"GroupId": "ParamGroupBody",
+			"Name": "Body Angle X"
+		},
+		{
+			"Id": "ParamBodyAngleY",
+			"GroupId": "ParamGroupBody",
+			"Name": "Body Angle Y"
+		},
+		{
+			"Id": "ParamBodyAngleZ",
+			"GroupId": "ParamGroupBody",
+			"Name": "Body Angle Z"
+		},
+		{
+			"Id": "ParamEyeLOpen",
+			"GroupId": "ParamGroupEyes",
+			"Name": "Left Eye Open"
+		},
+		{
+			"Id": "ParamEyeROpen",
+			"GroupId": "ParamGroupEyes",
+			"Name": "Right Eye Open"
+		},
+		{
+			"Id": "ParamEyeBallX",
+			"GroupId": "ParamGroupEyes",
+			"Name": "Independent iris gaze X"
+		},
+		{
+			"Id": "ParamEyeBallY",
+			"GroupId": "ParamGroupEyes",
+			"Name": "Independent iris gaze Y"
+		},
+		{
+			"Id": "ParamBrowLY",
+			"GroupId": "ParamGroupBrows",
+			"Name": "Left eyebrow height"
+		},
+		{
+			"Id": "ParamBrowRY",
+			"GroupId": "ParamGroupBrows",
+			"Name": "Right eyebrow height"
+		},
+		{
+			"Id": "ParamMouthOpenY",
+			"GroupId": "ParamGroupMouth",
+			"Name": "Mouth Open"
+		},
+		{
+			"Id": "ParamBreath",
+			"GroupId": "ParamGroupBody",
+			"Name": "Breath"
+		},
+		{
+			"Id": "ParamHairFront",
+			"GroupId": "ParamGroupPhysics",
+			"Name": "Front Hair Sway"
+		},
+		{
+			"Id": "ParamMouthA",
+			"GroupId": "ParamGroupCustom",
+			"Name": "ParamMouthA"
+		},
+		{
+			"Id": "ParamMouthO",
+			"GroupId": "ParamGroupCustom",
+			"Name": "ParamMouthO"
+		},
+		{
+			"Id": "ParamHandsLift",
+			"GroupId": "",
+			"Name": "Clasped hands: gentle lift"
+		},
+		{
+			"Id": "ParamHandsSway",
+			"GroupId": "",
+			"Name": "Clasped hands: small shared sway"
+		},
+		{
+			"Id": "ParamSleeveEase",
+			"GroupId": "",
+			"Name": "Sleeves: gentle ease"
+		},
+		{
+			"Id": "ParamBrowLAngle",
+			"GroupId": "",
+			"Name": "Left eyebrow angle"
+		},
+		{
+			"Id": "ParamBrowRAngle",
+			"GroupId": "",
+			"Name": "Right eyebrow angle"
+		}
+	],
+	"ParameterGroups": [
+		{
+			"Id": "ParamGroupFace",
+			"GroupId": "",
+			"Name": "Face"
+		},
+		{
+			"Id": "ParamGroupEyes",
+			"GroupId": "",
+			"Name": "Eyes"
+		},
+		{
+			"Id": "ParamGroupBrows",
+			"GroupId": "",
+			"Name": "Brows"
+		},
+		{
+			"Id": "ParamGroupMouth",
+			"GroupId": "",
+			"Name": "Mouth"
+		},
+		{
+			"Id": "ParamGroupBody",
+			"GroupId": "",
+			"Name": "Body"
+		},
+		{
+			"Id": "ParamGroupPhysics",
+			"GroupId": "",
+			"Name": "Physics"
+		},
+		{
+			"Id": "ParamGroupCustom",
+			"GroupId": "",
+			"Name": "Custom Parameters"
+		}
+	],
+	"Parts": [
+		{
+			"Id": "PartHead",
+			"Name": "Head"
+		},
+		{
+			"Id": "PartHairBack",
+			"Name": "Back Hair"
+		},
+		{
+			"Id": "PartFace",
+			"Name": "Face"
+		},
+		{
+			"Id": "PartHairFront",
+			"Name": "Front Hair"
+		},
+		{
+			"Id": "PartHeadAccessories",
+			"Name": "Head Accessories"
+		},
+		{
+			"Id": "PartExtra",
+			"Name": "Extra"
+		},
+		{
+			"Id": "PartBody",
+			"Name": "Body"
+		}
+	],
+	"CombinedParameters": [
+		[
+			"ParamAngleX",
+			"ParamAngleY"
+		],
+		[
+			"ParamBodyAngleX",
+			"ParamBodyAngleY"
+		],
+		[
+			"ParamEyeBallX",
+			"ParamEyeBallY"
+		]
+	],
+	"Drawables": [
+		{
+			"Id": "ArtMeshTopwear",
+			"Name": "topwear"
+		},
+		{
+			"Id": "ArtMeshFace",
+			"Name": "face"
+		},
+		{
+			"Id": "ArtMeshFrontHair",
+			"Name": "front hair 1"
+		},
+		{
+			"Id": "ArtMeshFrontHair2",
+			"Name": "front hair 2"
+		},
+		{
+			"Id": "ArtMeshFaceDetail",
+			"Name": "eye-white-right"
+		},
+		{
+			"Id": "ArtMeshFaceDetail2",
+			"Name": "iris-right"
+		},
+		{
+			"Id": "ArtMeshFaceDetail3",
+			"Name": "eye-white-left"
+		},
+		{
+			"Id": "ArtMeshFaceDetail4",
+			"Name": "iris-left"
+		},
+		{
+			"Id": "ArtMeshFaceDetail5",
+			"Name": "eyelash-upper-right"
+		},
+		{
+			"Id": "ArtMeshFaceDetail6",
+			"Name": "eyelash-lower-right"
+		},
+		{
+			"Id": "ArtMeshFaceDetail7",
+			"Name": "eyebrow-right"
+		},
+		{
+			"Id": "ArtMeshFaceDetail8",
+			"Name": "eyelash-upper-left"
+		},
+		{
+			"Id": "ArtMeshFaceDetail9",
+			"Name": "eyelash-lower-left"
+		},
+		{
+			"Id": "ArtMeshFaceDetail10",
+			"Name": "eyebrow-left"
+		},
+		{
+			"Id": "ArtMeshFaceDetail11",
+			"Name": "mouth-a"
+		},
+		{
+			"Id": "ArtMeshFaceDetail12",
+			"Name": "mouth-o"
+		}
+	]
+}

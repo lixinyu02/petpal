@@ -15,6 +15,8 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
   const smile = unit(pose.smileAmount), sad = unit(Math.max(finite(pose.sadAmount), finite(pose.downcastAmount)));
   const warm = unit(pose.warmAmount), pout = unit(pose.poutAmount);
   const referenceLayered = deformationProfile === 'reference-layered';
+  const referenceFeatures = deformationProfile === 'reference-features';
+  const referencePortrait = referenceLayered || referenceFeatures;
   // Only explicitly discovered, real channels enable the newer portrait's
   // expression artwork. Older portraits keep their original three-patch map;
   // similarly named parameters on imported models retain authored ownership.
@@ -35,6 +37,9 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
     dominantPatch = name; dominantAmount = amount;
   }
   const faceAmount = name => {
+    // The split-feature portrait has no whole-face emotion artwork. Its
+    // expression is carried by the real brow, lid and iris geometry below.
+    if (referenceFeatures) return 0;
     if (sleeping || hidden) return 0;
     if (!referenceLayered) return patchIntents[name];
     if (dominantPatch !== name) return 0;
@@ -50,12 +55,16 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
   // Raw voiceEnergy must never reopen a quiet mouth or leave a ghosted base lip.
   const mouthOpen = unit(pose.mouthOpen);
   const patchMouth = quiet || mouthOpen <= .04 || pose.mouthShape === 'M' || pose.mouthShape === 'rest' ? 0 : mouthOpen;
-  const patchAmount = referenceLayered ? patchMouth > 0 ? 1 : 0 : patchMouth;
+  const patchAmount = referencePortrait ? patchMouth > 0 ? 1 : 0 : patchMouth;
   const mouthForm = quiet ? smile * .7 - sad * .35 : pose.mouthShape === 'O' ? -.65 : pose.mouthShape === 'E' ? .25 : 0;
   // V10's relaxed/other faces already paint their own eyelid shapes. There is
   // no continuous lid geometry: narrowing Open would instead fade the old
   // neutral blink bitmap over those eyes. Only an actual blink closes them.
-  const eyelid = discreteFace ? 1 : 1 - unit(pose.eyeSmile) * .15 - unit(pose.sleepyAmount) * .38 - sad * .12;
+  const eyelid = referenceFeatures
+    ? clamp(1 - unit(pose.eyeSmile) * .2 - unit(pose.sleepyAmount) * .42 - sad * .12
+      - unit(pose.shyAmount) * .07 - unit(pose.concernAmount) * .04
+      - unit(pose.tenderAmount) * .06 - unit(pose.reliefAmount) * .08, .26, 1)
+    : discreteFace ? 1 : 1 - unit(pose.eyeSmile) * .15 - unit(pose.sleepyAmount) * .38 - sad * .12;
   // The bundled rig has eyebrow height, but no eyebrow angle. A small height
   // difference keeps its asymmetric cues visible without a virtual parameter.
   const browDifference = supportedParameters && !supportedParameters.includes('ParamBrowLAngle') && !supportedParameters.includes('ParamBrowRAngle') ? clamp(pose.browTilt) * .12 : 0;
@@ -75,10 +84,10 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
     // EyeBallForm is iris squash/stretch, not the smile eyelid parameter.
     // Keep an independent authored/physics value through the bridge below.
     ParamEyeBallForm: 0,
-    ParamBrowLY: hidden ? 0 : clamp(pose.browRaise) * .7 + browDifference,
-    ParamBrowRY: hidden ? 0 : clamp(pose.browRaise) * .7 - browDifference,
-    ParamBrowLAngle: hidden ? 0 : clamp(pose.browTilt) * .7,
-    ParamBrowRAngle: hidden ? 0 : -clamp(pose.browTilt) * .7,
+    ParamBrowLY: hidden || referenceFeatures && sleeping ? 0 : clamp(pose.browRaise) * .7 + browDifference,
+    ParamBrowRY: hidden || referenceFeatures && sleeping ? 0 : clamp(pose.browRaise) * .7 - browDifference,
+    ParamBrowLAngle: hidden || referenceFeatures && sleeping ? 0 : clamp(pose.browTilt) * .7,
+    ParamBrowRAngle: hidden || referenceFeatures && sleeping ? 0 : -clamp(pose.browTilt) * .7,
     // A trace of the reference's warm cheeks keeps the bundled portrait from
     // looking pale at rest; imported models retain their authored neutral.
     ParamCheek: sleeping || hidden ? 0 : deformationProfile === 'akari-stable' ? .16 + unit(pose.blush) * .84 : unit(pose.blush),
@@ -102,7 +111,7 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
     // This limit is only for our reviewed automatic rig. Imported Cubism
     // models retain their full authored opening range.
     ParamMouthOpenY: quiet ? 0 : Math.min(deformationProfile === 'akari-stable' ? .6 : 1, mouthOpen),
-    ParamMouthA: !referenceLayered && pose.mouthShape === 'O' ? 0 : patchAmount,
+    ParamMouthA: !referencePortrait && pose.mouthShape === 'O' ? 0 : patchAmount,
     ParamMouthO: pose.mouthShape === 'O' ? patchAmount : 0,
   };
 }

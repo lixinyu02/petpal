@@ -1,0 +1,346 @@
+{
+  "schema": 1,
+  "profile": "reference-features",
+  "method": "Original portrait mechanical feature separation; generated clean underpaint only inside bounded eye/brow masks; inverse alpha recovery of original strokes including native iris eye-white clipping; existing eye-white underpaint; no procedural feature drawing",
+  "canvas": [
+    1024,
+    1536
+  ],
+  "sources": [
+    {
+      "file": "artwork/akari/idle.png",
+      "sha256": "e351b622273c8db8faf24caa164d89b555f3fdf69d046343fd11f29fbdbca026"
+    },
+    {
+      "file": "artwork/akari/features-v11/clean-underpaint.png",
+      "sha256": "c8d13fae081311ad798d10fa283a3b45ec610a457d861f2b61cca6bc99fce941"
+    },
+    {
+      "file": "outputs/avatars/akari-cubism/layers/eyewhite-r.png",
+      "sha256": "3c8df15d386b4876042d9223757b0f46fe9ac3718534efa292cfe70a026b9bf2"
+    },
+    {
+      "file": "outputs/avatars/akari-cubism/layers/eyewhite-l.png",
+      "sha256": "ac202b979c777c462132e3269848678e688b94e589ac23cdc6b159dfd0bfbf5e"
+    },
+    {
+      "file": "outputs/avatars/akari-cubism-v7/akari.psd",
+      "sha256": "5541bc800828515499fa8112afe96d47aaaa79e1c370c196fdcd6ba97bc15322"
+    }
+  ],
+  "layers": [
+    {
+      "name": "topwear",
+      "bounds": [
+        54,
+        701,
+        915,
+        835
+      ],
+      "defaultVisible": true,
+      "source": "outputs/avatars/akari-cubism-v7/akari.psd",
+      "unchanged": true
+    },
+    {
+      "name": "face",
+      "bounds": [
+        0,
+        0,
+        866,
+        739
+      ],
+      "defaultVisible": true,
+      "source": "outputs/avatars/akari-cubism-v7/akari.psd",
+      "unchanged": false
+    },
+    {
+      "name": "front hair 1",
+      "bounds": [
+        191,
+        479,
+        240,
+        229
+      ],
+      "defaultVisible": true,
+      "source": "outputs/avatars/akari-cubism-v7/akari.psd",
+      "unchanged": true
+    },
+    {
+      "name": "front hair 2",
+      "bounds": [
+        595,
+        478,
+        242,
+        230
+      ],
+      "defaultVisible": true,
+      "source": "outputs/avatars/akari-cubism-v7/akari.psd",
+      "unchanged": true
+    },
+    {
+      "name": "eye-white-right",
+      "bounds": [
+        376,
+        361,
+        88,
+        58
+      ],
+      "defaultVisible": true,
+      "pixelsSha256": "17b83ec80add23a26c933788de295721c10c3f0e87f6de189e58d9c06c7ee908",
+      "source": "original aperture; previous independent eye-white under original iris",
+      "aperture": [
+        [
+          376,
+          389
+        ],
+        [
+          383,
+          377
+        ],
+        [
+          395,
+          368
+        ],
+        [
+          413,
+          361
+        ],
+        [
+          435,
+          361
+        ],
+        [
+          452,
+          367
+        ],
+        [
+          462,
+          378
+        ],
+        [
+          464,
+          397
+        ],
+        [
+          454,
+          408
+        ],
+        [
+          433,
+          418
+        ],
+        [
+          411,
+          418
+        ],
+        [
+          394,
+          411
+        ],
+        [
+          383,
+          401
+        ]
+      ]
+    },
+    {
+      "name": "iris-right",
+      "bounds": [
+        394,
+        358,
+        66,
+        64
+      ],
+      "defaultVisible": true,
+      "pixelsSha256": "691498f74ab27d363b602fecc94310103865ea39bf8e2184573253c849bbbf14",
+      "source": "original pixels recovered with inverse source-over alpha against clean underpaint",
+      "clippedBy": "eye-white-right"
+    },
+    {
+      "name": "eye-white-left",
+      "bounds": [
+        558,
+        338,
+        88,
+        61
+      ],
+      "defaultVisible": true,
+      "pixelsSha256": "a73e34046b2075d7c0b797ad0fcbea95ae12c7b9eed7ffa2abf3d77fee739a8d",
+      "source": "original aperture; previous independent eye-white under original iris",
+      "aperture": [
+        [
+          558,
+          368
+        ],
+        [
+          565,
+          352
+        ],
+        [
+          579,
+          340
+        ],
+        [
+          601,
+          338
+        ],
+        [
+          620,
+          343
+        ],
+        [
+          635,
+          352
+        ],
+        [
+          645,
+          361
+        ],
+        [
+          641,
+          377
+        ],
+        [
+          627,
+          390
+        ],
+        [
+          608,
+          397
+        ],
+        [
+          582,
+          398
+        ],
+        [
+          568,
+          390
+        ],
+        [
+          562,
+          380
+        ]
+      ]
+    },
+    {
+      "name": "iris-left",
+      "bounds": [
+        560,
+        336,
+        66,
+        65
+      ],
+      "defaultVisible": true,
+      "pixelsSha256": "a07fd71d9c945810eb5b5a0e596c4a7200e30dd6fa3d372ddb4fc0cc7968bea4",
+      "source": "original pixels recovered with inverse source-over alpha against clean underpaint",
+      "clippedBy": "eye-white-left"
+    },
+    {
+      "name": "eyelash-upper-right",
+      "bounds": [
+        345,
+        338,
+        137,
+        73
+      ],
+      "defaultVisible": true,
+      "pixelsSha256": "a06163f279a65e0a59e7d3021cafafa561e389ef5a6b07b4866fb83e34f448cf",
+      "source": "original pixels recovered with inverse source-over alpha against clean underpaint"
+    },
+    {
+      "name": "eyelash-lower-right",
+      "bounds": [
+        375,
+        392,
+        87,
+        37
+      ],
+      "defaultVisible": true,
+      "pixelsSha256": "7c08577fe15309c48f5bef900ecfc1f7bb42a23026f474f6aab06eb77802b299",
+      "source": "original pixels recovered with inverse source-over alpha against clean underpaint"
+    },
+    {
+      "name": "eyebrow-right",
+      "bounds": [
+        362,
+        295,
+        98,
+        36
+      ],
+      "defaultVisible": true,
+      "pixelsSha256": "e631a091470115759613366463325c44a5948349d1dc1f5f7efe9755dd8482e2",
+      "source": "original pixels recovered with inverse source-over alpha against clean underpaint"
+    },
+    {
+      "name": "eyelash-upper-left",
+      "bounds": [
+        539,
+        313,
+        134,
+        69
+      ],
+      "defaultVisible": true,
+      "pixelsSha256": "0798a92f407e4de4c609024e70aa444c83caff420c26748df9de3c793c45bc99",
+      "source": "original pixels recovered with inverse source-over alpha against clean underpaint"
+    },
+    {
+      "name": "eyelash-lower-left",
+      "bounds": [
+        559,
+        373,
+        89,
+        33
+      ],
+      "defaultVisible": true,
+      "pixelsSha256": "d34537b2aff4d9c10da902714067211f83163cd090faf5f34eea634d69582c08",
+      "source": "original pixels recovered with inverse source-over alpha against clean underpaint"
+    },
+    {
+      "name": "eyebrow-left",
+      "bounds": [
+        537,
+        277,
+        105,
+        27
+      ],
+      "defaultVisible": true,
+      "pixelsSha256": "bb3f68a3200875b9fcb95163f9a5d4475a9c1a031d1f2b7610791b9a57b2cbcc",
+      "source": "original pixels recovered with inverse source-over alpha against clean underpaint"
+    },
+    {
+      "name": "mouth-a",
+      "bounds": [
+        464,
+        460,
+        105,
+        81
+      ],
+      "defaultVisible": false,
+      "source": "outputs/avatars/akari-cubism-v7/akari.psd",
+      "unchanged": true
+    },
+    {
+      "name": "mouth-o",
+      "bounds": [
+        464,
+        460,
+        105,
+        81
+      ],
+      "defaultVisible": false,
+      "source": "outputs/avatars/akari-cubism-v7/akari.psd",
+      "unchanged": true
+    }
+  ],
+  "psdSha256": "9a23fbcdd859b75681960fedde5ca57f542a938ae4ee557726e0f7f6c223e0a9",
+  "readbackExact": true,
+  "neutralComparison": {
+    "nativeIrisClipSimulated": true,
+    "unchangedOutsideFeatures": true,
+    "changedPixels": 0,
+    "maxError": 1,
+    "meanAbsoluteError": 0.0009176900365408676,
+    "visiblePixels": 1019589
+  },
+  "boundary": "PSD pixel/layer and reference-resolution iris clip simulation only; actual Core mask filtering, native rig deformation, and browser verification are separate"
+}

@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCompanionGestures, bindCompanionGestures, portraitCoordinates, portraitContains } from '../src/pet/interaction.mjs';
+import { createCompanionGestures, bindCompanionGestures, portraitCoordinates, cubismPortraitCoordinates, portraitContains, portraitRegion } from '../src/pet/interaction.mjs';
 
 function fixture(initialAction = 'idle') {
   let time = 0, sequence = 0, action = initialAction;
-  const timers = new Map(), emitted = [], feedback = [];
+  const timers = new Map(), emitted = [], feedback = [], contexts = [];
   const gestures = createCompanionGestures({
     now: () => time, getAction: () => action,
-    emit: next => { emitted.push(next); action = next === 'wake' ? 'idle' : next; },
+    emit: (next, context) => { emitted.push(next); contexts.push(context); action = next === 'wake' ? 'idle' : next; },
     onFeedback: next => feedback.push(next),
     schedule: (callback, delay) => { const id = ++sequence; timers.set(id, {callback,at:time+delay}); return id; },
     unschedule: id => timers.delete(id),
@@ -22,7 +22,7 @@ function fixture(initialAction = 'idle') {
   };
   const point = (overrides = {}) => ({id:1,x:40,y:40,pointerType:'mouse',hit:true,button:0,isPrimary:true,...overrides});
   const tap = overrides => { gestures.down(point(overrides)); advance(30); gestures.up(point(overrides)); };
-  return {gestures,advance,point,tap,emitted,timers,feedback};
+  return {gestures,advance,point,tap,emitted,timers,feedback,contexts};
 }
 
 test('a single tap emits once, while a double tap produces only the greeting', () => {
@@ -90,6 +90,78 @@ test('wide and narrow layouts hit the same portrait and exclude transparent marg
   const data = new Uint8ClampedArray(16); data[3]=255;
   assert.equal(portraitContains({x:.4,y:.25},{width:2,height:2,data}),true);
   assert.equal(portraitContains({x:.6,y:.25},{width:2,height:2,data}),false);
+});
+
+test('reference head and joined-hand regions follow portrait coordinates on desktop and 412px screens', () => {
+  assert.equal(portraitRegion({x:.5,y:.16}),'head');
+  assert.equal(portraitRegion({x:.5,y:.89}),'hand');
+  assert.equal(portraitRegion({x:.72,y:.85}),'body');
+  assert.equal(portraitRegion({x:.5,y:.6}),'body');
+  assert.equal(portraitRegion({x:.02,y:.16}),null);
+  for(const rect of [{left:15,top:35,width:900,height:450},{left:0,top:0,width:412,height:620}]){
+    const portraitWidth=rect.height/Math.max(1.64,1.04/(rect.width/rect.height));
+    for(const [y,region] of [[.16,'head'],[.6,'body'],[.89,'hand']]){
+      const point=portraitCoordinates(rect,rect.left+rect.width/2,rect.top+rect.height/2+(y-.5)*portraitWidth*1.5);
+      assert.equal(portraitRegion(point),region);
+    }
+  }
+});
+
+test('Cubism hotspot fit matches its real width and height contain limits, including transformed canvas rects', () => {
+  for(const rect of [{left:0,top:0,width:412,height:960},{left:20,top:70,width:900,height:450},{left:8,top:41,width:386,height:575}]){
+    const fitWidth=Math.min(rect.width*.92,rect.height/1.5*.96);
+    for(const expected of [{x:.5,y:.16,region:'head'},{x:.5,y:.6,region:'body'},{x:.5,y:.89,region:'hand'}]){
+      const point=cubismPortraitCoordinates(rect,rect.left+rect.width/2+(expected.x-.5)*fitWidth,rect.top+rect.height/2+(expected.y-.5)*fitWidth*1.5);
+      assert.ok(Math.abs(point.x-expected.x)<1e-12);assert.ok(Math.abs(point.y-expected.y)<1e-12);
+      assert.equal(portraitRegion(point),expected.region);
+    }
+    assert.equal(portraitContains(cubismPortraitCoordinates(rect,rect.left+1,rect.top+1)),false);
+  }
+});
+
+test('head hover dwells once, moving strokes are cooled down, and leave cancels a pending dwell', () => {
+  const f=fixture(), point=f.point({region:'head'});
+  f.gestures.move(point);f.advance(649);assert.deepEqual(f.emitted,[]);
+  f.advance(1);assert.deepEqual(f.contexts,[{region:'head',source:'hover'}]);
+  f.advance(2000);f.gestures.move(point);assert.equal(f.emitted.length,1,'stationary hover is not an animation loop');
+  f.gestures.move({...point,x:58});assert.equal(f.emitted.length,2);
+  f.gestures.move({...point,x:80});assert.equal(f.emitted.length,2,'one moving reaction per cooldown');
+  f.gestures.leave();assert.equal(f.timers.size,0);
+  const pending=fixture();pending.gestures.move(pending.point({region:'head'}));pending.advance(300);pending.gestures.leave();pending.advance(1000);assert.deepEqual(pending.emitted,[]);
+});
+
+test('hand hover has its own semantic cue while body, touch hover, sleep and legacy surfaces stay quiet', () => {
+  const hand=fixture();hand.gestures.move(hand.point({region:'hand'}));hand.advance(900);
+  assert.deepEqual(hand.contexts,[{region:'hand',source:'hover'}]);
+  hand.advance(2000);hand.gestures.move(hand.point({region:'hand',x:90}));assert.equal(hand.emitted.length,1);
+  for(const [initial,overrides] of [['idle',{region:'body'}],['idle',{region:'head',pointerType:'touch'}],['idle',{region:'head',buttons:1}],['idle',{region:'head',isPrimary:false}],['sleep',{region:'head'}],['idle',{}]]){
+    const f=fixture(initial);f.gestures.move(f.point(overrides));f.advance(5000);assert.deepEqual(f.emitted,[]);
+  }
+});
+
+test('moving from a reacted head to the hand waits out the shared cooldown instead of losing the dwell', () => {
+  const f=fixture();f.gestures.move(f.point({region:'head'}));f.advance(650);
+  f.gestures.move(f.point({region:'hand'}));f.advance(900);assert.equal(f.emitted.length,1);
+  f.advance(699);assert.equal(f.emitted.length,1);f.advance(1);
+  assert.deepEqual(f.contexts,[{region:'head',source:'hover'},{region:'hand',source:'hover'}]);
+  assert.equal(f.timers.size,0);f.advance(5000);assert.equal(f.emitted.length,2);
+});
+
+test('mouse and touch taps keep hand/head metadata without changing old action contracts', () => {
+  for(const pointerType of ['mouse','touch']){
+    const f=fixture();f.tap({region:'hand',pointerType});f.advance(300);
+    assert.deepEqual(f.emitted,['pet']);assert.deepEqual(f.contexts,[{region:'hand',source:'tap'}]);
+    f.advance(100);f.tap({region:'hand',pointerType});f.advance(300);assert.equal(f.emitted.length,1,'rapid repeat is bounded');
+    f.advance(900);f.tap({region:'head',pointerType});f.advance(300);assert.deepEqual(f.contexts.at(-1),{region:'head',source:'tap'});
+  }
+  const double=fixture();double.tap({region:'hand'});double.advance(100);double.tap({region:'hand'});double.advance(1000);assert.deepEqual(double.emitted,['jump']);
+  const hold=fixture();hold.gestures.down(hold.point({region:'hand'}));hold.advance(700);hold.gestures.up(hold.point({region:'hand'}));hold.advance(1000);assert.deepEqual(hold.emitted,['sleep']);
+});
+
+test('crossing between body parts cannot release a tap or inherit a head hover timer', () => {
+  const f=fixture();f.gestures.move(f.point({region:'head'}));f.advance(500);f.gestures.move(f.point({region:'hand'}));f.advance(649);assert.deepEqual(f.emitted,[]);
+  f.gestures.cancel();f.gestures.down(f.point({region:'head'}));f.gestures.move(f.point({region:'body'}));f.gestures.up(f.point({region:'body'}));f.advance(1500);assert.deepEqual(f.emitted,[]);
+  const scroll=fixture();scroll.gestures.down(scroll.point({region:'hand',pointerType:'touch'}));scroll.gestures.move(scroll.point({region:'hand',pointerType:'touch',y:60}));scroll.gestures.up(scroll.point({region:'hand',pointerType:'touch',y:60}));scroll.advance(1000);assert.deepEqual(scroll.emitted,[]);
 });
 
 test('DOM binding cleans up global listeners and disabled surfaces ignore assistive clicks', t => {

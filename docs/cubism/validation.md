@@ -1,6 +1,10 @@
 # 原创 Cubism 网页验收
 
-## 当前 V10 facial-expressions：2026-10-02（网页已上线）
+## 当前 V11 continuous-features：2026-10-03（网页已上线）
+
+独立眉毛、眼睑、虹膜与原生裁剪；连续表情、头部/合手区域交互和持续语音倾听。修复动作退场跳变及眼周白边。340 项回归、官方 Core、Chrome 公网冷启动/交互和 412×960 检查通过。详见 [V11 验收](continuous-features-validation.md) 与 [模型能力说明](akari-continuous-features.md)。
+
+## 历史 V10 facial-expressions：2026-10-02
 
 新增害羞、惊讶、安心三套实际局部表情和真实参数，共六套表情；保留原人物几何与十六组动作。289 项回归、官方 Core、Chrome 组合表情／对话状态及 412×960 检查通过。另修正公网 Core 首加载预算过短的问题。详见 [V10 验收](facial-expressions-validation.md)、[作者与能力说明](akari-facial-expressions.md) 和 [来源](akari-facial-expressions-provenance.json)。
 
