@@ -156,7 +156,7 @@ export default function CubismScene(props: CubismSceneProps) {
   }, [modelUrl, compact, interactive]);
 
   useEffect(() => { if (props.performanceInput) quietInput.current?.(props.performanceInput); }, [props.performanceInput]);
-  return <div ref={host} className={`pet-three-scene anime-scene cubism-scene ${className}`}>
+  return <div ref={host} className={`pet-three-scene anime-scene cubism-scene ${className}`} data-character-style={modelUrl === '/avatars/akari-cubism-v7/akari.model3.json' ? 'akari-soft' : undefined}>
     {mode !== 'cubism' && <AnimeScene {...props} className="cubism-fallback" onReady={ready} />}
   </div>;
 }

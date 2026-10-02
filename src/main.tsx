@@ -4,6 +4,7 @@ import './styles.css';
 import './companion.css';
 import './natural-companion.css';
 import './adaptive-screen.css';
+import './companion-portrait.css';
 import { useViewport } from './platform/useViewport';
 import { getIdentity, getSessionEpoch, initConnection, subscribeSession } from './api';
 import { readCompanionCatEnabled, useCompanionCatEnabled } from './avatar/preference';

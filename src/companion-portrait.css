@@ -1,0 +1,121 @@
+/* The native portrait is the visual anchor. Keep the shared viewport geometry. */
+.companion-world.companion-anime {
+  --pet-ink: #344a40;
+  --pet-muted: #737d6f;
+  background:
+    radial-gradient(ellipse at 50% 42%, #fffdf8 0%, #fffdf800 57%),
+    radial-gradient(ellipse at 88% 12%, #f5e8d74d 0%, #f5e8d700 49%),
+    #faf7f1;
+}
+
+.companion-world.companion-anime .companion-brand > svg {
+  background: #ebece1;
+  color: #546e59;
+}
+
+.companion-world.companion-anime .companion-presence {
+  color: #74806f;
+  letter-spacing: .7px;
+}
+
+.companion-world.companion-anime .companion-presence i {
+  background: #869f77;
+  box-shadow: 0 0 0 3px #859c7410;
+}
+
+.companion-world.companion-anime .companion-intro h1 {
+  color: #3c5044;
+  font-weight: 500;
+  letter-spacing: 3px;
+}
+
+.companion-world.companion-anime .companion-switch {
+  background: #ecebe3;
+  box-shadow: inset 0 0 0 1px #65734c08;
+}
+
+.companion-world.companion-anime .companion-switch button {
+  color: #737c6b;
+}
+
+.companion-world.companion-anime .companion-switch button[aria-pressed="true"] {
+  background: #fffefa;
+  color: #3d5947;
+  box-shadow: 0 1px 5px #5e553510;
+}
+
+.companion-world.companion-anime .companion-aura {
+  inset: 3% 10% 0;
+  background:
+    radial-gradient(ellipse at 50% 41%, #f7dfc875 0%, #f8e8d750 33%, #f8e8d700 70%);
+  opacity: .92;
+}
+
+.companion-world.companion-anime .companion-space[data-action="sleep"] .companion-aura {
+  opacity: .42;
+}
+
+/* Restrict compositing to the full-size bundled portrait. Transparent desktop
+   pets, imported models and compact chat portraits keep their original surface. */
+.companion-world.companion-anime .cubism-scene[data-character-style="akari-soft"]:not([data-compact="true"]) > canvas {
+  filter: contrast(1.025) saturate(1.035) drop-shadow(0 3px 5px #85674d0d);
+}
+
+.companion-world.companion-anime .companion-reply {
+  color: #50604d;
+  letter-spacing: .15px;
+}
+
+.companion-world.companion-anime .companion-hint {
+  color: #7a8273;
+  letter-spacing: .15px;
+}
+
+.companion-world.companion-anime .interaction-help {
+  color: #74806f;
+}
+
+.companion-world.companion-anime .interaction-help summary {
+  text-decoration-color: #bbc2b2;
+}
+
+.cubism-scene[data-character-style="akari-soft"] > .companion-hand-feedback,
+.cubism-scene[data-character-style="akari-soft"] > .companion-hand-feedback .companion-hand-drawing {
+  width: 28px;
+  height: 32px;
+}
+
+.cubism-scene[data-character-style="akari-soft"] > .companion-hand-feedback .companion-hand-drawing {
+  filter: none;
+}
+
+@media (hover: hover) {
+  .companion-world.companion-anime .companion-switch button:not([aria-pressed="true"]):hover {
+    background: #f7f5ef;
+    color: #495f4b;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .companion-world.companion-anime .cubism-scene[data-character-style="akari-soft"] {
+    animation: companion-portrait-reveal .36s ease-out both;
+  }
+
+  .companion-world.companion-anime .companion-switch button {
+    transition: background-color .18s ease, color .18s ease, box-shadow .18s ease;
+  }
+}
+
+@keyframes companion-portrait-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .companion-world.companion-anime .cubism-scene[data-character-style="akari-soft"],
+  .companion-world.companion-anime .companion-switch button,
+  .companion-world.companion-anime .companion-aura {
+    animation: none;
+    transition: none;
+  }
+}

@@ -191,7 +191,12 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
       }
       if (!still && avatar._motionManager.isFinished()) startMotion('Idle');
       model.loadParameters();
-      if (!still) avatar._motionManager.updateMotion(model, seconds);
+      const referencePortrait = deformationProfile === 'reference-layered';
+      // Only a pure idle queue gets the slower clock; an outgoing reaction
+      // keeps its authored timing through the end of its fade.
+      const previousLayers = active(avatar._motionManager, motionRecords, motionRecords.get(motions.get(motionName)?.motion));
+      const pureIdleClock = referencePortrait && previousLayers.length > 0 && previousLayers.every(record => record.group === 'Idle');
+      if (!still) avatar._motionManager.updateMotion(model, seconds * (pureIdleClock ? .75 : 1));
       if (!still) {
         const resolved = expressions.has(pose.expression) ? pose.expression : expressions.has('neutral') ? 'neutral' : '';
         if (resolved !== expressionName) {
@@ -204,13 +209,19 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
       }
       const motionLayers = still ? [] : active(avatar._motionManager, motionRecords, motionRecords.get(motions.get(motionName)?.motion));
       const expressionLayers = still ? [] : active(avatar._expressionManager, expressionRecords, expressions.get(expressionName));
+      const pureIdle = referencePortrait && motionLayers.length > 0 && motionLayers.every(record => record.group === 'Idle');
+      if (pureIdle) bridge.apply(Object.fromEntries(ANGLES.map(name => [name, Number.isFinite(bridge.read(name)) ? bridge.read(name) * .7 : undefined])));
       const own = new Set([...motionLayers, ...expressionLayers].flatMap(record => [...record.parameters]));
+      // The live performance already schedules natural blinks. Multiplying
+      // another idle blink into it produces double blinks and long closures.
+      // Preserve the authored eyelids of reactions (including outgoing fades).
+      const reactionEyes = new Set(motionLayers.filter(record => record.group !== 'Idle').flatMap(record => [...record.parameters]));
       const nativeReactionParameters = new Set(motionLayers.filter(record => record.group !== 'Idle').flatMap(record => [...record.parameters]).filter(name => ANGLES.includes(name)));
       const reaction = motionLayers.find(record => record.group !== 'Idle')?.group || '';
       const targets = cubismParameterTargets(pose, follow, { ...options, nativeMotion: reaction || motionGroup, nativeParameters: [...own], nativeReactionParameters, supportedParameters: bridge.supported, deformationProfile });
       bridge.apply(targets, {
         additive: [...ANGLES, ...GAZE].filter(name => own.has(name)),
-        multiply: EYELIDS.filter(name => own.has(name)),
+        multiply: EYELIDS.filter(name => own.has(name) && (!referencePortrait || reactionEyes.has(name))),
         dominant: FACE.filter(name => own.has(name)),
         preserve: [...(own.has('ParamBreath') ? ['ParamBreath'] : []), ...(own.has('ParamEyeBallForm') ? ['ParamEyeBallForm'] : [])],
       });
