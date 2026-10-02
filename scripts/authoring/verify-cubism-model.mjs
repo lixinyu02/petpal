@@ -9,8 +9,8 @@ assert(manifestArg, 'Usage: node verify-official-core.mjs <model3.json> [receipt
 const projectRoot = path.resolve(import.meta.dirname, '../..');
 const profileIndex = flags.indexOf('--profile');
 const authoringProfile = profileIndex >= 0 ? flags[profileIndex + 1] : 'standard';
-assert(['standard', 'reference-layered'].includes(authoringProfile), 'Unknown verification profile');
-const referenceLayered = authoringProfile === 'reference-layered';
+assert(['standard', 'reference-layered', 'reference-gestures'].includes(authoringProfile), 'Unknown verification profile');
+const referenceLayered = ['reference-layered', 'reference-gestures'].includes(authoringProfile);
 const coreFlagIndex = flags.indexOf('--core');
 const corePath = coreFlagIndex >= 0
   ? path.resolve(flags[coreFlagIndex + 1] ?? '')
@@ -81,6 +81,7 @@ try {
   const required = referenceLayered
     ? ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX', 'ParamBodyAngleY', 'ParamBodyAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamMouthOpenY', 'ParamBreath', 'ParamHairFront', 'ParamMouthA', 'ParamMouthO', 'ParamWarm', 'ParamSad', 'ParamPout']
     : ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamEyeBallX', 'ParamEyeBallY', 'ParamMouthOpenY', 'ParamBreath'];
+  if (authoringProfile === 'reference-gestures') required.push('ParamHandsLift', 'ParamHandsSway', 'ParamSleeveEase');
   for (const id of required) assert(parameters.some(parameter => parameter.id === id), `Required rig parameter missing: ${id}`);
   const indexById = new Map(parameters.map((parameter, index) => [parameter.id, index]));
   const emotionParameters = referenceLayered ? ['ParamWarm', 'ParamSad', 'ParamPout'] : ['ParamCheek', 'ParamTear'];

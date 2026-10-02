@@ -20,13 +20,15 @@ test('upstream neutral overrides happy text and the speaking warm base without s
   assert.ok(pose.warmAmount < .001); assert.equal(mouthActive(frames), true);
 });
 
-test('upstream selection maps each voice emotion, persists through stationary boundaries and suppresses contrary text gestures', () => {
+test('upstream selection maps each voice emotion to its own one-shot gesture and suppresses contrary text gestures', () => {
   const text = '太好了，今天真的很开心。';
   for (const [emotion, expression] of Object.entries({ happy: 'happy', sad: 'sad', angry: 'pout', gentle: 'tender' })) {
     const controller = createAvatarPerformance();
     controller.setInput(input(text, { speech: { active: true, charIndex: 0, audioLevel: .5, emotion: { emotion, intensity: 'natural', source: 'manual' } } }));
+    const spoken = run(controller, .4).at(-1);
+    assert.equal(spoken.gesture, ['happy', 'gentle'].includes(emotion) ? 'sway' : 'none');
     const pose = run(controller, 4).at(-1);
-    assert.equal(pose.expression, expression); assert.equal(pose.gesture, 'none'); assert.ok(pose.expressionAmount > .8); assert.ok(pose.mouthOpen > 0);
+    assert.equal(pose.expression, expression); assert.equal(pose.gesture, 'none', 'spoken motion finishes without looping'); assert.ok(pose.expressionAmount > .8); assert.ok(pose.mouthOpen > 0);
   }
 });
 

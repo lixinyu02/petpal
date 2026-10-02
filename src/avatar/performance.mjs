@@ -10,6 +10,15 @@ const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 const ease = (value, target, dt, rate = 12) => value + (target - value) * (1 - Math.exp(-dt * rate));
 const FACE_CHANNELS = ['warmAmount', 'curiousAmount', 'surpriseAmount', 'concernAmount', 'smileAmount', 'sadAmount', 'downcastAmount', 'excitedAmount', 'shyAmount', 'smugAmount', 'poutAmount', 'reliefAmount', 'determinedAmount', 'hesitantAmount', 'sleepyAmount', 'expectantAmount', 'aggrievedAmount', 'tenderAmount', 'eyeSmile', 'tearAmount'];
 const NEGATIVE_EXPRESSIONS = new Set(['sad','downcast','concerned','pout','determined','hesitant','aggrieved']);
+// Authenticated voice metadata selects the mood. PCM energy only drives the
+// mouth/voice cadence, never which gesture or emotion is performed.
+const SPOKEN_GESTURES = { happy: 'sway', excited: 'bounce', tender: 'sway', shy: 'shy' };
+const speechSentenceStart = (text, index) => {
+  if (!Number.isFinite(index) || index < 0 || index >= text.length) return null;
+  let start = 0;
+  if (index > 0) for (const separator of '。！？.!?\n') start = Math.max(start, text.lastIndexOf(separator, index - 1) + 1);
+  return start;
+};
 // Facial targets are independent of articulation. Renderers must continue to
 // composite mouth movement after expression layers, including a smiling face.
 const expressions = {
@@ -69,6 +78,13 @@ export function createAvatarPerformance() {
   // Remember consumed lengths, not old message bodies. Reset/cancel must not replay a visited reply.
   const consumed = new Map();
   const reacted = new Set();
+  const speechCues = new Set();
+  const consumeSpeechCue = id => {
+    if (speechCues.has(id)) return false;
+    speechCues.add(id);
+    while (speechCues.size > 256) speechCues.delete(speechCues.values().next().value);
+    return true;
+  };
   const clearMouth = () => { queue = []; current = null; output.mouthOpen = 0; output.mouthShape = 'rest'; output.speaking = false; };
   const clearGestures = (clearHead=true) => { gestures.cancel(); gestureFromSpeech=false; output.gesture='none'; output.gestureProgress=output.bodyLean=output.bodyLift=output.bodyTurn=output.headShake=output.shoulderLift=0; if(clearHead){output.headTilt=output.headNod=0;nodPhase=0;} };
   // Idle overlays never become part of the underlying facial smoothing state.
@@ -98,7 +114,7 @@ export function createAvatarPerformance() {
     const changed = next.utteranceId !== input.utteranceId;
     const rewritten = !changed && !next.text.startsWith(input.text);
     const previousLength = Math.max(changed ? 0 : input.text.length, consumed.get(next.utteranceId) ?? 0);
-    const priorExternal = external, priorActive = externalActive, priorIndex = externalIndex, priorAudio = externalAudio;
+    const priorExternal = external, priorActive = externalActive, priorIndex = externalIndex, priorAudio = externalAudio, priorExpression = externalExpression;
     // New replies invalidate only their speech queue. Facial channels and the
     // blink clock continue smoothly instead of flashing through a neutral pose.
     if (changed || rewritten) { clearMouth(); emotionKind = null; emotionRemaining = 0; }
@@ -113,7 +129,9 @@ export function createAvatarPerformance() {
     externalAudio = external && Number.isFinite(next.speech.audioLevel) ? (externalActive ? clamp(next.speech.audioLevel) : 0) : null;
     if(next.phase!=='speaking'||!externalActive||externalAudio===null||externalAudio<=.025)output.voiceEnergy=0;
     externalIndex = external && Number.isFinite(next.speech.charIndex) ? clamp(Math.floor(next.speech.charIndex), 0, next.text.length) : -1;
-    if(gestureFromSpeech&&(changed||rewritten||externalEmotion))clearGestures(false);
+    // A stable upstream emotion is published every frame. Only a changed
+    // authority cancels the old semantic action, not every PCM snapshot.
+    if(gestureFromSpeech&&(changed||rewritten||(externalExpression!==null&&externalExpression!==priorExpression)))clearGestures(false);
     if(hidden||sleeping||motionReduced||(wasSpeaking&&next.phase!=='speaking')||(next.phase==='speaking'&&external&&(!externalActive||externalIndex<0||externalIndex>=next.text.length)))clearGestures();
     let boundaryAdvanced = false;
     if (next.phase !== 'speaking' || hidden || sleeping) { clearMouth(); emotionKind = null; emotionRemaining = 0; }
@@ -146,9 +164,22 @@ export function createAvatarPerformance() {
     // between estimated character boundaries. Energy never selects an emotion.
     if(externalActive&&externalAudio>.025&&emotionKind)emotionRemaining=Math.max(emotionRemaining,.4);
     const cueAdvanced=external?externalActive&&(changed||!priorExternal||!priorActive||!wasSpeaking||externalIndex>priorIndex):Boolean(appended);
-    if(next.phase==='speaking'&&cueAdvanced&&!externalEmotion){
-      const cue=gestureAtSpeechBoundary(next.text,external?externalIndex:next.text.length-1);
-      if(cue&&gestures.trigger(`speech:${next.utteranceId}:${cue.sentenceStart}`,cue.gesture,!hidden&&!sleeping&&!motionReduced))gestureFromSpeech=true;
+    // Consume a boundary crossed during pause/stop, including when the player
+    // removes emotion metadata while buffering. Initial pre-playback waiting
+    // does not consume the first sentence before it has had a chance to speak.
+    const interruptedBoundary=external&&!externalActive&&!changed&&priorExternal&&wasSpeaking&&(priorActive||externalIndex>priorIndex);
+    const cueBlocked=hidden||sleeping||motionReduced||next.phase!=='speaking'||(external&&!externalActive);
+    if((next.phase==='speaking'&&cueAdvanced)||interruptedBoundary){
+      const index=external?externalIndex:next.text.length-1;
+      const sentenceStart=speechSentenceStart(next.text,index);
+      const semantic=externalEmotion?null:gestureAtSpeechBoundary(next.text,index);
+      const gesture=externalEmotion?SPOKEN_GESTURES[externalExpression]:semantic?.gesture;
+      // Authoritative neutral/negative lines also consume their sentence, so
+      // later metadata or setting changes cannot add a delayed happy gesture.
+      if(sentenceStart!==null&&(externalEmotion||gesture||cueBlocked)){
+        const id=`speech:${next.utteranceId}:${sentenceStart}`;
+        if(consumeSpeechCue(id)&&gesture&&gestures.trigger(id,gesture,!cueBlocked&&!reaction))gestureFromSpeech=true;
+      }
     }
   }
 
@@ -165,6 +196,9 @@ export function createAvatarPerformance() {
     const negative=NEGATIVE_EXPRESSIONS.has(externalExpression??emotionKind??output.expression);
     const tenderPet=event.kind==='pet'&&!negative&&petNumber%2===1;
     const gesture=negative?'settle':event.kind==='pet'?(tenderPet?'sway':'tilt'):event.kind==='greet'?'nod':'settle';
+    // A deliberate touch takes precedence over an automatic spoken gesture.
+    // reset clears its cooldown but retains the gesture's consumed IDs.
+    if(gestureFromSpeech){clearGestures(false);gestures.reset();}
     const started=gestures.trigger(`reaction:${event.id}`,gesture,!motionReduced&&!(input.phase==='speaking'&&external&&!externalActive));
     if(started){gestureFromSpeech=false;if(event.kind==='pet'&&!negative)petNumber++;}
     reaction = { ...reactions[event.kind], ...(started&&tenderPet?{expression:'tender',duration:2.2,amount:.7}:{}), age: 0 };

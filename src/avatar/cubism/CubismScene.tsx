@@ -24,7 +24,7 @@ const development = Boolean((import.meta as ImportMeta & { env?: { DEV?: boolean
 
 /** A real Cubism surface, with the stable original character while loading or unsupported. */
 export default function CubismScene(props: CubismSceneProps) {
-  const { modelUrl = '/avatars/akari-cubism-v7/akari.model3.json', command, compact = false, interactive = true, className = '' } = props;
+  const { modelUrl = '/avatars/akari-cubism-v8/akari.model3.json', command, compact = false, interactive = true, className = '' } = props;
   const host = useRef<HTMLDivElement>(null);
   const callbacks = useRef(props); callbacks.current = props;
   const requested = useRef(command); requested.current = command;
@@ -128,7 +128,13 @@ export default function CubismScene(props: CubismSceneProps) {
       // Only rigid lift/approach remain outside it; never apply the same pose twice.
       surface.style.transform = `translateY(${body.yPercent}%) scale(${body.scale})`;
       gazeX = follow.gazeX; gazeY = follow.gazeY;
-      try { runtime.update(elapsed, pose, follow, { sleeping, reducedMotion: media.matches }); runtime.render(); }
+      try {
+        runtime.update(elapsed, pose, follow, {
+          sleeping, reducedMotion: media.matches, utteranceId: input.utteranceId, phase: input.phase,
+          speechActive: input.speech ? input.speech.active && !input.speech.ended : undefined,
+        });
+        runtime.render();
+      }
       catch (error) { if (development) console.error('PetPal Cubism frame failed:', error); fail(error instanceof Error ? error.message : 'render-failed'); return; }
       updateSceneDataset(surface.dataset, {
         renderFrames: String(++frames), phase: input.phase, petAction: action, petReady: 'true', expression: pose.expression,
@@ -156,7 +162,7 @@ export default function CubismScene(props: CubismSceneProps) {
   }, [modelUrl, compact, interactive]);
 
   useEffect(() => { if (props.performanceInput) quietInput.current?.(props.performanceInput); }, [props.performanceInput]);
-  return <div ref={host} className={`pet-three-scene anime-scene cubism-scene ${className}`} data-character-style={modelUrl === '/avatars/akari-cubism-v7/akari.model3.json' ? 'akari-soft' : undefined}>
+  return <div ref={host} className={`pet-three-scene anime-scene cubism-scene ${className}`} data-character-style={['/avatars/akari-cubism-v7/akari.model3.json', '/avatars/akari-cubism-v8/akari.model3.json'].includes(modelUrl) ? 'akari-soft' : undefined}>
     {mode !== 'cubism' && <AnimeScene {...props} className="cubism-fallback" onReady={ready} />}
   </div>;
 }

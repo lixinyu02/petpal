@@ -1,0 +1,85 @@
+{
+  "Version": 3,
+  "FileReferences": {
+    "Moc": "akari.moc3",
+    "Textures": [
+      "akari.2048/texture_00.png"
+    ],
+    "Physics": "akari.physics3.json",
+    "DisplayInfo": "akari.cdi3.json",
+    "Motions": {
+      "Idle": [
+        {
+          "File": "akari.idle.motion3.json"
+        }
+      ],
+      "Blink": [
+        {
+          "File": "akari.blink.motion3.json"
+        }
+      ],
+      "Nod": [
+        {
+          "File": "akari.nod.motion3.json"
+        }
+      ],
+      "Shake": [
+        {
+          "File": "akari.shake.motion3.json"
+        }
+      ],
+      "TapHead": [
+        {
+          "File": "akari.taphead.motion3.json",
+          "FadeInTime": 0.16,
+          "FadeOutTime": 0.5
+        }
+      ],
+      "Greet": [
+        {
+          "File": "akari.greet.motion3.json",
+          "FadeInTime": 0.18,
+          "FadeOutTime": 0.45
+        }
+      ],
+      "Shy": [
+        {
+          "File": "akari.shy.motion3.json",
+          "FadeInTime": 0.24,
+          "FadeOutTime": 0.42
+        }
+      ],
+      "Sway": [
+        {
+          "File": "akari.sway.motion3.json",
+          "FadeInTime": 0.24,
+          "FadeOutTime": 0.42
+        }
+      ],
+      "Bow": [
+        {
+          "File": "akari.bow.motion3.json",
+          "FadeInTime": 0.24,
+          "FadeOutTime": 0.42
+        }
+      ]
+    }
+  },
+  "Groups": [
+    {
+      "Target": "Parameter",
+      "Name": "EyeBlink",
+      "Ids": [
+        "ParamEyeLOpen",
+        "ParamEyeROpen"
+      ]
+    },
+    {
+      "Target": "Parameter",
+      "Name": "LipSync",
+      "Ids": [
+        "ParamMouthOpenY"
+      ]
+    }
+  ]
+}

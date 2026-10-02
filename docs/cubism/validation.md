@@ -1,6 +1,10 @@
 # 原创 Cubism 网页验收
 
-## 当前 V7 reference-layered：2026-10-02（网页已上线）
+## 当前 V8 reference-gestures：2026-10-02（网页已上线）
+
+默认角色为真实 Cubism V8，沿用 V7 的脸部、刘海与原图，补入合手轻抬、左右轻摆、衣袖跟随，以及 Shy／Sway／Bow 原生动作。相关回归 248/248、Core／Chrome／412×960 与正式 HTTPS 资源读回通过。完整结果、语音测试范围和手部能力限制见 [V8 验收](hand-gestures-validation.md)。
+
+## 历史 V7 reference-layered：2026-10-02（当时网页已上线）
 
 默认角色现为真实 Cubism V7，保留原完整人物比例并重新绑定头身、发根、局部眼口与情绪。源图、Core、Chrome、实际语音和正式 HTTPS 的分项结果与限制见 [V7 验收](reference-layered-validation.md)。下方是历史记录，其中“当前”指当时版本，不能作为当前模型通过或用户已接受外观的证明。
 

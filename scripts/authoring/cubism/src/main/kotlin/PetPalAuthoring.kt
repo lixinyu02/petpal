@@ -10,6 +10,7 @@ import io.github.psd2live.core.ProgressListener
 import io.github.psd2live.core.RigKeyformGeometryEdit
 import io.github.psd2live.core.RigKeyformChannelsEdit
 import io.github.psd2live.core.RigKeyformSetEdit
+import io.github.psd2live.core.RigParameterEdit
 import io.github.psd2live.core.RigTargetKind
 import io.github.psd2live.core.RigTargetRef
 import io.github.psd2live.core.RigWarpEdit
@@ -298,6 +299,12 @@ private val referencePatchBindings = linkedMapOf(
 private val referenceRequiredLayers = setOf("topwear", "face", "front hair 1", "front hair 2", "blink-left", "blink-right", "mouth-a", "mouth-o")
 private val referenceUnusedParameters = setOf("ParamEyeBallX", "ParamEyeBallY", "ParamEyeBallForm", "ParamBrowLY", "ParamBrowRY", "ParamMouthForm", "ParamHairBack")
 private val referenceStandardBindings = setOf("ParamAngleX", "ParamAngleY", "ParamAngleZ", "ParamBodyAngleX", "ParamBodyAngleY", "ParamBodyAngleZ", "ParamEyeLOpen", "ParamEyeROpen", "ParamMouthOpenY", "ParamBreath", "ParamHairFront")
+private val referenceGestureParameters = listOf(
+  RigParameterEdit("ParamHandsLift", "Clasped hands: gentle lift", 0f, 1f, 0f, created = true),
+  RigParameterEdit("ParamHandsSway", "Clasped hands: small shared sway", -1f, 1f, 0f, created = true),
+  RigParameterEdit("ParamSleeveEase", "Sleeves: gentle ease", 0f, 1f, 0f, created = true),
+)
+private val referenceGestureIds = referenceGestureParameters.map { it.id }.toSet()
 
 private data class ReferenceFrame(val left: Float, val top: Float, val width: Float, val height: Float)
 private fun referenceRootFrame(model: PuppetModel): ReferenceFrame {
@@ -320,6 +327,62 @@ private fun referenceHeadFrame(model: PuppetModel): ReferenceFrame {
 private fun smoothReference(value: Float): Float = value.coerceIn(0f, 1f).let { it * it * (3f - 2f * it) }
 private fun referenceMask(value: Float, outerStart: Float, innerStart: Float, innerEnd: Float, outerEnd: Float): Float =
   smoothReference((value - outerStart) / (innerStart - outerStart)) * smoothReference((outerEnd - value) / (outerEnd - innerEnd))
+
+/** V8 retains the original clasped-hands artwork. One translation moves BOTH hands, including
+ * their contact and all fingers; this is not separate finger/arm rigging or a raised-hand pose.
+ * The flat region extends beyond the visible hands so triangles crossing their outline stay
+ * rigid too. Only clothing below the fixed shoulder line absorbs the smooth transition. */
+private fun referenceGestureEdits(model: PuppetModel): List<RigKeyformSetEdit> {
+  val bodyFrame = referenceRootFrame(model)
+  val body = model.drawables.single { it.name.trim().lowercase() == "topwear" }
+  require(body.parentDeformerId?.raw == "DeformReferenceBody") { "Gesture mesh left the original body frame" }
+  val mesh = requireNotNull(body.mesh)
+  val canvas = FloatArray(mesh.positions.size) { i ->
+    if (i % 2 == 0) bodyFrame.left + mesh.positions[i] * bodyFrame.width else bodyFrame.top + mesh.positions[i] * bodyFrame.height
+  }
+  // Mesh fill can bridge a soft silhouette or an otherwise sparse area with triangles larger
+  // than the nominal interior spacing. Protect whole triangles touching the observed hand
+  // rectangle; protecting only their inner vertices would still shear pixels between them.
+  val handTriangleVertices = mutableSetOf<Int>()
+  for (triangle in mesh.indices.indices step 3) {
+    val vertices = listOf(mesh.indices[triangle] * 2, mesh.indices[triangle + 1] * 2, mesh.indices[triangle + 2] * 2)
+    if (vertices.maxOf { canvas[it] } >= 340f && vertices.minOf { canvas[it] } <= 692f &&
+      vertices.maxOf { canvas[it + 1] } >= 1270f && vertices.minOf { canvas[it + 1] } <= 1455f) handTriangleVertices.addAll(vertices)
+  }
+  require(handTriangleVertices.isNotEmpty()) { "Gesture mesh does not cover the original hands" }
+  val rigidLeft = minOf(300f, handTriangleVertices.minOf { canvas[it] } - 2f)
+  val rigidRight = maxOf(724f, handTriangleVertices.maxOf { canvas[it] } + 2f)
+  val rigidTop = minOf(1225f, handTriangleVertices.minOf { canvas[it + 1] } - 2f)
+  val rigidBottom = maxOf(1485f, handTriangleVertices.maxOf { canvas[it + 1] } + 2f)
+  require(rigidLeft >= 150f && rigidRight <= 875f && rigidTop >= 1100f && rigidBottom <= 1538f) { "Topwear triangulation reaches too far from the hands; refine it before adding gestures" }
+  println("Gesture shared-hand triangle coverage: ${handTriangleVertices.size} vertices, rigid bounds [$rigidLeft,$rigidTop,$rigidRight,$rigidBottom]")
+  val edits = mutableListOf<RigKeyformSetEdit>()
+  for (lift in listOf(0f, 0.5f, 1f)) for (sway in listOf(-1f, 0f, 1f)) for (ease in listOf(0f, 0.5f, 1f)) {
+    val deltas = FloatArray(mesh.positions.size)
+    for (i in mesh.positions.indices step 2) {
+      val x = canvas[i]
+      val y = canvas[i + 1]
+      // The V7 body warp already fixes y<=860. Keep an additional 60px buffer before any
+      // new geometry moves, rather than hoping sparse triangle interpolation pins the collar.
+      if (y <= 920f) continue
+      val hands = referenceMask(x, 80f, rigidLeft, rigidRight, 944f) * referenceMask(y, 920f, rigidTop, rigidBottom, 1630f)
+      val sleeveY = referenceMask(y, 920f, 1030f, 1250f, 1400f)
+      val sleeveLeft = referenceMask(x, 80f, 145f, 270f, 360f)
+      val sleeveRight = referenceMask(x, 664f, 754f, 879f, 944f)
+      // Suppression inside the shared hand region prevents sleeve easing from changing the
+      // spacing between the two hands. The two outer sleeves ease inward by at most 3px.
+      val sleeve = (sleeveLeft - sleeveRight) * sleeveY * (1f - hands)
+      deltas[i] = (6f * sway * hands + 3f * ease * sleeve) / bodyFrame.width
+      deltas[i + 1] = -16f * lift * hands / bodyFrame.height
+    }
+    edits += RigKeyformSetEdit(
+      RigTargetRef(RigTargetKind.ART_MESH, body.id.raw),
+      mapOf("ParamHandsLift" to lift, "ParamHandsSway" to sway, "ParamSleeveEase" to ease),
+      geometry = RigKeyformGeometryEdit(positionDeltas = deltas.toList()),
+    )
+  }
+  return edits
+}
 
 /** Original pixels are the rest pose. Head, body and hair have separate, bounded children;
  * the generated face/feature warps never independently tug the baked facial illustration. */
@@ -441,13 +504,14 @@ private fun referenceLayeredEdits(model: PuppetModel): List<RigKeyformSetEdit> {
   return edits
 }
 
-private fun referenceLayeredConfig(pipeline: PSD2LivePipeline, input: Path, initial: PipelineConfig): Pair<PipelineConfig, PuppetModel> {
+private fun referenceLayeredConfig(pipeline: PSD2LivePipeline, input: Path, initial: PipelineConfig, gestures: Boolean = false): Pair<PipelineConfig, PuppetModel> {
   val inspected = pipeline.inspect(input, initial)
   require(inspected.source.widthPx == 1024 && inspected.source.heightPx == 1536) { "Reference profile is calibrated to the original 1024x1536 artwork" }
   val layers = inspected.layers.associateBy { it.source.name.trim().lowercase() }
   require(layers.size == inspected.layers.size && layers.keys.containsAll(referenceRequiredLayers)) { "Reference PSD has duplicate or missing required layers" }
   require(layers.keys.all { it in referenceRequiredLayers || it in setOf("warm", "sad", "pout") }) { "Unexpected reference-layered source layer" }
   require(layers.values.all { it.opaquePixels > 0 }) { "Reference source contains empty layers" }
+  if (gestures) require(layers.size == 11 && layers.keys.containsAll(setOf("warm", "sad", "pout"))) { "Reference gestures require the complete original eleven-layer V7 PSD" }
   val overrides = layers.map { (name, layer) -> layer.source.id.raw to when (name) {
     "topwear" -> LayerClassificationOverride(tag = SemanticTag.TOPWEAR)
     "face" -> LayerClassificationOverride(tag = SemanticTag.FACE)
@@ -458,11 +522,15 @@ private fun referenceLayeredConfig(pipeline: PSD2LivePipeline, input: Path, init
     "topwear" -> 100f; "face" -> 200f; "front hair 1", "front hair 2" -> 210f
     "warm", "sad", "pout" -> 300f; "blink-left", "blink-right" -> 310f; "mouth-a" -> 320f; else -> 330f
   } }.toMap()
+  val meshSettings = listOf("mouth-a", "mouth-o").associate { name ->
+    layers.getValue(name).source.id.raw to MeshSettings(interiorDensity = 8f, edgeWidth = 3f, maxEdgeDistance = 4f)
+  }.toMutableMap()
+  if (gestures) meshSettings[layers.getValue("topwear").source.id.raw] = MeshSettings(interiorDensity = 16f, edgeWidth = 5f, maxEdgeDistance = 10f)
   var config = initial.copy(
     layerOverrides = overrides, drawOrderOverrides = orders,
     parentOverrides = layers.filterKeys { it == "face" || it in referencePatchBindings }.values.associate { it.source.id.raw to "DeformHeadContainer" },
     layerVisibility = layers.values.associate { it.source.id.raw to true },
-    meshOverrides = listOf("mouth-a", "mouth-o").associate { name -> layers.getValue(name).source.id.raw to MeshSettings(interiorDensity = 8f, edgeWidth = 3f, maxEdgeDistance = 4f) },
+    meshOverrides = meshSettings,
   )
   val preview = pipeline.buildPreview(input, config).rig.puppet
   val headMeshes = preview.drawables.filter { it.parentDeformerId?.raw == "DeformHeadContainer" }.map { it.id.raw }
@@ -481,14 +549,17 @@ private fun referenceLayeredConfig(pipeline: PSD2LivePipeline, input: Path, init
   ))
   val baseline = pipeline.buildPreview(input, config).rig.puppet
   return config.copy(rigEdits = config.rigEdits.copy(
-    keyformSetEdits = referenceLayeredEdits(baseline), deletedParameterIds = referenceUnusedParameters,
+    parameterEdits = if (gestures) referenceGestureParameters else emptyList(),
+    keyformSetEdits = referenceLayeredEdits(baseline) + if (gestures) referenceGestureEdits(baseline) else emptyList(),
+    deletedParameterIds = referenceUnusedParameters,
   )) to baseline
 }
 
-private fun assertReferenceLayered(baseline: PuppetModel, exported: PuppetModel) {
+private fun assertReferenceLayered(baseline: PuppetModel, exported: PuppetModel, gestures: Boolean = false) {
   val headFrame = referenceHeadFrame(exported); val bodyFrame = referenceRootFrame(exported)
   val patchParameters = exported.drawables.mapNotNull { referencePatchBindings[it.name.trim().lowercase()] }.toSet()
-  require(exported.parameters.map { it.id.raw }.toSet() == referenceStandardBindings + patchParameters) { "Reference export contains unbound or missing parameters" }
+  val expectedParameters = referenceStandardBindings + patchParameters + if (gestures) referenceGestureIds else emptySet()
+  require(exported.parameters.map { it.id.raw }.toSet() == expectedParameters) { "Reference export contains unbound or missing parameters" }
   for (before in baseline.deformers) {
     val after = exported.deformers.single { it.id == before.id }
     require(before.parent == after.parent) { "Reference export changed deformer parent: ${before.id.raw}" }
@@ -554,12 +625,89 @@ private fun assertReferenceLayered(baseline: PuppetModel, exported: PuppetModel)
   }
   val headRotation = exported.deformers.single { it.id.raw == "DeformHeadRotation" } as Deformer.Rotation
   require(requireNotNull(headRotation.geometryGrid).cells.all { it.form.angle == 0f && it.form.scale == 1f }) { "Head rotation bypasses the fixed neck transition" }
+  if (gestures) assertReferenceGestures(exported)
+}
+
+/** These checks concern the actual author's exported mesh/keyforms, not a screen overlay.
+ * Official Core and browser pose checks are still required for the generated MOC3. */
+private fun assertReferenceGestures(model: PuppetModel) {
+  require(model.drawables.size == 11) { "Hand gestures must retain the original eleven drawings" }
+  for (spec in referenceGestureParameters) require(model.parameters.any {
+    it.id.raw == spec.id && it.min == spec.min && it.max == spec.max && it.default == 0f
+  }) { "Gesture parameter contract changed: ${spec.id}" }
+  val body = model.drawables.single { it.name.trim().lowercase() == "topwear" }
+  val mesh = requireNotNull(body.mesh)
+  val frame = referenceRootFrame(model)
+  val grid = requireNotNull(body.geometryGrid) { "Hand gestures have no native mesh geometry" }
+  require(mesh.vertexCount in 150..8000) { "Hand mesh has insufficient geometry or exceeds its authoring budget" }
+  require(grid.axes.map { it.parameterId.raw }.toSet() == referenceGestureIds && grid.cells.size == 27) { "Gesture mesh lacks the complete three-axis keyform grid" }
+  for (axis in grid.axes) {
+    val expected = if (axis.parameterId.raw == "ParamHandsSway") floatArrayOf(-1f, 0f, 1f) else floatArrayOf(0f, 0.5f, 1f)
+    require(axis.keys.contentEquals(expected)) { "Gesture keys changed: ${axis.parameterId.raw}" }
+  }
+  require(neutralCell(grid, model).form.positionDeltas.all { it == 0f }) { "Gesture default must preserve every original pixel position" }
+  for (drawable in model.drawables) {
+    if (drawable.id != body.id) require(drawable.geometryGrid?.axes.orEmpty().none { it.parameterId.raw in referenceGestureIds }) { "Hand geometry escaped to ${drawable.name}" }
+    require(drawable.channelGrids.gridsByChannel.values.none { channel -> channel.axes.any { it.parameterId.raw in referenceGestureIds } }) { "Hand gestures must not change visibility, color, or draw order" }
+  }
+  for (deformer in model.deformers) {
+    val parameters = when (deformer) {
+      is Deformer.Warp -> deformer.geometryGrid?.axes.orEmpty().map { it.parameterId.raw }
+      is Deformer.Rotation -> deformer.geometryGrid?.axes.orEmpty().map { it.parameterId.raw }
+    }
+    require(parameters.none { it in referenceGestureIds }) { "Hand parameters must not drive any head/body deformer" }
+  }
+  val canvas = FloatArray(mesh.positions.size) { i ->
+    if (i % 2 == 0) frame.left + mesh.positions[i] * frame.width else frame.top + mesh.positions[i] * frame.height
+  }
+  val hands = mesh.positions.indices.step(2).filter { i -> canvas[i] in 340f..692f && canvas[i + 1] in 1270f..1455f }
+  require(hands.size >= 20) { "Gesture assertion does not cover both actual hands" }
+  require(mesh.positions.indices.step(2).count { canvas[it + 1] <= 860f } >= 10) { "Gesture assertion does not cover the fixed neckline" }
+  val handXs = hands.map { canvas[it] }
+  require(handXs.min() < 390f && handXs.max() > 640f) { "Gesture assertion sees only one hand" }
+  for (cell in grid.cells) {
+    val values = coordinate(grid, cell)
+    val delta = cell.form.positionDeltas
+    require(delta.size == mesh.positions.size && delta.all { it.isFinite() }) { "Invalid native gesture mesh deltas" }
+    val expectedX = values.getValue("ParamHandsSway") * 6f
+    val expectedY = values.getValue("ParamHandsLift") * -16f
+    for (i in mesh.positions.indices step 2) {
+      val dx = delta[i] * frame.width; val dy = delta[i + 1] * frame.height
+      require(hypot(dx, dy) <= 17.10f) { "Hand/sleeve geometry exceeds its 17.1px authoring budget" }
+      if (canvas[i + 1] <= 920f) require(delta[i] == 0f && delta[i + 1] == 0f) { "Hand gestures moved the pinned neck/shoulder buffer" }
+    }
+    for (i in hands) require(abs(delta[i] * frame.width - expectedX) < 0.005f && abs(delta[i + 1] * frame.height - expectedY) < 0.005f) { "Fingers or hand contact were stretched instead of moving together" }
+    val moved = FloatArray(canvas.size) { i -> canvas[i] + delta[i] * if (i % 2 == 0) frame.width else frame.height }
+    fun signedArea(points: FloatArray, a: Int, b: Int, c: Int): Float =
+      (points[b] - points[a]) * (points[c + 1] - points[a + 1]) - (points[b + 1] - points[a + 1]) * (points[c] - points[a])
+    for (triangle in mesh.indices.indices step 3) {
+      val vertices = listOf(mesh.indices[triangle] * 2, mesh.indices[triangle + 1] * 2, mesh.indices[triangle + 2] * 2)
+      val (a, b, c) = vertices
+      val restArea = signedArea(canvas, a, b, c)
+      // Ignore numerically degenerate baseline slivers; significant triangles may not flip,
+      // collapse or stretch substantially. Every coordinate itself remains checked above.
+      if (abs(restArea) > 0.1f) {
+        val ratio = signedArea(moved, a, b, c) / restArea
+        require(ratio in 0.60f..1.50f) { "Gesture folds or over-stretches a native clothing triangle" }
+      }
+      if (vertices.any { canvas[it + 1] <= 860f }) require(vertices.all { delta[it] == 0f && delta[it + 1] == 0f }) { "Triangle interpolation leaks gesture motion into the neckline" }
+      val overlapsHands = vertices.maxOf { canvas[it] } >= 340f && vertices.minOf { canvas[it] } <= 692f &&
+        vertices.maxOf { canvas[it + 1] } >= 1270f && vertices.minOf { canvas[it + 1] } <= 1455f
+      if (overlapsHands) require(vertices.all {
+        abs(delta[it] * frame.width - expectedX) < 0.005f && abs(delta[it + 1] * frame.height - expectedY) < 0.005f
+      }) { "Triangle interpolation tugs the original hand silhouette" }
+    }
+  }
+  for (id in referenceGestureIds) require(grid.cells.any { cell ->
+    val values = coordinate(grid, cell)
+    values.getValue(id) != 0f && referenceGestureIds.filter { it != id }.all { values.getValue(it) == 0f } && cell.form.positionDeltas.any { it != 0f }
+  }) { "Gesture parameter has no independent native geometry effect: $id" }
 }
 
 /** The frozen generator's metadata describes its PRESET base before our public authoring edits.
  * Correct only these verified profile facts after all authoring assertions succeed; preserve the
  * original diagnostics separately so provenance is not silently lost. */
-private fun writeReferenceMetadata(output: Path, model: PuppetModel) {
+private fun writeReferenceMetadata(output: Path, model: PuppetModel, gestures: Boolean = false) {
   Files.list(output).use { entries -> entries.filter { it.fileName.toString().endsWith(".psd2live.json") }.forEach { path ->
     val base = Json.parseToJsonElement(Files.readString(path)).jsonObject
     val baseWarnings = requireNotNull(base["warnings"]).jsonArray
@@ -569,15 +717,31 @@ private fun writeReferenceMetadata(output: Path, model: PuppetModel) {
       "mouth/mouth_open/mouth_close is missing; lip-sync parameters will not be bound to any drawable." ->
         "Reference-layered uses ParamMouthOpenY local native lip geometry with ParamMouthA/O occlusion patches, not mouth PRESET layers."
       else -> message
-    }) }
+    }) }.toMutableList()
+    if (gestures) warnings += JsonPrimitive("Reference-gestures adds bounded shared clasped-hand translation and local sleeve geometry to the unchanged illustration; no independent fingers, raised-arm pose, or occluded torso artwork is authored.")
     val hierarchy = requireNotNull(base["deformerHierarchy"]).jsonObject.toMutableMap().apply {
       put("head", JsonPrimitive("DeformReferenceHead")); put("headContainer", JsonPrimitive("DeformHeadContainer"))
       put("face", JsonPrimitive("DeformReferenceHead")); put("body", JsonPrimitive("DeformReferenceBody")); put("backHair", JsonArray(emptyList()))
     }
     val metadata = JsonObject(base.toMutableMap().apply {
-      put("petpalAuthoringProfile", JsonPrimitive("reference-layered"))
+      put("petpalAuthoringProfile", JsonPrimitive(if (gestures) "reference-gestures" else "reference-layered"))
       put("generatedBaseWarnings", baseWarnings); put("warnings", JsonArray(warnings)); put("deformerHierarchy", JsonObject(hierarchy))
       put("nativeBoundParameterIds", JsonArray(model.parameters.map { JsonPrimitive(it.id.raw) }))
+      if (gestures) put("gestureAuthoring", buildJsonObject {
+        put("source", "Unchanged eleven-layer V7 PSD; refined topwear ArtMesh only")
+        put("parameters", JsonArray(referenceGestureIds.map { JsonPrimitive(it) }))
+        put("keyformCombinations", 27)
+        put("handsSharedLiftPixels", 16)
+        put("handsSharedSwayPixels", 6)
+        put("sleeveEasePixels", 3)
+        put("gestureMaxDisplacementPixels", 17.1)
+        put("fixedNecklineThroughY", 860)
+        put("independentFingerRig", false)
+        put("independentArmRig", false)
+        put("raisedHandPose", false)
+        put("occludedArtworkRepainted", false)
+        put("validationBoundary", "Authoring geometry assertions only; official Core, browser motion, and Cubism Editor compatibility require separate verification")
+      })
     })
     Files.writeString(path, Json { prettyPrint = true }.encodeToString(JsonObject.serializer(), metadata) + "\n")
   } }
@@ -585,10 +749,11 @@ private fun writeReferenceMetadata(output: Path, model: PuppetModel) {
 
 // Independent authoring client for the frozen GPL tool. It is never part of the PetPal application.
 fun main(arguments: Array<String>) {
-  require(arguments.size in 2..3) { "Usage: <layered-PSD> <local-output-directory> [classic|continuous-body|stable-portrait|reference-layered]" }
+  require(arguments.size in 2..3) { "Usage: <layered-PSD> <local-output-directory> [classic|continuous-body|stable-portrait|reference-layered|reference-gestures]" }
   val profile = arguments.getOrElse(2) { "classic" }
-  require(profile in setOf("classic", "continuous-body", "stable-portrait", "reference-layered")) { "Unknown authoring profile: $profile" }
-  val referenceLayered = profile == "reference-layered"
+  require(profile in setOf("classic", "continuous-body", "stable-portrait", "reference-layered", "reference-gestures")) { "Unknown authoring profile: $profile" }
+  val referenceGestures = profile == "reference-gestures"
+  val referenceLayered = profile in setOf("reference-layered", "reference-gestures")
   val stablePortrait = profile == "stable-portrait"
   val continuousBody = profile in setOf("continuous-body", "stable-portrait")
   I18n.setLanguage(AppLanguage.ENGLISH, persist = false)
@@ -634,7 +799,7 @@ fun main(arguments: Array<String>) {
   var stableBaseline: PuppetModel? = null
   var referenceBaseline: PuppetModel? = null
   val exportConfig = if (referenceLayered) {
-    referenceLayeredConfig(pipeline, input, initialConfig).also { referenceBaseline = it.second }.first
+    referenceLayeredConfig(pipeline, input, initialConfig, referenceGestures).also { referenceBaseline = it.second }.first
   } else if (continuousBody) {
     // Reinspect with the same classifications that run() will use. Reusing the earlier analysis
     // with new overrides would leave its semantic tags out of sync with the export configuration.
@@ -686,9 +851,10 @@ fun main(arguments: Array<String>) {
     println("Stable portrait: neutral frames and parents retained; rigid body/head lattices; no independent face/hair perspective or iris jelly; anchored crown/fringe with 6px front and 8px rear tips; original blink and mouth keys retained")
   }
   if (referenceLayered) {
-    assertReferenceLayered(requireNotNull(referenceBaseline), model)
-    writeReferenceMetadata(output, model)
+    assertReferenceLayered(requireNotNull(referenceBaseline), model, referenceGestures)
+    writeReferenceMetadata(output, model, referenceGestures)
     println("Reference layered: original pixels and facial proportions retained; shared face/patch head with fixed neck transition; independently pinned body; 1.25px anchored hair tips; real blink, A/O lip shapes and available emotion opacity bindings")
+    if (referenceGestures) println("Reference gestures: original clasped hands translate together up to 16px vertically and 6px horizontally; local 3px sleeve easing; fixed neckline and unchanged face/hair; not independent fingers or raised arms")
   }
   println("Exported ${result.exportedFiles.size} files; ${model.parameters.size} parameters; ${model.drawables.size} drawables; profile=$profile")
   result.warnings.forEach { System.err.println("Warning: $it") }

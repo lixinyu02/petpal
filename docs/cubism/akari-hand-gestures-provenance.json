@@ -1,0 +1,222 @@
+{
+  "version": 8,
+  "date": "2026-10-02",
+  "profile": "reference-gestures",
+  "upstream": {
+    "repository": "https://github.com/tsunehimatoi/psd2live",
+    "commit": "2ac751fbb3ffdc8251a82e0d600d97afafafcaac",
+    "frozenSourceFiles": 704,
+    "sourceUnmodified": true
+  },
+  "artwork": {
+    "sourcePsd": {
+      "path": "outputs/avatars/akari-cubism-v7/akari.psd",
+      "bytes": 7756696,
+      "sha256": "5541bc800828515499fa8112afe96d47aaaa79e1c370c196fdcd6ba97bc15322"
+    },
+    "priorSourceManifest": "docs/cubism/akari-reference-layered-provenance.json",
+    "newImageGeneration": false,
+    "faceOrHairRedraw": false,
+    "sourceLayers": 11
+  },
+  "authoringReceipt": {
+    "path": "outputs/avatars/akari-cubism-v8/authoring-receipt.json",
+    "bytes": 3100,
+    "sha256": "f99e4c73ada5b0983260c9344cc51747580e3eae368e649594e012e152d2ec61"
+  },
+  "editorCandidate": {
+    "path": "outputs/avatars/akari-cubism-v8/akari.cmo3",
+    "bytes": 8075125,
+    "sha256": "94688f082f0dbb157b295a869db927bc5b5c93cca2e859931ffbd0d496e7e5fe"
+  },
+  "runnerSources": [
+    {
+      "path": "scripts/authoring/cubism/build.gradle.kts",
+      "sha256": "ed9f33a22b252d7139a81f50052b39fed052f0f8505d11932f0e05e376c6a7f9"
+    },
+    {
+      "path": "scripts/authoring/cubism/LICENSE.GPL-3.0",
+      "sha256": "22f65f0ba65b3fb08b8f2b681d5cefa436690fe67747fa9ad4674c75695643a4"
+    },
+    {
+      "path": "scripts/authoring/cubism/settings.gradle.kts",
+      "sha256": "2a8c2947bc76ea15fc8991912ecf491350e31e3d857407821bbe1deba732f70c"
+    },
+    {
+      "path": "scripts/authoring/cubism/src/main/kotlin/PetPalAuthoring.kt",
+      "sha256": "6be70a9a3030848a9ebd781148689a06a181e8b30277a72b25473f9b2434070e"
+    }
+  ],
+  "rawGeneratedFiles": [
+    {
+      "path": "akari.blink.motion3.json",
+      "bytes": 1155,
+      "sha256": "399f91b7bfac0666f589ab7c6daace5e33e5c6d6e7c6e7ca4024b6db48a65110"
+    },
+    {
+      "path": "akari.cdi3.json",
+      "bytes": 3530,
+      "sha256": "75ddaf005b497ad93cef0ab4e144df3c3462c2ceef43eb0bf557b9ff1bcf59ae"
+    },
+    {
+      "path": "akari.cmo3",
+      "bytes": 8075125,
+      "sha256": "94688f082f0dbb157b295a869db927bc5b5c93cca2e859931ffbd0d496e7e5fe"
+    },
+    {
+      "path": "akari.idle.motion3.json",
+      "bytes": 18820,
+      "sha256": "a32ca6a85d2ae68d5b71ba4d7a74db5ce35a5b634882bd0f83ce84363f597722"
+    },
+    {
+      "path": "akari.moc3",
+      "bytes": 761024,
+      "sha256": "29ebb1c652f658b2033996583409b920beecd94d2c2b3667b6c67e6820694246"
+    },
+    {
+      "path": "akari.model3.json",
+      "bytes": 717,
+      "sha256": "c6c415b919216cc82bed6c8f758e57306b71a27af92bcee9153b0eae9ae16560"
+    },
+    {
+      "path": "akari.nod.motion3.json",
+      "bytes": 1751,
+      "sha256": "bfd9a247d5ec8479145c2dddfd5fdbf03e1c46df8d7460f07badd146c1e19418"
+    },
+    {
+      "path": "akari.physics3.json",
+      "bytes": 3269,
+      "sha256": "b3a0a73c830ad0729f0c86e1096167763a0214014f741aa858d4150971a3eded"
+    },
+    {
+      "path": "akari.psd2live.json",
+      "bytes": 6662,
+      "sha256": "de04af57052cf2069e6f23ba7731905bb7114ae632e6f222a52ee3fe6b0dc847"
+    },
+    {
+      "path": "akari.shake.motion3.json",
+      "bytes": 1571,
+      "sha256": "9714b72b47dba8e33b6b08d0f9e84c77309a6ce6c98d2a3815c3a59d69163b01"
+    },
+    {
+      "path": "akari.2048/texture_00.png",
+      "bytes": 3754174,
+      "sha256": "7c3d2c7ab8762a0012f38977edbe3fc865d3c47cd8a0f194fee30574ddd94c66"
+    }
+  ],
+  "postprocessing": {
+    "path": "scripts/authoring/prepare-akari-hand-motions.mjs",
+    "bytes": 6717,
+    "sha256": "6437896779063c692aaef7b0d37ee53f6f5b0b928e0441c3b84320c3610f8df5"
+  },
+  "runtime": [
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.blink.motion3.json",
+      "bytes": 796,
+      "sha256": "3aeaeeae3c1f0bf77320db4f2e3c5a6fdfe20bc6aa394ff8f29676d33377e34c"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.bow.motion3.json",
+      "bytes": 2202,
+      "sha256": "19aa6d3d38a4a921875fe732eca94b0984c7f4003dbb89fbb371239744225c05"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.cdi3.json",
+      "bytes": 3530,
+      "sha256": "75ddaf005b497ad93cef0ab4e144df3c3462c2ceef43eb0bf557b9ff1bcf59ae"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.greet.motion3.json",
+      "bytes": 4294,
+      "sha256": "a926fe730f7d6de5ddaa4f0c78f3da2c10b0a9adc667a30e28e75d13a10c5aaf"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.idle.motion3.json",
+      "bytes": 13699,
+      "sha256": "4898654305a525d6031df126eef53c8555aab89c940f96b3e3666f699ff56c69"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.moc3",
+      "bytes": 761024,
+      "sha256": "29ebb1c652f658b2033996583409b920beecd94d2c2b3667b6c67e6820694246"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.model3.json",
+      "bytes": 1613,
+      "sha256": "3f1f643a7d44750939c8b3d6857aeddcc38b41913775505acd5be6ab0a5e074c"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.nod.motion3.json",
+      "bytes": 1180,
+      "sha256": "99ffb3b7330169eed05c156359f23f2852cb88d005d42034ae955e989da3f601"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.physics3.json",
+      "bytes": 3269,
+      "sha256": "b3a0a73c830ad0729f0c86e1096167763a0214014f741aa858d4150971a3eded"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.psd2live.json",
+      "bytes": 6662,
+      "sha256": "de04af57052cf2069e6f23ba7731905bb7114ae632e6f222a52ee3fe6b0dc847"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.shake.motion3.json",
+      "bytes": 1050,
+      "sha256": "714c60b27c378ba114c363b6ae942bcb51d5d56eb7a329c50d8b74fd01ba439e"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.shy.motion3.json",
+      "bytes": 2810,
+      "sha256": "db3a9e5635f5bae707ad1a4a423a5b903962fc5d72bd6b80e82e88923096aeaa"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.sway.motion3.json",
+      "bytes": 2594,
+      "sha256": "b212b91b4fa81b0b0d649193e962069b70af0f9708df0fc0b9af5129f353e190"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.taphead.motion3.json",
+      "bytes": 4398,
+      "sha256": "b503171905c7960acdd09cf2c1e7640a1c6739e89ce838d7274fe361f6de9e3a"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/README.md",
+      "bytes": 1044,
+      "sha256": "79217e6098b25ce8fd4170a64bf301b3e39260a9216a86a0ddd9bac0b7103f85"
+    },
+    {
+      "path": "public/avatars/akari-cubism-v8/akari.2048/texture_00.png",
+      "bytes": 3754174,
+      "sha256": "7c3d2c7ab8762a0012f38977edbe3fc865d3c47cd8a0f194fee30574ddd94c66"
+    }
+  ],
+  "validation": {
+    "core": {
+      "status": "pass",
+      "version": "6.0.1",
+      "mocVersion": 5,
+      "parameters": 19,
+      "drawables": 11,
+      "vertices": 2550,
+      "poses": 64,
+      "receipt": {
+        "path": "evidence/cubism-hands-20261002/core-final.json",
+        "bytes": 31035,
+        "sha256": "c5abba6d30824aab8cd6ef8f3d7a70c5250dae8ae81f003cd1e095306da7db35"
+      }
+    },
+    "tests": 248,
+    "handRegistrationMaxResidualSourcePixels": 0.1995935713809257,
+    "handRegistrationLimitSourcePixels": 0.25,
+    "officialEditorRoundtrip": false,
+    "physicalDevices": false
+  },
+  "boundaries": {
+    "independentFingers": false,
+    "independentArms": false,
+    "largeHandWave": false,
+    "newOccludedArtwork": false,
+    "notes": "Joined-hand local deformation of existing topwear ArtMesh. Browser and deployment evidence documented independently."
+  }
+}

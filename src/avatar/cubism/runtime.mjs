@@ -3,7 +3,7 @@ import { createCubismParameterBridge, cubismParameterTargets } from './parameter
 
 export const CUBISM_RUNTIME_ROOT = '/avatars/cubism-runtime/';
 export const CUBISM_CORE_URL = '/vendor/live2d/live2dcubismcore.min.js';
-const DEFAULT_MODEL = '/avatars/akari-cubism-v7/akari.model3.json';
+const DEFAULT_MODEL = '/avatars/akari-cubism-v8/akari.model3.json';
 const FRAMEWORK_EXPORTS = ['CubismFramework', 'CubismModelSettingJson', 'CubismMoc', 'CubismUserModel', 'CubismMatrix44', 'CubismShaderManager_WebGL', 'releaseCubismContext'];
 let corePromise, modulePromise;
 const runtimes = new WeakMap();
@@ -143,10 +143,13 @@ const ANGLES = ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX', 
 const GAZE = ['ParamEyeBallX', 'ParamEyeBallY'];
 const EYELIDS = ['ParamEyeLOpen', 'ParamEyeROpen'];
 const FACE = ['ParamEyeLSmile', 'ParamEyeRSmile', 'ParamEyeBallForm', 'ParamBrowLY', 'ParamBrowRY', 'ParamBrowLAngle', 'ParamBrowRAngle', 'ParamCheek', 'ParamTear', 'ParamExcited', 'ParamSad', 'ParamShoulderY'];
+const HANDS = ['ParamHandsLift', 'ParamHandsSway', 'ParamSleeveEase'];
+const GESTURE_MOTIONS = { nod: 'Nod', shake: 'Shake', shy: 'Shy', sway: 'Sway', bounce: 'Sway', bow: 'Bow' };
 
 /** Owns frame composition independently of WebGL, using the official queues. */
 export function createCubismFrameController({ model, avatar, bridge, motions = new Map(), expressions = new Map(), deformationProfile = 'standard' }) {
   let expressionName = '', motionName = '', motionGroup = '', gestureName = 'none', muted = false, mouthForm = 0;
+  let motionSource = '', motionUtterance = '';
   const motionRecords = new Map([...motions.entries()].map(([name, record]) => [record.motion, { ...record, group: name.slice(0, name.lastIndexOf('_')) }]));
   const expressionRecords = new Map([...expressions.values()].map(record => [record.motion, record]));
   // Capture neutral once. Persisting each animated frame into the next frame's
@@ -163,13 +166,21 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
     if (!entries) return manager.isFinished() || !fallback ? [] : [fallback];
     return entries.map(entry => records.get(entry?.getCubismMotion?.())).filter(Boolean);
   };
-  const startMotion = group => {
+  const startMotion = (group, source = 'idle', utteranceId = '') => {
     const chosen = [...motions.keys()].find(name => name.startsWith(`${group}_`));
-    if (muted || !chosen || chosen === motionName && !avatar._motionManager.isFinished()) return;
+    if (muted || !chosen) return;
+    if (chosen === motionName && !avatar._motionManager.isFinished()) {
+      // Models without touch assets may use the already-playing Nod as their
+      // fallback. It now belongs to that deliberate user interaction even
+      // though replaying the same motion would cause a visible restart.
+      if (source === 'interaction') { motionSource = source; motionUtterance = ''; }
+      return;
+    }
     // startMotionPriority asks the outgoing queue entries to fade out. Stopping
     // the queue here would discard their authored transition immediately.
     avatar._motionManager.startMotionPriority(motions.get(chosen).motion, false, group === 'Idle' ? 1 : 3);
     motionName = chosen; motionGroup = group;
+    motionSource = source; motionUtterance = utteranceId;
   };
   return {
     get motionGroup() { return motionGroup; },
@@ -179,15 +190,30 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
       if (still) {
         if (!muted) { stop(avatar._motionManager); stop(avatar._expressionManager); }
         motionName = motionGroup = expressionName = ''; gestureName = 'none';
+        motionSource = motionUtterance = '';
       }
       muted = still;
+      // Semantic gestures belong to the reply that started them. A cancelled
+      // playback, withdrawn emotion cue or new reply returns through the fade;
+      // manually requested touch/greeting motions keep their own lifecycle.
+      const cancelledSpeech = !still && motionSource === 'speech' && (
+        typeof options.utteranceId === 'string' && options.utteranceId !== motionUtterance ||
+        options.phase !== undefined && options.phase !== 'speaking' || options.speechActive === false || pose.gesture === 'none');
+      if (cancelledSpeech) {
+        startMotion('Idle');
+        if (motionSource === 'speech') { stop(avatar._motionManager); motionName = motionGroup = motionSource = motionUtterance = ''; }
+        // Consume a stale pose in this frame; it must not restart the cancelled
+        // action while the performance controller is clearing its own state.
+        gestureName = pose.gesture;
+      }
       if (!still && pose.gesture !== gestureName) {
         gestureName = pose.gesture;
         // A user interaction must not be replaced by the performance controller's
         // nod in the same frame. Consume that cue rather than replaying it later.
-        const interacting = (motionGroup === 'TapHead' || motionGroup === 'Greet') && !avatar._motionManager.isFinished();
-        if (!interacting && gestureName === 'nod') startMotion('Nod');
-        else if (!interacting && gestureName === 'shake') startMotion('Shake');
+        const interacting = motionSource === 'interaction' && !avatar._motionManager.isFinished();
+        const group = GESTURE_MOTIONS[gestureName];
+        const speechAllowed = options.phase !== 'speaking' || options.speechActive !== false;
+        if (!interacting && group && speechAllowed) startMotion(group, options.phase === 'speaking' ? 'speech' : 'gesture', options.utteranceId || '');
       }
       if (!still && avatar._motionManager.isFinished()) startMotion('Idle');
       model.loadParameters();
@@ -223,7 +249,7 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
         additive: [...ANGLES, ...GAZE].filter(name => own.has(name)),
         multiply: EYELIDS.filter(name => own.has(name) && (!referencePortrait || reactionEyes.has(name))),
         dominant: FACE.filter(name => own.has(name)),
-        preserve: [...(own.has('ParamBreath') ? ['ParamBreath'] : []), ...(own.has('ParamEyeBallForm') ? ['ParamEyeBallForm'] : [])],
+        preserve: [...(own.has('ParamBreath') ? ['ParamBreath'] : []), ...(own.has('ParamEyeBallForm') ? ['ParamEyeBallForm'] : []), ...HANDS.filter(name => own.has(name))],
       });
       if (!still && avatar._physics) avatar._physics.evaluate(model, seconds);
       if (avatar._pose) avatar._pose.updateParameters(model, seconds);
@@ -243,7 +269,7 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
     react(kind) {
       if (muted) return;
       const preferred = kind === 'pet' ? 'TapHead' : kind === 'greet' ? 'Greet' : 'Idle';
-      startMotion([...motions.keys()].some(name => name.startsWith(`${preferred}_`)) ? preferred : kind === 'wake' ? 'Idle' : 'Nod');
+      startMotion([...motions.keys()].some(name => name.startsWith(`${preferred}_`)) ? preferred : kind === 'wake' ? 'Idle' : 'Nod', kind === 'wake' ? 'idle' : 'interaction');
     },
   };
 }
@@ -341,7 +367,7 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
       -(canvasInfo.CanvasOriginY - canvasInfo.CanvasHeight / 2) / canvasInfo.PixelsPerUnit * authoredScale);
     // A user-supplied model must never inherit limits from its file name or
     // supported parameter IDs. Only this bundled, reviewed model opts in.
-    const deformationProfile = modelPath.pathname === '/avatars/akari-cubism-v7/akari.model3.json' ? 'reference-layered'
+    const deformationProfile = ['/avatars/akari-cubism-v7/akari.model3.json', '/avatars/akari-cubism-v8/akari.model3.json'].includes(modelPath.pathname) ? 'reference-layered'
       : ['/avatars/akari-cubism-v3/akari.model3.json', '/avatars/akari-cubism-v4/akari.model3.json', '/avatars/akari-cubism-v5/akari.model3.json', '/avatars/akari-cubism-v6/akari.model3.json'].includes(modelPath.pathname) ? 'akari-stable' : 'standard';
     const controller = createCubismFrameController({ model, avatar, bridge, motions, expressions, deformationProfile });
     return {

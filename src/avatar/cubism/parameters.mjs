@@ -60,6 +60,11 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
     ParamCheek: sleeping || hidden ? 0 : deformationProfile === 'akari-stable' ? .16 + unit(pose.blush) * .84 : unit(pose.blush),
     ParamBreath: still ? 0 : .35 + clamp(follow.breath) * .25 * unit(follow.breathScale / 1.12),
     ParamShoulderY: still ? 0 : unit(pose.shoulderLift),
+    // Optional, real V8 joints. Authored motions own these local hand/sleeve
+    // deformations; the neutral target clears them after the queue fades out.
+    ParamHandsLift: 0,
+    ParamHandsSway: 0,
+    ParamSleeveEase: 0,
     ParamTear: sleeping || hidden ? 0 : unit(pose.tearAmount),
     ParamExcited: sleeping || hidden ? 0 : unit(pose.excitedAmount),
     ParamWarm: sleeping || hidden || referenceLayered && dominantEmotion !== 'warm' ? 0 : warm,

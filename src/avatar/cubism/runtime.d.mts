@@ -3,7 +3,10 @@ import type { AvatarPresencePose } from '../presence.mjs';
 import type { CubismDeformationProfile, CubismParameterBridge, CubismParameterModel } from './parameters.mjs';
 export const CUBISM_RUNTIME_ROOT: string;
 export const CUBISM_CORE_URL: string;
-export type CubismFrameOptions = { sleeping?: boolean; hidden?: boolean; reducedMotion?: boolean };
+export type CubismFrameOptions = {
+  sleeping?: boolean; hidden?: boolean; reducedMotion?: boolean;
+  utteranceId?: string; phase?: string; speechActive?: boolean;
+};
 export interface CubismFrameController {
   readonly motionGroup: string;
   update(dt: number, pose: Partial<AvatarPerformanceSnapshot>, follow: Partial<AvatarPresencePose>, options?: CubismFrameOptions): void;
