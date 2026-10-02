@@ -3,7 +3,9 @@ import type { ComponentProps } from 'react';
 import type PetScene from '../pet/PetScene';
 import type { CompanionKind } from '../api';
 import type { PerformanceInput } from './performance.mjs';
-const AnimeScene = lazy(() => import('./cubism/CubismScene'));
+// Keep the coherent original portrait on the public path while the separately
+// authored Cubism face is being revised against that character.
+const AnimeScene = lazy(() => import('./AnimeScene'));
 const CatScene = lazy(() => import('../pet/PetScene'));
 
 class AvatarBoundary extends Component<{ children: ReactNode; kind: CompanionKind }, { failed: boolean }> {

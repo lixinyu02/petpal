@@ -3,7 +3,7 @@
 - Date: 2026-10-02
 - Complexity: L2
 - Related design: 2026-10-02-petpal-cubism-deformation-design.md
-- Current status: issue-1 done
+- Current status: issue-1 done; issue-2 in_progress
 
 ## issue-1
 
@@ -24,3 +24,20 @@
 - 已有消息的真实流式 TTS 返回 200 NDJSON，实际嘴型跟随播放能量并在停止后闭合。未新增 Chat／Agent 请求。
 - V4 已原子更新网页，83 个公网资源读回匹配；后端、账号/token、下载包与稳定升级清单在部署时保持，临时预览服务及浏览器覆盖已清理。
 - 本轮不重打客户端；CMO3 官方 Editor 与实体设备未重验，用户对 V4 外观的最终评价待体验。详细来源、hash 与范围见 [验收记录](../cubism/validation.md)。
+
+## issue-2
+
+- ID: issue-2
+- 标题: 对照原人物修正脸部比例与神态
+- 范围: V5 肩长前发和柔和鼻源素材、眉眼与下颌登记、native PSD、稳定 rig、真实静态动态视觉验收、网页交付
+- 依赖: issue-1；保留旧 V4 和原参考
+- 验收标准: 中性脸与原参考温柔神态接近，眉眼和鼻嘴协调，刘海不遮眼且前胸不被厚卷发包裹；眨眼、视线、表情及口型仍正常，不重新引入五官拉扯；Chrome 比对后上线并保留回退
+- 状态: in_progress
+- 验证方式: 源逐层 RGBA 读回、alpha与比例检查、真实 Core 几何／口型／眨眼回归、Chrome 原图/V4/V5 对照及412×960、TS／隔离构建、公网读回
+- commit: 本轮恢复检查点提交（Git history）；完整 Cubism 美术尚未完成
+
+### 用户否定后调整
+
+V5 曾上线但用户未接受；V6 未作为默认人物上线，且用户继续指出诡异。默认展示恢复完整原立绘动画，不将候选作为已修复的完整 Cubism 模型。此 issue 的外观修复仍在进行，当前交付目标是恢复协调人物并验证原动画、口型及互动；全 Cubism 模型的美术重制保留为未完成事项。
+
+原完整立绘恢复已交付网页。移除原立绘眼／眉局部 UV 折返和 DOM 重复轮廓风险，正式 Chrome 412×960、互动、已有回复真实朗读及停止闭嘴通过；189 项相关检查、TS、隔离构建与 118 公网资源读回通过。完整 Cubism 美术仍未完成，issue 保持 in_progress；本次仅提交恢复检查点，不把用户未接受的候选标成 done。见 [恢复验收](../cubism/portrait-recovery-validation.md)。

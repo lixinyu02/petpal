@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import vm from 'node:vm';
-import { acquireCubismFramework, createCubismFrameController, waitForCubismCore } from '../src/avatar/cubism/runtime.mjs';
+import { registerHooks } from 'node:module';
+import { acquireCubismFramework, createCubismAvatar, createCubismFrameController, waitForCubismCore } from '../src/avatar/cubism/runtime.mjs';
 import { createCubismParameterBridge, cubismParameterTargets } from '../src/avatar/cubism/parameters.mjs';
 
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -16,6 +17,116 @@ test('smile intent controls eyelids independently of the iris squash channel and
   assert.equal(smile.ParamMouthOpenY, .9);
   assert.equal(cubismParameterTargets({ speaking: true, mouthOpen: .9 }, {}, { deformationProfile: 'akari-stable' }).ParamMouthOpenY, .6);
   assert.equal(cubismParameterTargets({ speaking: false, mouthOpen: .9 }, {}, { deformationProfile: 'akari-stable' }).ParamMouthOpenY, 0);
+});
+
+// This surface permits the production factory to finish its resource loading.
+// It does not render pixels or certify shader/visual quality; model creation,
+// Framework, motions and the inspected native Core parameters remain real.
+function factoryWebGlStub() {
+  let sequence = 0, context;
+  const enums = new Map([['NO_ERROR', 0]]);
+  const object = () => ({ factoryStubObject: ++sequence });
+  const methods = {
+    createTexture: object, createFramebuffer: object, createBuffer: object,
+    createShader: object, createProgram: object,
+    getExtension: () => null,
+    getParameter: name => name === context.MAX_TEXTURE_SIZE || name === context.MAX_RENDERBUFFER_SIZE ? 4096 : name === context.VIEWPORT ? [0, 0, 256, 384] : null,
+    getShaderParameter: () => true, getProgramParameter: () => true,
+    getShaderInfoLog: () => '', getProgramInfoLog: () => '',
+    checkFramebufferStatus: () => context.FRAMEBUFFER_COMPLETE,
+    getAttribLocation: () => 0, getUniformLocation: object,
+    getError: () => 0, isContextLost: () => false,
+  };
+  context = new Proxy(methods, { get(target, name) {
+    if (name in target) return target[name];
+    if (typeof name === 'string' && /^[A-Z_0-9]+$/u.test(name)) {
+      if (!enums.has(name)) enums.set(name, enums.size + 1000);
+      return enums.get(name);
+    }
+    return () => {};
+  } });
+  return context;
+}
+
+test('production avatar factory defaults to V5 and applies exact built-in mouth limits without limiting a lookalike imported path', async () => {
+  const source = await fs.readFile(new URL('../public/vendor/live2d/live2dcubismcore.min.js', import.meta.url), 'utf8');
+  const sandbox = { console, setTimeout, clearTimeout, TextDecoder, TextEncoder, atob, btoa, window: {}, document: { currentScript: { src: 'https://petpal.test/vendor/live2d/live2dcubismcore.min.js' } } };
+  vm.runInNewContext(source, sandbox, { timeout: 2000 });
+  const core = await waitForCubismCore(() => sandbox.Live2DCubismCore);
+  const prior = { core: globalThis.Live2DCubismCore, fetch: globalThis.fetch, Image: globalThis.Image, WebGLBuffer: globalThis.WebGLBuffer };
+  const fromMoc = core.Model.fromMoc, nativeModels = [], requests = [];
+  const origin = 'https://petpal-factory.test';
+  const frameworkUrl = `${origin}/avatars/cubism-runtime/framework.mjs`;
+  // Remap only the official same-origin module URL to the same bundled
+  // Framework bytes. The factory's URL/profile decisions are not replaced.
+  const hooks = registerHooks({ resolve(specifier, context, next) {
+    return next(specifier === frameworkUrl ? new URL('../public/avatars/cubism-runtime/framework.mjs', import.meta.url).href : specifier, context);
+  } });
+  globalThis.Live2DCubismCore = core;
+  // The official renderer initializes its buffer slots through assignments to
+  // the browser's WebGLBuffer global. Node has no corresponding global.
+  globalThis.WebGLBuffer = null;
+  core.Model.fromMoc = function(moc) { const model = fromMoc.call(this, moc); nativeModels.push(model); return model; };
+  globalThis.fetch = async input => {
+    const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
+    assert.equal(url.origin, origin, 'Factory resources must remain at the test origin');
+    requests.push(url.pathname);
+    // Give the imported-path control the exact V5 model bytes, so only the
+    // production pathname classification differs from the built-in case.
+    const pathname = url.pathname.replace('/avatars/user/akari-cubism-v6/', '/avatars/akari-cubism-v6/');
+    assert.ok(pathname.startsWith('/avatars/') || pathname.startsWith('/vendor/'));
+    const bytes = await fs.readFile(new URL(`../public${pathname}`, import.meta.url));
+    return new Response(bytes, { headers: { 'Content-Length': String(bytes.length) } });
+  };
+  globalThis.Image = class {
+    set src(value) {
+      this.value = value;
+      if (!value) return;
+      // Read real PNG header dimensions from the Blob used by loadTexture.
+      // Decoding/rendering the bitmap is outside this routing/parameter test.
+      void prior.fetch(value).then(response => response.arrayBuffer()).then(bytes => {
+        if (this.value !== value) return;
+        const data = new DataView(bytes);
+        this.naturalWidth = data.getUint32(16); this.naturalHeight = data.getUint32(20);
+        this.onload?.();
+      }).catch(() => this.onerror?.());
+    }
+    get src() { return this.value; }
+  };
+  let avatar;
+  try {
+    for (const [modelUrl, expected, requestedManifest] of [
+      [undefined, .6, '/avatars/akari-cubism-v6/akari.model3.json'],
+      ['/avatars/akari-cubism-v5/akari.model3.json', .6, '/avatars/akari-cubism-v5/akari.model3.json'],
+      ['/avatars/akari-cubism-v3/akari.model3.json', .6, '/avatars/akari-cubism-v3/akari.model3.json'],
+      ['/avatars/akari-cubism-v4/akari.model3.json', .6, '/avatars/akari-cubism-v4/akari.model3.json'],
+      ['/avatars/user/akari-cubism-v6/akari.model3.json', .9, '/avatars/user/akari-cubism-v6/akari.model3.json'],
+    ]) {
+      const context = factoryWebGlStub(), location = new URL(`${origin}/`);
+      const canvas = { width: 256, height: 384, ownerDocument: { defaultView: { Live2DCubismCore: core, location } }, getContext: type => { assert.equal(type, 'webgl2'); return context; } };
+      const firstRequest = requests.length;
+      avatar = await createCubismAvatar({ canvas, ...(modelUrl ? { modelUrl } : {}) });
+      assert.equal(requests[firstRequest], requestedManifest);
+      const model = nativeModels.at(-1), mouth = Array.from(model.parameters.ids).indexOf('ParamMouthOpenY');
+      assert.ok(mouth >= 0);
+      avatar.update(.1, { speaking: true, mouthOpen: .9 }, {});
+      close(model.parameters.values[mouth], expected);
+      avatar.update(0, { speaking: false }, {});
+      assert.equal(model.parameters.values[mouth], 0);
+      const cheek = Array.from(model.parameters.ids).indexOf('ParamCheek');
+      assert.ok(cheek >= 0);
+      close(model.parameters.values[cheek], expected === .6 ? .16 : 0);
+      avatar.update(0, {}, {}, { hidden: true });
+      assert.equal(model.parameters.values[cheek], 0);
+      avatar.release(); avatar = undefined;
+    }
+  } finally {
+    avatar?.release(); hooks.deregister(); core.Model.fromMoc = fromMoc;
+    globalThis.fetch = prior.fetch;
+    if (prior.Image === undefined) delete globalThis.Image; else globalThis.Image = prior.Image;
+    if (prior.WebGLBuffer === undefined) delete globalThis.WebGLBuffer; else globalThis.WebGLBuffer = prior.WebGLBuffer;
+    if (prior.core === undefined) delete globalThis.Live2DCubismCore; else globalThis.Live2DCubismCore = prior.core;
+  }
 });
 
 test('licensed Core and Framework keep reaction angles exclusive through outgoing fades and retain imported-model articulation', async () => {

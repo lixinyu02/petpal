@@ -5,10 +5,10 @@ import vm from 'node:vm';
 import { acquireCubismFramework, createCubismFrameController, waitForCubismCore } from '../src/avatar/cubism/runtime.mjs';
 import { createCubismParameterBridge } from '../src/avatar/cubism/parameters.mjs';
 
-const assetRoot = new URL('../public/avatars/akari-cubism-v4/', import.meta.url);
+const assetRoot = new URL('../public/avatars/akari-cubism-v6/', import.meta.url);
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 
-test('actual licensed Core and Framework compose v4 authored reactions, exit cleanly, and cancel every native queue', async () => {
+test('actual licensed Core and Framework compose V6 authored reactions, exit cleanly, and cancel every native queue', async () => {
   const source = await fs.readFile(new URL('../public/vendor/live2d/live2dcubismcore.min.js', import.meta.url), 'utf8');
   const sandbox = { console, setTimeout, clearTimeout, TextDecoder, TextEncoder, atob, btoa, window: {}, document: { currentScript: { src: 'https://petpal.test/vendor/live2d/live2dcubismcore.min.js' } } };
   vm.runInNewContext(source, sandbox, { timeout: 2000, filename: 'licensed-live2dcubismcore.min.js' });
@@ -25,6 +25,8 @@ test('actual licensed Core and Framework compose v4 authored reactions, exit cle
     assert.equal(framework.CubismMoc.hasMocConsistency(moc), true);
     avatar = new framework.CubismUserModel(); avatar.loadModel(moc, true);
     const model = avatar.getModel();
+    assert.equal(model.getDrawableCount(), 19, 'V6 must retain the intended 19 native drawings');
+    assert.equal(model.getParameterCount(), 20, 'V6 must expose the actual stable-portrait20param rig');
     assert.deepEqual(Array.from(model.getModel().drawables.ids).filter(id => /^ArtMeshFrontHair(?:\d+)?$/u.test(id)), ['ArtMeshFrontHair']);
     if (manifest.FileReferences.Physics) {
       const physics = buffer(await fs.readFile(new URL(manifest.FileReferences.Physics, assetRoot)));
@@ -65,7 +67,7 @@ test('actual licensed Core and Framework compose v4 authored reactions, exit cle
     assert.ok(Math.max(...samples.map(sample => sample.brow)) > .06);
     assert.ok(Math.max(...samples.map(sample => sample.form)) > .15);
     assert.equal(controller.motionGroup, 'Idle');
-    assert.ok(Math.abs(read('ParamCheek')) < .0001);
+    assert.ok(Math.abs(read('ParamCheek') - .16) < .0001, 'reaction blush must settle to the bundled portrait warmth');
     assert.ok(Math.abs(read('ParamBrowLY')) < .0001);
     assert.ok(Math.abs(read('ParamMouthForm')) < .0001);
     controller.react('greet');

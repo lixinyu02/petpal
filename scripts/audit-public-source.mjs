@@ -68,21 +68,57 @@ export function inspectSourceEntry(entry, content) {
 }
 
 export function auditGitIndex(runGit=execFileSync) {
-  const staged = runGit('git',['ls-files','--stage','-z']).toString('utf8').split('\0').filter(Boolean).map(row=>{
-    const match=/^(\d+) ([a-f0-9]+) (\d)\t(.+)$/.exec(row);
+  const batchBytes=32*1024*1024,maxSourceBytes=40*1024*1024;
+  // A child-process exception can carry captured stdout containing a secret.
+  // Keep this boundary safe for programmatic callers as well as the CLI.
+  const git=(args,options)=>{
+    try{
+      const result=runGit('git',args,options);
+      if(!Buffer.isBuffer(result))throw new Error();
+      return result;
+    }catch{throw new Error('Unable to read Git source audit data');}
+  };
+  const staged = git(['ls-files','--stage','-z']).toString('utf8').split('\0').filter(Boolean).map(row=>{
+    const match=/^([0-7]{6}) ([a-f0-9]{40}|[a-f0-9]{64}) ([0-3])\t(.+)$/.exec(row);
     if(!match||match[3]!=='0')throw new Error('Unmerged or malformed index entry');
     return {mode:match[1],hash:match[2],path:match[4]};
   });
   if(!staged.length)throw new Error('No staged or tracked source files');
-  const blobs=runGit('git',['cat-file','--batch'],{input:staged.map(entry=>entry.hash).join('\n')+'\n',maxBuffer:128*1024*1024});
-  let offset=0,bytes=0;const issues=[];
-  for(const entry of staged){
-    const end=blobs.indexOf(10,offset),header=end<0?null:/^([a-f0-9]+) blob (\d+)$/.exec(blobs.subarray(offset,end).toString()),size=Number(header?.[2]);
-    if(!header||header[1]!==entry.hash||!Number.isSafeInteger(size)||size<0||end+size+1>=blobs.length||blobs[end+size+1]!==10)throw new Error('Unexpected Git blob response');
-    const content=blobs.subarray(end+1,end+1+size);offset=end+size+2;bytes+=size;
-    issues.push(...inspectSourceEntry(entry,content));
+  const input=entries=>entries.map(entry=>entry.hash).join('\n')+'\n';
+  const header=row=>/^([a-f0-9]{40}|[a-f0-9]{64}) blob (0|[1-9]\d*)$/.exec(row);
+  // Freeze exact index object IDs and validate every size/type before reading
+  // any body. Paths, refs and a second index lookup cannot change the snapshot.
+  const metadata=git(['cat-file','--batch-check'],{input:input(staged),maxBuffer:staged.length*128+1024}).toString('utf8').split('\n');
+  if(metadata.pop()!==''||metadata.length!==staged.length)throw new Error('Unexpected Git blob metadata');
+  let bytes=0;const issues=[];
+  for(let index=0;index<staged.length;index++){
+    const entry=staged[index],match=header(metadata[index]),size=Number(match?.[2]);
+    if(!match||match[1]!==entry.hash||!Number.isSafeInteger(size)||size<0||!Number.isSafeInteger(bytes+size))throw new Error('Unexpected Git blob metadata');
+    entry.size=size;bytes+=size;
   }
-  if(offset!==blobs.length)throw new Error('Unexpected trailing Git blob response');
+  const inspectBatch=entries=>{
+    const size=entries.reduce((sum,entry)=>sum+entry.size,0);
+    const blobs=git(['cat-file','--batch'],{input:input(entries),maxBuffer:size+entries.length*128+1024});
+    let offset=0;
+    for(const entry of entries){
+      const end=blobs.indexOf(10,offset),match=end<0?null:header(blobs.subarray(offset,end).toString('utf8'));
+      if(!match||match[1]!==entry.hash||Number(match[2])!==entry.size||end+entry.size+1>=blobs.length||blobs[end+entry.size+1]!==10)throw new Error('Unexpected Git blob response');
+      const content=blobs.subarray(end+1,end+1+entry.size);offset=end+entry.size+2;
+      issues.push(...inspectSourceEntry(entry,content));
+    }
+    if(offset!==blobs.length)throw new Error('Unexpected trailing Git blob response');
+  };
+  let batch=[],size=0;
+  for(const entry of staged){
+    if(entry.size>maxSourceBytes){
+      // Preserve metadata/path checks, but never allocate an oversized body.
+      issues.push(...inspectSourceEntry(entry,Buffer.alloc(0)),{path:entry.path,reason:'unexpected large source file'});
+      continue;
+    }
+    if(batch.length&&size+entry.size>batchBytes){inspectBatch(batch);batch=[];size=0;}
+    batch.push(entry);size+=entry.size;
+  }
+  if(batch.length)inspectBatch(batch);
   return {files:staged.length,bytes,pass:issues.length===0,issues};
 }
 

@@ -1,0 +1,27 @@
+{
+  "width": 1024,
+  "height": 1536,
+  "frontHair": {
+    "file": "front-hair.png",
+    "source": [4, 22, 1020, 1248],
+    "target": [170, 4, 680, 832]
+  },
+  "eyeAdjustment": {
+    "scale": 0.9,
+    "irisScale": 1,
+    "offsets": {"r": [-3, 9], "l": [-2, -1]}
+  },
+  "eyebrowAdjustment": {
+    "scale": 0.92,
+    "offsets": {"r": [0, 8], "l": [0, -2]}
+  },
+  "face": {"targetOverride": [329, 134, 366, 432]},
+  "nose": {
+    "file": "nose-soft.png",
+    "source": [430, 396, 370, 452],
+    "target": [496, 412, 30, 38]
+  },
+  "bodySource": "../akari-cubism-v2/body-continuous.png",
+  "reusedLayers": "../akari-cubism/layout.json except neck, topwear, nose and the two front hair layers",
+  "method": "Reference-guided shoulder hair, gentle nose, coordinated eye/brow registration and longer chin; mechanical RGBA sampling only."
+}

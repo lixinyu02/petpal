@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 const args = process.argv.slice(2);
 assert(args.length <= 1, 'Usage: node scripts/authoring/polish-akari-motions.mjs [existing-model-directory]');
 const projectRoot = fs.realpathSync(path.resolve(import.meta.dirname, '../..'));
-const requested = path.resolve(projectRoot, args[0] || 'public/avatars/akari-cubism-v4');
+const requested = path.resolve(projectRoot, args[0] || 'public/avatars/akari-cubism-v6');
 assert(fs.existsSync(requested) && fs.statSync(requested).isDirectory(), 'Target must be an existing model directory');
 const root = fs.realpathSync(requested);
 assert(root.startsWith(projectRoot + path.sep), 'Target must remain inside the PetPal checkout');
@@ -47,6 +47,16 @@ const verifiedProfiles = [
     name: 'stable-portrait',
     mocSha256: 'a2dd75ed234fb45cd97c6f1e26cc156c13bb8b671a9f70b7e7a21e882349ed26',
     textureSha256: 'bdf66abcce40b3178e1383cf3dac4805675f3ec95d5c9a264fae018a896dbc6f',
+  },
+  {
+    name: 'stable-portrait',
+    mocSha256: '93eb1502509bc91f5138d4391d4ef6191e9aec1008328d1ad16ed1730bff75e1',
+    textureSha256: 'b8e5475726ac909c4c5cf2a524192e224f02501dd189c931a163d5dc12aa4992',
+  },
+  {
+    name: 'stable-portrait',
+    mocSha256: '2c460efba11626631a65c6f0c9847b689db7dcf5fa70550459a45b9115858029',
+    textureSha256: 'e14c85310caefb9201592d83689eb549e3b479326ffee9224fc00c5519c27585',
   },
 ];
 const mocSha256 = sha256(fs.readFileSync(asset(manifest.FileReferences.Moc)));

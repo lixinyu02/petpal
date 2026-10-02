@@ -6,9 +6,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { PNG } from 'pngjs';
 import { initializeCanvas, writePsdBuffer, readPsd } from 'ag-psd';
 
-assert.equal(process.argv.length, 2, 'This packer uses the fixed V4 source directory; no arguments are accepted');
+const arguments_ = process.argv.slice(2);
+assert(arguments_.length === 0 || arguments_.length === 1 && ['--v5', '--v6'].includes(arguments_[0]),
+  'Use no arguments for the immutable V4 layout, or --v5 / --v6 for the corresponding fixed source directory');
+const version = arguments_.length === 0 ? 4 : arguments_[0] === '--v5' ? 5 : 6;
+const v5 = version >= 5, v6 = version === 6;
 const project = fs.realpathSync(path.resolve(import.meta.dirname, '../..'));
-const directory = path.join(project, 'outputs/avatars/akari-cubism-v4');
+const directory = path.join(project, `outputs/avatars/akari-cubism-v${version}`);
 const classic = path.join(project, 'outputs/avatars/akari-cubism');
 const continuous = path.join(project, 'outputs/avatars/akari-cubism-v2');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -41,23 +45,59 @@ function readJson(filename) {
   const bytes = readFile(filename);
   return { value: JSON.parse(bytes.toString('utf8')), file: relative(filename), sha256: hash(bytes) };
 }
-const v4Layout = readJson(path.join(directory, 'layout.json'));
+const avatarLayout = readJson(path.join(directory, 'layout.json'));
 const classicLayout = readJson(path.join(classic, 'layout.json'));
 const bodyLayout = readJson(path.join(continuous, 'layout.json'));
 const classicReceipt = readJson(path.join(classic, 'pack-receipt.json'));
 const bodyReceipt = readJson(path.join(continuous, 'pack-receipt.json'));
-const layout = v4Layout.value, original = classicLayout.value, previous = bodyLayout.value;
+const layout = avatarLayout.value, original = classicLayout.value, previous = bodyLayout.value;
 for (const document of [layout, original, previous]) {
   assert.equal(document.width, 1024, 'The original canvas width must be retained');
   assert.equal(document.height, 1536, 'The original canvas height must be retained');
 }
-assert.equal(layout.frontHair?.file, 'front-hair.png', 'V4 must use its sibling front-hair.png');
+if (v5) assert(typeof layout.frontHair?.file === 'string' && /^[^/\\]+\.png$/i.test(layout.frontHair.file),
+  'V5 front hair must identify a sibling PNG source');
+else assert.equal(layout.frontHair?.file, 'front-hair.png', 'V4 must use its sibling front-hair.png');
 assert.equal(previous.body?.file, 'body-continuous.png', 'The V2 continuous body source must be retained');
 const eyeAdjustment = layout.eyeAdjustment ?? { scale: 1, irisScale: 1 };
 assert(eyeAdjustment && typeof eyeAdjustment === 'object' && !Array.isArray(eyeAdjustment), 'eyeAdjustment must be an object');
 const eyeScale = eyeAdjustment.scale ?? 1, irisScale = eyeAdjustment.irisScale ?? 1;
 for (const [label, value] of [['eye scale', eyeScale], ['iris scale', irisScale]]) {
   assert(Number.isFinite(value) && value > 0 && value <= 1, `${label} must be greater than zero and no greater than one`);
+}
+function offsets(value, label) {
+  assert(value && typeof value === 'object' && !Array.isArray(value), `${label} must identify both eye sides`);
+  assert.deepEqual(Object.keys(value).sort(), ['l', 'r'], `${label} must contain only l and r`);
+  for (const side of ['r', 'l']) assert(Array.isArray(value[side]) && value[side].length === 2 &&
+    value[side].every(Number.isSafeInteger), `${label}.${side} must contain two integer pixel offsets`);
+  return { r: [...value.r], l: [...value.l] };
+}
+const eyeOffsets = v5 ? offsets(eyeAdjustment.offsets, 'eyeAdjustment.offsets') : undefined;
+const eyebrowAdjustment = v5 ? layout.eyebrowAdjustment : undefined;
+if (v5) assert(eyebrowAdjustment && typeof eyebrowAdjustment === 'object' && !Array.isArray(eyebrowAdjustment),
+  'V5 eyebrowAdjustment must be an object');
+const eyebrowScale = eyebrowAdjustment?.scale;
+if (v5) assert(Number.isFinite(eyebrowScale) && eyebrowScale > 0 && eyebrowScale <= 1,
+  'Eyebrow scale must be greater than zero and no greater than one');
+const eyebrowOffsets = v5 ? offsets(eyebrowAdjustment.offsets, 'eyebrowAdjustment.offsets') : undefined;
+if (v5) {
+  assert(layout.face && typeof layout.face === 'object' && !Array.isArray(layout.face), 'V5 face placement is required');
+  assert.equal(layout.nose?.file, 'nose-soft.png', 'V5 must use its sibling nose-soft.png replacement');
+}
+const eyeOverrideNames = ['eyewhite-r', 'eyewhite-l', 'eyelash-r', 'eyelash-l'];
+const layerOverrides = v6 ? layout.layerOverrides : undefined;
+if (v6) {
+  assert(layerOverrides && typeof layerOverrides === 'object' && !Array.isArray(layerOverrides),
+    'V6 layerOverrides must contain the four matched eye illustration layers');
+  assert.deepEqual(Object.keys(layerOverrides).sort(), [...eyeOverrideNames].sort(),
+    'V6 layerOverrides must contain exactly eyewhite-r/l and eyelash-r/l; other layers cannot be overridden');
+  for (const name of eyeOverrideNames) {
+    const override = layerOverrides[name];
+    assert(override && typeof override === 'object' && !Array.isArray(override), `${name} override must be an object`);
+    assert.equal(override.file, 'eyes-soft-atlas.png', `${name} must use the fixed sibling eyes-soft-atlas.png basename`);
+    if (override.offset !== undefined) assert(Array.isArray(override.offset) && override.offset.length === 2 &&
+      override.offset.every(Number.isSafeInteger), `${name} override offset must contain two integer pixel offsets`);
+  }
 }
 
 const originalNames = [
@@ -129,13 +169,43 @@ function adjustEye(item) {
     target = [Math.round(irisAnchor[0] - irisWidth / 2), Math.round(irisAnchor[1] - irisHeight / 2), irisWidth, irisHeight];
     Object.assign(transform, { irisAnchor, irisScale });
   }
+  if (v5) {
+    transform.offset = [...eyeOffsets[side]];
+    transform.scaledTarget = [...target];
+    target[0] += eyeOffsets[side][0]; target[1] += eyeOffsets[side][1];
+  }
   rectangle(target, `${item.name} effective placement`, layout.width, layout.height);
   return { target, transform };
+}
+function adjustFeature(item) {
+  const eye = adjustEye(item);
+  if (!v5 || eye.transform.kind !== 'none') return eye;
+  if (item.name === 'face') {
+    const target = [...rectangle(layout.face.targetOverride, 'V5 face targetOverride', layout.width, layout.height)];
+    rectangle(item.target, 'Original face placement', layout.width, layout.height);
+    return { target, transform: { kind: 'layout-target-override', originalTarget: [...item.target],
+      scale: [target[2] / item.target[2], target[3] / item.target[3]] } };
+  }
+  const match = /^eyebrow-([rl])$/.exec(item.name);
+  if (!match) return eye;
+  const side = match[1];
+  const [left, top, width, height] = rectangle(item.target, `${item.name} original placement`, layout.width, layout.height);
+  const anchor = [left + width / 2, top + height / 2];
+  const scaledTarget = [Math.round(anchor[0] + (left - anchor[0]) * eyebrowScale),
+    Math.round(anchor[1] + (top - anchor[1]) * eyebrowScale),
+    Math.max(1, Math.round(width * eyebrowScale)), Math.max(1, Math.round(height * eyebrowScale))];
+  const offset = [...eyebrowOffsets[side]];
+  const target = [scaledTarget[0] + offset[0], scaledTarget[1] + offset[1], scaledTarget[2], scaledTarget[3]];
+  rectangle(target, `${item.name} effective placement`, layout.width, layout.height);
+  return { target, transform: { kind: 'eyebrow-scale-offset', side, anchor, scale: eyebrowScale,
+    originalTarget: [...item.target], scaledTarget, offset } };
 }
 const body = readPng(path.join(continuous, previous.body.file));
 assert.equal(hash(body.bytes), bodyReceipt.value.bodySha256, 'The V2 body PNG differs from its reviewed receipt');
 assert.equal(hash(body.bytes), previousBody[0].sha256, 'The V2 body layer receipt differs');
 const hair = readPng(path.join(directory, layout.frontHair.file));
+const nose = v5 ? readPng(path.join(directory, layout.nose.file)) : undefined;
+const eyeAtlas = v6 ? readPng(path.join(directory, 'eyes-soft-atlas.png')) : undefined;
 const children = [], sources = [];
 function addLayer(name, image, source, target, pixels, reused, transform = {
   kind: 'layout-sampling', scale: [target[2] / source[2], target[3] / source[3]],
@@ -157,12 +227,33 @@ for (const item of original.layers) {
   } else {
     const record = classicRecords.get(item.name);
     assert.deepEqual(item.target, record.target, `Classic placement changed: ${item.name}`);
+    if (v5 && item.name === 'nose') {
+      addLayer(item.name, nose, layout.nose.source, layout.nose.target,
+        sample(nose.png, layout.nose.source, layout.nose.target, 'soft nose replacement'), false,
+        { kind: 'replacement-layout-sampling', originalFile: relative(path.join(classic, 'layers', item.name + '.png')), originalSourceSha256: record.sha256,
+          originalTarget: [...item.target],
+          scale: [layout.nose.target[2] / layout.nose.source[2], layout.nose.target[3] / layout.nose.source[3]] });
+      continue;
+    }
     const image = readPng(path.join(classic, 'layers', item.name + '.png'));
     assert.equal(hash(image.bytes), record.sha256, `Classic pixels changed: ${item.name}`);
     const [, , width, height] = rectangle(item.target, `${item.name} target`, layout.width, layout.height);
     assert.equal(image.png.width, width, `Classic layer width changed: ${item.name}`);
     assert.equal(image.png.height, height, `Classic layer height changed: ${item.name}`);
-    const { target, transform } = adjustEye(item);
+    const { target, transform } = adjustFeature(item);
+    if (v6 && Object.hasOwn(layerOverrides, item.name)) {
+      const override = layerOverrides[item.name];
+      const replacementOffset = override.offset === undefined ? [0, 0] : [...override.offset];
+      const replacementTarget = [target[0] + replacementOffset[0], target[1] + replacementOffset[1], target[2], target[3]];
+      rectangle(replacementTarget, `${item.name} replacement placement`, layout.width, layout.height);
+      addLayer(item.name, eyeAtlas, override.source, replacementTarget,
+        sample(eyeAtlas.png, override.source, replacementTarget, `${item.name} matched eye replacement`), false,
+        { ...transform, kind: 'replacement-eye-layout-sampling', placementKind: transform.kind,
+          originalFile: relative(image.filename), originalSourceSha256: record.sha256,
+          placementTarget: [...target], replacementOffset,
+          samplingScale: [replacementTarget[2] / override.source[2], replacementTarget[3] / override.source[3]] });
+      continue;
+    }
     addLayer(item.name, image, [0, 0, width, height], target,
       transform.kind === 'none' ? new Uint8ClampedArray(image.png.data)
         : sample(image.png, [0, 0, width, height], target, item.name), true, transform);
@@ -170,8 +261,8 @@ for (const item of original.layers) {
 }
 addLayer('front hair', hair, layout.frontHair.source, layout.frontHair.target,
   sample(hair.png, layout.frontHair.source, layout.frontHair.target, 'unified front hair'), false);
-assert.equal(children.length, 19, 'V4 must contain exactly nineteen layers');
-assert.equal(new Set(children.map(layer => layer.name)).size, 19, 'V4 layer names must be unique');
+assert.equal(children.length, 19, 'The avatar must contain exactly nineteen layers');
+assert.equal(new Set(children.map(layer => layer.name)).size, 19, 'Avatar layer names must be unique');
 assert.equal(children.at(-1).name, 'front hair', 'The unified hair must be the topmost source layer');
 
 function composite(neutralOnly) {
@@ -217,10 +308,20 @@ for (const [index, expected] of children.entries()) {
 
 const receipt = {
   schema: 1,
-  method: 'Classic face and feature sources plus V2 continuous body retained; optional anchored eye and iris reduction; one generated unified front hair; nearest RGBA sampling and PSD encoding only',
+  method: v6
+    ? 'Classic face source with registered target override; per-side anchored eye and eyebrow scale/offset; four matched eye-white and upper-eyelash illustrations sampled to unchanged target rectangles; V2 continuous body retained; generated unified front hair and soft nose replacement; nearest RGBA sampling and PSD encoding only'
+    : v5
+    ? 'Classic face source with registered target override; per-side anchored eye and eyebrow scale/offset; V2 continuous body retained; generated unified front hair and soft nose replacement; nearest RGBA sampling and PSD encoding only'
+    : 'Classic face and feature sources plus V2 continuous body retained; optional anchored eye and iris reduction; one generated unified front hair; nearest RGBA sampling and PSD encoding only',
   canvas: [layout.width, layout.height],
   eyeAdjustment: { scale: eyeScale, irisScale },
-  layouts: [v4Layout, classicLayout, bodyLayout].map(({ file, sha256 }) => ({ file, sha256 })),
+  ...(v5 ? { eyeAdjustment: { scale: eyeScale, irisScale, offsets: eyeOffsets },
+    eyebrowAdjustment: { scale: eyebrowScale, offsets: eyebrowOffsets },
+    faceAdjustment: { targetOverride: [...layout.face.targetOverride] }, noseSha256: hash(nose.bytes) } : {}),
+  ...(v6 ? { eyeAtlasSha256: hash(eyeAtlas.bytes), layerOverrides: eyeOverrideNames.map(name => ({ name,
+    file: layerOverrides[name].file, source: [...layerOverrides[name].source],
+    ...(layerOverrides[name].offset === undefined ? {} : { offset: [...layerOverrides[name].offset] }) })) } : {}),
+  layouts: [avatarLayout, classicLayout, bodyLayout].map(({ file, sha256 }) => ({ file, sha256 })),
   sourceReceipts: [classicReceipt, bodyReceipt].map(({ file, sha256 }) => ({ file, sha256 })),
   bodySha256: hash(body.bytes), frontHairSha256: hash(hair.bytes),
   psdSha256: hash(psd), neutralLayoutSha256: hash(neutralBytes),

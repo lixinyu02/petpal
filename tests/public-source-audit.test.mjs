@@ -66,15 +66,24 @@ test('path restrictions apply case insensitively and source entry metadata remai
   assert.throws(()=>inspectSourceEntry({path:'test.txt'},'not a Buffer'),TypeError);
 });
 
-function fakeGit(entries,transform=value=>value){
-  let count=0;
-  return (_command,args,options)=>{
-    count++;
-    if(count===1){assert.deepEqual(args,['ls-files','--stage','-z']);return Buffer.from(entries.map((entry,index)=>`100644 ${String(index+1).repeat(40)} 0\t${entry.path}\0`).join(''));}
-    assert.equal(count,2);assert.deepEqual(args,['cat-file','--batch']);
-    assert.equal(options.input,entries.map((_entry,index)=>String(index+1).repeat(40)).join('\n')+'\n');
-    return transform(Buffer.concat(entries.map((entry,index)=>{const body=Buffer.from(entry.content);return Buffer.concat([Buffer.from(`${String(index+1).repeat(40)} blob ${body.length}\n`),body,Buffer.from('\n')]);})));
+function fakeGit(entries,{transform=value=>value,metadataTransform=value=>value,onBatch=()=>{}}={}){
+  const objects=entries.map((entry,index)=>({...entry,hash:entry.hash||(index+1).toString(16).padStart(40,'0'),size:entry.metadataSize??Buffer.byteLength(entry.content)}));
+  let indexed=false,checked=false;
+  const run=(_command,args,options)=>{
+    if(!indexed){indexed=true;assert.deepEqual(args,['ls-files','--stage','-z']);return Buffer.from(objects.map(entry=>`100644 ${entry.hash} 0\t${entry.path}\0`).join(''));}
+    if(!checked){
+      checked=true;assert.deepEqual(args,['cat-file','--batch-check']);
+      assert.equal(options.input,objects.map(entry=>entry.hash).join('\n')+'\n');
+      return metadataTransform(Buffer.from(objects.map(entry=>`${entry.hash} blob ${entry.size}\n`).join('')));
+    }
+    assert.deepEqual(args,['cat-file','--batch']);
+    assert.ok(options.input.endsWith('\n'));
+    const batch=options.input.slice(0,-1).split('\n').map(hash=>{const entry=objects.find(entry=>entry.hash===hash);assert.ok(entry,'Only frozen index hashes may be read');return entry;});
+    run.batches.push(batch.map(entry=>entry.path));onBatch(batch,options);
+    return transform(Buffer.concat(batch.map(entry=>{const body=Buffer.isBuffer(entry.content)?entry.content:Buffer.from(entry.content);return Buffer.concat([Buffer.from(`${entry.hash} blob ${body.length}\n`),body,Buffer.from('\n')]);})));
   };
+  run.batches=[];
+  return run;
 }
 
 test('index audit inspects exact batch blobs and emits only fixed diagnostics',()=>{
@@ -88,9 +97,75 @@ test('index audit inspects exact batch blobs and emits only fixed diagnostics',(
 
 test('malformed, truncated and extra Git blob responses fail closed',()=>{
   const entries=[{path:'src/clean.ts',content:'export const ready = true;'}];
-  for(const transform of [bytes=>bytes.subarray(0,-2),bytes=>Buffer.concat([bytes,Buffer.from('extra')]),bytes=>Buffer.from(bytes.toString().replace(' blob ',' tree ')),bytes=>Buffer.from(bytes.toString().replace('1'.repeat(40),'f'.repeat(40)))])assert.throws(()=>auditGitIndex(fakeGit(entries,transform)),/Git blob/);
+  for(const transform of [bytes=>bytes.subarray(0,-2),bytes=>Buffer.concat([bytes,Buffer.from('extra')]),bytes=>Buffer.from(bytes.toString().replace(' blob ',' tree ')),bytes=>Buffer.from(bytes.toString().replace('1'.padStart(40,'0'),'f'.repeat(40)))])assert.throws(()=>auditGitIndex(fakeGit(entries,{transform})),/Git blob/);
   assert.throws(()=>auditGitIndex(()=>Buffer.from('')),/No staged/);
   assert.throws(()=>auditGitIndex(()=>Buffer.from(`100644 ${'1'.repeat(40)} 1\tsrc/conflict.ts\0`)),/Unmerged/);
+});
+
+test('32 MiB batches preserve exact boundary bytes and still detect a secret in the last batch',()=>{
+  const mib=1024*1024,large=Buffer.alloc(16*mib,32),value=credential();
+  const entries=[{path:'public/first.png',content:large},{path:'public/second.png',content:large},{path:'docs/last.json',content:JSON.stringify({token:value})},{path:'src/empty.ts',content:''}];
+  const git=fakeGit(entries,{onBatch:(batch,options)=>{
+    const size=batch.reduce((sum,entry)=>sum+entry.size,0);
+    assert.ok(size<=32*mib);assert.ok(options.maxBuffer>=size&&options.maxBuffer<33*mib,'stdout capacity must be per batch');
+  }});
+  const result=auditGitIndex(git);
+  assert.deepEqual(git.batches,[['public/first.png','public/second.png'],['docs/last.json','src/empty.ts']]);
+  assert.equal(result.files,4);assert.equal(result.bytes,32*mib+Buffer.byteLength(entries[2].content));
+  assert.equal(result.pass,false);assert.deepEqual(result.issues,[{path:'docs/last.json',reason:'unreviewed literal credential'}]);
+  assert.equal(JSON.stringify(result).includes(value),false);
+});
+
+test('a source larger than the target batch is read alone without truncation',()=>{
+  const mib=1024*1024,body=Buffer.alloc(33*mib,32);
+  const git=fakeGit([{path:'public/large.png',content:body},{path:'src/after.ts',content:'export {};'}],{onBatch:(batch,options)=>{
+    if(batch[0].path==='public/large.png'){assert.equal(batch.length,1);assert.ok(options.maxBuffer>body.length&&options.maxBuffer<34*mib);}
+  }});
+  const result=auditGitIndex(git);
+  assert.equal(result.pass,true);assert.equal(result.bytes,body.length+10);
+  assert.deepEqual(git.batches,[['public/large.png'],['src/after.ts']]);
+});
+
+test('every metadata row must match the immutable index hash, blob type and safe size before any body is read',()=>{
+  const entries=[{path:'src/first.ts',content:'first'},{path:'src/last.ts',content:'last'}];
+  const malformed=[
+    bytes=>bytes.subarray(0,-1),
+    bytes=>Buffer.concat([bytes,Buffer.from('\n')]),
+    bytes=>Buffer.from(bytes.toString().split('\n').slice(0,1).join('\n')+'\n'),
+    bytes=>Buffer.from(bytes.toString().replace('2'.padStart(40,'0'),'f'.repeat(40))),
+    bytes=>Buffer.from(bytes.toString().replace(' blob 4',' tree 4')),
+    bytes=>Buffer.from(bytes.toString().replace(' blob 4',' missing')),
+    ...['-1','1.5','NaN','Infinity','04','9007199254740992'].map(size=>bytes=>Buffer.from(bytes.toString().replace(' blob 4',` blob ${size}`))),
+    bytes=>{const value=Buffer.from(bytes);value[value.indexOf('blob')]=0xe2;return value;},
+  ];
+  for(const metadataTransform of malformed){
+    const git=fakeGit(entries,{metadataTransform});
+    assert.throws(()=>auditGitIndex(git),/^Error: Unexpected Git blob metadata$/);
+    assert.deepEqual(git.batches,[],'even a malformed last row must prevent all blob reads');
+  }
+  // The body response must agree with the preflight, not just have valid framing.
+  assert.throws(()=>auditGitIndex(fakeGit([{path:'src/drift.ts',content:'actual',metadataSize:5}])),/Unexpected Git blob response/);
+});
+
+test('objects over 40 MiB are rejected without reading their bodies while remaining files are scanned',()=>{
+  const size=40*1024*1024+1,value=privateSample('');
+  const git=fakeGit([{path:'public/oversized.png',content:null,metadataSize:size},{path:'docs/after.txt',content:value}],{onBatch:batch=>assert.ok(batch.every(entry=>entry.content!==null),'oversized object must never be requested')});
+  const result=auditGitIndex(git);
+  assert.deepEqual(git.batches,[['docs/after.txt']]);
+  assert.equal(result.files,2);assert.equal(result.bytes,size+Buffer.byteLength(value));assert.equal(result.pass,false);
+  assert.deepEqual(result.issues,[{path:'public/oversized.png',reason:'unexpected large source file'},{path:'docs/after.txt',reason:'private key material'}]);
+  assert.equal(JSON.stringify(result).includes(value),false);
+});
+
+test('Git process failures never propagate captured secret stdout through the audit API',()=>{
+  const value=credential();
+  for(const failAt of [1,2,3]){
+    const fixture=fakeGit([{path:'src/clean.ts',content:'export {};'}]);let calls=0;
+    assert.throws(()=>auditGitIndex((...args)=>{
+      if(++calls===failAt)throw Object.assign(new Error(value),{stdout:Buffer.from(value),stderr:Buffer.from(value)});
+      return fixture(...args);
+    }),error=>error.message==='Unable to read Git source audit data'&&!JSON.stringify(error).includes(value)&&error.stdout===undefined&&error.stderr===undefined&&error.cause===undefined);
+  }
 });
 
 test('the scanner and its tests contain no sensitive literals that bypass their own rules',async()=>{

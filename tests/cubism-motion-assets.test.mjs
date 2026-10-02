@@ -6,7 +6,7 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const bundle = path.join(root, 'public/avatars/akari-cubism-v4');
+const bundle = path.join(root, 'public/avatars/akari-cubism-v6');
 const readBytes = name => {
   const bytes = fs.readFileSync(path.join(bundle, name));
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -34,12 +34,13 @@ before(async () => {
   const moc = core.Moc.fromArrayBuffer(readBytes(manifest.FileReferences.Moc));
   const model = core.Model.fromMoc(moc);
   try {
+    assert.equal(model.drawables.ids.length, 19, 'V6 must retain the intended 19 native drawings');
     assert.deepEqual(Array.from(model.drawables.ids).filter(id => /^ArtMeshFrontHair(?:\d+)?$/u.test(id)), ['ArtMeshFrontHair']);
     actualParameters = new Map(Array.from(model.parameters.ids, (id, index) => [id, {
       min: model.parameters.minimumValues[index], max: model.parameters.maximumValues[index],
       default: model.parameters.defaultValues[index],
     }]));
-    assert.equal(actualParameters.size, 20, 'Validate against actual published rig, not virtual Framework IDs');
+    assert.equal(actualParameters.size, 20, 'Validate against the published V6 stable-portrait20param rig, not virtual Framework IDs');
   } finally { model.release(); moc._release(); }
 });
 
@@ -83,7 +84,7 @@ function parseCurve(curve, duration) {
   return { points, segmentCount, pointCount };
 }
 
-test('authored motions use actual rig ranges, valid Cubism counts, explicit fades and settled endings', () => {
+test('V6 authored motions use actual rig ranges, valid Cubism counts, explicit fades and settled endings', () => {
   for (const group of authoredGroups) {
     const entries = manifest.FileReferences.Motions[group];
     assert.equal(entries.length, 1);
@@ -131,7 +132,7 @@ function geometrySnapshot(model) {
   return Array.from({ length: model.getDrawableCount() }, (_, index) => Array.from(model.getDrawableVertices(index)));
 }
 
-test('official Framework and Core play all authored curves with finite changing mesh and unpinned hair', () => {
+test('official Framework and Core play all V6 authored curves with finite changing mesh and unpinned hair', () => {
   const settingBytes = readBytes('akari.model3.json');
   const setting = new framework.CubismModelSettingJson(settingBytes, settingBytes.byteLength);
   try {
@@ -180,7 +181,7 @@ test('official Framework and Core play all authored curves with finite changing 
   } finally { setting.release(); }
 });
 
-test('hair physics references real rig and remains stable under pointer turns at 30, 60 and 120 fps', () => {
+test('V6 hair physics references real rig and remains stable under pointer turns at 30, 60 and 120 fps', () => {
   const physics = JSON.parse(fs.readFileSync(path.join(bundle, manifest.FileReferences.Physics), 'utf8'));
   assert.equal(physics.Meta.PhysicsSettingCount, physics.PhysicsSettings.length);
   assert.equal(physics.Meta.TotalInputCount, physics.PhysicsSettings.reduce((sum, item) => sum + item.Input.length, 0));

@@ -15,7 +15,7 @@ function alphaAt(layer, x, y) {
   return image.data[((y - layer.top) * image.width + x - layer.left) * 4 + 3] / 255 * (layer.opacity ?? 1);
 }
 
-async function sourceCoverage(directory) {
+async function sourceCoverage(directory, expectedBrowTop = 292) {
   const psd = readPsd(await fs.readFile(new URL('akari.psd', directory)), { useImageData: true, skipCompositeImageData: true, skipThumbnail: true });
   const flatten = layers => layers.flatMap(layer => [layer, ...flatten(layer.children || [])]);
   const layers = flatten(psd.children || []), names = new Map(layers.map(layer => [layer.name, layer]));
@@ -24,7 +24,7 @@ async function sourceCoverage(directory) {
   const hair = layers.filter(layer => /^front hair(?: \d+)?$/u.test(layer.name));
   assert.ok(face && brows.every(Boolean) && eyes.every(Boolean) && hair.length, 'PSD must contain the real face, eyebrows, eyes and foreground hair');
   const foreheadBottom = Math.min(...brows.map(layer => layer.top));
-  assert.equal(foreheadBottom, 292, 'Measure the original eyebrow-top boundary in authored pixels');
+  assert.equal(foreheadBottom, expectedBrowTop, 'Measure the reviewed eyebrow-top boundary in authored pixels');
   const hairAlpha = (x, y) => 1 - hair.reduce((remaining, layer) => remaining * (1 - alphaAt(layer, x, y)), 1);
   const gaps = [480, 512, 550].map(x => {
     let current = 0, longest = 0, facePixels = 0;
@@ -59,10 +59,10 @@ function coveredForeheadAndVisibleEyes(result) {
   for (const eye of result.eyeCoverage) assert.ok(eye.occludedFraction < .02, `${eye.eye} is ${(eye.occludedFraction * 100).toFixed(3)}% covered by foreground hair`);
 }
 
-test('native V4 PSD foreground hair covers the forehead while leaving the adjusted eye-white masks visible', async t => {
-  const result = await sourceCoverage(new URL('../outputs/avatars/akari-cubism-v4/', import.meta.url));
+test('native V6 PSD foreground hair covers the forehead while leaving the adjusted eye-white masks visible', async t => {
+  const result = await sourceCoverage(new URL('../outputs/avatars/akari-cubism-v6/', import.meta.url), 291);
   coveredForeheadAndVisibleEyes(result);
-  t.diagnostic(`V4 registered source alpha ${JSON.stringify(result)}`);
+  t.diagnostic(`V6 registered source alpha ${JSON.stringify(result)}`);
 });
 
 test('the same native-alpha coverage acceptance rejects the old V2 exposed forehead', async t => {

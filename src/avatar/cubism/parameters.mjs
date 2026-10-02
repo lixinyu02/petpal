@@ -39,7 +39,9 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
     ParamBrowRY: hidden ? 0 : clamp(pose.browRaise) * .7 - browDifference,
     ParamBrowLAngle: hidden ? 0 : clamp(pose.browTilt) * .7,
     ParamBrowRAngle: hidden ? 0 : -clamp(pose.browTilt) * .7,
-    ParamCheek: sleeping || hidden ? 0 : unit(pose.blush),
+    // A trace of the reference's warm cheeks keeps the bundled portrait from
+    // looking pale at rest; imported models retain their authored neutral.
+    ParamCheek: sleeping || hidden ? 0 : deformationProfile === 'akari-stable' ? .16 + unit(pose.blush) * .84 : unit(pose.blush),
     ParamBreath: still ? 0 : .35 + clamp(follow.breath) * .25 * unit(follow.breathScale / 1.12),
     ParamShoulderY: still ? 0 : unit(pose.shoulderLift),
     ParamTear: sleeping || hidden ? 0 : unit(pose.tearAmount),

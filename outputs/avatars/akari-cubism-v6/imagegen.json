@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "recordedDate": "2026-10-02",
+  "modelVersion": "Akari V6",
+  "role": "Historical non-default eye-art candidate; static assets retained in the restored full-illustration web build, never deployed as the default character",
+  "tool": "image_gen.imagegen",
+  "toolOutputBasename": "exec-d17e3c85-533f-4572-960a-4ace91a6f57a.png",
+  "output": "eyes-soft-atlas.png",
+  "format": "PNG",
+  "decodedDimensions": [1448, 1086],
+  "bytes": 344120,
+  "sha256": "d605eeebfe523761590eab369323f108b2b815c256532781bb9e7ff9b32d2b0e",
+  "identityEvidence": "The current authoring handoff records the tool output basename; local PNG header, byte length and SHA-256 were checked against the V6 pack receipt",
+  "fullPrompt": "unknown",
+  "generationMode": "unknown",
+  "generationReferences": "unknown",
+  "generationDate": "unknown",
+  "promptEvidence": "A complete image-generation prompt is not available in the retained V6 asset receipts; no prompt was reconstructed from appearance or layout",
+  "postGenerationProgrammaticPainting": false,
+  "packingMethod": "Mechanical source cropping, nearest RGBA sampling and PSD encoding; no source PNG painting",
+  "layout": "layout.json",
+  "packReceipt": "pack-receipt.json",
+  "sourceRegions": [
+    {"layer": "eyewhite-r", "source": [108, 240, 500, 224]},
+    {"layer": "eyewhite-l", "source": [840, 240, 500, 224]},
+    {"layer": "eyelash-r", "source": [78, 600, 570, 282], "registrationOffset": [0, -10]},
+    {"layer": "eyelash-l", "source": [802, 600, 570, 282], "registrationOffset": [0, -10]}
+  ],
+  "preservedSources": "Original irises, face and eyebrows; V5 foreground hair and soft nose; V2 continuous body. Their crop and registration are defined separately in layout.json",
+  "acceptance": {
+    "userArtAcceptance": "rejected",
+    "publicStaticAssetsDeployed": true,
+    "deployedAsDefaultCharacter": false,
+    "currentDefault": false,
+    "officialEditor": "not verified",
+    "defaultPresentationRoute": "Original full-illustration animation in src/avatar/AnimeScene.tsx; this route is not a complete Cubism model"
+  }
+}

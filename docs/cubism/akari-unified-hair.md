@@ -2,7 +2,7 @@
 
 V4 延续最初选定的温柔日系少女、奶油白与浅橘配色，保留 Akari 的脸、眉、鼻、嘴、后发与 V2 连续颈肩身体。它针对用户仍不接受 V3 静态大额头、刘海覆盖不足和眼睛过大的反馈，替换统一前发并缩小眼组；[V3 的动态绑定修复](akari-stable-portrait.md) 继续使用，源图比例和动态执行分别检查。
 
-当前源码默认入口为 `public/avatars/akari-cubism-v4/akari.model3.json`，可编辑源与生成记录在 [`outputs/avatars/akari-cubism-v4`](../../outputs/avatars/akari-cubism-v4/README.md)。机械 PSD 打包、独立导出、V4 真实 Core／几何、相关回归、Chrome 动态、正式网页互动、真实 TTS 及公网部署验收已经完成，范围见 [验收记录](validation.md)。412×960 为 Chrome viewport 模拟，ASR 与四端实体设备未在本轮重验；classic／V2／V3 的历史通过结果和生成的中性合成图没有被当作 V4 实测。
+V4 保留为历史候选，当前默认为 [V5 比例修正](akari-reference-proportions.md)。V4 可编辑源与生成记录在 [`outputs/avatars/akari-cubism-v4`](../../outputs/avatars/akari-cubism-v4/README.md)。机械 PSD 打包、独立导出、V4 真实 Core／几何、相关回归、Chrome 动态、正式网页互动、真实 TTS 及公网部署已在此前完成，范围见 [验收记录](validation.md)。412×960 为 Chrome viewport 模拟，ASR 与四端实体设备未在该轮重验；历史通过结果不能当作 V5 实测。
 
 ## 源美术与静态比例
 

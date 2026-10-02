@@ -66,12 +66,10 @@ void main() {
   vec2 eyeCenter = point.x < .495 ? vec2(.406,.247) : vec2(.581,.239);
   float eyeMask = max(left,right);
   vec2 samplePoint = point;
-  float eyeScale = point.x < .495 ? eyeScaleLeft : eyeScaleRight;
-  samplePoint.y = mix(point.y, eyeCenter.y + (point.y-eyeCenter.y)/eyeScale, eyeMask);
   float brows = max(region(vec2(.410,.207),vec2(.061,.018)),region(vec2(.576,.190),vec2(.063,.018)));
-  samplePoint.y += browRaise*.0035*brows;
-  samplePoint.y += (point.x < .495 ? browLeftLift : browRightLift)*.004*brows;
-  samplePoint.y += (point.x-eyeCenter.x)*(point.x < .495 ? 1.0 : -1.0)*(browTilt-browFocus)*.16*brows;
+  // Preserve the source eye and brow contours. Blending a compressed UV map
+  // into a narrow mask folds its transition ring and repeats facial pixels.
+  // Registered expression artwork supplies eyelids/brows without that warp.
   float iris = max(region(vec2(.414,.251),vec2(.027,.024)),region(vec2(.578,.244),vec2(.027,.024)));
   samplePoint += vec2(-gazeX*.003, gazeY*.002)*iris;
   vec2 sampleUv = vec2(samplePoint.x,1.0-samplePoint.y);
@@ -364,7 +362,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       uniforms.browRaise.value=pose.browRaise; uniforms.blush.value=emotion.blush; uniforms.headTilt.value=follow.headTilt; uniforms.headNodOffset.value=headNodPercent*.03;
       uniforms.sadness.value=emotion.sadness; uniforms.downcast.value=emotion.downcast; uniforms.tears.value=emotion.tears; uniforms.sparkle.value=emotion.sparkle; uniforms.shy.value=emotion.shy;
       uniforms.smug.value=emotion.smug;uniforms.pout.value=emotion.pout;uniforms.upperWarmth.value=emotion.upperWarmth;
-      uniforms.eyeScaleLeft.value=emotion.eyeScaleLeft;uniforms.eyeScaleRight.value=emotion.eyeScaleRight;
+      uniforms.eyeScaleLeft.value=uniforms.eyeScaleRight.value=1;
       uniforms.browLeftLift.value=emotion.browLeftLift;uniforms.browRightLift.value=emotion.browRightLift;uniforms.browFocus.value=emotion.browFocus;
       uniforms.shoulderOffset.value=-body.shoulderYPercent*.03;
       // Rigid whole-portrait motion moves the neck and costume together. CSS uses
@@ -399,7 +397,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
         amount('pout',emotion.pout);
         if(smirkLayer){smirkLayer.style.opacity=String(emotion.smug);smirkLayer.style.setProperty('--smirk-lift',`${-emotion.smug*.18}%`);}
         eyeLayers.forEach((eye,index)=>{
-          const scale=index?emotion.eyeScaleRight:emotion.eyeScaleLeft;
+          const scale=1;
           eyeMasks[index].style.opacity=String(Math.abs(scale-1)>.0001||emotion.upperWarmth>0?1:0);
           const transform=`scaleY(${scale})`;
           eye.style.transform=transform;
@@ -409,8 +407,8 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
           }
         });
         browLayers.forEach((brow,index) => {
-          const lift=index?emotion.browRightLift:emotion.browLeftLift;
-          const transform = `translateY(${-pose.browRaise*.35-lift*.4}%) rotate(${(pose.browTilt-emotion.browFocus)*(index ? 1 : -1)*2.6}deg)`;
+          // Moving a brow overlay leaves the original brow underneath it.
+          const transform = 'none';
           brow.style.transform = transform;
           for (const name of ['warm','curious','sad','pout'] as const) if (browVariants[name][index]) { browVariants[name][index].style.transform = transform; browVariants[name][index].style.opacity = String(name==='sad'?emotion.sadness:name==='pout'?emotion.pout:name==='warm'?Math.max(uniforms.warm.value,emotion.upperWarmth):uniforms.curious.value); }
         });
@@ -433,7 +431,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
           sadness: emotion.sadness.toFixed(3), tears: emotion.tears.toFixed(3), eyeSparkle: emotion.sparkle.toFixed(3), eyeSmile: Math.max(emotion.blinkLeft-pose.blinkLeft,emotion.blinkRight-pose.blinkRight).toFixed(3),
           smug: emotion.smug.toFixed(3), pout: emotion.pout.toFixed(3), relief: emotion.relief.toFixed(3), determined: emotion.determined.toFixed(3),
           hesitant: emotion.hesitant.toFixed(3), sleepy: emotion.sleepy.toFixed(3), expectant: emotion.expectant.toFixed(3), aggrieved: emotion.aggrieved.toFixed(3), tender: emotion.tender.toFixed(3),
-          eyeScaleLeft: emotion.eyeScaleLeft.toFixed(3), eyeScaleRight: emotion.eyeScaleRight.toFixed(3), shoulderLift: pose.shoulderLift.toFixed(3), shoulderY: body.shoulderYPercent.toFixed(3),
+          eyeScaleLeft: uniforms.eyeScaleLeft.value.toFixed(3), eyeScaleRight: uniforms.eyeScaleRight.value.toFixed(3), shoulderLift: pose.shoulderLift.toFixed(3), shoulderY: body.shoulderYPercent.toFixed(3),
           microExpression: pose.microExpression, microProgress: pose.microProgress.toFixed(3), gesture: body.gesture, gestureProgress: body.progress.toFixed(3),
           bodyX: body.xPercent.toFixed(3), bodyY: body.yPercent.toFixed(3), bodyRotation: body.rotationDegrees.toFixed(3), bodyScale: body.scale.toFixed(4), headNodY: headNodPercent.toFixed(3),
           avatarPresence:'spring2d',headFollowX:follow.headX.toFixed(3),headFollowY:follow.headY.toFixed(3),headFollowTilt:follow.headTilt.toFixed(3),

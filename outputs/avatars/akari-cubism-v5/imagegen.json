@@ -1,0 +1,19 @@
+{
+  "tool": "built-in image_gen",
+  "date": "2026-10-02",
+  "transparentBackground": true,
+  "postGenerationPainting": false,
+  "assets": [
+    {
+      "output": "front-hair.png",
+      "generatedFile": "exec-685598cc-9424-41ca-992b-07dabb21566b.png",
+      "references": ["../akari-cubism-v4/front-hair.png", "../akari-cubism/reference.png"],
+      "prompt": "Edit target image 1, a transparent front-hair-only Live2D layer. Image 2 is the ORIGINAL character reference, for shoulder-length hair shape and soft style only. Keep image 1's exact upper crown, bangs, bow, scalp alignment, scale, transparent face opening and all details above image y=670. DO NOT change the forehead coverage, move bangs or cover the eye opening. Only redesign the LOWER hair lengths: dramatically shorten the overly long heavy chest curls to end around y=1000–1030 on the same 1024x1536 canvas, matching the shoulder-length lob of reference 2. Reduce side volume and curl bulk, eliminate the giant inward-facing coils over the chest. A few small soft wispy shoulder curls, with clear transparent neck and shoulder negative space. Preserve peach apricot hair color, delicate hand-painted anime shading, cream bow on screen right. Everything outside the hair and all face/neck/body openings must be genuine transparent alpha, not brown color. Output ONE hair-only layer in the same placement and canvas proportions as image 1, no face, skin, ears, eyes, body, typography, checkerboard, background, or added objects. Do not rescale the entire hairstyle vertically; keep upper geometry and replace lower lengths only."
+    },
+    {
+      "output": "nose-soft.png",
+      "generatedFile": "exec-ff70273c-069e-42b0-a2a6-2e6610485a46.png",
+      "prompt": "Create a minimal transparent illustrated nose feature asset for a 2D cartoon face rig. Square 512x512 canvas. Centered tiny softly painted warm-white oval highlight above a very faint short peach-colored curved nose-tip dash. No dark line, no vertical bridge, no nostril holes. The complete delicate mark occupies about 120x180px near the center. Soft translucent peach shading only immediately around the mark. Real transparent alpha elsewhere. One isolated nose mark only, no person, face, body, background, text, border or other elements."
+    }
+  ]
+}

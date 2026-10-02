@@ -4,11 +4,11 @@ import fs from 'node:fs/promises';
 import vm from 'node:vm';
 import {waitForCubismCore} from '../src/avatar/cubism/runtime.mjs';
 
-const root=new URL('../public/avatars/akari-cubism-v4/',import.meta.url);
+const root=new URL('../public/avatars/akari-cubism-v6/',import.meta.url);
 const arrayBuffer=bytes=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);
 const span=points=>({width:Math.max(...points.filter((_,i)=>i%2===0))-Math.min(...points.filter((_,i)=>i%2===0)),height:Math.max(...points.filter((_,i)=>i%2===1))-Math.min(...points.filter((_,i)=>i%2===1))});
 
-test('actual V4 stable MOC preserves head/body edges and feature spacing throughout combined poses, and uses one closed mouth drawing',async()=>{
+test('actual V6 stable MOC preserves head/body edges and feature spacing throughout combined poses, and uses one closed mouth drawing',async()=>{
  const source=await fs.readFile(new URL('../public/vendor/live2d/live2dcubismcore.min.js',import.meta.url),'utf8');
  const sandbox={console,setTimeout,clearTimeout,TextDecoder,TextEncoder,atob,btoa,window:{},document:{currentScript:{src:'https://petpal.test/vendor/live2d/live2dcubismcore.min.js'}}};
  vm.runInNewContext(source,sandbox,{timeout:2000});
@@ -21,6 +21,8 @@ test('actual V4 stable MOC preserves head/body edges and feature spacing through
  try{
   const parameter=new Map(Array.from(model.parameters.ids,(id,i)=>[id,i]));
   const drawable=new Map(Array.from(model.drawables.ids,(id,i)=>[id,i]));
+  assert.equal(parameter.size,20,'V6 must expose the actual stable-portrait20param rig');
+  assert.equal(drawable.size,19,'V6 must retain the intended 19 native drawings');
   const reset=values=>{
    model.parameters.values.set(model.parameters.defaultValues);
    for(const [id,value] of Object.entries(values)){assert.ok(parameter.has(id),id);model.parameters.values[parameter.get(id)]=value;}
@@ -82,7 +84,7 @@ test('actual V4 stable MOC preserves head/body edges and feature spacing through
  }finally{model.release();moc._release();}
 });
 
-test('licensed Core keeps V4 forehead hair anchors attached to the face and limits motion to the lower tips, rejecting the old sliding hair',async t=>{
+test('licensed Core keeps V6 forehead hair anchors attached to the face and limits motion to the lower tips, rejecting the old sliding hair',async t=>{
  const source=await fs.readFile(new URL('../public/vendor/live2d/live2dcubismcore.min.js',import.meta.url),'utf8');
  const sandbox={console,setTimeout,clearTimeout,TextDecoder,TextEncoder,atob,btoa,window:{},document:{currentScript:{src:'https://petpal.test/vendor/live2d/live2dcubismcore.min.js'}}};
  vm.runInNewContext(source,sandbox,{timeout:2000});
@@ -172,6 +174,6 @@ test('licensed Core keeps V4 forehead hair anchors attached to the face and limi
  assert.throws(()=>attachedRootsAndGentleTips(old),/front scalp slid/);
  assert.ok(old.maxFrontAnchorSlipPx>2&&old.maxBackAnchorSlipPx>2,'negative control must include visible scalp sliding');
  assert.ok(old.maxFrontTipMotionPx>20&&old.maxBackTipMotionPx>20,'negative control must include excessive tip motion');
- t.diagnostic(`v4 hair geometry ${JSON.stringify(stable)}`);
+ t.diagnostic(`v6 hair geometry ${JSON.stringify(stable)}`);
  t.diagnostic(`v2 sliding negative control ${JSON.stringify(old)}`);
 });

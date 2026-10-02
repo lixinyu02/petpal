@@ -1,0 +1,88 @@
+{
+  "status": "generated",
+  "generatedAt": "2026-10-02T04:33:23.1674237Z",
+  "upstream": "https://github.com/tsunehimatoi/psd2live",
+  "commit": "2ac751fbb3ffdc8251a82e0d600d97afafafcaac",
+  "frozenSourceFiles": 704,
+  "sourceUnmodified": true,
+  "authoringProfile": "stable-portrait",
+  "inputPsdSha256": "6b685f594503e7a5ebe075922b60e016e10b3ea751303c5eb9544d9e181505f7",
+  "runnerSources": [
+    {
+      "path": "scripts/authoring/cubism/build.gradle.kts",
+      "sha256": "ed9f33a22b252d7139a81f50052b39fed052f0f8505d11932f0e05e376c6a7f9"
+    },
+    {
+      "path": "scripts/authoring/cubism/LICENSE.GPL-3.0",
+      "sha256": "22f65f0ba65b3fb08b8f2b681d5cefa436690fe67747fa9ad4674c75695643a4"
+    },
+    {
+      "path": "scripts/authoring/cubism/settings.gradle.kts",
+      "sha256": "2a8c2947bc76ea15fc8991912ecf491350e31e3d857407821bbe1deba732f70c"
+    },
+    {
+      "path": "scripts/authoring/cubism/src/main/kotlin/PetPalAuthoring.kt",
+      "sha256": "64d1d702a121b04b624a9d406d32eef6761df402386891e726fab0f0d1949d6b"
+    }
+  ],
+  "generatedFiles": [
+    {
+      "path": "akari.blink.motion3.json",
+      "bytes": 1155,
+      "sha256": "399f91b7bfac0666f589ab7c6daace5e33e5c6d6e7c6e7ca4024b6db48a65110"
+    },
+    {
+      "path": "akari.cdi3.json",
+      "bytes": 4144,
+      "sha256": "230e516f2b291b5b07ac4ad9bebe21b3a4f2d67e2a6a1fd526ed690f981f25a0"
+    },
+    {
+      "path": "akari.cmo3",
+      "bytes": 6473270,
+      "sha256": "01c7a4f03b1e48332dd45dd219228a3896723d9d3f4fdc6bf11c1afae91ae46b"
+    },
+    {
+      "path": "akari.idle.motion3.json",
+      "bytes": 18820,
+      "sha256": "a32ca6a85d2ae68d5b71ba4d7a74db5ce35a5b634882bd0f83ce84363f597722"
+    },
+    {
+      "path": "akari.moc3",
+      "bytes": 146560,
+      "sha256": "2c460efba11626631a65c6f0c9847b689db7dcf5fa70550459a45b9115858029"
+    },
+    {
+      "path": "akari.model3.json",
+      "bytes": 717,
+      "sha256": "c6c415b919216cc82bed6c8f758e57306b71a27af92bcee9153b0eae9ae16560"
+    },
+    {
+      "path": "akari.nod.motion3.json",
+      "bytes": 1751,
+      "sha256": "bfd9a247d5ec8479145c2dddfd5fdbf03e1c46df8d7460f07badd146c1e19418"
+    },
+    {
+      "path": "akari.physics3.json",
+      "bytes": 6072,
+      "sha256": "3c9299431c1f86d2fe936b84a9920c6bb9af3a3a87d2edec3f561fbee327abe7"
+    },
+    {
+      "path": "akari.psd2live.json",
+      "bytes": 3678,
+      "sha256": "f160fd3916eef87e33c02f98beb6b0f0a1be2cce5e81213440cd86ae5e1c0b71"
+    },
+    {
+      "path": "akari.shake.motion3.json",
+      "bytes": 1571,
+      "sha256": "9714b72b47dba8e33b6b08d0f9e84c77309a6ce6c98d2a3815c3a59d69163b01"
+    },
+    {
+      "path": "akari.2048/texture_00.png",
+      "bytes": 3212312,
+      "sha256": "e14c85310caefb9201592d83689eb549e3b479326ffee9224fc00c5519c27585"
+    }
+  ],
+  "officialCoreValidation": "Run verify-cubism-model.mjs separately",
+  "editorValidation": "CMO3 has not been validated in official Cubism Editor",
+  "runtimeBoundary": "Authoring compiler and runner are not embedded in PetPal app packages"
+}
