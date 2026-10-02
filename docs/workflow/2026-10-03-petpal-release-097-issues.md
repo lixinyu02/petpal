@@ -3,7 +3,7 @@
 - Date: 2026-10-03
 - Complexity: L2
 - Related design: 2026-10-03-petpal-release-097-design.md
-- Current status: in_progress
+- Current status: done
 
 ## issue-1
 
@@ -23,6 +23,6 @@
 - 范围: GitHub stable、服务器下载、两源签名清单、网页部署、旧包私有归档
 - 依赖: issue-1 done
 - 验收标准: 两源五目标 0.9.7/stable/sequence9；公开下载字节核验；Chrome 仅最新正式版；旧公共包不再直链可用；原业务数据和私有回退资产保留
-- 状态: in_progress
-- 验证方式: 待执行
-- commit: pending
+- 状态: done
+- 验证方式: 十项 GitHub 资产完整读回、frozen tag/latest；两源五目标更新检查；六个服务器包完整摘要；34 个历史公共文件私有归档后 HTTP 核验；Chrome 登录下载页及 412×960 验收。完整证据位于 evidence/release-097-20261003。
+- commit: 本 issue 同名提交 docs(issue-2): record stable 0.9.7 publication and archive

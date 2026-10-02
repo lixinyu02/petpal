@@ -1,8 +1,10 @@
-# 软件内更新与发布
+# 软件内更新
 
-0.9.6 已重新制作 Windows x64、Ubuntu x64 / ARM64、Android 和 Web 五个更新目标，客户端包含 GitHub Releases 与可信 HTTPS 服务器的来源选择功能。[GitHub 正式版](https://github.com/lixinyu02/petpal/releases/tag/v0.9.6) 已公开并成为 latest，服务器正式更新源也已上线。安装方式和分平台边界见 [README](../README.md) 与 [0.9.6 验收](acceptance-0.9.6.md)。
+0.9.7 已正式发布 Windows x64、Ubuntu x64 / ARM64、Android 与 Web 五个更新目标；下载中心另保留同版本 Windows ZIP。可选择 GitHub Releases 或可信 HTTPS 服务器源。[GitHub 正式版](https://github.com/lixinyu02/petpal/releases/tag/v0.9.7) 为 latest，服务器源同步上线。
 
-两份 0.9.6 清单均使用 stable 通道、sequence 8，各自沿用原发布公钥；服务器与 GitHub 是不同签名身份，切源时须使用对应公钥。两源五目标均已验证 0.9.5 → 0.9.6 更新可用，当前 Web 0.9.6 返回已最新。服务器源还通过隔离 DesktopUpdateManager 的 Windows 完整下载、签名和 SHA-256 验证，未调用安装或启动下载文件；GitHub 十项资产完整字节读回和正式 latest/tag 检查通过。Android 是 versionCode 16 的原开发签名 APK；Windows 未做 Authenticode 签名。更新清单的 Ed25519 签名不能代替这些平台签名。
+两份清单均为 stable / sequence 9，各自沿用原发布公钥。已用实际更新服务验证两源五目标从 0.9.6 升级至 0.9.7，当前 Web 0.9.7 返回已最新；版本、完整包 SHA-256 与 Android versionCode 17 一致。十项 GitHub 资产完整字节读回，六个服务器包已通过真实完整字节读取及摘要校验；归档后另外以 HEAD 检查旧路径 404 和新包长度，HEAD 不替代完整读回。Windows 未做 Authenticode 签名；Android 沿用原开发证书。更新清单签名不能替代平台签名。
+
+网页随后增加的 V12 眨眼修复未写入已冻结的 0.9.7 安装包，详见 [安装包验收](acceptance-0.9.7.md) 与 [网页模型验收](cubism/akari-natural-eyelids-acceptance.md)。
 
 ## 历史版本与信任配置
 

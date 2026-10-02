@@ -1,6 +1,6 @@
 # PetPal 0.9.7 客户端验收
 
-日期：2026-10-03。构建验收完成，公共发布由对应 workflow issue-2 跟踪。
+日期：2026-10-03。构建与正式发布验收完成。GitHub latest=v0.9.7，两源 stable/sequence9，服务器历史文件私有归档、归档后 HTTP 与下载页验收通过。
 
 ## 本版内容
 
@@ -15,7 +15,7 @@
 - EXE 4985 个应用成员与冻结源核对；ZIP 10837 个文件完整读回，与 EXE runtime 对照。Windows 未做 Authenticode 签名，完整 ZIP 解压后启动仍为推荐方式。
 - Android versionCode 17，v1/v2 签名有效且证书与 0.9.6 相同。663 条 ZIP 记录的 CRC/长度完整验证，220 个网页文件逐个匹配；从 APK 实际读取 Core/V11 检查原生参数及遮罩。通知/OEM/更新类齐全，没有 CLI/server 或已知私有值。当前未连接 Android 真机/模拟器。
 - Ubuntu 每架构 11306 文件完整 tar 流读回、ELF/GLIBC 2.34、Codex/OpenCLI/Computer Use 依赖来源、许可和隐私扫描通过。OpenCLI 118 文件、217 import 边闭包通过。仅包与宿主侧 Core 验证，未新增 Ubuntu GUI 运行验收；网易云原生 MCP 仍依照既有平台能力限 Windows。
-- 所有平台内置默认 V11，MOC SHA-256 为 `a193b01b60f3238fee982b558bc56a67e834dc2d3f0039a501ae423b8e21d5dd`。Web ZIP 与 canonical 构建 220 个文件完整逐字节对应。
+- 本次冻结的六个发布包（含 Web ZIP）内置默认 V11，MOC SHA-256 为 `a193b01b60f3238fee982b558bc56a67e834dc2d3f0039a501ae423b8e21d5dd`。Web ZIP 与 canonical 构建 220 个文件完整逐字节对应。
 
 ## 包摘要
 
@@ -32,3 +32,7 @@
 完整本机证据位于 ignored `evidence/release-097-20261003/`。Windows smoke 使用新隔离 profile，真实加载当前 MOC；Core 版本另在结果与包审核中确认。资源历史的 V11 路径检测不单独作为模型身份结论。没有调用真实模型任务、播放音乐或操作用户桌面软件。
 
 封包均使用独立目录，不把生产 dist 用作构建输出。网页 ZIP 准备时产生的无文件临时目录留在隔离构建路径，最终 ZIP 明确排除它；初始 ZIP 保留在 ignored 证据，运行文件字节未变。
+
+## 发布后网页修复
+
+冻结安装包保持 V11 和表中原摘要。之后完成的 V12 自然眼睑与 TapHead 修复仅上线 Web，详见 [眨眼修复验收](cubism/akari-natural-eyelids-acceptance.md)，没有用相同版本名替换发布字节。

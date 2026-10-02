@@ -23,3 +23,7 @@
 页面和需要登录的 `/api/downloads` 行为不变。
 
 回归入口：`node --test tests/downloads.test.mjs tests/downloads-view.test.mjs tests/downloads-static.test.mjs`。
+
+## 0.9.7 发布验收
+
+GitHub latest 和两源 sequence 9 更新清单均已验证。下载页只显示 0.9.7 的 Android、Windows EXE/ZIP 与 Ubuntu x64/ARM64。34 个服务器历史文件（5,568,933,887 bytes）已在摘要保持的前提下移入私有归档，并完成旧路径 HEAD 404、新版六包 HEAD 200/长度验收；完整包摘要另有真实读回证据。历史 GitHub Release 保留。Chrome 已完成登录页面、真实链接、版本和 412×960 无横向溢出检查。
