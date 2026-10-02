@@ -7,6 +7,10 @@ import assert from 'node:assert/strict';
 const [manifestArg, receiptArg, ...flags] = process.argv.slice(2);
 assert(manifestArg, 'Usage: node verify-official-core.mjs <model3.json> [receipt.json]');
 const projectRoot = path.resolve(import.meta.dirname, '../..');
+const profileIndex = flags.indexOf('--profile');
+const authoringProfile = profileIndex >= 0 ? flags[profileIndex + 1] : 'standard';
+assert(['standard', 'reference-layered'].includes(authoringProfile), 'Unknown verification profile');
+const referenceLayered = authoringProfile === 'reference-layered';
 const coreFlagIndex = flags.indexOf('--core');
 const corePath = coreFlagIndex >= 0
   ? path.resolve(flags[coreFlagIndex + 1] ?? '')
@@ -74,10 +78,12 @@ try {
     assert([parameter.min, parameter.max, parameter.default].every(Number.isFinite), `Non-finite parameter: ${parameter.id}`);
     assert(parameter.min <= parameter.default && parameter.default <= parameter.max, `Invalid parameter range: ${parameter.id}`);
   }
-  const required = ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamEyeBallX', 'ParamEyeBallY', 'ParamMouthOpenY', 'ParamBreath'];
+  const required = referenceLayered
+    ? ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX', 'ParamBodyAngleY', 'ParamBodyAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamMouthOpenY', 'ParamBreath', 'ParamHairFront', 'ParamMouthA', 'ParamMouthO', 'ParamWarm', 'ParamSad', 'ParamPout']
+    : ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamEyeBallX', 'ParamEyeBallY', 'ParamMouthOpenY', 'ParamBreath'];
   for (const id of required) assert(parameters.some(parameter => parameter.id === id), `Required rig parameter missing: ${id}`);
   const indexById = new Map(parameters.map((parameter, index) => [parameter.id, index]));
-  const emotionParameters = ['ParamCheek', 'ParamTear'];
+  const emotionParameters = referenceLayered ? ['ParamWarm', 'ParamSad', 'ParamPout'] : ['ParamCheek', 'ParamTear'];
   if (flags.includes('--require-emotions')) for (const id of emotionParameters) assert(indexById.has(id), `Actual emotion parameter missing: ${id}`);
   const displayInfo = references.DisplayInfo ? JSON.parse(fs.readFileSync(resolveAsset(references.DisplayInfo), 'utf8')) : null;
   const canvas = model.canvasinfo;
@@ -138,6 +144,10 @@ try {
   const angleX = parameters[indexById.get('ParamAngleX')];
   const angleY = parameters[indexById.get('ParamAngleY')];
   for (const x of [angleX.min, 0, angleX.max]) for (const y of [angleY.min, 0, angleY.max]) samples.push(samplePose(`head-${x}-${y}`, { ParamAngleX: x, ParamAngleY: y }));
+  if (referenceLayered) {
+    assert.deepEqual([...parameters.map(parameter => parameter.id)].sort(), [...required].sort(), 'Reference model must contain only the reviewed responsive parameters');
+    for (const value of [-30, 30]) samples.push(samplePose(`ParamAngleZ-${value}`, { ParamAngleZ: value }));
+  }
   for (const id of required.filter(id => !['ParamAngleX', 'ParamAngleY', 'ParamAngleZ'].includes(id))) {
     const parameter = parameters[indexById.get(id)];
     samples.push(samplePose(`${id}-min`, { [id]: parameter.min }));
@@ -153,7 +163,7 @@ try {
     return { name: sample.name, values: sample.values, maxVertexDelta, maxOpacityDelta, finiteGeometry: true };
   }
   const sampledDeltas = samples.map(deltaFromNeutral);
-  for (const id of ['ParamEyeLOpen', 'ParamEyeROpen', 'ParamEyeBallX', 'ParamEyeBallY', 'ParamMouthOpenY', 'ParamBreath']) {
+  for (const id of referenceLayered ? required.filter(id => !['ParamAngleX', 'ParamAngleY'].includes(id)) : ['ParamEyeLOpen', 'ParamEyeROpen', 'ParamEyeBallX', 'ParamEyeBallY', 'ParamMouthOpenY', 'ParamBreath']) {
     assert(sampledDeltas.some(sample => sample.name.startsWith(id) && (sample.maxVertexDelta > 0.000001 || sample.maxOpacityDelta > 0.000001)), `Parameter has no actual geometry/opacity response: ${id}`);
   }
   assert(sampledDeltas.some(sample => sample.name.startsWith('head-') && sample.maxVertexDelta > 0.000001), 'Head turns must change actual vertices');
@@ -164,7 +174,7 @@ try {
     return [vertices.filter((_, index) => index % 2 === 0).reduce((sum, value) => sum + value, 0) / pointCount,
       vertices.filter((_, index) => index % 2 === 1).reduce((sum, value) => sum + value, 0) / pointCount];
   }
-  for (const [id, sourceName] of [['ParamCheek', 'blush'], ['ParamTear', 'tears']]) {
+  for (const [id, sourceName] of referenceLayered ? [['ParamWarm', 'warm'], ['ParamSad', 'sad'], ['ParamPout', 'pout']] : [['ParamCheek', 'blush'], ['ParamTear', 'tears']]) {
     if (!indexById.has(id)) continue;
     const parameter = parameters[indexById.get(id)];
     assert.deepEqual([parameter.min, parameter.max, parameter.default], [0, 1, 0], `Actual emotion range/default mismatch: ${id}`);
@@ -213,7 +223,7 @@ try {
     emotionBindings.push({ parameter: id, sourceName, actualDrawableIds: matching.map(drawable => drawable.Id), opacityEndpoints, headFollow, isolationPassed: true });
   }
   receipt = {
-    status: 'pass', officialCoreExecuted: true, officialCoreConsistency: consistency,
+    status: 'pass', authoringProfile, officialCoreExecuted: true, officialCoreConsistency: consistency,
     corruptMagicNegativeControl: 'rejected', coreVersion: `${version >>> 24}.${(version >>> 16) & 0xff}.${version & 0xffff}`,
     coreVersionRaw: version, latestSupportedMocVersion: core.Version.csmGetLatestMocVersion(),
     coreSha256: crypto.createHash('sha256').update(coreBytes).digest('hex'),

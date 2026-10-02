@@ -4,12 +4,12 @@ import { createCubismFrameController } from '../src/avatar/cubism/runtime.mjs';
 import { createCubismParameterBridge, cubismParameterTargets } from '../src/avatar/cubism/parameters.mjs';
 
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} differs from ${expected}`);
-const parameterNames = ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX', 'ParamBodyAngleY', 'ParamBodyAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamEyeBallX', 'ParamEyeBallY', 'ParamEyeBallForm', 'ParamBrowLY', 'ParamBrowRY', 'ParamCheek', 'ParamTear', 'ParamBreath', 'ParamMouthForm', 'ParamMouthOpenY'];
+const parameterNames = ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX', 'ParamBodyAngleY', 'ParamBodyAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamEyeBallX', 'ParamEyeBallY', 'ParamEyeBallForm', 'ParamBrowLY', 'ParamBrowRY', 'ParamCheek', 'ParamTear', 'ParamBreath', 'ParamMouthForm', 'ParamMouthOpenY', 'ParamMouthA', 'ParamMouthO', 'ParamWarm', 'ParamSad', 'ParamPout'];
 
 // This double models the public Framework queue boundary, including overlapping
 // outgoing motions and the pinned stopAllMotions splice bug. Rendering/MOC
 // geometry is covered separately by the official Core acceptance script.
-function rig({ motions = {}, expressions = {}, physics, pose } = {}) {
+function rig({ motions = {}, expressions = {}, physics, pose, deformationProfile = 'standard' } = {}) {
   const indices = new Map(parameterNames.map((name, index) => [name, index]));
   const values = parameterNames.map(name => /Eye[LR]Open/u.test(name) ? 1 : 0);
   let saved = [...values];
@@ -48,7 +48,7 @@ function rig({ motions = {}, expressions = {}, physics, pose } = {}) {
     return [name, { motion, parameters: new Set(value.parameters || Object.keys(value)) }];
   }));
   const bridge = createCubismParameterBridge(model, { getId: name => name });
-  const controller = createCubismFrameController({ model, avatar, bridge, motions: records(motions), expressions: records(expressions) });
+  const controller = createCubismFrameController({ model, avatar, bridge, motions: records(motions), expressions: records(expressions), deformationProfile });
   return { controller, model, bridge, motionManager, expressionManager, get, set };
 }
 
@@ -124,6 +124,22 @@ test('Cubism articulation has the final mouth authority after gesture, expressio
   assert.ok(result.get('ParamMouthForm') < -.6);
   result.controller.update(0, { expression: 'happy', speaking: false });
   assert.equal(result.get('ParamMouthOpenY'), 0);
+});
+
+test('Cubism reference A/O patches retain final articulation authority over all native frame layers', () => {
+  const forceMouth = ({ set }) => { set('ParamMouthA', 1); set('ParamMouthO', 1); };
+  const result = rig({ motions: { TapHead_0: { ParamMouthA: 1, ParamMouthO: 1 } }, expressions: { happy: { ParamMouthA: 1, ParamMouthO: 1 } }, physics: forceMouth, pose: forceMouth, deformationProfile: 'reference-layered' });
+  result.controller.react('pet');
+  result.controller.update(.1, { expression: 'happy', speaking: true, mouthOpen: .7, mouthShape: 'O' });
+  assert.equal(result.get('ParamMouthA'), 1); assert.equal(result.get('ParamMouthO'), 1); near(result.get('ParamMouthOpenY'), .7);
+  result.controller.update(.1, { expression: 'happy', speaking: true, mouthOpen: .3, mouthShape: 'E' });
+  assert.equal(result.get('ParamMouthA'), 1); assert.equal(result.get('ParamMouthO'), 0); near(result.get('ParamMouthOpenY'), .3);
+  result.controller.update(0, { expression: 'happy', speaking: false, voiceEnergy: 1 });
+  assert.equal(result.get('ParamMouthA'), 0); assert.equal(result.get('ParamMouthO'), 0);
+  for (const options of [{ hidden: true }, { sleeping: true }]) {
+    result.controller.update(0, { speaking: true, mouthOpen: .7, mouthShape: 'O' }, {}, options);
+    assert.equal(result.get('ParamMouthA'), 0); assert.equal(result.get('ParamMouthO'), 0);
+  }
 });
 
 test('Cubism mouth form transitions soften shape boundaries without adding frame-rate drift or delaying mouth closure', () => {

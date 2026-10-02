@@ -7,4 +7,8 @@ android/gradlew text eol=lf
 *.png binary
 *.gif binary
 *.jar binary
+# Preserve V7 authoring receipt bytes; serve model manifests identically on Windows/Linux.
+outputs/avatars/akari-cubism-v7/authoring-receipt.json -text whitespace=cr-at-eol
+outputs/avatars/akari-cubism-v7/pack-receipt.json text eol=lf
+public/avatars/akari-cubism-v7/*.json text eol=lf
 server/native/music-mcp/** -text

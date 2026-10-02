@@ -2,9 +2,15 @@
 
 - Date: 2026-10-02
 - Complexity: L2
-- Status: issue-2-in-progress
+- Status: issue-1/2-done; V7 web delivered; aesthetic feedback and official Editor acceptance remain open
 
-## 最新处置：恢复完整原人物
+## 当前方向：补强真实 Cubism 模型
+
+用户纠正：要补强 Cubism 模型，不能把完整立绘回退作为结果。V7 新增独立 `reference-layered` 作者 profile，以 `artwork/akari/idle.png` 为唯一中性母稿，保留原脸、眼睛与刘海的比例及像素。机械分解头、躯干、两侧发梢，从同人物表情母稿提取局部闭眼、A/O 嘴型及情绪覆片；它们是原生 ArtMesh、实际参数关键形与父变形器，由真实 MOC/Core 绘制，不能整图换帧。头身连接的过渡顶点固定，脸与覆片共享头部坐标；仅在实际姿态中无拉扯、重影及接缝后恢复默认 Cubism。保留原 profile 和历次候选，不修改冻结作者工具。
+
+V7 已通过 source／Core／Chrome／语音验收并上线网页，具体范围见 [V7 验收](../cubism/reference-layered-validation.md)。当前能力以局部原生覆片、协调小幅动作及发梢为准；没有连续眼睑或独立眼球视线，官方 Editor 打开／保存／再导出及实体设备不在已完成范围。下面保留各轮历史设计，不能把旧能力和旧结果转写为 V7。
+
+## 历史临时处置：恢复完整原人物
 
 用户连续否定 V5 和 V6 的整体神态。V6 新眼睑导致过多眼白暴露，不能继续作为默认交付；几何及像素检查通过也不能证明美术成立。网页默认恢复原 `AnimeScene` 完整立绘动画，保留原角色、表情纹理、眨眼、语音口型及直接互动。它不是完整 Cubism 模型，后者保留为明确未接受的作者候选。先用完整人物在 Chrome 检查中性、互动、说话和 412×960 布局，再原子更新网页。此次不继续缩放或重组五官，不展示拆散的眼部 atlas。
 

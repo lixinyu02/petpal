@@ -3,9 +3,8 @@ import type { ComponentProps } from 'react';
 import type PetScene from '../pet/PetScene';
 import type { CompanionKind } from '../api';
 import type { PerformanceInput } from './performance.mjs';
-// Keep the coherent original portrait on the public path while the separately
-// authored Cubism face is being revised against that character.
-const AnimeScene = lazy(() => import('./AnimeScene'));
+// The bundled native model retains the original character's neutral proportions.
+const CubismScene = lazy(() => import('./cubism/CubismScene'));
 const CatScene = lazy(() => import('../pet/PetScene'));
 
 class AvatarBoundary extends Component<{ children: ReactNode; kind: CompanionKind }, { failed: boolean }> {
@@ -18,5 +17,5 @@ class AvatarBoundary extends Component<{ children: ReactNode; kind: CompanionKin
 }
 
 export default function CompanionScene({ kind, speaking = false, performanceInput, ...props }: ComponentProps<typeof PetScene> & { kind: CompanionKind; speaking?: boolean; performanceInput?: PerformanceInput }) {
-  return <AvatarBoundary key={kind} kind={kind}><Suspense fallback={<div className="avatar-loading" role="status">{kind === 'cat' ? '小猫正在走来…' : '小伴正在走来…'}</div>}>{kind === 'cat' ? <CatScene {...props}/> : <AnimeScene {...props} speaking={speaking} performanceInput={performanceInput}/>}</Suspense></AvatarBoundary>;
+  return <AvatarBoundary key={kind} kind={kind}><Suspense fallback={<div className="avatar-loading" role="status">{kind === 'cat' ? '小猫正在走来…' : '小伴正在走来…'}</div>}>{kind === 'cat' ? <CatScene {...props}/> : <CubismScene {...props} speaking={speaking} performanceInput={performanceInput}/>}</Suspense></AvatarBoundary>;
 }

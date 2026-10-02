@@ -31,6 +31,91 @@ test('Cubism speech cancellation absolutely closes the mouth despite an existing
   assert.equal(cubismParameterTargets(speaking, {}, { reducedMotion: true }).ParamMouthOpenY, .7);
 });
 
+test('Cubism reference mouth patches follow gated articulation without blending A/O or reopening silence', () => {
+  const speaking = { speaking: true, mouthOpen: .7, mouthShape: 'A', voiceEnergy: 1 };
+  for (const [shape, expectedA, expectedO] of [['A', .7, 0], ['E', .7, 0], ['O', 0, .7], ['M', 0, 0], ['rest', 0, 0], [undefined, .7, 0]]) {
+    const targets = cubismParameterTargets({ ...speaking, mouthShape: shape });
+    assert.equal(targets.ParamMouthA, expectedA, String(shape));
+    assert.equal(targets.ParamMouthO, expectedO, String(shape));
+    assert.equal(targets.ParamMouthOpenY, .7, 'legacy opening remains unchanged');
+  }
+  for (const mouthOpen of [0, .04, -1, NaN, Infinity]) {
+    const targets = cubismParameterTargets({ ...speaking, mouthOpen });
+    assert.equal(targets.ParamMouthA, 0); assert.equal(targets.ParamMouthO, 0);
+  }
+  const loud = cubismParameterTargets({ ...speaking, mouthOpen: 2 });
+  assert.equal(loud.ParamMouthA, 1); assert.equal(loud.ParamMouthO, 0);
+  for (const options of [{ hidden: true }, { sleeping: true }]) {
+    const targets = cubismParameterTargets(speaking, {}, options);
+    assert.equal(targets.ParamMouthA, 0); assert.equal(targets.ParamMouthO, 0);
+  }
+  const cancelled = cubismParameterTargets({ ...speaking, speaking: false });
+  assert.equal(cancelled.ParamMouthA, 0); assert.equal(cancelled.ParamMouthO, 0);
+  assert.equal(cubismParameterTargets(speaking, {}, { reducedMotion: true }).ParamMouthA, .7);
+});
+
+test('Cubism optional local expression layers bind only real parameters and reset while hidden or asleep', () => {
+  const pose = { warmAmount: .6, sadAmount: .2, downcastAmount: .8, poutAmount: 2 };
+  const targets = cubismParameterTargets(pose);
+  assert.equal(targets.ParamWarm, .6); assert.equal(targets.ParamSad, .8); assert.equal(targets.ParamPout, 1);
+  for (const options of [{ hidden: true }, { sleeping: true }]) {
+    const quiet = cubismParameterTargets(pose, {}, options);
+    assert.equal(quiet.ParamWarm, 0); assert.equal(quiet.ParamSad, 0); assert.equal(quiet.ParamPout, 0);
+  }
+  const invalid = cubismParameterTargets({ warmAmount: NaN, sadAmount: Infinity, poutAmount: -1 });
+  assert.equal(invalid.ParamWarm, 0); assert.equal(invalid.ParamSad, 0); assert.equal(invalid.ParamPout, 0);
+  const names = ['ParamWarm', 'ParamMouthA', 'ParamMouthO'], changes = [];
+  const bridge = createCubismParameterBridge({
+    getParameterCount: () => names.length,
+    getParameterIndex: name => names.includes(name) ? names.indexOf(name) : names.length,
+    getParameterMinimumValue: () => 0,
+    getParameterMaximumValue: () => 1,
+    setParameterValueByIndex: (index, value) => changes.push([names[index], value]),
+  }, { getId: name => name });
+  assert.deepEqual(new Set(bridge.supported), new Set(names));
+  bridge.apply({ ...targets, ParamMouthA: .8, ParamMouthO: 0 });
+  bridge.apply({ ...targets, ParamMouthA: .8, ParamMouthO: 0 }, { mouthOnly: true });
+  assert.deepEqual(changes, [['ParamWarm', .6], ['ParamMouthA', .8], ['ParamMouthO', 0]]);
+  assert.equal(bridge.read('ParamSad'), undefined); assert.equal(bridge.read('ParamPout'), undefined);
+});
+
+test('Cubism reference-layered expression patches choose one dominant channel without changing legacy Sad', () => {
+  const options = { deformationProfile: 'reference-layered' };
+  const expressions = targets => [targets.ParamWarm, targets.ParamSad, targets.ParamPout];
+  assert.deepEqual(expressions(cubismParameterTargets({ warmAmount: .7, sadAmount: .4, poutAmount: .2 }, {}, options)), [.7, 0, 0]);
+  assert.deepEqual(expressions(cubismParameterTargets({ warmAmount: .4, downcastAmount: .8, poutAmount: .2 }, {}, options)), [0, .8, 0]);
+  assert.deepEqual(expressions(cubismParameterTargets({ warmAmount: .1, sadAmount: .4, poutAmount: .6 }, {}, options)), [0, 0, .6]);
+  assert.deepEqual(expressions(cubismParameterTargets({ warmAmount: .4, sadAmount: .4, poutAmount: .4 }, {}, options)), [.4, 0, 0]);
+  assert.deepEqual(expressions(cubismParameterTargets({}, {}, options)), [0, 0, 0]);
+  assert.deepEqual(expressions(cubismParameterTargets({ warmAmount: .9, sadAmount: .6, poutAmount: .4 }, {}, { ...options, supportedParameters: ['ParamSad', 'ParamPout'] })), [0, .6, 0]);
+  assert.deepEqual(expressions(cubismParameterTargets({ warmAmount: .7, sadAmount: .4, poutAmount: .2 })), [.7, .4, .2]);
+  for (const state of [{ hidden: true }, { sleeping: true }]) {
+    assert.deepEqual(expressions(cubismParameterTargets({ warmAmount: 1, sadAmount: 1, poutAmount: 1 }, {}, { ...options, ...state })), [0, 0, 0]);
+  }
+});
+
+test('Cubism reference-layered mouth fully covers closed lips while keeping energy on local OpenY geometry', () => {
+  const options = { deformationProfile: 'reference-layered' };
+  const mouth = pose => {
+    const targets = cubismParameterTargets(pose, {}, options);
+    return [targets.ParamMouthA, targets.ParamMouthO, targets.ParamMouthOpenY];
+  };
+  const speaking = { speaking: true, mouthOpen: .06, mouthShape: 'A' };
+  assert.deepEqual(mouth(speaking), [1, 0, .06]);
+  assert.deepEqual(mouth({ ...speaking, mouthOpen: .8, mouthShape: 'O' }), [1, 1, .8]);
+  assert.deepEqual(mouth({ ...speaking, mouthShape: 'E' }), [1, 0, .06]);
+  assert.deepEqual(mouth({ ...speaking, mouthOpen: .04 }), [0, 0, .04]);
+  assert.deepEqual(mouth({ ...speaking, mouthShape: 'M' }), [0, 0, .06]);
+  assert.deepEqual(mouth({ ...speaking, mouthShape: 'rest' }), [0, 0, .06]);
+  assert.deepEqual(mouth({ ...speaking, speaking: false, voiceEnergy: 1 }), [0, 0, 0]);
+  for (const state of [{ hidden: true }, { sleeping: true }]) {
+    const targets = cubismParameterTargets(speaking, {}, { ...options, ...state });
+    assert.deepEqual([targets.ParamMouthA, targets.ParamMouthO, targets.ParamMouthOpenY], [0, 0, 0]);
+  }
+  const reduced = cubismParameterTargets(speaking, {}, { ...options, reducedMotion: true });
+  assert.deepEqual([reduced.ParamMouthA, reduced.ParamMouthO, reduced.ParamMouthOpenY], [1, 0, .06]);
+});
+
 test('Cubism preserves world gaze axes, independent eye blinks and neutral reduced motion', () => {
   const pose = { speaking: false, blinkLeft: 1, blinkRight: 0, headNod: .5 };
   const follow = { headX: .5, headY: -.5, headTilt: .25, gazeX: .8, gazeY: -.8, breath: 1, breathScale: 1.12 };

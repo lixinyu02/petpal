@@ -1,6 +1,10 @@
 # 原创 Cubism 网页验收
 
-## 当前 V4 统一前发：2026-10-02（网页已上线）
+## 当前 V7 reference-layered：2026-10-02（网页已上线）
+
+默认角色现为真实 Cubism V7，保留原完整人物比例并重新绑定头身、发根、局部眼口与情绪。源图、Core、Chrome、实际语音和正式 HTTPS 的分项结果与限制见 [V7 验收](reference-layered-validation.md)。下方是历史记录，其中“当前”指当时版本，不能作为当前模型通过或用户已接受外观的证明。
+
+## 历史 V4 统一前发：2026-10-02
 
 当前源码默认角色为 `public/avatars/akari-cubism-v4/akari.model3.json`。V4 保留温柔日系、奶油白与浅橘少女的原脸、后发、身体及衣服，把两块不协调的旧前发替换为一张统一透明前发；眼白／睫毛／闭眼／虹膜整体缩小至 0.85，虹膜再缩小至 0.92，眉毛不动。来源与重建见 [V4 作者说明](akari-unified-hair.md) 和 [V4 来源摘要](akari-unified-hair-provenance.json)。
 

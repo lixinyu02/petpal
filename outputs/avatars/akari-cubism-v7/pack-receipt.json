@@ -1,0 +1,167 @@
+{
+  "schema": 1,
+  "method": "Unscaled original neutral pixels; inverse source-over head/body/hair segmentation; same-character local expression patches; native layered PSD encoding",
+  "canvas": [
+    1024,
+    1536
+  ],
+  "sources": [
+    {
+      "file": "artwork/akari/idle.png",
+      "sha256": "e351b622273c8db8faf24caa164d89b555f3fdf69d046343fd11f29fbdbca026"
+    },
+    {
+      "file": "artwork/akari/blink.png",
+      "sha256": "748559e11ab3d49c2fe6cd71af2304028a20755d9f15d85c1161773e2cc36705"
+    },
+    {
+      "file": "artwork/akari/talk.png",
+      "sha256": "a679d75e1b20a0294c0f9892c26f15ed740e04893c68a2517235975f45d73e81"
+    },
+    {
+      "file": "artwork/akari/round.png",
+      "sha256": "9b29b9eaf757695807f9f3ffb4b924e9e063dc83f3e738f6d31ee51bb52be427"
+    },
+    {
+      "file": "artwork/akari/warm.png",
+      "sha256": "0c1cf890d282773fffeb2867b57c7eb326efe4688872c913bb7824f28bef4c91"
+    },
+    {
+      "file": "artwork/akari/sad.png",
+      "sha256": "6f553761f789eaeea402924ccc1b48c22221db38647d0929ce3f59bac0c09a49"
+    },
+    {
+      "file": "artwork/akari/pout.png",
+      "sha256": "0e6fdff6ca01a19020ce0230d312289648575da674269618fcf73324e57bcf4f"
+    }
+  ],
+  "layers": [
+    {
+      "name": "topwear",
+      "donor": "idle",
+      "bounds": [
+        54,
+        701,
+        915,
+        835
+      ],
+      "defaultVisible": true
+    },
+    {
+      "name": "face",
+      "donor": "idle",
+      "bounds": [
+        0,
+        0,
+        866,
+        739
+      ],
+      "defaultVisible": true
+    },
+    {
+      "name": "front hair 1",
+      "donor": "idle",
+      "bounds": [
+        191,
+        479,
+        240,
+        229
+      ],
+      "defaultVisible": true
+    },
+    {
+      "name": "front hair 2",
+      "donor": "idle",
+      "bounds": [
+        595,
+        478,
+        242,
+        230
+      ],
+      "defaultVisible": true
+    },
+    {
+      "name": "warm",
+      "donor": "warm",
+      "bounds": [
+        350,
+        272,
+        322,
+        282
+      ],
+      "defaultVisible": false
+    },
+    {
+      "name": "sad",
+      "donor": "sad",
+      "bounds": [
+        350,
+        272,
+        322,
+        282
+      ],
+      "defaultVisible": false
+    },
+    {
+      "name": "pout",
+      "donor": "pout",
+      "bounds": [
+        350,
+        272,
+        322,
+        282
+      ],
+      "defaultVisible": false
+    },
+    {
+      "name": "blink-right",
+      "donor": "blink",
+      "bounds": [
+        343,
+        335,
+        144,
+        97
+      ],
+      "defaultVisible": false
+    },
+    {
+      "name": "blink-left",
+      "donor": "blink",
+      "bounds": [
+        543,
+        316,
+        128,
+        104
+      ],
+      "defaultVisible": false
+    },
+    {
+      "name": "mouth-a",
+      "donor": "talk",
+      "bounds": [
+        464,
+        460,
+        105,
+        81
+      ],
+      "defaultVisible": false
+    },
+    {
+      "name": "mouth-o",
+      "donor": "round",
+      "bounds": [
+        464,
+        460,
+        105,
+        81
+      ],
+      "defaultVisible": false
+    }
+  ],
+  "psdSha256": "5541bc800828515499fa8112afe96d47aaaa79e1c370c196fdcd6ba97bc15322",
+  "neutralComparison": {
+    "maxAlphaDifference": 1,
+    "maxRgbDifference": 0
+  },
+  "boundary": "Mechanical source and composites only; native exporter/Core/browser must be verified separately"
+}

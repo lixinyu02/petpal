@@ -3,7 +3,7 @@
 - Date: 2026-10-02
 - Complexity: L2
 - Related design: 2026-10-02-petpal-cubism-deformation-design.md
-- Current status: issue-1 done; issue-2 in_progress
+- Current status: issue-1/2 done; V7 web delivered; aesthetic feedback and official Editor acceptance remain open
 
 ## issue-1
 
@@ -28,15 +28,23 @@
 ## issue-2
 
 - ID: issue-2
-- 标题: 对照原人物修正脸部比例与神态
-- 范围: V5 肩长前发和柔和鼻源素材、眉眼与下颌登记、native PSD、稳定 rig、真实静态动态视觉验收、网页交付
+- 标题: 补强原人物 Cubism 模型与稳定动态
+- 范围: V5/V6 历史候选；最终 V7 原比例 native PSD、reference-layered rig、真实 MOC/CMO3、局部眼口与情绪、真实动态验收及网页交付
 - 依赖: issue-1；保留旧 V4 和原参考
-- 验收标准: 中性脸与原参考温柔神态接近，眉眼和鼻嘴协调，刘海不遮眼且前胸不被厚卷发包裹；眨眼、视线、表情及口型仍正常，不重新引入五官拉扯；Chrome 比对后上线并保留回退
-- 状态: in_progress
-- 验证方式: 源逐层 RGBA 读回、alpha与比例检查、真实 Core 几何／口型／眨眼回归、Chrome 原图/V4/V5 对照及412×960、TS／隔离构建、公网读回
-- commit: 本轮恢复检查点提交（Git history）；完整 Cubism 美术尚未完成
+- 验收标准: 保留原中性人物脸部与发际比例；小幅头身和发梢动作协调、原生闭眼与局部嘴型无持续重影，情绪与真实朗读可用；真实 Core/Chrome 比对后上线并保留回退。独立眼球视线、连续眼睑和官方 Editor 验收不计入本次完成范围，用户美术反馈仍待体验
+- 状态: done
+- 验证方式: 源逐层 RGBA 读回、真实 Core 58 姿态、7 项专用回归与121组合姿态、Chrome 完整原图/V7 动态及412×960、实际 TTS、205相关检查、TS／隔离构建、公网读回
+- commit: 本 issue 的 V7 补强提交（Git history）；历史恢复检查点为 9eb3bcc
 
-### 用户否定后调整
+### 最新纠正与 V7 目标
+
+用户明确要求补强 Cubism，原立绘恢复仅是临时检查点。此 issue 继续完成真实模型：同一中性母稿、局部原生覆片、协调头身及发梢绑定、真实 MOC/Core/Chrome 动态验收，再切回默认 Cubism。原 profile 和历史候选保持；不重打客户端。不得用旧几何测试或回退截图证明新模型完成。
+
+### V7 交付结果
+
+实际 11 ArtMesh／16 响应参数模型已成为正式网页默认。PSD 像素核对、Core 58 姿态、121 组合姿态、205 相关回归、TS／隔离构建通过；Chrome 正式网页 412×960、直接点击／长按／键盘唤醒及实际流式朗读与停止闭嘴通过。135 静态文件部署核对、131 正式 HTTPS 资源读回匹配，后端／账号／下载／更新清单保持。本轮只更新网页。连续眼睑、独立眼球视线、手部动作和官方 Editor 仍未完成，不声称完整专业 VTuber 模型；美术最终评价仍以用户体验为准。见 [V7 验收](../cubism/reference-layered-validation.md)。
+
+### 用户否定后调整（历史）
 
 V5 曾上线但用户未接受；V6 未作为默认人物上线，且用户继续指出诡异。默认展示恢复完整原立绘动画，不将候选作为已修复的完整 Cubism 模型。此 issue 的外观修复仍在进行，当前交付目标是恢复协调人物并验证原动画、口型及互动；全 Cubism 模型的美术重制保留为未完成事项。
 

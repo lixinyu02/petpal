@@ -13,7 +13,23 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
   const blinkL = sleeping ? 1 : unit(pose.blinkLeft);
   const blinkR = sleeping ? 1 : unit(pose.blinkRight);
   const smile = unit(pose.smileAmount), sad = unit(Math.max(finite(pose.sadAmount), finite(pose.downcastAmount)));
+  const warm = unit(pose.warmAmount), pout = unit(pose.poutAmount);
+  const referenceLayered = deformationProfile === 'reference-layered';
+  // Whole local expression patches must not paint competing eyes/eyebrows.
+  // Keep the winning channel's already-smoothed intensity; older rigs retain
+  // their independent Sad parameter and all existing facial controls.
+  const availableWarm = !supportedParameters || supportedParameters.includes('ParamWarm') ? warm : 0;
+  const availableSad = !supportedParameters || supportedParameters.includes('ParamSad') ? sad : 0;
+  const availablePout = !supportedParameters || supportedParameters.includes('ParamPout') ? pout : 0;
+  const dominantEmotion = availableSad > availableWarm && availableSad >= availablePout ? 'sad' : availablePout > availableWarm ? 'pout' : 'warm';
   const quiet = sleeping || hidden || !pose.speaking;
+  // Reuse already energy-gated, smoothed articulation. Reference-layered rigs
+  // gate the A base patch fully on; O then covers A in its authored draw order.
+  // The separate OpenY parameter controls only the authored local lip geometry.
+  // Raw voiceEnergy must never reopen a quiet mouth or leave a ghosted base lip.
+  const mouthOpen = unit(pose.mouthOpen);
+  const patchMouth = quiet || mouthOpen <= .04 || pose.mouthShape === 'M' || pose.mouthShape === 'rest' ? 0 : mouthOpen;
+  const patchAmount = referenceLayered ? patchMouth > 0 ? 1 : 0 : patchMouth;
   const mouthForm = quiet ? smile * .7 - sad * .35 : pose.mouthShape === 'O' ? -.65 : pose.mouthShape === 'E' ? .25 : 0;
   const eyelid = 1 - unit(pose.eyeSmile) * .15 - unit(pose.sleepyAmount) * .38 - sad * .12;
   // The bundled rig has eyebrow height, but no eyebrow angle. A small height
@@ -46,12 +62,16 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
     ParamShoulderY: still ? 0 : unit(pose.shoulderLift),
     ParamTear: sleeping || hidden ? 0 : unit(pose.tearAmount),
     ParamExcited: sleeping || hidden ? 0 : unit(pose.excitedAmount),
-    ParamSad: sleeping || hidden ? 0 : sad,
+    ParamWarm: sleeping || hidden || referenceLayered && dominantEmotion !== 'warm' ? 0 : warm,
+    ParamSad: sleeping || hidden || referenceLayered && dominantEmotion !== 'sad' ? 0 : sad,
+    ParamPout: sleeping || hidden || referenceLayered && dominantEmotion !== 'pout' ? 0 : pout,
     ParamMouthForm: hidden || sleeping ? 0 : clamp(mouthForm),
     // Absolute application after motion/expression/physics guarantees immediate closure.
     // This limit is only for our reviewed automatic rig. Imported Cubism
     // models retain their full authored opening range.
-    ParamMouthOpenY: quiet ? 0 : Math.min(deformationProfile === 'akari-stable' ? .6 : 1, unit(pose.mouthOpen)),
+    ParamMouthOpenY: quiet ? 0 : Math.min(deformationProfile === 'akari-stable' ? .6 : 1, mouthOpen),
+    ParamMouthA: !referenceLayered && pose.mouthShape === 'O' ? 0 : patchAmount,
+    ParamMouthO: pose.mouthShape === 'O' ? patchAmount : 0,
   };
 }
 
