@@ -1,0 +1,24 @@
+{
+  "tool": "built-in image_gen",
+  "intent": "identity-preserve",
+  "reference": "artwork/akari/idle.png",
+  "transparentBackground": true,
+  "variants": [
+    {
+      "name": "shy",
+      "path": "artwork/akari/expressions-v10/shy.png",
+      "prompt": "Use case: identity-preserve. Asset: exact aligned facial-expression donor for a Live2D model. Edit the supplied image, same 1024x1536 portrait canvas, identical character identity, head outline, hair/bangs, eye outlines and sizes, eye centers, nose, chin, neck, body, clothes, hands, bow, lighting, colors and framing. Change ONLY eyebrows, eyelids, gaze, mouth and cheek blush inside the small existing face (roughly x350..670 y280..540). Expression: an unmistakably bashful shy expression: averted gaze slightly downward (do not move the eye outlines), gently softened upper eyelids, eyebrows relaxed inward, pronounced warm rosy blush on both cheeks and bridge of nose, tiny closed-mouth embarrassed smile. No sweat drops, no symbols, no hands near the face. Outside face must remain unchanged. Maintain original transparent background/alpha. No text, no extra objects, no new hairstyle, no larger eyes. Return just this single portrait, not a sheet."
+    },
+    {
+      "name": "surprise",
+      "path": "artwork/akari/expressions-v10/surprise.png",
+      "prompt": "Use case: identity-preserve. Asset: exact aligned facial-expression donor for a Live2D model. Edit the supplied image, same 1024x1536 portrait canvas, identical character identity, head outline, hair/bangs, eye outlines and sizes, eye centers, nose, chin, neck, body, clothes, hands, bow, lighting, colors and framing. Change ONLY eyebrows, eyelids, gaze, mouth and cheek blush inside the small existing face (roughly x350..670 y280..540). Expression: a gentle but clearly surprised expression: eyebrows subtly raised, eyes alert while their outer size/spacing stays exactly the same, small neat rounded O mouth. No huge eyes, no shock lines, no dramatic screaming. Outside face must remain unchanged. Maintain original transparent background/alpha. No text, no extra objects, no new hairstyle, no larger eyes. Return just this single portrait, not a sheet."
+    },
+    {
+      "name": "relaxed",
+      "path": "artwork/akari/expressions-v10/relaxed.png",
+      "prompt": "Use case: identity-preserve. Asset: exact aligned facial-expression donor for a Live2D model. Edit the supplied image, same 1024x1536 portrait canvas, identical character identity, head outline, hair/bangs, eye outlines and sizes, eye centers, nose, chin, neck, body, clothes, hands, bow, lighting, colors and framing. Change ONLY eyebrows, eyelids, gaze, mouth and cheek blush inside the small existing face (roughly x350..670 y280..540). Expression: a clearly relieved peaceful expression: upper eyelids lowered into soft half-lidded eyes with the same eye outlines and iris size, slightly lowered relaxed eyebrows, gentle closed-mouth smile. Not fully closed eyes, no tears, no blush beyond a soft tint. Outside face must remain unchanged. Maintain original transparent background/alpha. No text, no extra objects, no new hairstyle, no larger eyes. Return just this single portrait, not a sheet."
+    }
+  ],
+  "integration": "Only clipped local face pixels enter new hidden PSD layers; full donor body and hair are not used."
+}

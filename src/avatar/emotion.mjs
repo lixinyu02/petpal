@@ -13,11 +13,26 @@ const emotions={
   expectant:/期待|盼着|翘首以盼|\bexpectant\b|\blooking forward\b/giu,
   aggrieved:/委屈|被误会|冤枉|\baggrieved\b|\bwronged\b/giu,
   tender:/温柔|轻轻陪着|轻声陪你|\btender\b|\bgently here for you\b/giu,
+  surprised:/惊讶|吃惊|意外|\bsurprised\b/giu,
 };
 const negated=prefix=>/(?:(?:不是不|并非不|不(?:要|用|必)?|不是|并非|没(?:有)?|从未|无须|别|勿|莫)(?:再|太|很|怎么|那么|这么|会|想|觉得|感到|特别|真的|有点){0,3}|not(?:\s+(?:really|very|feeling)){0,3}|never|no\s+longer|(?:don|doesn|didn|isn|wasn|weren|aren)['’]t(?:\s+feel(?:ing)?)?)\s*$/iu.test(prefix);
 function affirmed(text,expression) {
   const matcher=new RegExp(expression.source,expression.flags.includes('g')?expression.flags:`${expression.flags}g`);
   for(const match of text.matchAll(matcher))if(!negated(text.slice(Math.max(0,match.index-24),match.index)))return true;
+  return false;
+}
+function explicitSurprise(text) {
+  for(const match of text.matchAll(new RegExp(emotions.surprised.source,emotions.surprised.flags))) {
+    const prefix=text.slice(0,match.index).split(/[，,。.!?！？;；\n]/u).at(-1).trim();
+    const suffix=text.slice(match.index+match[0].length).split(/[，,。.!?！？;；\n]/u)[0];
+    if(negated(prefix)||/\bnot\s+at\s+all\s*$/iu.test(prefix)||/^\s*(?:吗|么|不|与否|or not\b)/iu.test(suffix))continue;
+    // New literal cues describe our own reaction. A third-person report, a
+    // question to the user, or a noun such as “意外事故” is not an expression.
+    const ownReaction=/(?:^|我|让人|令人)(?:(?:现在|今天|此刻|刚才|也|还|真的?|确实|有点|有些|一点|很|好|太|特别|十分|非常|挺|感到|觉得|感觉|竟然|居然)\s*)*$/u.test(prefix);
+    const englishReaction=/^(?:i(?:['’]m| am| feel| felt)?(?:\s+(?:really|very|quite|a little|so|still))*|(?:really|very|quite|a little|so|still)?)$/iu.test(prefix);
+    if(match[0]==='意外'&&(!prefix||/^(?:事故|事件|情况|伤害|保险|错误|中断|故障|发生)/u.test(suffix)))continue;
+    if(ownReaction||englishReaction)return true;
+  }
   return false;
 }
 function enumeratesEmotions(text) {
@@ -57,7 +72,7 @@ export function detectAvatarEmotion(value) {
   // Warm gratitude remains gentle even when the sentence also mentions joy.
   if(affirmed(text,/谢谢|感谢|\bthanks?\b/giu))return 'warm';
   if(affirmed(text,emotions.happy))return 'happy';
-  if(affirmed(text,/[!！]{2}|哇|天哪|惊喜|没想到|\bwow\b/giu))return 'surprised';
+  if(explicitSurprise(text)||affirmed(text,/[!！]{2}|哇|天哪|惊喜|没想到|\bwow\b/giu))return 'surprised';
   if(affirmed(text,/喜欢|陪你|抱抱|爱你|\blove\b|[❤♥😊]/giu))return 'warm';
   if(/让我想|思考|也许|或许|想一想|\bhmm\b|\bperhaps\b/iu.test(text))return 'thoughtful';
   if(/[?？]|为什么|怎么|好奇|\bwonder\b/iu.test(text))return 'curious';

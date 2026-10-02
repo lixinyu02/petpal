@@ -3,7 +3,7 @@ import { createCubismParameterBridge, cubismParameterTargets } from './parameter
 
 export const CUBISM_RUNTIME_ROOT = '/avatars/cubism-runtime/';
 export const CUBISM_CORE_URL = '/vendor/live2d/live2dcubismcore.min.js';
-const DEFAULT_MODEL = '/avatars/akari-cubism-v9/akari.model3.json';
+const DEFAULT_MODEL = '/avatars/akari-cubism-v10/akari.model3.json';
 const FRAMEWORK_EXPORTS = ['CubismFramework', 'CubismModelSettingJson', 'CubismMoc', 'CubismUserModel', 'CubismMatrix44', 'CubismShaderManager_WebGL', 'releaseCubismContext'];
 let corePromise, modulePromise;
 const runtimes = new WeakMap();
@@ -58,7 +58,8 @@ export async function waitForCubismCore(getCore, { timeoutMs = 3000, now = () =>
   }
 }
 
-async function loadCore({ document, window, coreUrl, timeoutMs = 2500 }) {
+/** Cold public downloads get their own bounded budget, before Core initialization. */
+export async function loadCubismCore({ document, window, coreUrl, timeoutMs = 12000 }) {
   if (window.Live2DCubismCore) return waitForCubismCore(() => window.Live2DCubismCore);
   if (!corePromise) {
     corePromise = new Promise((resolve, reject) => {
@@ -143,6 +144,7 @@ const ANGLES = ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX', 
 const GAZE = ['ParamEyeBallX', 'ParamEyeBallY'];
 const EYELIDS = ['ParamEyeLOpen', 'ParamEyeROpen'];
 const FACE = ['ParamEyeLSmile', 'ParamEyeRSmile', 'ParamEyeBallForm', 'ParamBrowLY', 'ParamBrowRY', 'ParamBrowLAngle', 'ParamBrowRAngle', 'ParamCheek', 'ParamTear', 'ParamExcited', 'ParamSad', 'ParamShoulderY'];
+const PORTRAIT_FACE_PATCHES = ['ParamWarm', 'ParamSad', 'ParamPout', 'ParamShy', 'ParamSurprise', 'ParamRelaxed'];
 const HANDS = ['ParamHandsLift', 'ParamHandsSway', 'ParamSleeveEase'];
 const GESTURE_MOTIONS = { nod: 'Nod', shake: 'Shake', shy: 'Shy', sway: 'Sway', bounce: 'Sway', bow: 'Bow', tilt: 'Curious', shrug: 'Think', leanIn: 'Listen', recoil: 'Surprise', settle: 'Reassure', peek: 'Curious', doze: 'Doze', wink: 'Wink' };
 
@@ -298,6 +300,10 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
       });
       if (!still && avatar._physics) avatar._physics.evaluate(model, seconds);
       if (avatar._pose) avatar._pose.updateParameters(model, seconds);
+      // Local face artwork is a single selection, even while native motion or
+      // expression curves fade. Restore it after physics/pose so an outgoing
+      // face cannot ghost over the current one; articulation still goes last.
+      if (referencePortrait) bridge.apply(Object.fromEntries(PORTRAIT_FACE_PATCHES.map(name => [name, targets[name]])));
       let form = targets.ParamMouthForm;
       // Quiet smiles in real gesture/expression curves remain visible, but a
       // speaking mouth belongs exclusively to the live articulation controller.
@@ -344,7 +350,7 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
     }
   };
   try {
-    const core = await loadCore({ document, window, coreUrl }); stopped(signal);
+    const core = await loadCubismCore({ document, window, coreUrl }); stopped(signal);
     const framework = await loadFramework(frameworkUrl); module = framework; stopped(signal);
     lease = acquireCubismFramework(framework, core);
     const bytes = await fetchCubismBytes(modelPath.href, { signal, maxBytes: 256 * 1024 });
@@ -411,7 +417,7 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
       -(canvasInfo.CanvasOriginY - canvasInfo.CanvasHeight / 2) / canvasInfo.PixelsPerUnit * authoredScale);
     // A user-supplied model must never inherit limits from its file name or
     // supported parameter IDs. Only this bundled, reviewed model opts in.
-    const deformationProfile = ['/avatars/akari-cubism-v7/akari.model3.json', '/avatars/akari-cubism-v8/akari.model3.json', '/avatars/akari-cubism-v9/akari.model3.json'].includes(modelPath.pathname) ? 'reference-layered'
+    const deformationProfile = ['/avatars/akari-cubism-v7/akari.model3.json', '/avatars/akari-cubism-v8/akari.model3.json', '/avatars/akari-cubism-v9/akari.model3.json', '/avatars/akari-cubism-v10/akari.model3.json'].includes(modelPath.pathname) ? 'reference-layered'
       : ['/avatars/akari-cubism-v3/akari.model3.json', '/avatars/akari-cubism-v4/akari.model3.json', '/avatars/akari-cubism-v5/akari.model3.json', '/avatars/akari-cubism-v6/akari.model3.json'].includes(modelPath.pathname) ? 'akari-stable' : 'standard';
     const controller = createCubismFrameController({ model, avatar, bridge, motions, expressions, deformationProfile });
     return {

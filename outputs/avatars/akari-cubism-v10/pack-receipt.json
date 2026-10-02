@@ -1,0 +1,95 @@
+{
+  "schema": 1,
+  "source": "outputs/avatars/akari-cubism-v7/akari.psd",
+  "sourceSha256": "5541bc800828515499fa8112afe96d47aaaa79e1c370c196fdcd6ba97bc15322",
+  "psdSha256": "06322c6f3c44319b804ab3740e6f0c9becd43a6237e8992115b7f447a86dc546",
+  "layers": 14,
+  "unchangedSourceLayers": [
+    {
+      "name": "mouth-o",
+      "pixelsSha256": "8610c666d21437df64ad2fe38a936c121fdc5b75ee875fc21ccedc0a83856848"
+    },
+    {
+      "name": "mouth-a",
+      "pixelsSha256": "6b84817a7daa424278620b02058ff9004dbb779426ec4cd77444fe436fb5564d"
+    },
+    {
+      "name": "blink-left",
+      "pixelsSha256": "8c3508d755da5a505edcc4f5d52f815c12c8016a78c7fc0959e02b7cea728a89"
+    },
+    {
+      "name": "blink-right",
+      "pixelsSha256": "40b72bb6a5ff9a01f18166bb8cdfd41cc790498a68113f445d52be21166c879d"
+    },
+    {
+      "name": "pout",
+      "pixelsSha256": "c461f6d672953184bb3417b759367b74b0cbd04f18aa0a69b0600c995e13f801"
+    },
+    {
+      "name": "sad",
+      "pixelsSha256": "84458c2aa97271e959bb574db418f258377cb021e5d4cf2ee526eca8f342761e"
+    },
+    {
+      "name": "warm",
+      "pixelsSha256": "db313d7b137b49261cb6c12b53a363d3324ba2766a0fa9e456484285e89bd534"
+    },
+    {
+      "name": "front hair 2",
+      "pixelsSha256": "23a17ba1d9fbda9727fbbe8ee752e3df4b95dd19fa0c2c7dc333e107a158ee5b"
+    },
+    {
+      "name": "front hair 1",
+      "pixelsSha256": "e360f19d32729e3e5eaaa2b1d807d69a639ba7612924e50cb154d92b6379e871"
+    },
+    {
+      "name": "face",
+      "pixelsSha256": "4decd87afe36f2e3521078bc4649379e6e6b1af0d291de7ca13c291dbe5ca093"
+    },
+    {
+      "name": "topwear",
+      "pixelsSha256": "425ea20280468474f19e3b75b2d276af98109be9d34b0e0674f440e673a08d7c"
+    }
+  ],
+  "newLayers": [
+    {
+      "name": "shy",
+      "source": "artwork/akari/expressions-v10/shy.png",
+      "sha256": "c2b5d4e9e1089542dbaf342a80e55393d889f1a9302ba2bb439c9cd889118033",
+      "bounds": [
+        350,
+        272,
+        322,
+        282
+      ],
+      "pixelsSha256": "82c3923ccee4aabe3ec013afa6bd3ece090f07d7604b16e3a54a9750061c1600"
+    },
+    {
+      "name": "surprise",
+      "source": "artwork/akari/expressions-v10/surprise.png",
+      "sha256": "5ec3636eb0cc623202d0f10e1aeb8fc117a2580b9ae5fdb767edca8a239e3a7d",
+      "bounds": [
+        350,
+        272,
+        322,
+        282
+      ],
+      "pixelsSha256": "f5f6d58bf96b12f02754ef3d6c1b6068675f0967bda60bbeda58b385e4dc2a26"
+    },
+    {
+      "name": "relaxed",
+      "source": "artwork/akari/expressions-v10/relaxed.png",
+      "sha256": "80b9840924e8c2ce9690887a9ff459659789806c357ff6bf617f750b59aad8d4",
+      "bounds": [
+        350,
+        272,
+        322,
+        282
+      ],
+      "pixelsSha256": "2b63347bbe5da62e5abc2cb2b5a962658f36f608b4d38680c7d20eea6ac64e5a"
+    }
+  ],
+  "neutralLayersIdentical": true,
+  "compositeAlphaDifference": 0,
+  "compositeOpaqueRgbDifference": 0,
+  "method": "Unscaled generated face pixels clipped to reviewed V7 local mask; old 11 layers preserved byte for byte; no painted or synthetic features"
+}

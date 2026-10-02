@@ -15,18 +15,34 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
   const smile = unit(pose.smileAmount), sad = unit(Math.max(finite(pose.sadAmount), finite(pose.downcastAmount)));
   const warm = unit(pose.warmAmount), pout = unit(pose.poutAmount);
   const referenceLayered = deformationProfile === 'reference-layered';
-  // This portrait has three real local expression patches, not independent
-  // brow/iris controls. Fold secondary intent gently into those existing
-  // patches, while retaining stronger directly-authored Warm/Sad channels.
-  const patchWarm = referenceLayered ? Math.max(warm, unit(pose.reliefAmount) * .45, unit(pose.tenderAmount) * .5, unit(pose.shyAmount) * .28, smile * .3, unit(pose.smugAmount) * .2) : warm;
+  // Only explicitly discovered, real channels enable the newer portrait's
+  // expression artwork. Older portraits keep their original three-patch map;
+  // similarly named parameters on imported models retain authored ownership.
+  const hasPortraitPatch = name => referenceLayered && supportedParameters?.includes(name) === true;
+  const shyPatch = hasPortraitPatch('ParamShy'), surprisePatch = hasPortraitPatch('ParamSurprise'), relaxedPatch = hasPortraitPatch('ParamRelaxed');
+  const discreteFace = shyPatch || surprisePatch || relaxedPatch;
+  const patchWarm = referenceLayered ? Math.max(warm, relaxedPatch ? 0 : unit(pose.reliefAmount) * .45, relaxedPatch ? 0 : unit(pose.tenderAmount) * .5, shyPatch ? 0 : unit(pose.shyAmount) * .28, smile * .3, unit(pose.smugAmount) * .2) : warm;
   const patchSad = referenceLayered ? Math.max(sad, unit(pose.concernAmount) * .24, unit(pose.aggrievedAmount) * .42, unit(pose.hesitantAmount) * .14) : sad;
-  // Whole local expression patches must not paint competing eyes/eyebrows.
-  // Keep the winning channel's already-smoothed intensity; older rigs retain
-  // their independent Sad parameter and all existing facial controls.
-  const availableWarm = !supportedParameters || supportedParameters.includes('ParamWarm') ? patchWarm : 0;
-  const availableSad = !supportedParameters || supportedParameters.includes('ParamSad') ? patchSad : 0;
-  const availablePout = !supportedParameters || supportedParameters.includes('ParamPout') ? pout : 0;
-  const dominantEmotion = availableSad > availableWarm && availableSad >= availablePout ? 'sad' : availablePout > availableWarm ? 'pout' : 'warm';
+  const patchIntents = {
+    ParamWarm: patchWarm, ParamSad: patchSad, ParamPout: pout,
+    ParamShy: shyPatch ? unit(pose.shyAmount) : 0,
+    ParamSurprise: surprisePatch ? unit(pose.surpriseAmount) : 0,
+    ParamRelaxed: relaxedPatch ? Math.max(unit(pose.reliefAmount), unit(pose.tenderAmount), unit(pose.sleepyAmount)) : 0,
+  };
+  let dominantPatch = '', dominantAmount = 0;
+  for (const [name, amount] of Object.entries(patchIntents)) {
+    if (supportedParameters && !supportedParameters.includes(name) || amount <= dominantAmount) continue;
+    dominantPatch = name; dominantAmount = amount;
+  }
+  const faceAmount = name => {
+    if (sleeping || hidden) return 0;
+    if (!referenceLayered) return patchIntents[name];
+    if (dominantPatch !== name) return 0;
+    // Swapping opaque local face art at partial alpha duplicates the neutral
+    // pupils/brows beneath it. Intents remain smoothed, but V10 displays one
+    // complete face once it is deliberate; tiny residuals return to neutral.
+    return discreteFace ? dominantAmount > .08 ? 1 : 0 : dominantAmount;
+  };
   const quiet = sleeping || hidden || !pose.speaking;
   // Reuse already energy-gated, smoothed articulation. Reference-layered rigs
   // gate the A base patch fully on; O then covers A in its authored draw order.
@@ -36,7 +52,10 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
   const patchMouth = quiet || mouthOpen <= .04 || pose.mouthShape === 'M' || pose.mouthShape === 'rest' ? 0 : mouthOpen;
   const patchAmount = referenceLayered ? patchMouth > 0 ? 1 : 0 : patchMouth;
   const mouthForm = quiet ? smile * .7 - sad * .35 : pose.mouthShape === 'O' ? -.65 : pose.mouthShape === 'E' ? .25 : 0;
-  const eyelid = 1 - unit(pose.eyeSmile) * .15 - unit(pose.sleepyAmount) * .38 - sad * .12;
+  // V10's relaxed/other faces already paint their own eyelid shapes. There is
+  // no continuous lid geometry: narrowing Open would instead fade the old
+  // neutral blink bitmap over those eyes. Only an actual blink closes them.
+  const eyelid = discreteFace ? 1 : 1 - unit(pose.eyeSmile) * .15 - unit(pose.sleepyAmount) * .38 - sad * .12;
   // The bundled rig has eyebrow height, but no eyebrow angle. A small height
   // difference keeps its asymmetric cues visible without a virtual parameter.
   const browDifference = supportedParameters && !supportedParameters.includes('ParamBrowLAngle') && !supportedParameters.includes('ParamBrowRAngle') ? clamp(pose.browTilt) * .12 : 0;
@@ -72,9 +91,12 @@ export function cubismParameterTargets(pose = {}, follow = {}, { sleeping = fals
     ParamSleeveEase: 0,
     ParamTear: sleeping || hidden ? 0 : unit(pose.tearAmount),
     ParamExcited: sleeping || hidden ? 0 : unit(pose.excitedAmount),
-    ParamWarm: sleeping || hidden || referenceLayered && dominantEmotion !== 'warm' ? 0 : patchWarm,
-    ParamSad: sleeping || hidden || referenceLayered && dominantEmotion !== 'sad' ? 0 : patchSad,
-    ParamPout: sleeping || hidden || referenceLayered && dominantEmotion !== 'pout' ? 0 : pout,
+    ParamWarm: faceAmount('ParamWarm'),
+    ParamSad: faceAmount('ParamSad'),
+    ParamPout: faceAmount('ParamPout'),
+    ParamShy: referenceLayered ? faceAmount('ParamShy') : undefined,
+    ParamSurprise: referenceLayered ? faceAmount('ParamSurprise') : undefined,
+    ParamRelaxed: referenceLayered ? faceAmount('ParamRelaxed') : undefined,
     ParamMouthForm: hidden || sleeping ? 0 : clamp(mouthForm),
     // Absolute application after motion/expression/physics guarantees immediate closure.
     // This limit is only for our reviewed automatic rig. Imported Cubism

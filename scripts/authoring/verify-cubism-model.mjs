@@ -9,8 +9,11 @@ assert(manifestArg, 'Usage: node verify-official-core.mjs <model3.json> [receipt
 const projectRoot = path.resolve(import.meta.dirname, '../..');
 const profileIndex = flags.indexOf('--profile');
 const authoringProfile = profileIndex >= 0 ? flags[profileIndex + 1] : 'standard';
-assert(['standard', 'reference-layered', 'reference-gestures'].includes(authoringProfile), 'Unknown verification profile');
-const referenceLayered = ['reference-layered', 'reference-gestures'].includes(authoringProfile);
+assert(['standard', 'reference-layered', 'reference-gestures', 'reference-expressions'].includes(authoringProfile), 'Unknown verification profile');
+const referenceLayered = ['reference-layered', 'reference-gestures', 'reference-expressions'].includes(authoringProfile);
+const referenceExpressions = authoringProfile === 'reference-expressions';
+const referenceEmotionBindings = [['ParamWarm', 'warm'], ['ParamSad', 'sad'], ['ParamPout', 'pout'],
+  ...(referenceExpressions ? [['ParamShy', 'shy'], ['ParamSurprise', 'surprise'], ['ParamRelaxed', 'relaxed']] : [])];
 const coreFlagIndex = flags.indexOf('--core');
 const corePath = coreFlagIndex >= 0
   ? path.resolve(flags[coreFlagIndex + 1] ?? '')
@@ -81,10 +84,11 @@ try {
   const required = referenceLayered
     ? ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX', 'ParamBodyAngleY', 'ParamBodyAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamMouthOpenY', 'ParamBreath', 'ParamHairFront', 'ParamMouthA', 'ParamMouthO', 'ParamWarm', 'ParamSad', 'ParamPout']
     : ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamEyeLOpen', 'ParamEyeROpen', 'ParamEyeBallX', 'ParamEyeBallY', 'ParamMouthOpenY', 'ParamBreath'];
-  if (authoringProfile === 'reference-gestures') required.push('ParamHandsLift', 'ParamHandsSway', 'ParamSleeveEase');
+  if (['reference-gestures', 'reference-expressions'].includes(authoringProfile)) required.push('ParamHandsLift', 'ParamHandsSway', 'ParamSleeveEase');
+  if (referenceExpressions) required.push('ParamShy', 'ParamSurprise', 'ParamRelaxed');
   for (const id of required) assert(parameters.some(parameter => parameter.id === id), `Required rig parameter missing: ${id}`);
   const indexById = new Map(parameters.map((parameter, index) => [parameter.id, index]));
-  const emotionParameters = referenceLayered ? ['ParamWarm', 'ParamSad', 'ParamPout'] : ['ParamCheek', 'ParamTear'];
+  const emotionParameters = referenceLayered ? referenceEmotionBindings.map(([id]) => id) : ['ParamCheek', 'ParamTear'];
   if (flags.includes('--require-emotions')) for (const id of emotionParameters) assert(indexById.has(id), `Actual emotion parameter missing: ${id}`);
   const displayInfo = references.DisplayInfo ? JSON.parse(fs.readFileSync(resolveAsset(references.DisplayInfo), 'utf8')) : null;
   const canvas = model.canvasinfo;
@@ -175,7 +179,7 @@ try {
     return [vertices.filter((_, index) => index % 2 === 0).reduce((sum, value) => sum + value, 0) / pointCount,
       vertices.filter((_, index) => index % 2 === 1).reduce((sum, value) => sum + value, 0) / pointCount];
   }
-  for (const [id, sourceName] of referenceLayered ? [['ParamWarm', 'warm'], ['ParamSad', 'sad'], ['ParamPout', 'pout']] : [['ParamCheek', 'blush'], ['ParamTear', 'tears']]) {
+  for (const [id, sourceName] of referenceLayered ? referenceEmotionBindings : [['ParamCheek', 'blush'], ['ParamTear', 'tears']]) {
     if (!indexById.has(id)) continue;
     const parameter = parameters[indexById.get(id)];
     assert.deepEqual([parameter.min, parameter.max, parameter.default], [0, 1, 0], `Actual emotion range/default mismatch: ${id}`);
@@ -195,6 +199,7 @@ try {
         else maxOtherOpacityDelta = Math.max(maxOtherOpacityDelta, Math.abs(pose.opacities[index] - neutral.opacities[index]));
       }
       assert(maxOtherOpacityDelta < 0.000001, `Emotion parameter changed unrelated opacity: ${id}`);
+      if (referenceExpressions) assert.deepEqual(pose.positions, neutral.positions, `Facial expression must not distort native rest geometry: ${id}`);
       opacityEndpoints.push({ value, drawables: indices.map(index => ({ id: model.drawables.ids[index], opacity: pose.opacities[index] })), maxOtherOpacityDelta });
       sampledDeltas.push(deltaFromNeutral(pose));
     }
@@ -223,6 +228,27 @@ try {
     }
     emotionBindings.push({ parameter: id, sourceName, actualDrawableIds: matching.map(drawable => drawable.Id), opacityEndpoints, headFollow, isolationPassed: true });
   }
+  const facialOcclusion = [];
+  if (referenceExpressions) {
+    assert.equal(model.drawables.count, 14, 'Expression profile must preserve eleven original drawings plus three local patches');
+    const expectedLayers = ['topwear', 'face', 'front hair 1', 'front hair 2', 'blink-left', 'blink-right', 'mouth-a', 'mouth-o', ...referenceEmotionBindings.map(([, name]) => name)];
+    assert.deepEqual(displayInfo.Drawables.map(drawable => drawable.Name.trim().toLowerCase()).sort(), expectedLayers.sort(), 'Expression layer contract changed');
+    const sourceIndex = name => drawableIndexById.get(displayInfo.Drawables.find(drawable => drawable.Name.trim().toLowerCase() === name)?.Id);
+    for (const [id, sourceName] of referenceEmotionBindings) {
+      const expressionIndex = sourceIndex(sourceName);
+      const protectedLayers = ['blink-left', 'blink-right', 'mouth-a', 'mouth-o'];
+      for (const name of protectedLayers) assert(model.drawables.drawOrders[expressionIndex] < model.drawables.drawOrders[sourceIndex(name)], `Expression patch covers blink or speech mouth: ${sourceName}/${name}`);
+      for (const mouth of ['a', 'o']) {
+        const pose = samplePose(`${id}-blink-mouth-${mouth}`, {
+          [id]: 1, ParamEyeLOpen: 0, ParamEyeROpen: 0, ParamMouthOpenY: 1,
+          ParamMouthA: mouth === 'a' ? 1 : 0, ParamMouthO: mouth === 'o' ? 1 : 0,
+        });
+        const visibleNames = [sourceName, 'blink-left', 'blink-right', `mouth-${mouth}`];
+        for (const name of visibleNames) assert.equal(pose.opacities[sourceIndex(name)], 1, `Combined expression/blink/speech lost visibility: ${id}/${name}`);
+        facialOcclusion.push({ parameter: id, mouth, visibleNames, blinkAndMouthAboveExpression: true });
+      }
+    }
+  }
   receipt = {
     status: 'pass', authoringProfile, officialCoreExecuted: true, officialCoreConsistency: consistency,
     corruptMagicNegativeControl: 'rejected', coreVersion: `${version >>> 24}.${(version >>> 16) & 0xff}.${version & 0xffff}`,
@@ -233,7 +259,7 @@ try {
     canvas: { width: canvas.CanvasWidth, height: canvas.CanvasHeight, originX: canvas.CanvasOriginX, originY: canvas.CanvasOriginY, pixelsPerUnit: canvas.PixelsPerUnit },
     layout: manifest.Layout ?? null, neutralBounds, neutralBoundsByDrawable,
     drawables: model.drawables.count, parts: model.parts.count, vertices: neutral.vertexCount, triangles: neutral.triangleCount,
-    parameters, sampledDeltas, emotionBindings, files, logs: coreLogs,
+    parameters, sampledDeltas, emotionBindings, facialOcclusion, files, logs: coreLogs,
     scope: 'Official Core consistency, actual model instantiation and sampled mesh/parameter execution; browser rendering and visual quality require separate acceptance.',
   };
 } finally {

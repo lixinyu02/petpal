@@ -295,7 +295,10 @@ private val referencePatchBindings = linkedMapOf(
   "blink-left" to "ParamEyeLOpen", "blink-right" to "ParamEyeROpen",
   "mouth-a" to "ParamMouthA", "mouth-o" to "ParamMouthO",
   "warm" to "ParamWarm", "sad" to "ParamSad", "pout" to "ParamPout",
+  "shy" to "ParamShy", "surprise" to "ParamSurprise", "relaxed" to "ParamRelaxed",
 )
+private val referenceOriginalEmotions = setOf("warm", "sad", "pout")
+private val referenceNewEmotions = setOf("shy", "surprise", "relaxed")
 private val referenceRequiredLayers = setOf("topwear", "face", "front hair 1", "front hair 2", "blink-left", "blink-right", "mouth-a", "mouth-o")
 private val referenceUnusedParameters = setOf("ParamEyeBallX", "ParamEyeBallY", "ParamEyeBallForm", "ParamBrowLY", "ParamBrowRY", "ParamMouthForm", "ParamHairBack")
 private val referenceStandardBindings = setOf("ParamAngleX", "ParamAngleY", "ParamAngleZ", "ParamBodyAngleX", "ParamBodyAngleY", "ParamBodyAngleZ", "ParamEyeLOpen", "ParamEyeROpen", "ParamMouthOpenY", "ParamBreath", "ParamHairFront")
@@ -504,14 +507,15 @@ private fun referenceLayeredEdits(model: PuppetModel): List<RigKeyformSetEdit> {
   return edits
 }
 
-private fun referenceLayeredConfig(pipeline: PSD2LivePipeline, input: Path, initial: PipelineConfig, gestures: Boolean = false): Pair<PipelineConfig, PuppetModel> {
+private fun referenceLayeredConfig(pipeline: PSD2LivePipeline, input: Path, initial: PipelineConfig, gestures: Boolean = false, expressions: Boolean = false): Pair<PipelineConfig, PuppetModel> {
   val inspected = pipeline.inspect(input, initial)
   require(inspected.source.widthPx == 1024 && inspected.source.heightPx == 1536) { "Reference profile is calibrated to the original 1024x1536 artwork" }
   val layers = inspected.layers.associateBy { it.source.name.trim().lowercase() }
   require(layers.size == inspected.layers.size && layers.keys.containsAll(referenceRequiredLayers)) { "Reference PSD has duplicate or missing required layers" }
-  require(layers.keys.all { it in referenceRequiredLayers || it in setOf("warm", "sad", "pout") }) { "Unexpected reference-layered source layer" }
+  val allowedEmotions = referenceOriginalEmotions + if (expressions) referenceNewEmotions else emptySet()
+  require(layers.keys.all { it in referenceRequiredLayers || it in allowedEmotions }) { "Unexpected reference-layered source layer" }
   require(layers.values.all { it.opaquePixels > 0 }) { "Reference source contains empty layers" }
-  if (gestures) require(layers.size == 11 && layers.keys.containsAll(setOf("warm", "sad", "pout"))) { "Reference gestures require the complete original eleven-layer V7 PSD" }
+  if (gestures) require(layers.size == (if (expressions) 14 else 11) && layers.keys.containsAll(allowedEmotions)) { "Reference gestures require all original layers and the selected profile's complete expression set" }
   val overrides = layers.map { (name, layer) -> layer.source.id.raw to when (name) {
     "topwear" -> LayerClassificationOverride(tag = SemanticTag.TOPWEAR)
     "face" -> LayerClassificationOverride(tag = SemanticTag.FACE)
@@ -520,7 +524,7 @@ private fun referenceLayeredConfig(pipeline: PSD2LivePipeline, input: Path, init
   } }.toMap()
   val orders = layers.map { (name, layer) -> layer.source.id.raw to when (name) {
     "topwear" -> 100f; "face" -> 200f; "front hair 1", "front hair 2" -> 210f
-    "warm", "sad", "pout" -> 300f; "blink-left", "blink-right" -> 310f; "mouth-a" -> 320f; else -> 330f
+    "warm", "sad", "pout", "shy", "surprise", "relaxed" -> 300f; "blink-left", "blink-right" -> 310f; "mouth-a" -> 320f; else -> 330f
   } }.toMap()
   val meshSettings = listOf("mouth-a", "mouth-o").associate { name ->
     layers.getValue(name).source.id.raw to MeshSettings(interiorDensity = 8f, edgeWidth = 3f, maxEdgeDistance = 4f)
@@ -555,7 +559,7 @@ private fun referenceLayeredConfig(pipeline: PSD2LivePipeline, input: Path, init
   )) to baseline
 }
 
-private fun assertReferenceLayered(baseline: PuppetModel, exported: PuppetModel, gestures: Boolean = false) {
+private fun assertReferenceLayered(baseline: PuppetModel, exported: PuppetModel, gestures: Boolean = false, expressions: Boolean = false) {
   val headFrame = referenceHeadFrame(exported); val bodyFrame = referenceRootFrame(exported)
   val patchParameters = exported.drawables.mapNotNull { referencePatchBindings[it.name.trim().lowercase()] }.toSet()
   val expectedParameters = referenceStandardBindings + patchParameters + if (gestures) referenceGestureIds else emptySet()
@@ -625,13 +629,13 @@ private fun assertReferenceLayered(baseline: PuppetModel, exported: PuppetModel,
   }
   val headRotation = exported.deformers.single { it.id.raw == "DeformHeadRotation" } as Deformer.Rotation
   require(requireNotNull(headRotation.geometryGrid).cells.all { it.form.angle == 0f && it.form.scale == 1f }) { "Head rotation bypasses the fixed neck transition" }
-  if (gestures) assertReferenceGestures(exported)
+  if (gestures) assertReferenceGestures(exported, expressions)
 }
 
 /** These checks concern the actual author's exported mesh/keyforms, not a screen overlay.
  * Official Core and browser pose checks are still required for the generated MOC3. */
-private fun assertReferenceGestures(model: PuppetModel) {
-  require(model.drawables.size == 11) { "Hand gestures must retain the original eleven drawings" }
+private fun assertReferenceGestures(model: PuppetModel, expressions: Boolean = false) {
+  require(model.drawables.size == if (expressions) 14 else 11) { "Hand gestures must retain the original eleven drawings plus only the selected expression patches" }
   for (spec in referenceGestureParameters) require(model.parameters.any {
     it.id.raw == spec.id && it.min == spec.min && it.max == spec.max && it.default == 0f
   }) { "Gesture parameter contract changed: ${spec.id}" }
@@ -707,7 +711,7 @@ private fun assertReferenceGestures(model: PuppetModel) {
 /** The frozen generator's metadata describes its PRESET base before our public authoring edits.
  * Correct only these verified profile facts after all authoring assertions succeed; preserve the
  * original diagnostics separately so provenance is not silently lost. */
-private fun writeReferenceMetadata(output: Path, model: PuppetModel, gestures: Boolean = false) {
+private fun writeReferenceMetadata(output: Path, model: PuppetModel, gestures: Boolean = false, expressions: Boolean = false) {
   Files.list(output).use { entries -> entries.filter { it.fileName.toString().endsWith(".psd2live.json") }.forEach { path ->
     val base = Json.parseToJsonElement(Files.readString(path)).jsonObject
     val baseWarnings = requireNotNull(base["warnings"]).jsonArray
@@ -719,16 +723,17 @@ private fun writeReferenceMetadata(output: Path, model: PuppetModel, gestures: B
       else -> message
     }) }.toMutableList()
     if (gestures) warnings += JsonPrimitive("Reference-gestures adds bounded shared clasped-hand translation and local sleeve geometry to the unchanged illustration; no independent fingers, raised-arm pose, or occluded torso artwork is authored.")
+    if (expressions) warnings += JsonPrimitive("Reference-expressions adds local shy, surprise and relaxed facial opacity patches in the same rigid head frame; they do not create continuous eyelid, iris or brow geometry.")
     val hierarchy = requireNotNull(base["deformerHierarchy"]).jsonObject.toMutableMap().apply {
       put("head", JsonPrimitive("DeformReferenceHead")); put("headContainer", JsonPrimitive("DeformHeadContainer"))
       put("face", JsonPrimitive("DeformReferenceHead")); put("body", JsonPrimitive("DeformReferenceBody")); put("backHair", JsonArray(emptyList()))
     }
     val metadata = JsonObject(base.toMutableMap().apply {
-      put("petpalAuthoringProfile", JsonPrimitive(if (gestures) "reference-gestures" else "reference-layered"))
+      put("petpalAuthoringProfile", JsonPrimitive(if (expressions) "reference-expressions" else if (gestures) "reference-gestures" else "reference-layered"))
       put("generatedBaseWarnings", baseWarnings); put("warnings", JsonArray(warnings)); put("deformerHierarchy", JsonObject(hierarchy))
       put("nativeBoundParameterIds", JsonArray(model.parameters.map { JsonPrimitive(it.id.raw) }))
       if (gestures) put("gestureAuthoring", buildJsonObject {
-        put("source", "Unchanged eleven-layer V7 PSD; refined topwear ArtMesh only")
+        put("source", if (expressions) "Original eleven V7 layers plus three local facial patches; original gesture geometry retained" else "Unchanged eleven-layer V7 PSD; refined topwear ArtMesh only")
         put("parameters", JsonArray(referenceGestureIds.map { JsonPrimitive(it) }))
         put("keyformCombinations", 27)
         put("handsSharedLiftPixels", 16)
@@ -742,6 +747,16 @@ private fun writeReferenceMetadata(output: Path, model: PuppetModel, gestures: B
         put("occludedArtworkRepainted", false)
         put("validationBoundary", "Authoring geometry assertions only; official Core, browser motion, and Cubism Editor compatibility require separate verification")
       })
+      if (expressions) put("expressionAuthoring", buildJsonObject {
+        put("newLayers", JsonArray(referenceNewEmotions.map { JsonPrimitive(it) }))
+        put("newParameters", JsonArray(referenceNewEmotions.map { JsonPrimitive(referencePatchBindings.getValue(it)) }))
+        put("parent", "DeformReferenceHead")
+        put("expressionDrawOrder", 300)
+        put("blinkDrawOrder", 310)
+        put("mouthDrawOrders", JsonArray(listOf(JsonPrimitive(320), JsonPrimitive(330))))
+        put("neutralOpacity", 0)
+        put("independentFeatureGeometry", false)
+      })
     })
     Files.writeString(path, Json { prettyPrint = true }.encodeToString(JsonObject.serializer(), metadata) + "\n")
   } }
@@ -749,11 +764,12 @@ private fun writeReferenceMetadata(output: Path, model: PuppetModel, gestures: B
 
 // Independent authoring client for the frozen GPL tool. It is never part of the PetPal application.
 fun main(arguments: Array<String>) {
-  require(arguments.size in 2..3) { "Usage: <layered-PSD> <local-output-directory> [classic|continuous-body|stable-portrait|reference-layered|reference-gestures]" }
+  require(arguments.size in 2..3) { "Usage: <layered-PSD> <local-output-directory> [classic|continuous-body|stable-portrait|reference-layered|reference-gestures|reference-expressions]" }
   val profile = arguments.getOrElse(2) { "classic" }
-  require(profile in setOf("classic", "continuous-body", "stable-portrait", "reference-layered", "reference-gestures")) { "Unknown authoring profile: $profile" }
-  val referenceGestures = profile == "reference-gestures"
-  val referenceLayered = profile in setOf("reference-layered", "reference-gestures")
+  require(profile in setOf("classic", "continuous-body", "stable-portrait", "reference-layered", "reference-gestures", "reference-expressions")) { "Unknown authoring profile: $profile" }
+  val referenceExpressions = profile == "reference-expressions"
+  val referenceGestures = profile in setOf("reference-gestures", "reference-expressions")
+  val referenceLayered = profile in setOf("reference-layered", "reference-gestures", "reference-expressions")
   val stablePortrait = profile == "stable-portrait"
   val continuousBody = profile in setOf("continuous-body", "stable-portrait")
   I18n.setLanguage(AppLanguage.ENGLISH, persist = false)
@@ -799,7 +815,7 @@ fun main(arguments: Array<String>) {
   var stableBaseline: PuppetModel? = null
   var referenceBaseline: PuppetModel? = null
   val exportConfig = if (referenceLayered) {
-    referenceLayeredConfig(pipeline, input, initialConfig, referenceGestures).also { referenceBaseline = it.second }.first
+    referenceLayeredConfig(pipeline, input, initialConfig, referenceGestures, referenceExpressions).also { referenceBaseline = it.second }.first
   } else if (continuousBody) {
     // Reinspect with the same classifications that run() will use. Reusing the earlier analysis
     // with new overrides would leave its semantic tags out of sync with the export configuration.
@@ -851,10 +867,11 @@ fun main(arguments: Array<String>) {
     println("Stable portrait: neutral frames and parents retained; rigid body/head lattices; no independent face/hair perspective or iris jelly; anchored crown/fringe with 6px front and 8px rear tips; original blink and mouth keys retained")
   }
   if (referenceLayered) {
-    assertReferenceLayered(requireNotNull(referenceBaseline), model, referenceGestures)
-    writeReferenceMetadata(output, model, referenceGestures)
+    assertReferenceLayered(requireNotNull(referenceBaseline), model, referenceGestures, referenceExpressions)
+    writeReferenceMetadata(output, model, referenceGestures, referenceExpressions)
     println("Reference layered: original pixels and facial proportions retained; shared face/patch head with fixed neck transition; independently pinned body; 1.25px anchored hair tips; real blink, A/O lip shapes and available emotion opacity bindings")
     if (referenceGestures) println("Reference gestures: original clasped hands translate together up to 16px vertically and 6px horizontally; local 3px sleeve easing; fixed neckline and unchanged face/hair; not independent fingers or raised arms")
+    if (referenceExpressions) println("Reference expressions: three additional local facial patches share the rigid head frame, start transparent, and remain below blink and A/O speaking mouth patches")
   }
   println("Exported ${result.exportedFiles.size} files; ${model.parameters.size} parameters; ${model.drawables.size} drawables; profile=$profile")
   result.warnings.forEach { System.err.println("Warning: $it") }

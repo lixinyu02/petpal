@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { detectAvatarEmotion as emotion, emotionAtSpeechBoundary as at } from '../src/avatar/emotion.mjs';
+import { createAvatarPerformance } from '../src/avatar/performance.mjs';
 
 test('five requested emotions have distinct conservative text cues',()=>{
   for(const [text,expected] of [['今天好开心呀。','happy'],['太好了，终于完成了！','happy'],['我真的很伤心，心都碎了。','sad'],['今天有一点难过，感觉很失落。','downcast'],['我好兴奋，已经迫不及待了！','excited'],['被你夸得有点害羞，脸都红了。','shy'],['I am excited!','excited'],['I feel sad.','sad'],['I am shy.','shy']])assert.equal(emotion(text),expected,text);
@@ -60,4 +61,38 @@ test('hesitation, sleepiness, expectation, hurt feelings and tenderness stay dis
   for(const text of ['犹豫、困倦、期待、委屈、温柔。','“犹豫”这个词是什么意思？','支持期待和温柔两种表情。'])assert.equal(emotion(text),null,text);
   const text='先听我说，现在有一点犹豫，还没想好呢。但是接下来说普通内容。';
   assert.equal(at(text,0),null);assert.equal(at(text,text.indexOf('现在')),'hesitant');assert.equal(at(text,text.indexOf('还没')),'hesitant');assert.equal(at(text,text.indexOf('但是')),null);
+});
+
+test('literal surprise cues describe a reaction without acting out negations or someone else\'s feelings',()=>{
+  for(const text of ['我很惊讶。','我现在有点吃惊。','我也感到意外。','这个结果让我很惊讶。','真让人吃惊。','有些意外呢。','I am surprised.','I feel very surprised.','哇，居然是这样！'])assert.equal(emotion(text),'surprised',text);
+  for(const text of ['我不惊讶。','我一点都不吃惊。','我没有感到意外。','不要惊讶。','我并非很惊讶。','I am not surprised.','I am not at all surprised.','你很惊讶吗？','你可能会感到吃惊。','她觉得很意外。','小明很惊讶。','They are surprised.','I am surprised or not?'])assert.notEqual(emotion(text),'surprised',text);
+});
+
+test('surprise descriptions, emotion menus and accidental failures stay factual',()=>{
+  for(const text of ['支持害羞和惊讶两种表情。','“吃惊”这个词是什么意思？','惊讶、开心、安心。','这只是一起意外事故。','意外退出了。','意外中断已经恢复。','我感到意外故障仍未排除。'])assert.equal(emotion(text),null,text);
+  const menu='表情包括害羞，惊讶，安心。';
+  for(const word of ['害羞','惊讶','安心'])assert.equal(at(menu,menu.indexOf(word)),null,word);
+});
+
+test('surprise follows spoken clauses and clears on explicit denial before a later relieved expression',()=>{
+  const text='先看看结果，我很惊讶，刚才完全没准备，但现在已经不惊讶了，继续检查。终于安心了。';
+  assert.equal(at(text,0),null);
+  assert.equal(at(text,text.indexOf('我很')),'surprised');
+  assert.equal(at(text,text.indexOf('刚才')),'surprised');
+  assert.equal(at(text,text.indexOf('但现在')),null);
+  assert.equal(at(text,text.indexOf('继续')),null);
+  assert.equal(at(text,text.indexOf('终于')),'relieved');
+  assert.equal(emotion('我有点伤心，这让我很惊讶。'),'sad','existing negative priority remains intact');
+});
+
+test('literal surprise drives the face during speech while upstream voice metadata remains authoritative',()=>{
+  for(const [metadata,expected]of [[null,'surprised'],[{emotion:'neutral',intensity:'natural',source:'manual'},'neutral'],[{emotion:'sad',intensity:'natural',source:'rules'},'sad'],[{emotion:'gentle',intensity:'natural',source:'choice'},'tender']]){
+    const controller=createAvatarPerformance();
+    controller.setInput({utteranceId:'literal-surprise',phase:'speaking',text:'我现在很惊讶。',speech:{active:true,charIndex:0,audioLevel:.6,...(metadata?{emotion:metadata}:{})}});
+    const pose=controller.step(.25);
+    assert.equal(pose.expression,expected);
+    assert.ok(pose.mouthOpen>0,'the emotional face does not prevent active speech');
+    if(metadata)assert.equal(pose.surpriseAmount,0,'text cannot replace explicit voice metadata');
+    else assert.ok(pose.surpriseAmount>.5);
+  }
 });

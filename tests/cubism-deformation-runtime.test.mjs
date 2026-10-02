@@ -48,7 +48,7 @@ function factoryWebGlStub() {
   return context;
 }
 
-test('production avatar factory defaults to V9, keeps legacy limits, and isolates reference-layered controls from imported paths', async () => {
+test('production avatar factory defaults to V10, keeps legacy limits, and isolates reference-layered controls from imported paths', async () => {
   const source = await fs.readFile(new URL('../public/vendor/live2d/live2dcubismcore.min.js', import.meta.url), 'utf8');
   const sandbox = { console, setTimeout, clearTimeout, TextDecoder, TextEncoder, atob, btoa, window: {}, document: { currentScript: { src: 'https://petpal.test/vendor/live2d/live2dcubismcore.min.js' } } };
   vm.runInNewContext(source, sandbox, { timeout: 2000 });
@@ -73,7 +73,7 @@ test('production avatar factory defaults to V9, keeps legacy limits, and isolate
     requests.push(url.pathname);
     // Give imported-path controls the exact bundled model bytes, so only the
     // production pathname classification differs from the built-in case.
-    const pathname = url.pathname.replace(/^\/avatars\/user\/(akari-cubism-v[6789])\//u, '/avatars/$1/');
+    const pathname = url.pathname.replace(/^\/avatars\/user\/(akari-cubism-v(?:[6789]|10))\//u, '/avatars/$1/');
     assert.ok(pathname.startsWith('/avatars/') || pathname.startsWith('/vendor/'));
     const bytes = await fs.readFile(new URL(`../public${pathname}`, import.meta.url));
     return new Response(bytes, { headers: { 'Content-Length': String(bytes.length) } });
@@ -96,7 +96,8 @@ test('production avatar factory defaults to V9, keeps legacy limits, and isolate
   let avatar;
   try {
     for (const [modelUrl, expected, requestedManifest, referenceLayered = false] of [
-      [undefined, .9, '/avatars/akari-cubism-v9/akari.model3.json', true],
+      [undefined, .9, '/avatars/akari-cubism-v10/akari.model3.json', true],
+      ['/avatars/akari-cubism-v10/akari.model3.json', .9, '/avatars/akari-cubism-v10/akari.model3.json', true],
       ['/avatars/akari-cubism-v9/akari.model3.json', .9, '/avatars/akari-cubism-v9/akari.model3.json', true],
       ['/avatars/akari-cubism-v8/akari.model3.json', .9, '/avatars/akari-cubism-v8/akari.model3.json', true],
       ['/avatars/akari-cubism-v7/akari.model3.json', .9, '/avatars/akari-cubism-v7/akari.model3.json', true],
@@ -108,6 +109,7 @@ test('production avatar factory defaults to V9, keeps legacy limits, and isolate
       ['/avatars/user/akari-cubism-v7/akari.model3.json', .9, '/avatars/user/akari-cubism-v7/akari.model3.json'],
       ['/avatars/user/akari-cubism-v8/akari.model3.json', .9, '/avatars/user/akari-cubism-v8/akari.model3.json'],
       ['/avatars/user/akari-cubism-v9/akari.model3.json', .9, '/avatars/user/akari-cubism-v9/akari.model3.json'],
+      ['/avatars/user/akari-cubism-v10/akari.model3.json', .9, '/avatars/user/akari-cubism-v10/akari.model3.json'],
     ]) {
       const context = factoryWebGlStub(), location = new URL(`${origin}/`);
       const canvas = { width: 256, height: 384, ownerDocument: { defaultView: { Live2DCubismCore: core, location } }, getContext: type => { assert.equal(type, 'webgl2'); return context; } };
@@ -124,8 +126,9 @@ test('production avatar factory defaults to V9, keeps legacy limits, and isolate
       };
       avatar.update(.1, { speaking: true, mouthOpen: .9, mouthShape: 'A' }, {});
       close(model.parameters.values[mouth], expected);
-      if (/akari-cubism-v[789]\//u.test(requestedManifest)) {
-        assert.equal(ids.length, requestedManifest.includes('-v7/') ? 16 : 19, 'Reference MOC must expose only its real rig parameters');
+      const facialV10 = requestedManifest.includes('-v10/');
+      if (/akari-cubism-v(?:[789]|10)\//u.test(requestedManifest)) {
+        assert.equal(ids.length, facialV10 ? 22 : requestedManifest.includes('-v7/') ? 16 : 19, 'Reference MOC must expose only its real rig parameters');
         close(read('ParamMouthA'), referenceLayered ? 1 : .9);
         assert.equal(read('ParamMouthO'), 0);
         avatar.update(.1, { speaking: true, mouthOpen: .9, mouthShape: 'O' });
@@ -133,17 +136,24 @@ test('production avatar factory defaults to V9, keeps legacy limits, and isolate
         close(read('ParamMouthO'), referenceLayered ? 1 : .9);
         close(read('ParamMouthOpenY'), .9);
         avatar.update(.1, { speaking: true, mouthOpen: .9, mouthShape: 'A', warmAmount: .8, sadAmount: .4, poutAmount: .6 });
-        close(read('ParamWarm'), .8);
+        close(read('ParamWarm'), facialV10 && referenceLayered ? 1 : .8);
         close(read('ParamSad'), referenceLayered ? 0 : .4);
         close(read('ParamPout'), referenceLayered ? 0 : .6);
+        if (facialV10) for (const [channel, parameter] of [['shyAmount', 'ParamShy'], ['surpriseAmount', 'ParamSurprise'], ['reliefAmount', 'ParamRelaxed']]) {
+          avatar.update(.1, { [channel]: .7, speaking: true, mouthOpen: .9, mouthShape: 'O' });
+          close(read(parameter), referenceLayered ? 1 : 0, `${parameter} must only use bundled portrait semantics`);
+          for (const other of ['ParamWarm', 'ParamSad', 'ParamPout', 'ParamShy', 'ParamSurprise', 'ParamRelaxed'].filter(name => name !== parameter)) close(read(other), 0);
+          close(read('ParamMouthOpenY'), .9);
+        }
       }
       avatar.update(0, { speaking: false, voiceEnergy: 1 }, {});
       assert.equal(model.parameters.values[mouth], 0);
-      if (/akari-cubism-v[789]\//u.test(requestedManifest)) {
-        for (const name of ['ParamMouthA', 'ParamMouthO', 'ParamWarm', 'ParamSad', 'ParamPout']) assert.equal(read(name), 0);
+      if (/akari-cubism-v(?:[789]|10)\//u.test(requestedManifest)) {
+        const cleared = ['ParamMouthA', 'ParamMouthO', 'ParamWarm', 'ParamSad', 'ParamPout', ...(facialV10 ? ['ParamShy', 'ParamSurprise', 'ParamRelaxed'] : [])];
+        for (const name of cleared) assert.equal(read(name), 0);
         for (const state of [{ hidden: true }, { sleeping: true }]) {
-          avatar.update(0, { speaking: true, mouthOpen: .9, mouthShape: 'O', warmAmount: .8, sadAmount: .4, poutAmount: .6 }, {}, state);
-          for (const name of ['ParamMouthOpenY', 'ParamMouthA', 'ParamMouthO', 'ParamWarm', 'ParamSad', 'ParamPout']) assert.equal(read(name), 0);
+          avatar.update(0, { speaking: true, mouthOpen: .9, mouthShape: 'O', warmAmount: .8, sadAmount: .4, poutAmount: .6, shyAmount: 1, surpriseAmount: 1, reliefAmount: 1 }, {}, state);
+          for (const name of ['ParamMouthOpenY', ...cleared]) assert.equal(read(name), 0);
         }
       }
       const cheek = ids.indexOf('ParamCheek');
