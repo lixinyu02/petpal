@@ -2,3 +2,8 @@
 .cubism-scene>canvas{width:100%;height:100%;outline:none;touch-action:pan-y pinch-zoom;transform-origin:50% 60%}
 .cubism-scene>canvas:focus-visible{outline:2px solid #7c9270;outline-offset:-4px;border-radius:18px}
 .cubism-scene>.cubism-fallback{position:absolute;inset:0;width:100%;height:100%}
+.cubism-scene>.cubism-retry{position:absolute;z-index:3;bottom:2px;left:50%;transform:translateX(-50%);min-height:44px;padding:8px 14px;border:0;border-radius:12px;background:#faf7f0e8;color:#526c56;font-size:12px;cursor:pointer}
+.cubism-scene>.cubism-retry:focus-visible{outline:2px solid #7c9270;outline-offset:2px}
+.cubism-scene[data-compact=true]>.cubism-retry{font-size:0;left:auto;right:0;bottom:0;transform:none;width:28px;min-height:28px;padding:0;background:#faf7f0;border-radius:50%}
+.cubism-scene[data-compact=true]>.cubism-retry:after{content:'↻';font-size:19px;line-height:1}
+@media(pointer:coarse){.cubism-scene[data-compact=true]>.cubism-retry{width:44px;min-height:44px}}

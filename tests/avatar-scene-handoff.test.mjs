@@ -13,7 +13,8 @@ function createSceneHarness(props = {}) {
   const effects = [], frames = [], states = [], updates = [];
   const hooks = [], listeners = new Map();
   let hookIndex = 0, tree, currentProps = props;
-  let finishLoad;
+  let finishLoad, failLoad, fallbackImports = 0;
+  const Suspense = function Suspense() {}, AvatarLoading = function AvatarLoading() {};
   const attributes = new Map();
   const surface = {
     style: {}, dataset: {},
@@ -35,6 +36,7 @@ function createSceneHarness(props = {}) {
   for (const [key, value] of Object.entries(globals)) globalThis[key] = value;
   const modules = {
     react: {
+      lazy: loader => ({ loader }), Suspense,
       useRef(value) {
         const at = hookIndex++;
         if (!hooks[at]) hooks[at] = {ref:{current:value === null ? container : value}};
@@ -53,7 +55,7 @@ function createSceneHarness(props = {}) {
       },
     },
     'react/jsx-runtime': { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
-    '../AnimeScene': { default: function AnimeScene() {} },
+    '../AvatarLoading': { default: AvatarLoading },
     '../performance.mjs': { createAvatarPerformance },
     '../presence.mjs': { createAvatarPresence },
     '../action-state.mjs': { createCompanionActionState },
@@ -64,7 +66,7 @@ function createSceneHarness(props = {}) {
     '../../pet/interaction.mjs': { bindCompanionGestures: () => Object.assign(() => {}, { refresh() {} }) },
     '../../pet/gesture-feedback.mjs': { createCompanionFeedback: () => ({ update() {}, dispose() {} }) },
     '../anime-pose-render.mjs': { animePoseTransform },
-    './runtime.mjs': { createCubismAvatar: () => new Promise(resolve => { finishLoad = resolve; }) },
+    './runtime.mjs': { createCubismAvatar: () => new Promise((resolve, reject) => { finishLoad = resolve; failLoad = reject; }) },
   };
   const source = fs.readFileSync(new URL('../src/avatar/cubism/CubismScene.tsx', import.meta.url), 'utf8')
     .replace(/const development = .*;/u, 'const development = false;');
@@ -72,7 +74,10 @@ function createSceneHarness(props = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
   const module = { exports: {} };
-  new Function('require', 'module', 'exports', compiled)(name => modules[name] || {}, module, module.exports);
+  new Function('require', 'module', 'exports', compiled)(name => {
+    if (name === '../AnimeScene') { fallbackImports++; return {default:function AnimeScene(){}}; }
+    return modules[name] || {};
+  }, module, module.exports);
   const render = (nextProps = {}) => {
     currentProps = {...currentProps, ...nextProps}; hookIndex = 0; effects.length = 0;
     tree = module.exports.default({ ...currentProps, onState: state => states.push(state.action) });
@@ -80,7 +85,11 @@ function createSceneHarness(props = {}) {
   };
   render();
   return {
-    get fallback() { return tree.props.children; },
+    get loading() { return tree.props.children[0]?.type === AvatarLoading; },
+    get fallback() { return tree.props.children[0]?.type === Suspense ? tree.props.children[0].props.children : null; },
+    get actionState() { return hooks.map(hook => hook?.ref?.current).find(value => typeof value?.consumeCommand === 'function'); },
+    get fallbackImports() { return fallbackImports; },
+    async loadFallback() { await this.fallback.type.loader(); },
     surface, states, updates,
     async resolveNative() {
       finishLoad({
@@ -88,10 +97,13 @@ function createSceneHarness(props = {}) {
         render() {}, release() {}, react() {}, supportedParameters: [], motionGroup: 'Idle', mocVersion: 5, coreVersion: 6,
       });
       await new Promise(resolve => setImmediate(resolve));
+      render();
     },
+    async rejectNative() { failLoad(new Error('Isolated unavailable native fixture')); await new Promise(resolve => setImmediate(resolve)); render(); },
     frame(now) { frames.at(-1)(now); render(); },
     rebuild(nextProps) { render(nextProps); render(); },
     loseContext() { listeners.get('webglcontextlost')({preventDefault() {}}); render(); },
+    retry() { tree.props.children[1].props.onClick(); render(); render(); },
     dispose() {
       for (const hook of hooks) hook?.cleanup?.();
       for (const [key, descriptor] of previous) {
@@ -102,12 +114,12 @@ function createSceneHarness(props = {}) {
   };
 }
 
-test('a resting loading fallback stays asleep on the actual native component first frame', async t => {
+test('native loading uses a static portrait and never loads the recovery renderer on success', async t => {
   const scene = createSceneHarness(); t.after(() => scene.dispose());
-  const state = scene.fallback.props.actionState;
-  assert(state, 'loading fallback receives the shared action intent');
-  state.transition('sleep'); scene.fallback.props.onState({action:'sleep'});
+  assert.equal(scene.loading, true); assert.equal(scene.fallback, null); assert.equal(scene.fallbackImports, 0);
+  const state = scene.actionState; state.transition('sleep');
   await scene.resolveNative(); scene.frame(100);
+  assert.equal(scene.loading, false); assert.equal(scene.fallback, null); assert.equal(scene.fallbackImports, 0);
   assert.equal(scene.states.at(-1), 'sleep');
   assert.equal(scene.surface.dataset.petAction, 'sleep');
   assert.equal(scene.updates.at(-1).sleeping, true);
@@ -115,7 +127,7 @@ test('a resting loading fallback stays asleep on the actual native component fir
 
 test('native readiness cannot replay a fallback sleep command after the user wakes it', async t => {
   const command = {id:7, action:'sleep'}, scene = createSceneHarness({command}); t.after(() => scene.dispose());
-  const state = scene.fallback.props.actionState;
+  const state = scene.actionState;
   assert.equal(state.consumeCommand(command.id), true);
   state.transition(command.action); state.transition('wake');
   await scene.resolveNative(); scene.frame(100);
@@ -126,17 +138,39 @@ test('native readiness cannot replay a fallback sleep command after the user wak
 
 test('native context loss hands the resting state to fallback and compact or interactive rebuilds retain that same intent', async t => {
   const scene = createSceneHarness(); t.after(() => scene.dispose());
-  const state = scene.fallback.props.actionState;
+  const state = scene.actionState;
   state.transition('sleep'); await scene.resolveNative(); scene.frame(100);
   scene.loseContext();
   assert.equal(scene.fallback.props.actionState, state);
   assert.equal(scene.fallback.props.actionState.snapshot().action, 'sleep');
   for (const props of [{compact:true}, {interactive:false}, {compact:false,interactive:true}]) {
     scene.rebuild(props);
-    assert.equal(scene.fallback.props.actionState, state);
+    assert.equal(scene.loading, true); assert.equal(scene.actionState, state);
     assert.equal(state.snapshot().action, 'sleep');
     await scene.resolveNative(); scene.frame(100);
     assert.equal(scene.surface.dataset.petAction, 'sleep');
     assert.equal(scene.states.at(-1), 'sleep');
   }
+});
+
+test('pending commands wait for native readiness and are not replayed after recovery', async t => {
+  const scene = createSceneHarness({command:{id:1,action:'sleep'}}); t.after(() => scene.dispose());
+  assert.equal(scene.actionState.snapshot().action, 'idle');
+  await scene.resolveNative(); scene.frame(100); assert.equal(scene.surface.dataset.petAction, 'sleep');
+  scene.loseContext(); await scene.loadFallback(); assert.equal(scene.fallbackImports, 1);
+  scene.actionState.transition('wake'); scene.retry();
+  assert.equal(scene.loading, true); assert.equal(scene.fallback, null);
+  await scene.resolveNative(); scene.frame(100);
+  assert.equal(scene.surface.dataset.petAction, 'idle');
+});
+
+test('native rejection loads recovery only on demand and manual retry preserves rest', async t => {
+  const scene = createSceneHarness(); t.after(() => scene.dispose());
+  assert.equal(scene.fallbackImports, 0);
+  await scene.rejectNative(); assert.ok(scene.fallback); await scene.loadFallback();
+  assert.equal(scene.fallbackImports, 1);
+  const shared = scene.fallback.props.actionState; shared.transition('sleep');
+  scene.retry(); assert.equal(scene.loading, true); assert.equal(scene.actionState, shared);
+  await scene.resolveNative(); scene.frame(100);
+  assert.equal(scene.surface.dataset.petAction, 'sleep'); assert.equal(scene.updates.at(-1).sleeping, true);
 });

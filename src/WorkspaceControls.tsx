@@ -25,6 +25,7 @@ export function ModelPicker({ providers, value, onChange, disabled = false, labe
   const [open, setOpen] = useState(false), [query, setQuery] = useState(''), [activeIndex, setActiveIndex] = useState(0);
   const [placement, setPlacement] = useState({ left: 12, top: 60, width: 340, maxHeight: 400 });
   const trigger = useRef<HTMLButtonElement>(null), popup = useRef<HTMLDivElement>(null), search = useRef<HTMLInputElement>(null);
+  const triggerPointer = useRef(''), focusSearchOnOpen = useRef(true);
   const id = useId(), listId = `${id}-models`, searchId = `${id}-search`;
   const choices = useMemo<ModelChoice[]>(() => [
     ...(fallbackOption ? [{ id: '', name: fallbackOption.label, description: fallbackOption.description || '使用执行主机上的 Codex 配置', search: `${fallbackOption.label} ${fallbackOption.description || ''}`.toLocaleLowerCase() }] : []),
@@ -35,9 +36,11 @@ export function ModelPicker({ providers, value, onChange, disabled = false, labe
   const selected = choices.find(choice => choice.id === value), active = filtered[activeIndex];
 
   function close(restoreFocus = false) { setOpen(false); if (restoreFocus) trigger.current?.focus(); }
-  function show() {
+  function show(focusSearch = true) {
     if (disabled || !choices.length) return;
+    focusSearchOnOpen.current = focusSearch;
     setQuery(''); setActiveIndex(Math.max(0, choices.findIndex(choice => choice.id === value))); setOpen(true);
+    if (open && focusSearch) search.current?.focus({ preventScroll: true });
   }
   function choose(choice: ModelChoice) { close(true); if (choice.id !== value) onChange(choice.id); }
   function keyDown(event: KeyboardEvent) {
@@ -67,7 +70,7 @@ export function ModelPicker({ providers, value, onChange, disabled = false, labe
       setPlacement({ left: Math.max(offsetLeft + gutter, Math.min(anchor.left, width + offsetLeft - menuWidth - gutter)), top, width: menuWidth, maxHeight });
     };
     const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(place); };
-    place(); search.current?.focus({ preventScroll: true });
+    place(); if (focusSearchOnOpen.current) search.current?.focus({ preventScroll: true });
     window.addEventListener('resize', schedule); window.addEventListener('scroll', schedule, true); window.visualViewport?.addEventListener('resize', schedule); window.visualViewport?.addEventListener('scroll', schedule);
     return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', schedule); window.removeEventListener('scroll', schedule, true); window.visualViewport?.removeEventListener('resize', schedule); window.visualViewport?.removeEventListener('scroll', schedule); };
   }, [open]);
@@ -82,7 +85,15 @@ export function ModelPicker({ providers, value, onChange, disabled = false, labe
 
   return <div className="workspace-model-picker">
     <button ref={trigger} type="button" className="workspace-model-trigger" aria-label={`${label}：${selected?.name || fallbackLabel}`} aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined} disabled={disabled || !choices.length}
-      onClick={() => open ? close() : show()} onKeyDown={event => { if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); show(); } }}>
+      onPointerDown={event => { triggerPointer.current = event.pointerType; }} onPointerCancel={() => { triggerPointer.current = ''; }}
+      onClick={event => {
+        // Pointer taps show choices first; semantic clicks keep accessible search focus.
+        const touchActivation = event.detail > 0 && (triggerPointer.current === 'touch' || triggerPointer.current === 'pen');
+        triggerPointer.current = ''; open ? close() : show(!touchActivation);
+      }} onKeyDown={event => {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); triggerPointer.current = ''; show(); }
+        else if (open && event.key === 'Escape') keyDown(event);
+      }}>
       <Cpu size={17} aria-hidden="true"/><span className="workspace-model-current"><small>{label}</small><strong>{selected?.name || fallbackLabel}</strong></span><ChevronDown size={15} className={open ? 'is-open' : ''} aria-hidden="true"/>
     </button>
     {open && createPortal(<div ref={popup} className="workspace-model-popup" style={placement} onKeyDown={keyDown}>

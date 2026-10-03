@@ -3,6 +3,7 @@ import type { ComponentProps } from 'react';
 import type PetScene from '../pet/PetScene';
 import type { CompanionKind } from '../api';
 import type { PerformanceInput } from './performance.mjs';
+import AvatarLoading from './AvatarLoading';
 // The bundled native model retains the original character's neutral proportions.
 const CubismScene = lazy(() => import('./cubism/CubismScene'));
 const CatScene = lazy(() => import('../pet/PetScene'));
@@ -17,5 +18,5 @@ class AvatarBoundary extends Component<{ children: ReactNode; kind: CompanionKin
 }
 
 export default function CompanionScene({ kind, speaking = false, performanceInput, ...props }: ComponentProps<typeof PetScene> & { kind: CompanionKind; speaking?: boolean; performanceInput?: PerformanceInput }) {
-  return <AvatarBoundary key={kind} kind={kind}><Suspense fallback={<div className="avatar-loading" role="status">{kind === 'cat' ? '小猫正在走来…' : '小伴正在走来…'}</div>}>{kind === 'cat' ? <CatScene {...props}/> : <CubismScene {...props} speaking={speaking} performanceInput={performanceInput}/>}</Suspense></AvatarBoundary>;
+  return <AvatarBoundary key={kind} kind={kind}><Suspense fallback={kind === 'cat' ? <div className="avatar-loading" role="status"><span>小猫正在走来…</span></div> : <AvatarLoading compact={props.compact}/>}>{kind === 'cat' ? <CatScene {...props}/> : <CubismScene {...props} speaking={speaking} performanceInput={performanceInput}/>}</Suspense></AvatarBoundary>;
 }

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import AnimeScene from '../AnimeScene';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import AvatarLoading from '../AvatarLoading';
 import type { PetCommand } from '../../pet/PetScene';
 import type { PetAction, PetBehaviorState, PetInteraction } from '../../pet/behavior';
 import { createAvatarPerformance, type PerformanceInput } from '../performance.mjs';
@@ -22,6 +22,8 @@ export type CubismSceneProps = {
 };
 const clamp = (value: number) => Math.min(1, Math.max(-1, value));
 const development = Boolean((import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV);
+// The fallback owns another GPU and expression set; only load it on failure.
+const AnimeScene = lazy(() => import('../AnimeScene'));
 
 /** A real Cubism surface, with the stable original character while loading or unsupported. */
 export default function CubismScene(props: CubismSceneProps) {
@@ -34,6 +36,7 @@ export default function CubismScene(props: CubismSceneProps) {
   const quietInput = useRef<((input: PerformanceInput) => void) | undefined>(undefined);
   const readyCallbackSent = useRef(false);
   const [mode, setMode] = useState<'loading' | 'cubism' | 'fallback'>('loading');
+  const [attempt, setAttempt] = useState(0);
   const ready = () => { if (!readyCallbackSent.current) { readyCallbackSent.current = true; callbacks.current.onReady?.(); } };
 
   useEffect(() => {
@@ -142,7 +145,8 @@ export default function CubismScene(props: CubismSceneProps) {
       const body = animePoseTransform(pose, { sleeping, reducedMotion: media.matches });
       // Head/eye/body rotation and gaze follow belong to the actual MOC rig.
       // Only rigid lift/approach remain outside it; never apply the same pose twice.
-      surface.style.transform = `translateY(${body.yPercent}%) scale(${body.scale})`;
+      const transform = `translateY(${body.yPercent}%) scale(${body.scale})`;
+      if (surface.style.transform !== transform) surface.style.transform = transform;
       // A stationary pointer can change regions when this canvas moves or
       // resizes. Cancel its old dwell/hold before that stale hotspot reacts.
       unbind.refresh();
@@ -178,10 +182,11 @@ export default function CubismScene(props: CubismSceneProps) {
       document.removeEventListener('visibilitychange', visibility); window.removeEventListener('resize', resize);
       surface.remove();
     };
-  }, [modelUrl, compact, interactive, actionState]);
+  }, [modelUrl, compact, interactive, actionState, attempt]);
 
   useEffect(() => { if (props.performanceInput) quietInput.current?.(props.performanceInput); }, [props.performanceInput]);
-  return <div ref={host} className={`pet-three-scene anime-scene cubism-scene ${className}`} data-character-style={referencePortrait ? 'akari-soft' : undefined}>
-    {mode !== 'cubism' && <AnimeScene {...props} actionState={actionState} className="cubism-fallback" onReady={ready} />}
+  return <div ref={host} className={`pet-three-scene anime-scene cubism-scene ${className}`} data-compact={compact} data-character-style={referencePortrait ? 'akari-soft' : undefined}>
+    {mode === 'loading' ? <AvatarLoading compact={compact}/> : mode === 'fallback' ? <Suspense fallback={<AvatarLoading compact={compact}/>}><AnimeScene {...props} actionState={actionState} className="cubism-fallback" onReady={ready} /></Suspense> : null}
+    {mode === 'fallback' && <button type="button" className="cubism-retry" aria-label="重新加载伙伴动画" onClick={() => setAttempt(value => value + 1)}>恢复动画</button>}
   </div>;
 }
