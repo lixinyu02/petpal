@@ -34,6 +34,17 @@ const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.u
 const now = () => new Date().toISOString();
 const failure = (status, message) => Object.assign(new Error(message), { status });
 
+function hostingPublicOrigin(value) {
+  if (value === '') return '';
+  if (typeof value !== 'string' || value.length > 2048 || !/^https:\/\/[^/?#]+\/?$/i.test(value) || /[\x00-\x20\x7f\\%*]/.test(value)) throw failure(400, 'HTTPS 访问地址须为完整 HTTPS 来源地址。');
+  let url;
+  try { url = new URL(value); } catch { throw failure(400, 'HTTPS 访问地址无效。'); }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/' || url.origin === 'null') {
+    throw failure(400, 'HTTPS 访问地址不能包含路径、凭据或查询参数。');
+  }
+  return url.origin;
+}
+
 function string(value, label, maximum, { optional = false } = {}) {
   if (optional && value === undefined) return undefined;
   if (typeof value !== 'string' || !value.trim() || value.length > maximum) throw failure(400, `${label}不能为空，且不能超过 ${maximum} 个字符。`);
@@ -87,8 +98,18 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const origins = new Set(allowedOrigins.map(value => {
     const url = new URL(value); if (!['http:', 'https:', 'capacitor:'].includes(url.protocol)) throw new Error('允许来源协议无效。'); return url.origin === 'null' ? value.replace(/\/$/, '') : url.origin;
   }));
-  const localHosts = new Set(['localhost', '127.0.0.1', '[::1]', ...Object.values(networkInterfaces()).flat().filter(Boolean).map(item => item.address.includes(':') ? `[${item.address}]` : item.address)]);
+  const localHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
   for (const origin of origins) localHosts.add(new URL(origin).hostname);
+  // Native central listeners share this application without rewriting sockets,
+  // so authentication, login limits and streaming see the original client.
+  const hostingRequests = new WeakMap();
+  const isLocalHost = host => localHosts.has(host) || Object.values(networkInterfaces()).flat().filter(Boolean)
+    .some(item => (item.address.includes(':') ? `[${item.address}]` : item.address) === host);
+  const hostingStatus = () => {
+    const password = state.users.find(user => user.id === state.ownerId && !user.disabled)?.password;
+    return { instanceId: state.instanceId, ownerHasPassword: Boolean(password?.algorithm === 'scrypt'
+      && /^[a-f0-9]{32}$/.test(password.salt) && /^[a-f0-9]{128}$/.test(password.hash)) };
+  };
 
   app.use((req, res, next) => {
     if (shuttingDown) return res.status(503).json({ error: '服务正在退出。' });
@@ -97,11 +118,16 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     res.setHeader('Cache-Control', 'no-store');
     let host;
     try { host = new URL(`http://${req.headers.host}`).hostname; } catch { return res.status(400).json({ error: '无效 Host。' }); }
-    if (!localHosts.has(host)) return res.status(403).json({ error: '此主机名未被允许，请配置服务来源名单。' });
+    const hostingOrigin = hostingRequests.get(req) || '';
+    const localHost = isLocalHost(host);
+    if (!localHost && !(hostingOrigin && req.headers.host?.toLowerCase() === new URL(hostingOrigin).host)) return res.status(403).json({ error: '此主机名未被允许，请配置服务来源名单。' });
     const origin = req.headers.origin;
     if (origin) {
-      const sameOrigin = origin === `${req.socket.encrypted ? 'https' : 'http'}://${req.headers.host}`;
-      if (!sameOrigin && !origins.has(origin)) return res.status(403).json({ error: '此来源未被允许。' });
+      const sameOrigin = localHost && origin === `${req.socket.encrypted ? 'https' : 'http'}://${req.headers.host}`;
+      // The configured HTTPS origin supports a trusted reverse proxy and the
+      // packaged Android frontend. No forwarded header grants origin trust.
+      const hostingAllowed = hostingOrigin && (origin === hostingOrigin || origin === 'https://localhost');
+      if (!sameOrigin && !origins.has(origin) && !hostingAllowed) return res.status(403).json({ error: '此来源未被允许。' });
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
@@ -903,25 +929,84 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const status = error.status ?? (error.type === 'entity.too.large' ? 413 : 500);
     res.status(status).json({ error: status >= 500 ? '服务暂时无法完成请求，请检查后台和数据目录。' : error.type === 'entity.parse.failed' ? '请求 JSON 格式无效。' : error.message });
   });
-  const server = http.createServer(app);
-  server.headersTimeout = 15000;
-  server.requestTimeout = 30000;
+  const listeners = new Set();
+  const hostingPolicies = new WeakMap();
+  const createListener = (network = false, publicUrl = '') => {
+    const policy = { publicUrl };
+    const listener = http.createServer((req, res) => {
+      if (network) {
+        hostingRequests.set(req, policy.publicUrl);
+        if (!hostingStatus().ownerHasPassword) {
+          res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          return res.end(JSON.stringify({ error: '本机管理员尚未设置登录密码，中央服务不可用。' }));
+        }
+        if (!req.url?.startsWith('/') || req.url.startsWith('//')) {
+          res.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          return res.end(JSON.stringify({ error: '中央服务不接受代理请求。' }));
+        }
+        const authorization = req.headers.authorization;
+        if (authorization?.startsWith('Bearer ') && secureEqual(tokenHash(authorization.slice(7)), ownerTokenHash)) {
+          res.writeHead(403, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          return res.end(JSON.stringify({ error: '请使用账号密码登录；本机管理员配对令牌不可用于中央入口。' }));
+        }
+      }
+      app(req, res);
+    });
+    listener.headersTimeout = 15000;
+    listener.requestTimeout = 30000;
+    listener.on('connect', (_req, socket) => socket.destroy());
+    listener.on('upgrade', (_req, socket) => socket.destroy());
+    listeners.add(listener);
+    if (network) hostingPolicies.set(listener, policy);
+    listener.on('listening', () => {
+      if (shuttingDown) { listener.close(); listener.closeAllConnections(); }
+      else listeners.add(listener);
+    });
+    listener.on('close', () => listeners.delete(listener));
+    return listener;
+  };
+  const server = createListener();
+  const hosting = {
+    status: hostingStatus,
+    assertOwnerSession(value) {
+      try { return updates.assertOwnerSession(value); }
+      catch (error) {
+        if (error.status === 403) throw failure(403, '仅本机管理员可管理中央服务。');
+        throw error;
+      }
+    },
+    createListener(options = {}) {
+      if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => key !== 'publicUrl')) throw failure(400, '中央服务监听配置无效。');
+      if (shuttingDown) throw failure(503, '服务正在退出。');
+      if (!hostingStatus().ownerHasPassword) throw failure(409, '请先在账号设置中为本机管理员设置登录密码。');
+      return createListener(true, hostingPublicOrigin(Object.hasOwn(options, 'publicUrl') ? options.publicUrl : ''));
+    },
+    updateListener(listener, options) {
+      const policy = hostingPolicies.get(listener);
+      if (!policy || !options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).length !== 1 || !Object.hasOwn(options, 'publicUrl')) throw failure(400, '中央服务监听配置无效。');
+      if (shuttingDown) throw failure(503, '服务正在退出。');
+      policy.publicUrl = hostingPublicOrigin(options.publicUrl);
+    },
+  };
   let closing;
   const close = () => closing ??= (async () => {
     shuttingDown = true;
-    const httpClosed = server.listening ? new Promise((resolve, reject) => {
-      server.close(error => error ? reject(error) : resolve()); server.closeIdleConnections();
-    }) : Promise.resolve();
+    const closingListeners = [...listeners];
+    const httpClosed = Promise.all(closingListeners.map(listener => listener.listening ? new Promise((resolve, reject) => {
+      listener.close(error => error ? reject(error) : resolve()); listener.closeIdleConnections();
+    }) : Promise.resolve()));
+    // Attach rejection handling now; service shutdown may finish asynchronously.
+    void httpClosed.catch(() => {});
     for (const probe of probes) probe.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     for (const task of active.values()) task.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     if (configSwap) await configSwap.catch(() => {});
     const results = await Promise.allSettled([notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
     let saveError;
     try { await store.queue; } catch (error) { saveError = error; }
-    finally { server.closeAllConnections(); await httpClosed; }
+    finally { for (const listener of closingListeners) listener.closeAllConnections(); await httpClosed; }
     const failed = results.find(result => result.status === 'rejected');
     if (failed) throw failed.reason;
     if (saveError) throw saveError;
   })();
-  return { server, token: accessToken, close, updates };
+  return { server, token: accessToken, close, updates, hosting };
 }

@@ -24,12 +24,12 @@ assert.ok(runtime.portableSmoke.uiReady && runtime.portableSmoke.codex.available
 assert.equal(runtime.portableSmoke.desktopTools.opencli.version, '1.8.8');
 assert.ok(asar.nativeHelperCompared);
 assert.equal(runtime.portableSmoke.executor?.available, true, 'Executor preload facade was not verified by the final portable');
-const requiredExecutionSource = ['desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs'];
+const requiredExecutionSource = ['desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs'];
 for (const file of requiredExecutionSource) {
   const frozen = freeze.find(item => item.path === file), packed = asar.files?.find(item => item.path === file), smoke = runtime.portableSmoke.bundleFiles?.find(item => item.path === file);
-  assert.ok(frozen && packed && smoke, `Executor source must be present in frozen inputs, final EXE readback and native smoke: ${file}`);
-  assert.equal(packed.sha256.toLowerCase(), frozen.sha256.toLowerCase(), `Executor readback differs from frozen source: ${file}`);
-  assert.equal(smoke.sha256.toLowerCase(), packed.sha256.toLowerCase(), `Executor smoke differs from final EXE readback: ${file}`);
+  assert.ok(frozen && packed && smoke, `Runtime source must be present in frozen inputs, final EXE readback and native smoke: ${file}`);
+  assert.equal(packed.sha256.toLowerCase(), frozen.sha256.toLowerCase(), `Runtime readback differs from frozen source: ${file}`);
+  assert.equal(smoke.sha256.toLowerCase(), packed.sha256.toLowerCase(), `Runtime smoke differs from final EXE readback: ${file}`);
 }
 for (const entry of freeze) assert.equal(await hash(entry.path), entry.sha256.toLowerCase(), `Frozen source changed: ${entry.path}`);
 assert.equal(await hash(`${directory}/result.json`), createHash('sha256').update(JSON.stringify(runtime.portableSmoke, null, 2)).digest('hex'), 'Smoke result differs from the runtime receipt');

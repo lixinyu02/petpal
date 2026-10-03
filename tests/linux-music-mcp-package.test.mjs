@@ -14,6 +14,7 @@ import ts from 'typescript';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const run=promisify(execFile);
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+const centralFiles=['desktop/central-server.cjs','desktop/central-server-ipc.cjs','desktop/central-server-smoke.cjs'];
 const vendorFiles=[
   'server/native/music-mcp/netease/server.py',
   'server/native/music-mcp/netease/LICENSE',
@@ -46,7 +47,7 @@ async function requiredOpencliRuntime(){
 
 test('Linux package and independent verifier require the complete pinned music MCP sources',async()=>{
   const packagePolicy=await requiredSource('linux-package.mjs'),verifyPolicy=await requiredSource('linux-verify.mjs');
-  for(const file of [...vendorFiles,'server/music-mcp.mjs','server/music-mcp-routes.mjs','desktop/startup-diagnostics.cjs']){
+  for(const file of [...vendorFiles,...centralFiles,'server/music-mcp.mjs','server/music-mcp-routes.mjs','desktop/startup-diagnostics.cjs']){
     assert.ok(packagePolicy.includes(file),`Builder does not require ${file}`);
     assert.ok(verifyPolicy.includes(file),`Verifier does not require ${file}`);
   }
@@ -104,7 +105,7 @@ test('Linux archive audit rejects every missing or modified music MCP vendor mem
     catch(error){assert.equal(error.code,1,error.stderr);return {code:error.code,...JSON.parse(error.stdout)};}
   }
   const baseline=await verify();assert.equal(baseline.ok,true,baseline.failures.join('\n'));
-  for(const file of [...vendorFiles,'server/native/computer-use/patches/linux-x11-window-geometry.patch','server/opencli-manager.mjs','server/opencli-sites.mjs','server/opencli-worker.mjs','server/opencli-routes.mjs']){
+  for(const file of [...vendorFiles,...centralFiles,'server/native/computer-use/patches/linux-x11-window-geometry.patch','server/opencli-manager.mjs','server/opencli-sites.mjs','server/opencli-worker.mjs','server/opencli-routes.mjs']){
     await t.test(`missing ${file}`,async()=>{
       await rm(path.join(app,file));
       try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Required application source missing: ${file}`));}

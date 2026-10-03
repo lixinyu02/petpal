@@ -389,16 +389,17 @@ async function mainHarness() {
       return require(name);
     },
   });
-  vm.runInContext(`${source}\nglobalThis.harness = {launchPreparedUpdate, queuePortableUpdate, pending: () => pendingUpdate, configure: values => {backend=values.backend; updates=values.updates; verifyDownloadedUpdate=values.verify;}};`, context);
+  vm.runInContext(`${source}\nglobalThis.harness = {launchPreparedUpdate, queuePortableUpdate, pending: () => pendingUpdate, configure: values => {backend=values.backend; updates=values.updates; centralServer=values.central; verifyDownloadedUpdate=values.verify;}};`, context);
   const config = { configured: true, revision: standardRelease.revision, repository: standardRelease.repository };
   const backend = { updates: { statusConfig: () => ({ ...config }) }, close: async () => { calls.push({ action: 'backend-close' }); } };
   const updates = { close: async options => { calls.push({ action: 'updates-close', options }); } };
+  const central = { close: async () => { calls.push({ action: 'central-close' }); } };
   const verify = async () => { calls.push({ action: 'verify' }); };
-  context.harness.configure({ backend, updates, verify });
+  context.harness.configure({ backend, updates, central, verify });
   const controller = new AbortController();
   const prepared = { file: path.join(tmpdir(), 'fixture-never-executed.exe'), directory: tmpdir(), release: { ...standardRelease }, signal: controller.signal,
     authorize: async () => { calls.push({ action: 'authorize' }); } };
-  return { ...context.harness, calls, events, scheduled, config, backend, updates, verify, prepared, controller, exit };
+  return { ...context.harness, calls, events, scheduled, config, backend, updates, central, verify, prepared, controller, exit };
 }
 
 test('final main handoff rechecks source and cancellation after hash/authorization, then launches without inherited portable or smoke overrides', async () => {
@@ -435,10 +436,14 @@ test('canceling a queued portable handoff leaves the application open and allows
   assert.equal(f.pending(), retry); assert.equal(f.calls.filter(call => call.action === 'quit').length, 1);
 });
 
-test('main waits for both shutdowns before portable verification and skips launch on cleanup failure', async () => {
+test('main closes the central listener before backend shutdowns and waits for cleanup before portable verification', async () => {
   for (const fail of [false, true]) {
-    const f = await mainHarness(); let completeBackend;
-    f.backend.close = () => new Promise((resolve, reject) => { completeBackend = () => {
+    const f = await mainHarness(); let completeBackend, completeCentral, markBackendStarted;
+    const backendStarted = new Promise(resolve => { markBackendStarted = resolve; });
+    f.central.close = () => new Promise(resolve => { f.calls.push({ action: 'central-closing' }); completeCentral = () => {
+      f.calls.push({ action: 'central-closed' }); resolve();
+    }; });
+    f.backend.close = () => new Promise((resolve, reject) => { markBackendStarted(); completeBackend = () => {
       f.calls.push({ action: 'backend-closed' });
       if (fail) reject(new Error('test cleanup failure')); else resolve();
     }; });
@@ -446,6 +451,11 @@ test('main waits for both shutdowns before portable verification and skips launc
     let prevented = false;
     f.events.get('before-quit')({ preventDefault: () => { prevented = true; } });
     assert.equal(prevented, true); assert.equal(f.calls.some(call => call.action === 'spawn'), false);
+    assert.equal(completeBackend, undefined, 'Backend must remain available while the extra central listener is closing');
+    assert.equal(f.calls.some(call => ['updates-close', 'verify', 'authorize'].includes(call.action)), false);
+    completeCentral(); await backendStarted;
+    assert.ok(f.calls.findIndex(call => call.action === 'central-closed') < f.calls.findIndex(call => call.action === 'updates-close'));
+    assert.equal(f.calls.some(call => ['verify', 'spawn'].includes(call.action)), false);
     completeBackend();
     assert.equal(await f.exit, fail ? 1 : 0);
     const names = f.calls.map(call => call.action);
@@ -456,4 +466,16 @@ test('main waits for both shutdowns before portable verification and skips launc
       assert.ok(names.indexOf('spawn') < names.indexOf('exit'));
     }
   }
+});
+
+test('central listener cleanup failure still closes the backend and updater but prevents portable handoff', async () => {
+  const f = await mainHarness();
+  f.central.close = async () => { f.calls.push({ action: 'central-failed' }); throw new Error('fixture central cleanup failure'); };
+  f.queuePortableUpdate(f.prepared);
+  f.events.get('before-quit')({ preventDefault() {} });
+  assert.equal(await f.exit, 1);
+  const names = f.calls.map(call => call.action);
+  assert.ok(names.includes('updates-close')); assert.ok(names.includes('backend-close'));
+  assert.equal(names.includes('verify') || names.includes('spawn'), false);
+  assert.ok(names.indexOf('central-failed') < names.indexOf('backend-close'));
 });

@@ -18,6 +18,9 @@ files:
   - desktop/startup-diagnostics.cjs
   - desktop/app-preferences.cjs
   - desktop/app-preferences-ipc.cjs
+  - desktop/central-server.cjs
+  - desktop/central-server-ipc.cjs
+  - desktop/central-server-smoke.cjs
   - desktop/remote-http.cjs
   - desktop/executor.mjs
   - desktop/assets/**

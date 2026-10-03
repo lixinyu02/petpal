@@ -3,6 +3,7 @@ import { restoreTargetConnection } from './auth/connection-targets.mjs';
 import type { DesktopUpdates } from './platform/updates';
 import type { DesktopMusicMcp } from './platform/music-mcp';
 import type { PreferencesBridge } from './platform/app-preferences';
+import type { CentralServerBridge } from './platform/central-server';
 import { createRequestScope, SessionChangedError } from './auth/request-scope.mjs';
 import type { SpeechStreamHandlers } from './avatar/speech-stream.mjs';
 import type { SpeechEmotion } from './avatar/speech-emotion.mjs';
@@ -54,7 +55,7 @@ export type Identity = {instanceId:string;userId:string};
 export type NativeExecutorStatus = {state:'disconnected'|'connecting'|'reconnecting'|'online'|'error';hostId?:string;name:string;platform:string;arch:string;error?:string;retryable?:boolean;retryAt?:number};
 export type NativeExecutor = {connect(input:Connection & Identity):Promise<NativeExecutorStatus>;disconnect():Promise<void>;status():Promise<NativeExecutorStatus>};
 declare global {
-  interface Window { petpal?: { connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; remoteAck?(id:string,sequence:number):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; preferences?:PreferencesBridge; updates?:DesktopUpdates; executor?:NativeExecutor; musicMcp?:DesktopMusicMcp }; }
+  interface Window { petpal?: { connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; remoteAck?(id:string,sequence:number):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; preferences?:PreferencesBridge; centralServer?:CentralServerBridge; updates?:DesktopUpdates; executor?:NativeExecutor; musicMcp?:DesktopMusicMcp }; }
 }
 const requests = createRequestScope();
 const listeners = new Set<()=>void>();

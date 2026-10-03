@@ -96,7 +96,7 @@ for (const absolute of await walk(path.join(root, 'server'))) {
   if (file.startsWith('server/data/') || /(?:^|\/)\.env|\.test\./.test(file)) continue;
   await compare(file, file.startsWith('server/native/'));
 }
-for (const file of ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/remote-http.cjs', 'desktop/updates.mjs', 'desktop/executor.mjs', 'package.json']) await compare(file);
+for (const file of ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs', 'desktop/remote-http.cjs', 'desktop/updates.mjs', 'desktop/executor.mjs', 'package.json']) await compare(file);
 for (const file of ['desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs']) assert.ok(compared.has(file), `Required executor module missing: ${file}`);
 for (const file of ['server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex-config.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1']) assert.ok(compared.has(file), `Required assistant module missing: ${file}`);
 const metadata = JSON.parse(packedBytes('package.json'));

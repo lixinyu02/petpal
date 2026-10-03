@@ -27,7 +27,7 @@ test('desktop release smoke requires a live native Cubism V12 model and rejects 
     const win = { webContents: { executeJavaScript: code => vm.runInNewContext(code, {
       document: { hidden: false, querySelectorAll: () => [canvas], querySelector: selector => selector.startsWith('.cubism-scene') ? native : true },
       performance: { getEntriesByType: () => moc ? [{ name: 'http://localhost/avatars/akari-cubism-v12/akari.moc3' }] : [] },
-      localStorage: { getItem: key => key === 'petpal.displayCompanion' ? JSON.stringify({ version: 2, kind: 'anime', catEnabled: false }) : null },
+      localStorage: { getItem: key => key === 'petpal.displayCompanion' ? JSON.stringify({ version: 3, kind: 'anime', catEnabled: false }) : null },
       getComputedStyle: () => ({ display: 'block', visibility: 'visible' }), URL,
       innerWidth: 400, innerHeight: 600, devicePixelRatio: 1, Date: { now: () => time },
       setTimeout: callback => { time += 26000; callback(); },

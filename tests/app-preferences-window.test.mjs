@@ -83,14 +83,16 @@ test('pet topmost preference applies on creation and immediately after a saved c
 });
 
 test('application quit waits for pending preference rollback before exiting the process', async () => {
-  const f = harness(); let received, finish;
+  const f = harness(); let received, finish, finishCentral;
   const pending = new Promise(resolve => { finish = resolve; });
-  const exits = [], closures = [];
+  const centralPending = new Promise(resolve => { finishCentral = resolve; });
+  const exits = [], closures = [], centralClosures = [];
   f.context.app.on = (event, callback) => { assert.equal(event, 'before-quit'); received = callback; };
   f.context.app.exit = code => exits.push(code);
   f.context.appPreferences.close = () => { closures.push('preferences'); return pending; };
   f.context.executor.close = async () => { closures.push('executor'); };
   f.context.remoteHttp.close = async () => { closures.push('requests'); };
+  f.context.centralServer = { close: async () => { centralClosures.push('start'); await centralPending; centralClosures.push('closed'); } };
   f.context.console = { error() { assert.fail('Unexpected shutdown failure'); } };
   vm.runInContext('let updates, pendingUpdate, backend, exitCode=0; tray={destroy(){}};', f.context);
   const lifecycle = parsed.statements.find(node => ts.isIfStatement(node) && node.expression.getText(parsed).includes('requestSingleInstanceLock'));
@@ -98,7 +100,12 @@ test('application quit waits for pending preference rollback before exiting the 
   assert.ok(registration); vm.runInContext(registration.getText(parsed), f.context);
   let prevented = false;
   received({ preventDefault() { prevented = true; } });
+  assert.equal(prevented, true); assert.deepEqual(centralClosures, ['start']);
+  assert.deepEqual(closures, [], 'The additional network listener must finish closing before backend and preference shutdown');
+  assert.equal(exits.length, 0, 'The process must stay alive until central listener shutdown completes');
+  finishCentral();
   await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(centralClosures, ['start', 'closed']);
   assert.equal(prevented, true); assert.deepEqual(closures.sort(), ['executor','preferences','requests']);
   assert.equal(exits.length, 0, 'OS rollback must finish before process exit');
   finish(); await new Promise(resolve => setImmediate(resolve));

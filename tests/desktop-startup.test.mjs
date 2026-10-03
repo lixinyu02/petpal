@@ -126,6 +126,7 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false, pre
     readDesktopServiceSettings: async () => ({ codexHttpOrigins: '' }),
     createAppPreferences: () => ({ load: async () => {}, current: () => ({ startMinimized: false, showPetOnLaunch: true, closeToTray: true, petAlwaysOnTop: true, ...preferences }) }),
     createAppPreferencesHandlers: () => ({}), verifyPreferencesSessionConnection: async () => ({}),
+    createCentralServer: () => ({ load: async () => {} }), createCentralServerHandlers: () => ({}),
     serverModule: { createPetServer: async () => backendStub },
     executorModuleStub: { DesktopExecutor: class { async disconnect() {} }, createExecutorHandlers: () => ({}), createMusicMcpHandlers: () => ({}), createComputerUseMcpHandlers: () => ({}), createOpenCliHandlers: () => ({}) },
     updaterModuleStub: { DesktopUpdateManager: class {}, createDesktopUpdateHandlers: () => ({}) },
@@ -145,7 +146,7 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false, pre
     .replace("await import(pathToFileURL(path.join(__dirname, 'executor.mjs')).href)", 'executorModuleStub')
     .replace("await import(pathToFileURL(path.join(__dirname, 'updates.mjs')).href)", 'updaterModuleStub');
   vm.runInContext(`let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
-    let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor, appPreferences;
+    let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor, appPreferences, centralServer;
     let startupDiagnostics, startupPhase = 'electron-ready', startupFailed = false;
     const root = ${JSON.stringify(f.root)}, __dirname = ${JSON.stringify(f.root)}, iconPath = 'fixture-icon';
     ${['getStartupDiagnostics', 'startupMilestone', 'handleStartupFailure', 'rendererFailure', 'createMain', 'showPet', 'applyPetWindowPreferences'].map(declaration).join('\n')}

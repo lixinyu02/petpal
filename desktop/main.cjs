@@ -11,11 +11,13 @@ const { mainWindowLayout, petWindowLayout } = require('./window-layout.cjs');
 const { createStartupDiagnostics, startupFailureMessage } = require('./startup-diagnostics.cjs');
 const { createAppPreferences } = require('./app-preferences.cjs');
 const { createAppPreferencesHandlers, verifyPreferencesSessionConnection } = require('./app-preferences-ipc.cjs');
+const { createCentralServer } = require('./central-server.cjs');
+const { createCentralServerHandlers } = require('./central-server-ipc.cjs');
 const { spawn } = require('node:child_process');
 
 let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
 let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor;
-let appPreferences;
+let appPreferences, centralServer;
 let startupDiagnostics, startupPhase = 'electron-ready', startupFailed = false;
 const root = path.resolve(__dirname, '..');
 const iconPath = path.join(__dirname, 'assets', 'icon.png');
@@ -227,7 +229,7 @@ async function inspectAvatarWindow(win, requireWorld, kind, expectedCatEnabled) 
         ? canvas?.dataset.avatarRenderer === 'cubism' && !!cubism && modelLoaded && Number(canvas.dataset.mocVersion) > 0
         : !['mesh2d', 'cubism'].includes(canvas?.dataset.avatarRenderer);
       let display; try { display = JSON.parse(localStorage.getItem('petpal.displayCompanion') || 'null'); } catch {}
-      const displayReady = ${typeof expectedCatEnabled === 'boolean' ? `display?.version === 2 && display.kind === ${JSON.stringify(kind)} && display.catEnabled === ${JSON.stringify(expectedCatEnabled)}` : 'true'};
+      const displayReady = ${typeof expectedCatEnabled === 'boolean' ? `display?.version === 3 && display.kind === ${JSON.stringify(kind)} && display.catEnabled === ${JSON.stringify(expectedCatEnabled)}` : 'true'};
       if (ready && visible && expectedRenderer && displayReady && canvases.length === 1 && canvas.dataset.petCount === '1' && Number(canvas.dataset.renderFrames) >= 2) {
         const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
         if (gl && !gl.isContextLost()) return resolve({
@@ -300,9 +302,9 @@ async function clickSmokeButton(container, label) {
 
 async function inspectSmokeAvatarPair(kind, catEnabled) {
   const [main, pet] = await Promise.all([inspectAvatarWindow(mainWindow, true, kind, catEnabled), inspectAvatarWindow(petWindow, false, kind, catEnabled)]);
-  if ([main, pet].some(value => value.display?.version !== 2 || value.display.kind !== kind || value.display.catEnabled !== catEnabled)) {
+  if ([main, pet].some(value => value.display?.version !== 3 || value.display.kind !== kind || value.display.catEnabled !== catEnabled)) {
     console.log(JSON.stringify({ event: 'desktop-smoke-check', check: 'avatar-display-pair', expected: { kind, catEnabled }, main: main.display, pet: pet.display }));
-    throw new Error('Effective v2 avatar display did not synchronize between desktop windows');
+    throw new Error('Effective v3 avatar display did not synchronize between desktop windows');
   }
   return { main, pet };
 }
@@ -676,7 +678,7 @@ async function boot() {
   backend = await createPetServer({
     dataDir: path.join(app.getPath('userData'), 'data'),
     token: crypto.randomBytes(32).toString('hex'),
-    staticDir: path.join(root, 'dist'),
+    staticDir: process.argv.includes('--smoke-test') && process.env.PETPAL_SMOKE_DIST ? path.resolve(process.env.PETPAL_SMOKE_DIST) : path.join(root, 'dist'),
     allowedOrigins: [],
     workspaceRoot,
     codexHttpOrigins: serviceSettings.codexHttpOrigins,
@@ -684,6 +686,14 @@ async function boot() {
   await startupMilestone('backend-listen');
   const port = await listenDesktopBackend(backend.server);
   origin = `http://127.0.0.1:${port}`;
+  centralServer = createCentralServer({ userData: app.getPath('userData'), hosting: backend.hosting, reservedPorts: [port] });
+  await centralServer.load();
+  for (const [channel, handler] of Object.entries(createCentralServerHandlers(centralServer, {
+    isAllowed: event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting,
+    readConnection: event => event.sender.executeJavaScript(`(() => { try { const value = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); return value && { url: value.url === '' ? location.origin : value.url, token: value.token }; } catch { return null; } })()`),
+    origin,
+    assertOwnerSession: token => backend.hosting.assertOwnerSession(token),
+  }))) ipcMain.handle(channel, handler);
   for (const [channel, handler] of Object.entries(createAppPreferencesHandlers(appPreferences, {
     isAllowed: event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting,
     readConnection: event => event.sender.executeJavaScript(`(() => { try { const value = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); return value && { url: value.url === '' ? location.origin : value.url, token: value.token }; } catch { return null; } })()`),
@@ -746,11 +756,19 @@ async function boot() {
   await startupMilestone('window-create');
   const launchPreferences = appPreferences.current(), smoke = process.argv.includes('--smoke-test');
   createMain(smoke || !launchPreferences.startMinimized);
-  if (smoke || launchPreferences.showPetOnLaunch) showPet();
+  if ((smoke && !process.argv.includes('--smoke-central-server')) || (!smoke && launchPreferences.showPetOnLaunch)) showPet();
   await startupMilestone('window-load');
   await Promise.all([mainLoaded, petLoaded]);
   await startupMilestone('ready');
   if (process.argv.includes('--smoke-test')) {
+    if (process.argv.includes('--smoke-central-server')) {
+      await startupMilestone('smoke-central-server');
+      const centralSmoke = require('./central-server-smoke.cjs');
+      const receipt = await centralSmoke({ backend, centralServer, origin, mainWindow, loginSmokeMain, clickSmokeButton,
+        directory: process.env.PETPAL_SMOKE_DIR, restore: process.env.PETPAL_CENTRAL_SMOKE_RESTORE === '1' });
+      console.log(JSON.stringify({ event: 'central-server-smoke', ...receipt }));
+      app.quit(); return;
+    }
     await startupMilestone('smoke-login');
     const loginGate = await loginSmokeMain();
     const health = await fetch(`${origin}/api/health`).then(r => r.json());
@@ -948,7 +966,7 @@ async function boot() {
       const bytes = await fs.readFile(absolute);
       return [{ path: relative.split(path.sep).join('/'), bytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }];
     };
-    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
+    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
     if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'result.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
     if (!health.ok || !bridge.hasToken || !codex.available || !desktopTools.opencli.available || desktopTools.opencli.version !== '1.8.8') throw new Error('Desktop smoke prerequisite failed');
@@ -968,8 +986,9 @@ else {
     event.preventDefault(); quitting = true;
     tray?.destroy(); tray = null;
     (async () => {
+      const centralOutcome = await Promise.allSettled([centralServer?.close()]);
       const outcomes = await Promise.allSettled([appPreferences?.close(), executor?.close(), remoteHttp?.close(), updates?.close({ preserveHandoff: Boolean(pendingUpdate) }), backend?.close()]);
-      const failed = outcomes.find(outcome => outcome.status === 'rejected');
+      const failed = [...centralOutcome, ...outcomes].find(outcome => outcome.status === 'rejected');
       if (failed) throw failed.reason;
       if (pendingUpdate) await launchPreparedUpdate(pendingUpdate);
     })().catch(error => { console.error('PetPal shutdown/update handoff:', error.message); exitCode = 1; }).finally(() => app.exit(exitCode));

@@ -59,6 +59,16 @@ test('ASR and Agent fixture credentials use the shared exact-file policy without
   assert.ok(reasons(inspect('tests/other.test.mjs',JSON.stringify({token:asrFixture}))).includes('unreviewed literal credential'));
 });
 
+test('central server synthetic fixtures remain scoped to the reviewed test file and value',async()=>{
+  const names=['tests/central-hosting.test.mjs','tests/central-server-integration.test.mjs','tests/central-server-ipc.test.mjs','tests/central-server-settings.test.mjs'];
+  for(const name of names){
+    assert.deepEqual(inspect(name,await readFile(new URL(`../${name}`,import.meta.url))),[],name);
+    assert.ok(reasons(inspect(name,JSON.stringify({token:credential()}))).includes('unreviewed literal credential'));
+  }
+  const fixture=['secret','must','not','be','rendered'].join('-');
+  for(const name of ['tests/other.test.mjs','docs/central-server.md',names[0]])assert.ok(reasons(inspect(name,JSON.stringify({token:fixture}))).includes('unreviewed literal credential'));
+});
+
 test('path restrictions apply case insensitively and source entry metadata remains bounded',()=>{
   for(const name of ['docs/PRIVATE.PEM','docs/auth.JSON','.RELEASE-PRIVATE/key.txt','NODE_MODULES/test.txt','docs/data.SQLITE'])assert.ok(reasons(inspect(name,'not-sensitive')).includes('runtime, credentials, or generated artifact path'));
   assert.ok(reasons(inspect('public/asset.png','relative-target','120000')).includes('non-regular source entry'));

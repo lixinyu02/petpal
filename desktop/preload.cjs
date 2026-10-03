@@ -38,6 +38,12 @@ function preferenceUpdate(patch) {
   return ipcRenderer.invoke('petpal:app-preferences:update', connection, patch);
 }
 
+function centralServerCall(action, ...args) {
+  let connection = null;
+  try { const value = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); if (value) connection = { url: value.url === '' ? location.origin : value.url, token: value.token }; } catch { /* logged out */ }
+  return ipcRenderer.invoke(`petpal:central-server:${action}`, connection, ...args);
+}
+
 contextBridge.exposeInMainWorld('petpal', Object.freeze({
   connection: () => ipcRenderer.invoke('petpal:connection'),
   showPet: () => ipcRenderer.invoke('petpal:show-pet'),
@@ -46,6 +52,10 @@ contextBridge.exposeInMainWorld('petpal', Object.freeze({
   preferences: Object.freeze({
     status: () => ipcRenderer.invoke('petpal:app-preferences:status'),
     update: preferenceUpdate,
+  }),
+  centralServer: Object.freeze({
+    status: () => centralServerCall('status'),
+    update: patch => centralServerCall('update', patch),
   }),
   remoteRequest,
   remoteAbort: id => ipcRenderer.invoke('petpal:remote:abort', id),
