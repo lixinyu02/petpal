@@ -3,36 +3,48 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
+import { renderToPipeableStream, renderToStaticMarkup } from 'react-dom/server';
+import { PassThrough } from 'node:stream';
+import { text as streamText } from 'node:stream/consumers';
 import { markdownSpeechText } from '../src/voice/markdown-speech.mjs';
 import { createSentenceSplitter, createSpeechQueue } from '../src/voice/speech-flow.mjs';
 
 const bundle=await build({entryPoints:[fileURLToPath(new URL('../src/MessageMarkdown.tsx',import.meta.url))],bundle:true,write:false,format:'esm',platform:'node',loader:{'.css':'empty'}});
 const {default:MessageMarkdown,safeMarkdownUrl}=await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
-const render=(content,compact=false)=>renderToStaticMarkup(createElement(MessageMarkdown,{content,compact}));
+const render=async(content,compact=false)=>{
+  const stream=new PassThrough();let renderingError;
+  const renderer=renderToPipeableStream(createElement(MessageMarkdown,{content,compact}),{onAllReady(){renderer.pipe(stream);},onError(error){renderingError=error;}});
+  const html=await streamText(stream);if(renderingError)throw renderingError;return html;
+};
 
-test('replies render common Markdown and GFM semantic elements without showing formatting delimiters',()=>{
-  const html=render('# 标题\n\n二加三等于 **5**，*正确*。\n\n- 第一项\n- 第二项\n\n1. 顺序项\n\n> 引用\n\n`inline`\n\n```js\nconst answer = 5;\n```\n\n| 名称 | 值 |\n| --- | --- |\n| 结果 | 5 |\n\n- [x] 完成',true);
+test('pending Markdown stays readable and escaped inside its own loading boundary',()=>{
+  const html=renderToStaticMarkup(createElement(MessageMarkdown,{content:'<img src="https://tracker.example/pixel" onerror="alert(1)"> **你好**',compact:true}));
+  assert.ok(html.includes('aria-busy="true"'));assert.ok(html.includes('message-markdown-compact'));assert.ok(html.includes('&lt;img'));
+  assert.equal(html.includes('<img'),false);assert.equal(html.includes('<script'),false);assert.ok(html.includes('**你好**'));
+});
+
+test('replies render common Markdown and GFM semantic elements without showing formatting delimiters',async()=>{
+  const html=await render('# 标题\n\n二加三等于 **5**，*正确*。\n\n- 第一项\n- 第二项\n\n1. 顺序项\n\n> 引用\n\n`inline`\n\n```js\nconst answer = 5;\n```\n\n| 名称 | 值 |\n| --- | --- |\n| 结果 | 5 |\n\n- [x] 完成',true);
   for(const fragment of ['<h1>标题</h1>','<strong>5</strong>','<em>正确</em>','<ul>','<ol>','<blockquote>','<code>inline</code>','<pre>','<table>','type="checkbox"','disabled=""','message-markdown-compact'])assert.ok(html.includes(fragment),fragment);
   assert.equal(html.includes('**5**'),false);assert.equal(html.includes('```'),false);
 });
 
-test('unsafe links, raw HTML, scripts, event handlers and tracking images cannot become active content',()=>{
-  const html=render('[危险](javascript:alert%281%29)\n\n[数据](data:text/html;base64,YQ==)\n\n<script>alert("x")</script>\n\n<img src="https://tracker.example/pixel" onerror="alert(1)">\n\n![参考图](https://tracker.example/image.png)\n\n<div onclick="alert(2)">隐藏容器</div>');
+test('unsafe links, raw HTML, scripts, event handlers and tracking images cannot become active content',async()=>{
+  const html=await render('[危险](javascript:alert%281%29)\n\n[数据](data:text/html;base64,YQ==)\n\n<script>alert("x")</script>\n\n<img src="https://tracker.example/pixel" onerror="alert(1)">\n\n![参考图](https://tracker.example/image.png)\n\n<div onclick="alert(2)">隐藏容器</div>');
   for(const forbidden of ['<script','<img','onerror=','onclick=','href="javascript:','href="data:','src=','tracker.example'])assert.equal(html.includes(forbidden),false,forbidden);
   assert.ok(html.includes('图片：参考图'));
   for(const url of ['javascript:alert(1)','JAVASCRIPT:alert(1)','data:text/html,hi','vbscript:msgbox(1)','file:///etc/passwd','intent://open','java\nscript:alert(1)'])assert.equal(safeMarkdownUrl(url),'',url);
 });
 
-test('safe links preserve their labels and open with opener/referrer protection',()=>{
-  const html=render('[查看文档](https://example.com/a?q=1&b=2) 与 [站内](/?chat=1)');
+test('safe links preserve their labels and open with opener/referrer protection',async()=>{
+  const html=await render('[查看文档](https://example.com/a?q=1&b=2) 与 [站内](/?chat=1)');
   assert.ok(html.includes('href="https://example.com/a?q=1&amp;b=2"'));assert.ok(html.includes('target="_blank"'));assert.ok(html.includes('rel="noopener noreferrer"'));assert.ok(html.includes('>查看文档</a>'));
   assert.equal(safeMarkdownUrl('https://example.com'),'https://example.com');
   assert.equal(safeMarkdownUrl('/?chat=1'),'/?chat=1');
 });
 
-test('partial streamed Markdown renders safely until delimiters finish and component is memoized',()=>{
-  for(const content of ['二加三等于 **','二加三等于 **5','二加三等于 **5**。','[链接](https://example','```js\nalert("hi")'])assert.doesNotThrow(()=>render(content));
+test('partial streamed Markdown renders safely until delimiters finish and component is memoized',async()=>{
+  for(const content of ['二加三等于 **','二加三等于 **5','二加三等于 **5**。','[链接](https://example','```js\nalert("hi")'])await assert.doesNotReject(()=>render(content));
   assert.equal(MessageMarkdown.$$typeof,Symbol.for('react.memo'));
 });
 

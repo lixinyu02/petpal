@@ -1,6 +1,8 @@
 import {overlayCompanion} from './preference-store.mjs';
 
 export const COMPANION_DISPLAY_KEY='petpal.displayCompanion';
+// This release resets earlier opt-ins. A current explicit choice remains local.
+export const COMPANION_CAT_VERSION=2;
 export const companionCatStorageKey=scope=>`petpal.companionCatEnabled:${encodeURIComponent(scope||'')}`;
 
 /** Raw shape preferences remain untouched; a separate local opt-in controls use. */
@@ -9,14 +11,14 @@ export function effectiveCompanionKind(kind,enabled=false){
 }
 
 export function companionDisplayRecord(kind,enabled=false){
-  return JSON.stringify({version:2,kind:effectiveCompanionKind(kind,enabled),catEnabled:enabled===true});
+  return JSON.stringify({version:3,kind:effectiveCompanionKind(kind,enabled),catEnabled:enabled===true});
 }
 
 export function readCompanionDisplay(raw){
   try{
     if(typeof raw!=='string'||raw.length>256)return{kind:'anime',catEnabled:false};
     const value=JSON.parse(raw);
-    if(value?.version!==2||typeof value.catEnabled!=='boolean'||!['anime','cat'].includes(value.kind))return{kind:'anime',catEnabled:false};
+    if(value?.version!==3||typeof value.catEnabled!=='boolean'||!['anime','cat'].includes(value.kind))return{kind:'anime',catEnabled:false};
     return{kind:effectiveCompanionKind(value.kind,value.catEnabled),catEnabled:value.catEnabled};
   }catch{return{kind:'anime',catEnabled:false};}
 }
@@ -40,7 +42,7 @@ export function resolveCompanionDisplay({kind='anime',catEnabled=false,search=''
   return effectiveCompanionKind(kind,catEnabled);
 }
 
-/** No legacy-key migration: every account/server scope starts explicitly off. */
+/** Earlier enabled records are reset without altering raw account preferences. */
 export function createCompanionCatCapability({storage,scope=''}={}){
   const key=companionCatStorageKey(scope),listeners=new Set();
   let disposed=false;
@@ -50,7 +52,7 @@ export function createCompanionCatCapability({storage,scope=''}={}){
       const raw=storage?.getItem(key);
       if(!raw)return false;
       if(raw.length>256)return false;
-      try{const value=JSON.parse(raw);return !!value&&!Array.isArray(value)&&value.enabled===true;}
+      try{const value=JSON.parse(raw);return !!value&&!Array.isArray(value)&&value.version===COMPANION_CAT_VERSION&&value.enabled===true;}
       catch{return false;}
     }catch{return undefined;}
   };
@@ -69,7 +71,7 @@ export function createCompanionCatCapability({storage,scope=''}={}){
       if(typeof next!=='boolean')throw new TypeError('Cat capability must be a boolean.');
       if(disposed)return;
       const changed=enabled!==next;enabled=next;
-      try{storage?.setItem(key,JSON.stringify({enabled}));}catch{}
+      try{storage?.setItem(key,JSON.stringify({version:COMPANION_CAT_VERSION,enabled}));}catch{}
       if(changed)notify();
     },
     refresh,

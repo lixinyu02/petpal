@@ -50,9 +50,9 @@ test('account, server and guest capabilities have independent keys with no legac
 test('cross-window refresh accepts only this scope and clears on removal or storage.clear',()=>{
   const storage=disk(),key=companionCatStorageKey('alice');
   const alice=createCompanionCatCapability({storage,scope:'alice'}),bob=createCompanionCatCapability({storage,scope:'bob'});
-  storage.setItem(key,JSON.stringify({enabled:true}));alice.storageChanged(key);bob.storageChanged(key);
+  storage.setItem(key,JSON.stringify({version:2,enabled:true}));alice.storageChanged(key);bob.storageChanged(key);
   assert.equal(alice.snapshot(),true);assert.equal(bob.snapshot(),false);
-  storage.setItem(companionCatStorageKey('bob'),JSON.stringify({enabled:true}));
+  storage.setItem(companionCatStorageKey('bob'),JSON.stringify({version:2,enabled:true}));
   alice.storageChanged(companionCatStorageKey('bob'));assert.equal(alice.snapshot(),true);
   storage.removeItem(key);alice.storageChanged(key);assert.equal(alice.snapshot(),false);
   alice.setEnabled(true);storage.removeItem(key);alice.storageChanged(null);assert.equal(alice.snapshot(),false);
@@ -80,12 +80,23 @@ test('denied storage keeps an explicit choice in memory while disposal blocks ol
 
 test('public display publication is effective and cannot expose an old raw cat when disabled',()=>{
   const record=JSON.parse(companionDisplayRecord('cat',false));
-  assert.deepEqual(record,{version:2,kind:'anime',catEnabled:false});
+  assert.deepEqual(record,{version:3,kind:'anime',catEnabled:false});
   assert.equal(COMPANION_DISPLAY_KEY,'petpal.displayCompanion');
   for(const raw of [undefined,'invalid','null','{"kind":"cat"}','{"version":2,"kind":"cat","catEnabled":"true"}']){
     assert.deepEqual(readCompanionDisplay(raw),{kind:'anime',catEnabled:false});
     assert.equal(resolveCompanionDisplay({floating:true,search:'?pet=1&avatar=cat',displayRaw:raw}),'anime');
   }
+});
+
+test('this release resets old opt-ins and old floating publications until explicitly enabled again',()=>{
+  const storage=disk(),key=companionCatStorageKey('alice');
+  storage.setItem(key,JSON.stringify({enabled:true}));
+  const capability=createCompanionCatCapability({storage,scope:'alice'});
+  assert.equal(capability.snapshot(),false);
+  assert.deepEqual(readCompanionDisplay(JSON.stringify({version:2,kind:'cat',catEnabled:true})),{kind:'anime',catEnabled:false});
+  capability.setEnabled(true);
+  assert.equal(createCompanionCatCapability({storage,scope:'alice'}).snapshot(),true);
+  assert.deepEqual(JSON.parse(storage.getItem(key)),{version:2,enabled:true});
 });
 
 test('floating and ordinary overlay queries follow only a current explicit displayed cat and react to disabling',()=>{

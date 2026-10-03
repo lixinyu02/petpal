@@ -1,5 +1,3 @@
-import DownloadsView from './DownloadsView';
-import ClientBehaviorSettings from './ClientBehaviorSettings';
 import BrandMark from './BrandMark';
 import CompanionOptions from './CompanionOptions';
 import ChatMessages from './ChatMessages';
@@ -18,8 +16,7 @@ import { executionHostLock, readExecutionHost, resolveExecutionHostId, saveExecu
 import { useAttachments, AttachmentInput, AttachmentDrafts, MessageImages } from './Attachments';
 import './workspace.css';
 import { ConnectionDialog } from './auth/LoginGate';
-import UpdatesSettings from './UpdatesSettings';
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { ArrowDown, ArrowRight, ArrowUp, ArrowUpRight, AudioLines, Download, ListOrdered, CornerDownRight, Check, ChevronDown, CircleHelp, Code2, Coffee, Globe2, History, Link2, Loader2, Menu, MessageCircle, Monitor, MoreHorizontal, PawPrint, Pencil, Plug, Plus, RefreshCw, Settings2, ShieldCheck, Sparkles, Square, Sun, Terminal, Trash2, Unplug, UserRound, Volume2, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { PetOverlay as Overlay, showPet } from './platform/overlay';
@@ -36,18 +33,23 @@ import './workspace-density.css';
 import './workspace-room.css';
 import './workspace-smoothness.css';
 import './workspace-polish.css';
-import AccountsSettings from './AccountsSettings';
-import VoiceSettings from './VoiceSettings';
-import DesktopAssistantSettings from './DesktopAssistantSettings';
-import MusicMcpSettings from './MusicMcpSettings';
-import ComputerUseSettings from './ComputerUseSettings';
-import OpenCliSettings from './OpenCliSettings';
 import {createBrowserSetupDraft} from './browser-setup-draft.mjs';
 import {nativeComputerUse} from './platform/computer-use';
 import { nativeMusicMcp } from './platform/music-mcp';
 import { taskNotificationSession } from './platform/task-notification-session';
 import { reasoningEfforts } from './desktop-settings.mjs';
 import { api, getConnection, getIdentity, getSessionEpoch, initConnection, connectWithToken, login, isSessionChanged, SessionChangedError, streamMessage, type AgentHost, type AgentPermissions as Permissions, type AgentSubmission, type Connection, type Conversation, type Message, type NativeExecutorStatus, type Provider, type ReasoningEffort, type State } from './api';
+
+const DownloadsView = lazy(() => import('./DownloadsView'));
+const ClientBehaviorSettings = lazy(() => import('./ClientBehaviorSettings'));
+const UpdatesSettings = lazy(() => import('./UpdatesSettings'));
+const AccountsSettings = lazy(() => import('./AccountsSettings'));
+const VoiceSettings = lazy(() => import('./VoiceSettings'));
+const DesktopAssistantSettings = lazy(() => import('./DesktopAssistantSettings'));
+const MusicMcpSettings = lazy(() => import('./MusicMcpSettings'));
+const ComputerUseSettings = lazy(() => import('./ComputerUseSettings'));
+const OpenCliSettings = lazy(() => import('./OpenCliSettings'));
+const settingsLoading = <div className="loading-view" role="status"><Loader2 className="spin" aria-hidden="true"/>正在打开设置…</div>;
 
 const emptyState: State = { settings: { petName: '小伴', companionKind: 'anime', persona: '你是用户温柔、机灵的个人 AI 伙伴。用自然简洁的中文回应，认真倾听；不知道的事情坦诚说明。' }, providers: [], conversations: [], codex: {} };
 type Approval = { id: string; kind: string; description: string };
@@ -517,7 +519,7 @@ export default function App() {
 
     <main className="main-area">
       <header className="topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileNav(true)}><Menu size={21} aria-hidden="true"/></button><span className="breadcrumb">我的空间</span><span className="breadcrumb-divider">/</span><strong>{view === 'settings' ? '连接与设置' : view==='downloads'?'下载客户端':currentMode === 'codex' ? 'Agent · 执行任务' : 'Chat · 聊天'}</strong></div><div className="topbar-actions">{view === 'chat' && <button type="button" className="companion-panel-toggle" aria-label={companionPanelOpen ? '收起伙伴栏' : '展开伙伴栏'} aria-expanded={companionPanelOpen} aria-controls="workspace-companion-panel" onClick={() => setCompanionPanelOpen(value => !value)}><PawPrint size={16} aria-hidden="true"/><span>{companionPanelOpen ? '收起伙伴' : '伙伴'}</span></button>}<span className="today">{todayLabel}</span><button className="avatar account-entry" aria-label="我的账号" onClick={() => { stopPresentation(); setSettingsTab('accounts'); setView('settings'); }}>{state.user?.displayName?.slice(0,1) || '我'}</button><a className="single-companion-return" href="/" aria-label="回到伙伴身边"><PawPrint size={20} aria-hidden="true"/></a></div></header>
-      {!ready ? <div className="loading-view"><Loader2 className="spin" aria-hidden="true"/>正在准备你的小伴…</div> : view==='downloads'?<DownloadsView/>:view === 'settings' ? <SettingsView state={state} connected={connected} refresh={refresh} notice={setNotice} connect={() => setConnectionOpen(true)} initialTab={settingsTab} hasDraft={!!draft.trim()||!!attachments.items.length||working} onDownload={()=>setView('downloads')} onPrepareBrowser={prepareBrowser} prepareBrowserDisabled={working||hostBusy||hostsLoading||!state.user?.canUseCodex||!!draft.trim()||!!attachments.items.length||!!unconfirmed}/> : <div className={`workspace${companionPanelOpen ? ' workspace-companion-visible' : ''}`}>
+      {!ready ? <div className="loading-view"><Loader2 className="spin" aria-hidden="true"/>正在准备你的小伴…</div> : view==='downloads'?<Suspense fallback={<div className="loading-view" role="status"><Loader2 className="spin" aria-hidden="true"/>正在打开下载页面…</div>}><DownloadsView/></Suspense>:view === 'settings' ? <SettingsView state={state} connected={connected} refresh={refresh} notice={setNotice} connect={() => setConnectionOpen(true)} initialTab={settingsTab} hasDraft={!!draft.trim()||!!attachments.items.length||working} onDownload={()=>setView('downloads')} onPrepareBrowser={prepareBrowser} prepareBrowserDisabled={working||hostBusy||hostsLoading||!state.user?.canUseCodex||!!draft.trim()||!!attachments.items.length||!!unconfirmed}/> : <div className={`workspace${companionPanelOpen ? ' workspace-companion-visible' : ''}`}>
         <section className="chat-area">
           <div className={`workspace-controls is-${currentMode==='chat'?'chat':'agent'}`}>
             <div className="workspace-mode-row">
@@ -586,6 +588,7 @@ function SettingsView({ state, connected, refresh, notice, connect, initialTab, 
   async function savePet(e: FormEvent) { e.preventDefault(); setBusy(true); setError(''); try { await api('/settings', { method: 'PATCH', body: JSON.stringify({ petName, persona }) }); await refresh(); notice('小伴的设置已保存'); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } }
   async function overlay() { setError(''); try { const result = await Overlay.status(); if (!result.permission) { await Overlay.requestPermission(); notice('请允许悬浮窗权限，返回后再次点击开启。'); } else if (result.running) { await Overlay.stop(); setOverlayRunning(false); notice('悬浮伙伴已收起'); } else { await showPet({ companionKind: readCompanion() }); setOverlayRunning(true); notice('悬浮伙伴已开启'); } } catch (e) { setError((e as Error).message); } }
   return <div className="settings-page"><div className="settings-heading"><span className="eyebrow">MAKE IT YOURS</span><h1>让小伴，更懂你。</h1><p>连接你喜欢的模型，设定属于你们的相处方式。</p></div><div className="settings-tabs" role="tablist"><button role="tab" aria-selected={tab === 'models'} className={tab === 'models' ? 'active' : ''} onClick={() => setTab('models')}><Plug size={18} aria-hidden="true"/>模型连接</button><button role="tab" aria-selected={tab === 'pet'} className={tab === 'pet' ? 'active' : ''} onClick={() => setTab('pet')}><PawPrint size={18} aria-hidden="true"/>小伴个性</button><button role="tab" aria-selected={tab === 'desktop'} className={tab === 'desktop' ? 'active' : ''} onClick={() => setTab('desktop')}><Monitor size={18} aria-hidden="true"/>设备连接</button>{canManageMusicMcp && <button role="tab" aria-selected={tab === 'assistant'} className={tab === 'assistant' ? 'active' : ''} onClick={() => setTab('assistant')}><Terminal size={18} aria-hidden="true"/>电脑助手</button>}<button role="tab" aria-selected={tab === 'voice'} className={tab === 'voice' ? 'active' : ''} onClick={()=>setTab('voice')}><AudioLines size={18} aria-hidden="true"/>语音与设备</button><button role="tab" aria-selected={tab === 'accounts'} className={tab === 'accounts' ? 'active' : ''} onClick={()=>setTab('accounts')}><UserRound size={18} aria-hidden="true"/>账号</button><button role="tab" aria-selected={tab === 'updates'} className={tab === 'updates' ? 'active' : ''} onClick={()=>setTab('updates')}><RefreshCw size={18} aria-hidden="true"/>软件更新</button></div>{error && <div className="error-banner" role="alert"><span>{error}</span><button className="icon-button" aria-label="关闭设置错误" onClick={() => setError('')}><X size={15} aria-hidden="true"/></button></div>}{!connected && <div className="setup-notice"><Unplug size={19} aria-hidden="true"/><span>先连接个人服务，才能保存设置。</span><button className="secondary-button" onClick={connect}>连接服务</button></div>}
+    <Suspense key={tab} fallback={settingsLoading}>
     {tab === 'updates' && <UpdatesSettings connected={connected} user={state.user} hasDraft={hasDraft}/>}
     {tab === 'assistant' && state.user?.isOwner && <DesktopAssistantSettings connected={connected} user={state.user} onConfigSaved={refresh}/>}
     {tab === 'assistant' && canManageMusicMcp && <div className="settings-section desktop-assistant"><MusicMcpSettings connected={connected} user={state.user}/><ComputerUseSettings connected={connected} user={state.user}/><OpenCliSettings connected={connected} user={state.user} onPrepareBrowser={onPrepareBrowser} prepareBrowserDisabled={prepareBrowserDisabled}/></div>}
@@ -599,6 +602,7 @@ function SettingsView({ state, connected, refresh, notice, connect, initialTab, 
       {state.user?.isOwner && <div className="device-row"><div><h3>Codex 与音乐控制</h3><p>在电脑助手中配置 Responses API、检测播放器，并连接 OpenCLI 浏览器工具。</p></div><button className="secondary-button" onClick={()=>setTab('assistant')}><Terminal size={15} aria-hidden="true"/>电脑助手设置</button></div>}
       <div className="about-app"><PawPrint size={20} aria-hidden="true"/><strong>小伴 PetPal</strong><span>Web / Android / Windows / Ubuntu</span></div>
     </div><ClientBehaviorSettings connected={connected} onDownload={onDownload}/></>}
+    </Suspense>
     {editing && <div className="modal-backdrop"><section className="modal provider-modal" role="dialog" aria-modal="true" aria-labelledby="provider-title"><div className="modal-heading"><h2 id="provider-title">{editing.id ? '编辑模型连接' : '添加模型连接'}</h2><button className="icon-button" aria-label="关闭模型窗口" onClick={() => setEditing(null)}><X size={20} aria-hidden="true"/></button></div><form onSubmit={saveProvider}><label>连接名称<input autoFocus required maxLength={80} placeholder="例如：我的 OpenAI" value={editing.name || ''} onChange={e => setEditing({ ...editing, name: e.target.value })}/></label><label>接口协议<select value={editing.protocol} onChange={e => setEditing({ ...editing, protocol: e.target.value as Provider['protocol'] })}><option value="responses">Responses</option><option value="chat-completions">Chat Completions</option></select></label><label>API 地址<input required type="url" placeholder="https://api.openai.com/v1" value={editing.baseUrl || ''} onChange={e => setEditing({ ...editing, baseUrl: e.target.value })}/></label><label>模型名称<input required placeholder="填写服务商提供的模型 ID" value={editing.model || ''} onChange={e => setEditing({ ...editing, model: e.target.value })}/></label><label>推理强度<select aria-label="模型推理强度" value={editing.reasoningEffort ?? ''} onChange={e=>setEditing({...editing,reasoningEffort:e.target.value as ReasoningEffort})}>{reasoningEfforts.map(effort=><option key={effort} value={effort}>{effort || '服务默认'}</option>)}</select></label><label>API Key<input type="password" autoComplete="off" placeholder={editing.hasApiKey ? '已保存，留空则保留' : '输入密钥；无需认证的本地模型可留空'} value={editing.apiKey || ''} onChange={e => setEditing({ ...editing, apiKey: e.target.value })}/></label><p className="field-help">{editing.protocol === 'responses' ? '将请求 /responses，支持文本增量流。' : '将请求 /chat/completions，兼容本地与第三方模型。'}</p>{error && <div className="form-error" role="alert">{error}</div>}<button className="primary-button full-button" disabled={busy}>{busy ? <Loader2 className="spin" size={16} aria-hidden="true"/> : <Check size={16} aria-hidden="true"/>}保存连接</button></form></section></div>}
     {removeId && <div className="modal-backdrop"><section className="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="remove-provider-title"><h2 id="remove-provider-title">删除这个模型连接？</h2><p>依赖此连接的对话将无法继续发送消息。</p><div className="button-row"><button className="secondary-button" onClick={() => setRemoveId(null)}>取消</button><button className="danger-button" onClick={deleteProvider}>删除连接</button></div></section></div>}
   </div>;

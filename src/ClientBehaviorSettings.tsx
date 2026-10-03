@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import { Download, Loader2, RefreshCw, Settings2 } from 'lucide-react';
 import { getIdentity, getSessionEpoch, subscribeSession } from './api';
 import TaskNotificationsSettings from './TaskNotificationsSettings';
+import ThemeSettings from './ThemeSettings';
 import { supportsTaskNotifications } from './platform/task-notifications';
 import { readAppPreferencesStatus, type AppPreferences, type AppPreferencesStatus, type PreferencesBridge } from './platform/app-preferences';
 import './client-behavior-settings.css';
@@ -104,6 +105,7 @@ export default function ClientBehaviorSettings({ connected, onDownload }: Props)
   }
 
   return <>
+    <ThemeSettings connected={connected} />
     <section className="settings-section client-behavior-settings" aria-label="启动与窗口" aria-busy={!!busy}>
       <div className="section-title"><div><h2>启动与窗口</h2><p>{android ? '检查这部手机的自启动与后台提醒。' : desktop ? '设置只应用于这台电脑。' : '系统自启与独立桌宠窗口需要桌面客户端。'}</p></div><Settings2 size={22} aria-hidden="true" /></div>
       {!connected ? <p className="client-behavior-note">登录后可以管理本设备的启动与窗口设置。</p> : android ? <p className="client-behavior-note">手机的自启动和省电限制由系统管理，可在下方“后台任务提醒”中打开对应设置。手机重启后仍需打开小伴并检查提醒状态。</p> : !desktop ? <>

@@ -4,8 +4,8 @@ import type { DesktopUpdates } from './platform/updates';
 import type { DesktopMusicMcp } from './platform/music-mcp';
 import type { PreferencesBridge } from './platform/app-preferences';
 import { createRequestScope, SessionChangedError } from './auth/request-scope.mjs';
-import { readSpeechStream, type SpeechStreamHandlers } from './avatar/speech-stream.mjs';
-import { normalizeSpeechEmotion, type SpeechEmotion } from './avatar/speech-emotion.mjs';
+import type { SpeechStreamHandlers } from './avatar/speech-stream.mjs';
+import type { SpeechEmotion } from './avatar/speech-emotion.mjs';
 export { SessionChangedError };
 export type AgentAccess = 'none'|'workspace'|'full';
 export type AgentPermissions = { access:'read-only'|'workspace-write'|'full-access'; approval:'ask'|'auto'|'review' };
@@ -14,6 +14,13 @@ export type ManagedUser = User & { disabled:boolean; providerIds:string[]; hasPa
 export type ReasoningEffort = '' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 export type Provider = { id: string; name: string; protocol: 'chat-completions' | 'responses'; baseUrl: string; model: string; reasoningEffort?:ReasoningEffort; hasApiKey: boolean; editable?:boolean; testable?:boolean; supportsImages?:boolean };
 export type Attachment = {id:string;mimeType:string;name:string;size:number;width:number;height:number};
+export type DownloadPackage = {
+  id:string;platform:'android'|'windows'|'ubuntu';arch:'universal'|'x64'|'arm64';version:string;channel:'stable'|'preview';
+  format:'apk'|'portable-exe'|'portable-zip'|'tar.gz'|'appimage'|'deb';filename:string;url:string;releaseUrl:string;
+  bytes:number;publishedAt:string;sha256?:string;debug:boolean;source?:'server'|'github';fallbackUrl?:string;
+};
+export type DownloadsCatalog = {repository:string;releasesUrl:string;checkedAt:string|null;stale:boolean;error:string|null;
+  retryAt:string|null;packages:DownloadPackage[];latestVersion?:string|null;source?:'server'|'github'|'mixed'|'none';notices?:string[]};
 export type Message = { id: string; role: 'user' | 'assistant'; content: string; model?: string; status?: string; createdAt?: string; attachments?:Attachment[]; steered?:boolean };
 export type AgentQueueEntry = { id:string; submissionId:string; revision:number; content:string; attachmentIds:string[]; permissions:AgentPermissions; providerId:string|null; model:string; effort:string; createdAt:string;hostId?:string;hostName?:string;projectDirectory?:string };
 export type AgentRun = { id:string; submissionId:string; status:'running'|'stopping'|'completed'|'cancelled'|'error'|'unknown'; turnId:string|null; permissions:AgentPermissions; providerId:string|null; model:string; effort:string; startedAt:string; finishedAt?:string; error?:string;hostId?:string;hostName?:string;projectDirectory?:string };
@@ -175,7 +182,7 @@ export async function apiSpeechAudio(text:string, signal:AbortSignal):Promise<{b
     if(!response.ok){await responseJson(response,request);throw new Error('音频请求失败。');}
     const fields=['x-petpal-speech-emotion','x-petpal-speech-intensity','x-petpal-speech-source'].map(name=>response.headers.get(name));
     let emotion:SpeechEmotion|null;
-    try { emotion=normalizeSpeechEmotion(fields.every(value=>value===null)?null:{emotion:fields[0],intensity:fields[1],source:fields[2]}); }
+    try { const {normalizeSpeechEmotion}=await import('./avatar/speech-emotion.mjs');request.assertCurrent();emotion=normalizeSpeechEmotion(fields.every(value=>value===null)?null:{emotion:fields[0],intensity:fields[1],source:fields[2]}); }
     catch(error){void response.body?.cancel().catch(()=>{});throw error;}
     const blob=await response.blob();request.assertCurrent();return {blob,emotion};
   }finally{request.close();}
@@ -185,6 +192,7 @@ export async function apiSpeechStream(text:string, signal:AbortSignal, handlers:
   const request=requests.begin(signal);
   try {
     request.assertCurrent();
+    const {readSpeechStream}=await import('./avatar/speech-stream.mjs');request.assertCurrent();
     const response=await connectionFetch(`${request.connection.url}/api/voice/synthesize/stream`,{
       method:'POST',headers:{'Content-Type':'application/json',Accept:'application/x-petpal-speech-v2+ndjson',Authorization:`Bearer ${request.connection.token}`},
       body:JSON.stringify({text}),signal:request.signal,

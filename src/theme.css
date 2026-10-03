@@ -1,0 +1,78 @@
+/* Local day/night appearance. Character textures and canvases keep their original colors. */
+:root{--theme-surface:#fafbf8;--theme-raised:#fcfdf9;--theme-soft:#f1f4ec;--theme-ink:#30433b;--theme-muted:#778776;--theme-border:#dde5d7}
+html[data-theme="night"]{color-scheme:dark;--theme-surface:#181d1b;--theme-raised:#222a25;--theme-soft:#2b352e;--theme-ink:#e0e7e1;--theme-muted:#a9b8ae;--theme-border:#3b4940;--green:#a0ccb1;--muted:#a9b8ae;--line:#36433b;--soft:#28332c;--cream:#222a25;color:var(--theme-ink);background:var(--theme-surface)}
+html[data-theme="day"]{color-scheme:light}
+.theme-settings{margin-top:28px;min-width:0}
+.theme-settings .section-title{margin-bottom:16px}
+.theme-settings .section-title>svg{color:var(--theme-muted);flex-shrink:0}
+.theme-settings .section-title p{line-height:1.8}
+.theme-choices{border:0;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;min-width:0;max-width:440px}
+.theme-choice{position:relative;display:block;min-width:0;cursor:pointer}
+.theme-choice input{position:absolute;inset:0;width:100%;height:100%;padding:0;margin:0;opacity:0;z-index:1;cursor:pointer}
+.theme-choice>span{display:flex;align-items:center;justify-content:center;gap:8px;min-height:46px;padding:9px 10px;border:1px solid var(--theme-border);border-radius:9px;background:var(--theme-raised);color:var(--theme-muted);font-size:12px;transition:background .15s,border-color .15s,color .15s}
+.theme-choice input:checked+span{background:var(--theme-soft);border-color:#779675;color:var(--green);font-weight:600}
+.theme-choice input:focus-visible+span{outline:2px solid #7ea38a;outline-offset:3px}
+.theme-choice input:disabled,.theme-choices:disabled .theme-choice{cursor:default}
+.theme-choices:disabled .theme-choice>span{opacity:.55}
+.theme-help,.theme-current{color:var(--theme-muted);font-size:11px;line-height:1.9;margin:12px 0 0;overflow-wrap:anywhere}
+.theme-current{margin-top:4px}
+.theme-visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* Legacy feature sheets still use fixed daylight colors; these scoped color overrides
+   also cover sheets loaded after the entry point, without changing their layout. */
+html[data-theme="night"] :is(.app-shell,.main-area,.chat-area,.settings-page,.login-page,.downloads-view,.companion-world){background:var(--theme-surface)!important;color:var(--theme-ink)!important}
+html[data-theme="night"] :is(.sidebar,.topbar,.pet-panel){background:#1f2722!important;border-color:var(--line)!important}
+html[data-theme="night"] :is(.composer,.modal,.workspace-model-popup,.workspace-disclosure-content,.chat-assistant-dialog,.task-notification-settings,.computer-use-settings,.music-mcp-source,.opencli-site-list,.pet-render-error){background:var(--theme-raised)!important;border-color:var(--theme-border)!important;color:var(--theme-ink)!important;box-shadow:0 10px 32px #0003}
+html[data-theme="night"] :is(.settings-page,.modal,.login-page,.downloads-view,.chat-assistant-dialog,.workspace-model-popup,.workspace-disclosure-content) :is(h1,h2,h3,h4,strong,legend,label),
+html[data-theme="night"] :is(.app-shell,.companion-world) :is(h1,h2,h3,h4){color:var(--theme-ink)!important}
+html[data-theme="night"] :is(.settings-page,.modal,.login-page,.downloads-view,.chat-assistant-dialog,.workspace-disclosure-content) :is(p,small,dt),
+html[data-theme="night"] :is(.section-title p,.field-help,.brand-en,.history-heading,.history-empty,.host-status small,.host-status>svg,.breadcrumb,.breadcrumb-divider,.today,.mode-label,.workspace-mode-note,.welcome>p,.welcome .eyebrow,.composer-hint,.composer-footnote,.pet-name>span,.quiet-note p,.platform-note,.about-app,.about-app span,.muted,.stream-status,.message-author>span,.pet-interaction-hint,.voice-caption,.voice-caption-author,.voice-caption-empty,.voice-caption-user,.voice-conversation-model,.companion-hint,.interaction-help,.companion-presence,.companion-footer,.companion-brand small,.companion-controls small,.companion-world .companion-hint,.companion-world .companion-footer,.companion-world .companion-presence){color:var(--theme-muted)!important}
+html[data-theme="night"] :is(.brand,.topbar-title strong,.companion-brand,.companion-reply,.pet-name h2,.pet-panel-heading,.pet-speech,.message-text,.message-author,.message-markdown,.companion-voice-panel,.voice-caption-reply,.client-behavior-copy strong,.workspace-target-label,.workspace-model-option,.workspace-host-option,.workspace-host-current>strong,.workspace-host-menu-heading>h3,.workspace-host-guide>strong,.chat-assistant-trigger-copy>strong,.assistant-task-label,.assistant-player h4,.account-identity strong,.account-row strong,.task-phone-label,.task-phone-paths strong){color:var(--theme-ink)!important}
+html[data-theme="night"] :is(.workspace-model-current small,.workspace-model-id,.workspace-model-meta,.workspace-model-meta>span,.workspace-model-empty,.workspace-model-footer,.workspace-target-host,.workspace-target-hint,.workspace-host-control label>span,.workspace-host-current>small,.workspace-host-group>h4,.workspace-host-group>h4>span,.workspace-host-option-copy>span,.workspace-host-option-copy>small,.workspace-host-empty,.workspace-host-menu-footnote,.workspace-host-guide>p,.chat-assistant-trigger-copy>small,.chat-assistant-trigger-state,.chat-assistant-options label>span,.chat-assistant-note,.chat-assistant-tasks,.chat-assistant-task-details>summary,.chat-assistant-task-details strong,.chat-assistant-default>small,.assistant-state,.assistant-unavailable,.assistant-bridge-status dt,.assistant-player p,.assistant-section-heading p,.client-behavior-copy small,.client-behavior-groups legend,.client-behavior-footer>span,.client-behavior-note,.client-behavior-state,.task-phone-paths span,.task-notification-settings summary small,.task-reliability-settings summary small,.downloads-eyebrow,.downloads-heading p,.downloads-platform p,.downloads-install,.downloads-file,.downloads-checksum,.downloads-footer,.download-source,.voice-conversation-captions p>span,.voice-conversation-captions .voice-caption-user,.voice-conversation-captions .voice-caption-empty,.agent-permission-note,.agent-queue-heading,.agent-queue-content small,.agent-queue-index,.opencli-status-line,.opencli-unsaved,.opencli-result-count,.opencli-notebook-description,.opencli-site summary small,.opencli-command-list small,.music-mcp-state,.music-mcp-source-title>span){color:var(--theme-muted)!important}
+html[data-theme="night"] :is(.new-chat,.secondary-button,.desktop-pet-button,.companion-controls,.companion-response-row button,.companion-voice-entry,.workspace-model-trigger,.workspace-host-control,.workspace-host-picker>summary,.workspace-host-search,.workspace-target-segments,.agent-onboarding-configure,.workspace-host-guide>button,.assistant-task-approval button,.chat-assistant-default>button,.agent-execution-unknown button){background:var(--theme-raised)!important;border-color:var(--theme-border)!important;color:#b8d6c2!important;box-shadow:none}
+html[data-theme="night"] :is(.new-chat,.secondary-button,.desktop-pet-button,.workspace-model-trigger,.workspace-host-picker>summary,.agent-onboarding-configure,.workspace-host-guide>button):hover:not(:disabled),
+html[data-theme="night"] :is(.main-nav button,.settings-link,.history-row,.icon-button,.workspace-disclosure>summary,.workspace-host-option,.workspace-host-refresh,.workspace-model-close,.chat-assistant-trigger,.chat-assistant-dialog-heading>button,.agent-queue-actions button,.companion-controls button):hover{background:var(--theme-soft)!important;color:#c0e0cb!important}
+html[data-theme="night"] :is(.main-nav button.active,.settings-link.active,.history-row.selected,.workspace-model-option.is-selected,.workspace-model-option.is-focused,.workspace-host-option.is-selected,.workspace-target-segments>button[aria-pressed="true"],.companion-switch button[aria-pressed="true"]){background:#344a3c!important;color:#d6e8da!important}
+html[data-theme="night"] :is(.main-nav>button,.settings-link,.history-item,.settings-tabs>button,.workspace-disclosure,.workspace-disclosure>summary,.chat-assistant-trigger,.chat-assistant-task-latest>button,.companion-footer>a,.companion-footer>button,.companion-settings,.companion-codex,.single-companion-return,.copy-message,.message-read,.attach-image,.attachment-remove,.speech-controls button,.speech-toggle,.motion-preview-link,.task-notification-settings summary,.music-mcp-source>summary,.music-mcp-runtime>summary,.music-mcp-tools>summary,.opencli-catalog>summary,.opencli-browser>summary,.opencli-notebook>summary,.opencli-site>summary){color:#b7cabc!important}
+html[data-theme="night"] :is(.mode-switch,.companion-switch,.message-user .message-text,.message-avatar,.avatar,.dialog-icon,.empty-models,.pet-settings-preview,.device-badge,.nav-tag,.setup-notice,.assistant-runtime,.voice-runtime-note,.voice-preparing,.task-settings-notice,.workspace-host-server-note,.opencli-state,.opencli-command-names code,.protocol-labels code){background:var(--theme-soft)!important;border-color:var(--theme-border)!important;color:#c4d6c8!important}
+html[data-theme="night"] :is(.mode-switch button,.companion-switch button){color:var(--theme-muted)!important}
+html[data-theme="night"] :is(.mode-switch button[aria-pressed="true"],.auth-modes button.active){background:#344a3c!important;color:#d6e8da!important;border-color:#718c78!important;box-shadow:none}
+html[data-theme="night"] :is(.primary-button,.send-button,.companion-chat,.voice-conversation-actions .voice-primary){background:#3c7158!important;color:#f4f8f3!important;border-color:#59866d!important}
+html[data-theme="night"] :is(.primary-button,.send-button,.companion-chat,.voice-conversation-actions .voice-primary):hover:not(:disabled){background:#487e63!important;color:#fff!important}
+html[data-theme="night"] :is(.danger-button,.composer .stop-button){background:#794e3d!important;color:#ffebdf!important}
+html[data-theme="night"] :is(.pet-speech,.companion-reply,.suggestions>button){background:transparent!important}
+html[data-theme="night"] :is(.suggestions>button,.suggestions>button>svg,.suggestion-arrow){color:#b1c6b6!important;border-color:var(--theme-border)!important}
+html[data-theme="night"] :is(.settings-page,.modal,.login-page,.downloads-view,.chat-assistant-dialog,.workspace-disclosure-content,.workspace-model-popup,.composer,.agent-queue,.companion-voice-panel) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),textarea,select){color:var(--theme-ink)!important;background:#202923!important;border-color:#48574d!important}
+html[data-theme="night"] :is(.workspace-model-search,.workspace-host-search) input{background:transparent!important}
+html[data-theme="night"] :is(input,textarea)::placeholder{color:#a1afa5!important;opacity:1}
+html[data-theme="night"] :is(input[type="checkbox"],input[type="radio"],meter,progress){accent-color:#88b69c}
+html[data-theme="night"] :is(button,a,input,textarea,select,summary):focus-visible{outline-color:#a2c9b1!important}
+html[data-theme="night"] :is(.settings-tabs,.provider-row,.device-row,.account-row,.account-identity,.account-grants,.assistant-section,.assistant-player,.voice-config-block,.cosyvoice-section,.media-devices-section,.media-device-row,.asr-settings,.agent-queue,.agent-queue li,.agent-onboarding,.chat-assistant-tasks,.chat-assistant-task-entry,.chat-assistant-dialog-heading,.chat-assistant-enable,.client-behavior-row,.task-notification-body,.task-reliability-settings,.downloads-list,.downloads-row,.music-mcp-tools,.music-mcp-tools li,.opencli-catalog,.opencli-browser,.opencli-notebook,.opencli-site,.opencli-notebook-list>li,.opencli-command-list>li,.opencli-browser-steps>li,.workspace-host-guide,.workspace-model-search,.workspace-model-footer,.voice-conversation-toolbar,.host-status,.quiet-note){border-color:var(--line)!important}
+html[data-theme="night"] :is(.message-markdown p,.message-markdown li,.message-markdown h1,.message-markdown h2,.message-markdown h3,.message-markdown h4,.message-markdown th,.message-markdown td){color:var(--theme-ink)!important}
+html[data-theme="night"] .message-markdown :is(code,pre,th){background:#26332b!important;color:#d8e7dc!important;border-color:var(--theme-border)!important}
+html[data-theme="night"] .message-markdown pre code{background:transparent!important}
+html[data-theme="night"] .message-markdown :is(td,th,hr,blockquote){border-color:#506253!important}
+html[data-theme="night"] .message-markdown blockquote{color:var(--theme-muted)!important}
+html[data-theme="night"] :is(.message-markdown a,.assistant-links a,.music-mcp-origin,.music-mcp-tools code,.music-mcp-login code,.opencli-browser-steps a,.account-entry,.assistant-task-actions,.speech-controls button,.single-companion-return:hover,.inline-connect,.settings-tabs>button.active){color:#a9d6b9!important}
+html[data-theme="night"] :is(.form-error,.error-banner,.login-retry,.agent-execution-unknown){background:#352a23!important;border-color:#755747!important;color:#eac3a8!important}
+html[data-theme="night"] :is(.form-error,.error-banner,.login-retry,.agent-execution-unknown) :is(p,span,strong,small){color:#eac3a8!important}
+html[data-theme="night"] :is(.message-error,.agent-queue-error,.agent-permission-notice,.workspace-target-error,.workspace-host-lock,.chat-assistant-note.is-error,.assistant-task-state.is-error,.assistant-task-state.is-unknown,.assistant-task-approval,.assistant-task-approval-jump,.voice-conversation-error,.execution-reconnect){color:#e4b79a!important}
+html[data-theme="night"] :is(.assistant-task-state,.music-mcp-state.is-connected,.opencli-capability.is-callable,.voice-saved,.assistant-message,.chat-assistant-trigger.is-enabled .chat-assistant-trigger-state){color:#a4d4b3!important}
+html[data-theme="night"] .client-behavior-switch{background:#506051}
+html[data-theme="night"] .client-behavior-control input:checked+.client-behavior-switch{background:#6b9a7c}
+html[data-theme="night"] .client-behavior-control input:disabled+.client-behavior-switch{opacity:.65}
+html[data-theme="night"] .companion-aura{background:radial-gradient(ellipse,#b68f6340 0%,#76573d26 44%,transparent 72%)}
+html[data-theme="night"] .companion-floor{background:radial-gradient(ellipse,#9aaa7840,transparent 70%)}
+html[data-theme="night"] :is(.scene-circle,.scene-floor){background:#364136}
+html[data-theme="night"] :is(.modal-backdrop,.nav-scrim,.chat-assistant-layer){background:#060b08a8!important}
+html[data-theme="night"] .toast{background:#355640;color:#f1f7ef}
+html[data-theme="night"] :is(.single-pet-tools button,.floating-hide,.floating-bubble){background:#253229e8!important;color:#d4e6d7!important;border-color:#617863!important}
+html[data-theme="night"] :is(.single-pet-drag,.pet-drag-handle){color:#b1cba4!important}
+html[data-theme="night"] ::selection{background:#3d604c;color:#eff7f0}
+html[data-theme="night"] ::-webkit-scrollbar-thumb{background:#526557}
+
+/* Native overlay entry stays transparent before and after React mounts. */
+html[data-petpal-surface="transparent"],html[data-petpal-surface="transparent"] body,html[data-petpal-surface="transparent"] #root,
+html[data-theme] :is(.single-pet-overlay,.floating-pet){background:transparent!important}
+@media(max-width:650px){.theme-settings{margin-top:24px}.theme-choice>span{gap:6px;padding-inline:8px}.theme-help,.theme-current{font-size:10px}}
+@media(prefers-reduced-motion:reduce){.theme-choice>span{transition:none}}

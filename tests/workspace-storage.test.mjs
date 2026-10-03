@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import ts from 'typescript';
+import * as React from 'react';
 import * as executionHosts from '../src/execution-hosts.mjs';
 import * as projectPreferences from '../src/project-directory-preferences.mjs';
 import {watchCompanionBreakpoint} from '../src/companion-mount.mjs';
@@ -34,6 +35,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false}={}){
   Object.defineProperty(window,'localStorage',{get:readStorage});
   document.hidden=false;
   const react={
+    ...React,
     useState(initial){const at=index++;if(!hooks[at])hooks[at]={state:typeof initial==='function'?initial():initial};return[hooks[at].state,value=>{hooks[at].state=typeof value==='function'?value(hooks[at].state):value;}];},
     useRef(initial){const at=index++;if(!hooks[at])hooks[at]={ref:{current:initial}};return hooks[at].ref;},
     useEffect(effect,deps){const at=index++,previous=hooks[at];if(!previous||deps.some((value,i)=>!Object.is(value,previous.deps?.[i])))effects.push(()=>{previous?.cleanup?.();hooks[at]={deps,cleanup:effect()};});},

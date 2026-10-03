@@ -4,6 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#f6f7f2" />
+    <script>
+      /* Keep this first-paint policy in sync with src/platform/theme.mjs. */
+      (() => {
+        let preference = 'auto';
+        try { const saved = localStorage.getItem('petpal.theme'); if (saved === 'day' || saved === 'night' || saved === 'auto') preference = saved; } catch {}
+        const hour = new Date().getHours(), theme = preference === 'auto' ? (hour >= 7 && hour < 19 ? 'day' : 'night') : preference;
+        const root = document.documentElement, query = new URLSearchParams(location.search);
+        const transparent = query.has('pet') || query.has('overlay');
+        root.dataset.theme = theme; root.dataset.themePreference = preference;
+        if (transparent) root.dataset.petpalSurface = 'transparent';
+        root.style.colorScheme = theme === 'night' ? 'dark' : 'light';
+        root.style.backgroundColor = transparent ? 'transparent' : theme === 'night' ? '#181d1b' : '#fafbf8';
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', theme === 'night' ? '#181d1b' : '#f6f7f2');
+      })();
+    </script>
     <meta name="description" content="小伴 PetPal，你的小猫与个人 AI 助手。" />
     <title>小伴 PetPal</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />

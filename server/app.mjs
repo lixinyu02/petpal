@@ -18,6 +18,8 @@ import { createAgentTasks } from './agent-tasks.mjs';
 import { normalizeAgentPermissions } from './agent-permissions.mjs';
 import { createAttachmentService, normalizeAttachmentIds, IMAGE_LIMIT } from './attachments.mjs';
 import { createDownloadsCatalog } from './downloads.mjs';
+import { staticCacheControl } from './static-cache.mjs';
+import compression from 'compression';
 import { createExecutors } from './executors.mjs';
 import { normalizeProjectDirectory } from './project-directory.mjs';
 import { RemoteCodexBridge } from './remote-codex.mjs';
@@ -56,7 +58,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   if (state.codexConfig.toolVersion !== CODEX_TOOL_VERSION) Object.assign(state.codexConfig, { toolVersion: CODEX_TOOL_VERSION, revision: randomUUID() });
   if (legacyCodex) for (const conversation of state.conversations) if (conversation.mode === 'codex') conversation.codexRevision = state.codexConfig.revision;
   const updates = createUpdateService({ ...updatesOptions, store });
-  const downloads = createDownloadsCatalog(downloadsOptions);
+  const downloads = createDownloadsCatalog({localDirectory:staticDir?path.join(path.resolve(staticDir),'downloads'):undefined,...downloadsOptions});
   const cosyvoice = await createCosyVoiceService({ ...cosyvoiceOptions, store, dataDir });
   const asr = createAsrService({ ...asrOptions, store, authorizeSession: auth => authorizeAsrIdentity(auth) });
   await store.save();
@@ -876,11 +878,24 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.use('/api', (req, res) => res.status(404).json({ error: '接口不存在。' }));
   if (staticDir) {
     const directory = path.resolve(staticDir);
+    // Compression is limited to public UI files, never authenticated API streams
+    // or multi-hundred-megabyte resumable installers.
+    app.use(compression({filter:(req,res)=>!/^\/downloads(?:\/|$)/.test(req.path)&&compression.filter(req,res)}));
     // Client package URLs are files, never SPA routes. In particular, an
     // archived package must return 404 instead of a successful HTML download.
-    app.use('/downloads', express.static(path.join(directory, 'downloads'), { dotfiles: 'deny', index: false, redirect: false }),
+    app.use('/downloads', async (req,res,next)=>{
+      // Signed update manifests/artifacts retain their separate verification path.
+      if(req.path.startsWith('/updates/'))return next();
+      const filename=req.path.slice(1);
+      const file=await downloads.localFile(filename);
+      if(!file)return res.status(404).json({error:'安装包不存在或已归档，请从下载中心获取最新正式版。'});
+      res.setHeader('Cache-Control','no-store');
+      res.sendFile(file.path,{dotfiles:'deny'},error=>error&&next(error));
+    }, express.static(path.join(directory, 'downloads'), { dotfiles: 'deny', index: false, redirect: false }),
       (req, res) => res.status(404).json({ error: '安装包不存在或已归档，请从下载中心获取最新正式版。' }));
-    app.use(express.static(directory, { dotfiles: 'deny', index: 'index.html' }));
+    app.use(express.static(directory, { dotfiles: 'deny', index: 'index.html',
+      setHeaders: (res, filename) => res.setHeader('Cache-Control',staticCacheControl(directory,filename)),
+    }));
     app.get('/{*splat}', (req, res, next) => { res.sendFile(path.join(directory, 'index.html'), error => error && next(error)); });
   }
   app.use((error, req, res, next) => {

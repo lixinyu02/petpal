@@ -1,14 +1,30 @@
 # 最新正式客户端下载规则
 
-下载中心先在 GitHub 元数据中选出全局最高的纯数字 `major.minor.patch`
-版本，再显示该版本的 Android、Windows、Ubuntu 资产。只接受明确为
+下载中心优先检查同站点 `downloads/` 目录的正式发布清单与校验和，再使用
+GitHub 作为同版备用或缺包来源。服务器上已校验的安装包无需等待 GitHub
+响应，GitHub 断网或限流也可以正常显示和下载。只显示已知正式版本中最高的
+纯数字 `major.minor.patch` 版本的 Android、Windows、Ubuntu 资产。GitHub 只接受明确为
 `draft=false`、`prerelease=false` 的 Release；即使 GitHub 错误标成正式版，
 带 `-rc`、`-preview` 等后缀的标签也不会进入目录。版本比较按三个数字段
 进行，不按发布时间或字符串字典顺序。
 
+本地清单名称固定为 `release-manifest-<version>.json`，校验和固定为
+`SHA256SUMS-<version>.txt`。清单必须为 `channel=stable`，文件名、版本、
+平台目标、长度与 SHA-256 必须相符，校验和不得重复或包含额外文件。
+文件必须直接位于下载目录并为普通文件；目录或文件符号链接、越界路径、
+恶意文件名和不完整文件都不能生成本地下载链接。Web ZIP 可作为已校验正式
+资产保留，不进入三类客户端选择器。
+
 同版的多架构和 Windows ZIP／EXE 都保留。最新版本缺少某个平台或包未上传
 完成时，该平台显示等待发布，不从历史版本补包。历史 GitHub Release 仍保留
-用于回退，下载页不列出历史版。前端还会过滤旧后端返回的混合目录。
+用于回退，下载页不列出历史版。较新本地清单损坏或其文件缺失时不能从旧版
+目录补包；已知 GitHub 最新版高于服务器版本时，也不能展示旧服务器包。
+前端还会根据目录的最新版标记过滤旧后端返回的混合目录。
+
+服务器文件首次读取时完整验证内容摘要，之后每次请求检查文件身份、长度和
+修改时间；仅在这些值或预期摘要改变时重新计算哈希。并发请求共用验证，
+校验失败的同一文件也不会反复读取 GB 内容。后台退出会中止仍在进行的哈希
+和 GitHub 请求。元数据读取有 64 KiB 上限，不根据声明长度无限分配内存。
 
 资产原有的文件名／版本、仓库与下载 URL 精确匹配、上传状态、大小、ID 和
 可选 SHA-256 校验规则保持。GitHub 读取仍限制大小、时限且不携带用户凭据；
@@ -18,12 +34,21 @@
 正式发布通道与平台证书是两回事。Android 的 `debug` 文件名会如实显示
 “沿用开发证书签名”，不把正式 Release 错标成仅供试用。
 
-服务器 `/downloads` 文件区与 SPA 路由分开：已存在的安装包正常下载，已归档
+服务器 `/downloads` 文件区与 SPA 路由分开：已校验的最新安装包正常下载，已归档
 或不存在的包返回 404，不能把首页 HTML 当作成功下载的客户端。普通 SPA
-页面和需要登录的 `/api/downloads` 行为不变。
+页面和需要登录的 `/api/downloads` 行为不变。文件支持 HEAD 与 Range；
+`/downloads/updates/**` 保持原签名更新协议，独立于客户端下载目录过滤。
+客户端下载链接跟随当前连接的后端，桌面或 Android 连接远程服务器时不会
+错误地下载客户端本机地址。界面会显示服务器直连来源，并在同版 GitHub
+元数据可用时提供单独的备用链接。
 
-回归入口：`node --test tests/downloads.test.mjs tests/downloads-view.test.mjs tests/downloads-static.test.mjs`。
+回归入口：`node --test tests/local-downloads.test.mjs tests/downloads.test.mjs tests/downloads-view.test.mjs tests/downloads-static.test.mjs`。
 
 ## 0.9.7 发布验收
 
 GitHub latest 和两源 sequence 9 更新清单均已验证。下载页只显示 0.9.7 的 Android、Windows EXE/ZIP 与 Ubuntu x64/ARM64。34 个服务器历史文件（5,568,933,887 bytes）已在摘要保持的前提下移入私有归档，并完成旧路径 HEAD 404、新版六包 HEAD 200/长度验收；完整包摘要另有真实读回证据。历史 GitHub Release 保留。Chrome 已完成登录页面、真实链接、版本和 412×960 无横向溢出检查。
+
+2026-10-04 新目录模块对当前 `dist/downloads` 完整重新读取并验证六份正式资产，
+其中五份客户端合计 1,322,077,698 bytes，全部与清单和校验和一致。
+这只是本机文件完整性验收，不代表 Android／Ubuntu 实机安装验收；安装包内容、
+签名更新清单与正式标签均未修改。

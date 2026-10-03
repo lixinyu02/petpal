@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const require=createRequire(import.meta.url);
 const bundle=await build({entryPoints:[fileURLToPath(new URL('../src/DownloadsView.tsx',import.meta.url))],bundle:true,write:false,format:'cjs',platform:'node',external:['react','react/jsx-runtime','react/jsx-dev-runtime'],loader:{'.css':'empty'},plugins:[{name:'isolated-download-api',setup(builder){
-  builder.onLoad({filter:/src[\\/]api\.ts$/},()=>({contents:'export const api=(path,options)=>apiFixture.api(path,options);export const getSessionEpoch=()=>1;export const isSessionChanged=()=>false;',loader:'ts'}));
+  builder.onLoad({filter:/src[\\/]api\.ts$/},()=>({contents:'export const api=(path,options)=>apiFixture.api(path,options);export const getConnection=()=>({url:apiFixture.serverUrl||""});export const getSessionEpoch=()=>1;export const isSessionChanged=()=>false;',loader:'ts'}));
 }}]});
 function load(react=require('react'),apiFixture={},window=new EventTarget()){
   const compiled={exports:{}};
@@ -37,14 +37,14 @@ test('the UI rejects preview flags and semantic suffixes even when an older serv
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function nodes(tree){if(Array.isArray(tree))return tree.flatMap(nodes);if(!tree||typeof tree!=='object')return[];return[tree,...nodes(tree.props?.children)];}
 /** Run the real component's effects, state and selection handler; no network or global browser state. */
-function downloadFixture(packages){
+function downloadFixture(packages,{serverUrl='',catalog={}}={}){
   const hooks=[],effects=[];let index=0,tree;
   const react={...require('react'),
     useState(initial){const at=index++;if(!hooks[at])hooks[at]={state:typeof initial==='function'?initial():initial};return[hooks[at].state,value=>{hooks[at].state=typeof value==='function'?value(hooks[at].state):value;}];},
     useRef(initial){const at=index++;if(!hooks[at])hooks[at]={ref:{current:initial}};return hooks[at].ref;},
     useEffect(effect,deps){const at=index++,previous=hooks[at];if(!previous||deps.some((value,i)=>!Object.is(value,previous.deps?.[i])))effects.push(()=>{previous?.cleanup?.();hooks[at]={deps,cleanup:effect()};});},
   };
-  const apiFixture={api:async path=>{assert.equal(path,'/downloads');return{packages,checkedAt:'2026-10-03T00:00:00Z',error:null,stale:false,retryAt:null};}};
+  const apiFixture={serverUrl,api:async path=>{assert.equal(path,'/downloads');return{packages,checkedAt:'2026-10-03T00:00:00Z',error:null,stale:false,retryAt:null,...catalog};}};
   const Component=load(react,apiFixture).default;
   const render=()=>{index=0;effects.length=0;tree=Component();for(const effect of effects)effect();return tree;};
   const find=(type,predicate=()=>true)=>nodes(tree).find(node=>node.type===type&&predicate(node.props));
@@ -79,4 +79,16 @@ test('an ARM64-only Ubuntu release remains downloadable without inventing an x64
   const f=downloadFixture([download('arm','ubuntu','arm64','tar.gz')]);t.after(()=>f.close());await f.ready();
   assert.equal(f.find('select',props=>props['aria-label']==='Ubuntu 安装包'),undefined);
   assert.equal(f.find('a',props=>props['aria-label']==='下载 Ubuntu 0.9.7 arm64').props.href,'https://example.invalid/arm');
+});
+
+test('a declared newest version keeps an older mixed client catalog hidden even when its newest assets are absent',()=>{
+  assert.deepEqual(latestStableDownloadPackages([item('old','0.9.7','windows')],'0.9.8'),[]);
+});
+
+test('local download URLs follow the connected backend and expose the independently selectable GitHub fallback',async t=>{
+  const name='PetPal-0.9.7-Windows-x64.zip',fallback='https://github.com/lixinyu02/petpal/releases/download/v0.9.7/'+name;
+  const f=downloadFixture([{...download('local','windows','x64','portable-zip'),filename:name,source:'server',url:'/downloads/'+name,fallbackUrl:fallback}],
+    {serverUrl:'https://petpal.example:44318'});t.after(()=>f.close());await f.ready();
+  assert.equal(f.find('a',props=>props['aria-label']==='下载 Windows 0.9.7 x64').props.href,'https://petpal.example:44318/downloads/'+name);
+  assert.equal(f.find('a',props=>props.children?.[0]==='GitHub 备用').props.href,fallback);
 });

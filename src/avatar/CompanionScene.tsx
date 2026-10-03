@@ -4,6 +4,8 @@ import type PetScene from '../pet/PetScene';
 import type { CompanionKind } from '../api';
 import type { PerformanceInput } from './performance.mjs';
 import AvatarLoading from './AvatarLoading';
+import '../companion.css';
+import '../companion-portrait.css';
 // The bundled native model retains the original character's neutral proportions.
 const CubismScene = lazy(() => import('./cubism/CubismScene'));
 const CatScene = lazy(() => import('../pet/PetScene'));
