@@ -24,6 +24,7 @@ const installation = (item: Package) => item.format === 'apk'
   : item.format === 'appimage' ? '允许文件作为程序执行，然后打开 AppImage。'
   : '下载后使用 Ubuntu 的软件安装器打开 DEB。';
 const packageLabel = (item: Package) => `v${item.version} · ${item.arch === 'universal' ? '通用' : item.arch} · ${formats[item.format]} · 正式版`;
+const architectureRank = (arch: Package['arch']) => arch === 'x64' ? 0 : arch === 'arm64' ? 1 : 2;
 /** Also protect upgraded clients still connected to an older mixed catalog. */
 export function latestStableDownloadPackages(packages: Package[]) {
   const stable = packages.filter(item => item.channel === 'stable' && /^(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})$/.test(item.version));
@@ -66,7 +67,7 @@ export default function DownloadsView() {
     {loading && !catalog && <p className="downloads-loading" role="status">正在读取 GitHub 已发布的安装包…</p>}
     <div className="downloads-list">
       {platforms.map(platform => {
-        const packages = latestPackages.filter(item => item.platform === platform.id).sort((a, b) => a.arch.localeCompare(b.arch)
+        const packages = latestPackages.filter(item => item.platform === platform.id).sort((a, b) => architectureRank(a.arch) - architectureRank(b.arch)
           || (a.platform === 'windows' && a.releaseUrl === b.releaseUrl && a.arch === b.arch ? Number(b.format === 'portable-zip') - Number(a.format === 'portable-zip') : 0)
           || a.filename.localeCompare(b.filename));
         const item = packages.find(item => item.id === selected[platform.id]) || packages[0], Icon = platform.icon;

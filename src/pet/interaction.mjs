@@ -1,5 +1,5 @@
 /** One gesture policy for both renderers. No DOM dependency; clocks are injectable. */
-export function createCompanionGestures({ emit, getAction, onFeedback = () => {}, now = () => performance.now(), schedule = setTimeout, unschedule = clearTimeout }) {
+export function createCompanionGestures({ emit, getAction, onFeedback = () => {}, validatePoint = () => true, now = () => performance.now(), schedule = setTimeout, unschedule = clearTimeout }) {
   let press = null, holdTimer, tapTimer, lastTap = null, blocked = false, hoverPoint = null, hoverTimer, regionReactionAt = -Infinity;
   const pointers = new Set();
   const clearHold = () => { unschedule(holdTimer); holdTimer = undefined; };
@@ -9,6 +9,11 @@ export function createCompanionGestures({ emit, getAction, onFeedback = () => {}
   const release = () => { clearHold(); if (press) feedback('cancel', press); press = null; };
   const cancel = () => { release(); clearTap(); clearHover(); pointers.clear(); blocked = false; };
   const respond = (action, point, source = 'tap') => {
+    // Layout may change while RAF is paused; delayed gestures must recheck the
+    // current portrait instead of relying on the geometry at pointer arrival.
+    if (point && !validatePoint(point)) {
+      cancel(); feedback('cancel', point); return false;
+    }
     const region = point?.region;
     if (action === 'pet' && region) {
       if (source === 'hover' && getAction() === 'sleep') return false;
@@ -122,7 +127,11 @@ export function bindCompanionGestures(surface, { hitTest, regionAt, emit, getAct
     const visible = onFeedback?.(value) === true;
     surface.style.cursor = value.phase !== 'cancel' && value.hit && value.pointerType === 'mouse' ? visible ? 'none' : 'pointer' : 'default';
   };
-  const gestures = createCompanionGestures({ emit: (action, context) => { if (enabled()) emit(action, context); }, getAction, onFeedback: feedback });
+  const gestures = createCompanionGestures({
+    emit: (action, context) => { if (enabled()) emit(action, context); }, getAction, onFeedback: feedback,
+    validatePoint: point => enabled() && (point.pointerType === 'keyboard' ||
+      hitTest(point.x, point.y) && (!regionAt || (regionAt(point.x, point.y) || undefined) === point.region)),
+  });
   const point = event => ({ id: event.pointerId, x: event.clientX, y: event.clientY, pointerType: event.pointerType, button: event.button, buttons: event.buttons, isPrimary: event.isPrimary, hit: enabled() && hitTest(event.clientX, event.clientY), ...(regionAt ? { region: regionAt(event.clientX, event.clientY) || undefined } : {}) });
   const down = event => { if (enabled()) gestures.down(point(event)); };
   const move = event => {

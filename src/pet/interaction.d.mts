@@ -6,6 +6,7 @@ export type CompanionFeedback = Partial<Point> & { phase: 'hover' | 'press' | 's
 export function createCompanionGestures(options: {
   emit: (action: PetInteraction, context?: CompanionGestureContext) => void; getAction: () => PetAction;
   onFeedback?: (feedback: CompanionFeedback) => void;
+  validatePoint?: (point: Point) => boolean;
   now?: () => number; schedule?: (callback: () => void, delay: number) => ReturnType<typeof setTimeout>; unschedule?: (timer: ReturnType<typeof setTimeout> | undefined) => void;
 }): { down(point: Point): boolean; move(point: Point): boolean; up(point: Point): void; cancel(): void; leave(): void; keyDown(key: string, repeat?: boolean): boolean; keyUp(key: string): void; activate(): void };
 export function bindCompanionGestures(surface: HTMLElement, options: {

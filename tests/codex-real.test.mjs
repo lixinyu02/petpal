@@ -153,7 +153,23 @@ child.once('error', () => process.exit(1));
 child.once('exit', code => process.exit(code ?? 1));
 `);
   let mode = 'text', sequence = 0, executes = 0;
-  let requestStarted, requestClosed;
+  const pendingRequests = new Map(), requestIdentities = [];
+  const pendingFixture = prompt => {
+    const capture = { prompt, identity: null, closedIdentity: null };
+    capture.opened = new Promise(resolve => { capture.open = resolve; });
+    capture.disconnected = new Promise(resolve => { capture.close = resolve; });
+    pendingRequests.set(prompt, capture);
+    return capture;
+  };
+  const waitPending = async (capture, promise, label) => {
+    try { return await within(promise, label); }
+    catch (error) {
+      t.diagnostic(JSON.stringify({ label, expectedPrompt: capture.prompt, opened: capture.identity, closed: capture.closedIdentity,
+        activeRequests: bridge.transport?.activeRequests, requests: requestIdentities, fixtureErrors: errors.map(item => item.message),
+        runs: [...bridge.runs.values()].map(run => ({ threadId: run.threadId, turnId: run.turnId, aborted: run.aborted, settled: run.settled })) }));
+      throw error;
+    }
+  };
   const server = http.createServer(async (req, res) => {
     try {
       assert.equal(req.method, 'POST'); assert.equal(req.url, '/v1/responses');
@@ -161,12 +177,22 @@ child.once('exit', code => process.exit(code ?? 1));
       const chunks = []; for await (const chunk of req) chunks.push(chunk);
       const body = JSON.parse(Buffer.concat(chunks).toString()); requests.push(body);
       const id = `resp_transport_${++sequence}`;
+      const userInput = Array.isArray(body.input) ? body.input.filter(item => item.role === 'user').at(-1) : undefined;
+      const prompt = Array.isArray(userInput?.content) ? userInput.content.filter(item => item.type === 'input_text').map(item => item.text).join('') : '';
+      const identity = { responseId: id, prompt };
+      requestIdentities.push({ ...identity, mode });
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
       const send = (type, value) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...value })}\n\n`);
       send('response.created', { response: { id, object: 'response', model: body.model, status: 'in_progress', output: [] } });
       if (mode === 'pending') {
-        res.once('close', () => requestClosed?.());
-        requestStarted?.();
+        const capture = pendingRequests.get(prompt);
+        assert.ok(capture, `Unexpected pending fixture request: ${JSON.stringify(identity)}`);
+        assert.equal(capture.identity, null, `Duplicate pending fixture request: ${JSON.stringify(identity)}`);
+        capture.identity = identity;
+        // Bind close to this response and its actual input, never to a resolver
+        // that another pending turn can replace while this socket is closing.
+        res.once('close', () => { capture.closedIdentity = identity; capture.close(identity); });
+        capture.open(identity);
         return;
       }
       const previous = body.input?.some(item => item.type === 'function_call_output');
@@ -219,12 +245,14 @@ child.once('exit', code => process.exit(code ?? 1));
   await assert.rejects(bridge.run({ prompt: 'Empty-response negative fixture.' }), /未返回可显示的回复|Codex turn 失败/);
 
   mode = 'pending';
-  const opened = new Promise(resolve => { requestStarted = resolve; });
-  const disconnected = new Promise(resolve => { requestClosed = resolve; });
+  const cancellationFixture = pendingFixture('Cancellation fixture.');
   const controller = new AbortController();
-  const cancelled = bridge.run({ prompt: 'Cancellation fixture.', signal: controller.signal });
+  const cancelled = bridge.run({ prompt: cancellationFixture.prompt, signal: controller.signal });
   const cancellation = assert.rejects(cancelled, { name: 'AbortError' });
-  await within(opened, 'cancellation request opened'); controller.abort(); await within(cancellation, 'cancelled turn rejected'); await within(disconnected, 'cancelled upstream response closed');
+  const opened = await waitPending(cancellationFixture, cancellationFixture.opened, 'cancellation request opened');
+  controller.abort();
+  await waitPending(cancellationFixture, cancellation, 'cancelled turn rejected');
+  assert.deepEqual(await waitPending(cancellationFixture, cancellationFixture.disconnected, 'cancelled upstream response closed'), opened);
   assert.equal(bridge.transport.activeRequests, 0);
   mode = 'text';
   assert.equal((await bridge.run({ prompt: 'Cancellation must leave the bridge reusable.' })).text, first.text);
@@ -238,13 +266,16 @@ child.once('exit', code => process.exit(code ?? 1));
   assert.equal((await bridge.run({ prompt: 'Restart must use its new loopback transport.' })).text, first.text);
 
   mode = 'pending';
-  const finalOpened = new Promise(resolve => { requestStarted = resolve; });
-  const finalDisconnected = new Promise(resolve => { requestClosed = resolve; });
+  const closeFixture = pendingFixture('Close fixture.');
   const transport = bridge.transport;
-  const stopped = assert.rejects(bridge.run({ prompt: 'Close fixture.' }), /后台已关闭/);
-  await within(finalOpened, 'close request opened'); await bridge.close(); await within(stopped, 'closed bridge rejected'); await within(finalDisconnected, 'closed upstream response closed');
+  const stopped = assert.rejects(bridge.run({ prompt: closeFixture.prompt }), /后台已关闭/);
+  const finalOpened = await waitPending(closeFixture, closeFixture.opened, 'close request opened');
+  await bridge.close();
+  await waitPending(closeFixture, stopped, 'closed bridge rejected');
+  assert.deepEqual(await waitPending(closeFixture, closeFixture.disconnected, 'closed upstream response closed'), finalOpened);
   assert.equal(transport.activeRequests, 0); assert.equal(bridge.transport, null);
   assert.equal(errors.length, 0, errors.map(error => error.message).join('; '));
+  t.diagnostic(`upstream cancellation closed ${opened.responseId}; bridge close closed ${finalOpened.responseId}; both responses matched their requested fixture input`);
   t.diagnostic(`native CLI verified simplified text, final-only tools, empty-reply failure, private credentials, upstream cancellation and isolated restart across ${requests.length} local requests`);
 });
 

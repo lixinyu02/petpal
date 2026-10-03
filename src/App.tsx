@@ -51,6 +51,7 @@ import { api, getConnection, getIdentity, getSessionEpoch, initConnection, conne
 const emptyState: State = { settings: { petName: '小伴', companionKind: 'anime', persona: '你是用户温柔、机灵的个人 AI 伙伴。用自然简洁的中文回应，认真倾听；不知道的事情坦诚说明。' }, providers: [], conversations: [], codex: {} };
 type Approval = { id: string; kind: string; description: string };
 const dateFormatter=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric'});
+function browserStorage():Storage|undefined{try{return window.localStorage;}catch{return undefined;}}
 
 export default function App() {
   const accountEpoch = useRef(getSessionEpoch()).current;
@@ -200,7 +201,7 @@ export default function App() {
     return () => { alive = false; };
   }, []);
   useEffect(()=>{
-    setAgentHostId(conversation?.mode==='codex'?(conversation.agent?.run?.hostId||conversation.agentHostId||conversation.threadHostId||'central'):readExecutionHost(localStorage,hostScope));
+    setAgentHostId(conversation?.mode==='codex'?(conversation.agent?.run?.hostId||conversation.agentHostId||conversation.threadHostId||'central'):readExecutionHost(browserStorage(),hostScope));
     setAgentHosts([]);setDefaultHostId('');setNativeExecutor(null);setHostsError('');
   },[hostScope]);
   useEffect(()=>{
@@ -490,7 +491,7 @@ export default function App() {
   }
   function changeHost(nextId:string){
     if(agentSendLock.current||hostBusy||unconfirmed||busyRef.current||!agentHosts.some(host=>host.id===nextId&&host.online))return;
-    setAgentHostId(nextId);saveExecutionHost(localStorage,hostScope,nextId);setError('');
+    setAgentHostId(nextId);saveExecutionHost(browserStorage(),hostScope,nextId);setError('');
     const host=agentHosts.find(item=>item.id===nextId);
     setNotice(`下一条任务将在${host?.name||'所选电脑'}执行，聊天记录会保留。`);
   }

@@ -8,13 +8,14 @@ import { animeEmotionMix, animeMouthLayerMix } from './anime-emotion-render.mjs'
 import { animeHeadNodOffset, animePoseTransform, sampleAnimeShoulderWeight } from './anime-pose-render.mjs';
 import { sampleAnimeHairWeights, createAnimeHairMotion } from './anime-rig.mjs';
 import { createAvatarPresence } from './presence.mjs';
+import { createCompanionActionState, type CompanionActionState } from './action-state.mjs';
 import { createVisibleSceneLoop, updateSceneDataset } from './scene-loop.mjs';
 import { bindCompanionGestures, portraitCoordinates, portraitContains } from '../pet/interaction.mjs';
 import { createCompanionFeedback } from '../pet/gesture-feedback.mjs';
 import '../pet/gesture-feedback.css';
 import './anime-scene.css';
 
-type Props = { command?: PetCommand; compact?: boolean; onState?: (state: PetBehaviorState) => void; onReady?: () => void; onInteract?: (action: PetInteraction) => void; interactive?: boolean; className?: string; speaking?: boolean; performanceInput?: PerformanceInput };
+type Props = { command?: PetCommand; compact?: boolean; onState?: (state: PetBehaviorState) => void; onReady?: () => void; onInteract?: (action: PetInteraction) => void; interactive?: boolean; className?: string; speaking?: boolean; performanceInput?: PerformanceInput; actionState?: CompanionActionState };
 const vertexShader = `
 varying vec2 vUv;
 attribute vec2 hairWeights;
@@ -121,10 +122,12 @@ void main() {
   #include <premultiplied_alpha_fragment>
 }`;
 
-export default function AnimeScene({ command, compact = false, onState, onReady, onInteract, interactive = true, className = '', speaking = false, performanceInput }: Props) {
+export default function AnimeScene({ command, compact = false, onState, onReady, onInteract, interactive = true, className = '', speaking = false, performanceInput, actionState: suppliedActionState }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const callbacks = useRef({ onState, onReady, onInteract, speaking, performanceInput }); callbacks.current = { onState, onReady, onInteract, speaking, performanceInput };
   const requested = useRef(command); requested.current = command;
+  const ownActionState = useRef(createCompanionActionState()).current;
+  const actionState = suppliedActionState || ownActionState;
   const [failure, setFailure] = useState('');
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
@@ -132,7 +135,8 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     const container = host.current;
     if (!container) return;
     let renderer: THREE.WebGLRenderer | undefined;
-    let disposed = false, gpuFailed = false, inView = true, loaded = false, last = 0, time = 0, frames = 0, ready = false, action: PetAction = 'idle', actionStart = 0, lastId = -1;
+    const initialAction = actionState.snapshot();
+    let disposed = false, gpuFailed = false, inView = true, loaded = false, last = 0, time = 0, frames = 0, ready = false, action: PetAction = initialAction.action, actionRevision = initialAction.revision, actionStart = 0;
     const frameLoop = createVisibleSceneLoop(now => frame(now));
     const abort = new AbortController();
     setFailure(''); setLoading(true); container.dataset.avatarMode = 'loading'; delete container.dataset.optionalEmotionUnavailable;
@@ -283,8 +287,9 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     document.addEventListener('visibilitychange', visibility);
     const emitState = () => callbacks.current.onState?.({ action, x: 0, facing: 1, lookX: gazeX, lookY: gazeY, actionTime: time-actionStart, actionProgress: 0, jumpHeight: 0, speed: 0, autonomous: false, paused: false, autonomyPaused: media.matches });
     const interact = (next: PetInteraction, userGesture = false) => {
-      if (action === 'sleep' && next !== 'wake' && next !== 'sleep') return;
-      action = next === 'wake' ? 'idle' : next as PetAction; actionStart = time;
+      const nextState = actionState.transition(next);
+      if (!nextState) return;
+      action = nextState.action; actionRevision = nextState.revision; actionStart = time;
       // Touch changes the expression, never invents speech or competes with playback.
       localInput = { utteranceId: `interaction-${++interactionSequence}`, text: '', phase: 'idle' };
       if(action === 'sleep') performance.reset();
@@ -299,7 +304,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     const unbindGestures = surfaces.map(surface => bindCompanionGestures(surface, {
       enabled: () => interactive && loaded && !disposed && surface.getAttribute('aria-hidden') !== 'true',
       hitTest: (x,y) => portraitContains(portraitCoordinates(container.getBoundingClientRect(),x,y),hitMask),
-      getAction: () => action, emit: next => interact(next,true), onPointer: move, onLeave: leave,
+      getAction: () => actionState.snapshot().action, emit: next => interact(next,true), onPointer: move, onLeave: leave,
       onFeedback: value => feedback.update(value, surface),
     }));
     const lost = (event: Event) => { event.preventDefault(); useFallback('网格绘图连接已暂停，已切换轻量角色；可以重试恢复。'); }; canvas?.addEventListener('webglcontextlost', lost);
@@ -320,8 +325,13 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       if (last && now-last < 1000/30) return;
       const elapsed = last ? Math.max(0,(now-last)/1000) : 0;
       const dt = Math.min(elapsed,.1); last = now; time += elapsed;
+      const sharedAction = actionState.snapshot();
+      if (actionRevision !== sharedAction.revision) {
+        action = sharedAction.action; actionRevision = sharedAction.revision; actionStart = time;
+        if (action === 'sleep') performance.reset();
+      }
       const command = requested.current;
-      if (command && command.id !== lastId) { lastId = command.id; interact(command.action); }
+      if (command && actionState.consumeCommand(command.id)) interact(command.action);
       if (action !== 'sleep' && action !== 'idle' && time-actionStart > (action === 'eat' ? 4 : 2.7)) interact('wake');
       const supplied = callbacks.current.performanceInput;
       const asleep = action === 'sleep';
@@ -447,6 +457,6 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       feedback.dispose();
       releaseGpu(); geometry.dispose(); material.dispose(); canvas?.remove(); fallback.remove();
     };
-  }, [compact, attempt, interactive]);
+  }, [compact, attempt, interactive, actionState]);
   return <div ref={host} className={`pet-three-scene anime-scene ${className}`}>{(failure || loading) && <div className="anime-scene-status" role={failure ? 'alert' : 'status'}><span>{failure || '正在加载角色…'}</span>{failure && <button onClick={() => setAttempt(n=>n+1)}>重新加载</button>}</div>}</div>;
 }

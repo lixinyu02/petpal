@@ -278,14 +278,15 @@ test('redirected or failed official installer requests are not followed, retried
 
 test('every download requests identity encoding, including official redirects and all Linux repository members', async t => {
   const redirectedInstaller = 'https://dl.google.com/dl/chrome/install/googlechrome-identity-fixture.msi';
-  const windows = await fixture(t, { transport: async (url, _settings, { installer }) => {
+  // This verifies encoding across two platforms, not the preparation deadline.
+  const windows = await fixture(t, { timeoutMs: 10000, transport: async (url, _settings, { installer }) => {
     if (url === windowsInstallerUrl) return new Response(null, { status: 302, headers: { location: redirectedInstaller } });
     assert.equal(url, redirectedInstaller); return new Response(installer);
   } });
   const windowsResult = await windows.manager.execute({ action: 'install-browser' });
   assert.equal(windowsResult.state, 'prepared'); assert.equal(windowsResult.sha256, sha256(windows.installer));
   assert.deepEqual(windows.downloads.map(call => call.url), [windowsInstallerUrl, redirectedInstaller]);
-  const linux = await fixture(t, { platform: 'linux' });
+  const linux = await fixture(t, { platform: 'linux', timeoutMs: 10000 });
   const linuxResult = await linux.manager.execute({ action: 'install-browser' });
   assert.equal(linuxResult.state, 'prepared'); assert.equal(linuxResult.sha256, sha256(linux.repo.packageBytes));
   assert.equal(linux.downloads.length, 4);

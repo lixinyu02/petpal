@@ -243,6 +243,71 @@ test('animation refresh clears moved-away or inactive surfaces without starting 
   f.unbind(); const disposedCount=f.feedback.length; f.unbind.refresh(); assert.equal(f.feedback.length,disposedCount);
 });
 
+test('refresh cancels a stationary pointer dwell and hold when layout changes its region', t => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  let region = 'head';
+  const f = domFixture(t, {regionAt:() => region});
+  f.dispatch('pointermove');
+  t.mock.timers.tick(400);
+  region = 'body'; f.unbind.refresh();
+  t.mock.timers.tick(1000);
+  assert.deepEqual(f.emitted, [], 'the old head dwell must not react over the body');
+  assert.equal(f.feedback.at(-1).phase, 'cancel'); assert.equal(f.surface.style.cursor, 'default');
+
+  for (const pointerType of ['mouse','touch']) {
+    region = 'hand'; f.dispatch('pointerdown', {pointerType});
+    t.mock.timers.tick(400);
+    region = 'body'; f.unbind.refresh();
+    t.mock.timers.tick(1000);
+    f.dispatch('pointerup', {pointerType}, f.win);
+    t.mock.timers.tick(400);
+    assert.deepEqual(f.emitted, [], `${pointerType} cannot rest or tap after its held region moves`);
+    assert.equal(f.feedback.at(-1).phase, 'cancel');
+  }
+});
+
+for (const change of ['region','outside','disabled']) test(`delayed hover, hold and tap validate ${change} geometry even without render refresh`, t => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  let region = 'head';
+  const f = domFixture(t, {regionAt:() => region});
+  const reset = () => { region = 'head'; f.setHit(true); f.setEnabled(true); };
+  const invalidate = () => {
+    if (change === 'region') region = 'body';
+    else if (change === 'outside') f.setHit(false);
+    else f.setEnabled(false);
+  };
+  for (const hoveredRegion of ['head','hand']) {
+    reset(); region = hoveredRegion; f.dispatch('pointermove');
+    t.mock.timers.tick(200); invalidate(); t.mock.timers.tick(900);
+    assert.deepEqual(f.emitted, [], `${hoveredRegion} dwell must recheck the current portrait`);
+    assert.equal(f.feedback.at(-1).phase, 'cancel'); assert.equal(f.surface.style.cursor, 'default');
+  }
+  for (const pointerType of ['mouse','touch']) {
+    reset(); f.dispatch('pointerdown', {pointerType});
+    t.mock.timers.tick(200); invalidate(); t.mock.timers.tick(700);
+    f.dispatch('pointerup', {pointerType}, f.win); t.mock.timers.tick(400);
+    assert.deepEqual(f.emitted, [], `${pointerType} hold cannot rest or leave a queued tap`);
+    assert.equal(f.feedback.at(-1).phase, 'cancel'); assert.equal(f.surface.style.cursor, 'default');
+
+    reset(); f.dispatch('pointerdown', {pointerType}); f.dispatch('pointerup', {pointerType}, f.win);
+    invalidate(); t.mock.timers.tick(300);
+    assert.deepEqual(f.emitted, [], `${pointerType} delayed tap cannot target stale geometry`);
+    assert.equal(f.feedback.at(-1).phase, 'cancel');
+  }
+});
+
+test('timer-time geometry checks preserve enabled keyboard and semantic activation', t => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  const f = domFixture(t, {regionAt:() => null}); f.setHit(false);
+  f.dispatch('keydown', {key:'Enter'}); f.dispatch('keyup', {key:'Enter'}); t.mock.timers.tick(300);
+  assert.deepEqual(f.emitted, ['pet']);
+  f.dispatch('keydown', {key:' '}); t.mock.timers.tick(700); f.dispatch('keyup', {key:' '});
+  f.dispatch('click', {detail:0});
+  assert.deepEqual(f.emitted, ['pet','sleep','pet']);
+  f.setEnabled(false); f.dispatch('click', {detail:0});
+  assert.equal(f.emitted.length, 3);
+});
+
 test('touch release survives the browser pointerleave but blur, hidden and pointercancel still clear it', t => {
   const f = domFixture(t);
   for (const type of ['blur','pointercancel','visibilitychange']) {

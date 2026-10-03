@@ -104,7 +104,7 @@ test('disable stops running child before resolving and leaves future queries dis
   const f = await setup(t, { delayExit: true, run: () => {} });
   const pending = f.manager.query(query).catch(error => error); const child = await waitForChild(f);
   let configured = false; const disabled = f.manager.configure({ ...await f.manager.config(), enabled: false }).then(value => { configured = true; return value; });
-  await new Promise(resolve => setTimeout(resolve, 15)); assert.equal(configured, false);
+  await waitForSignal(child, 'SIGTERM'); assert.equal(configured, false);
   child.finish(1); assert.equal((await pending).name, 'AbortError'); assert.equal((await disabled).enabled, false);
   await assert.rejects(f.manager.query(query), error => error.code === 'disabled');
 });

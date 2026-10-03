@@ -43,7 +43,19 @@ test('selected executor relay retains image context over 4 MiB and rejects more 
   const { body: { hostId, connectionId } } = await request('/agent/executors/register', { deviceId: randomUUID(), name: 'Vision budget PC', platform: 'win32', arch: 'x64' });
   const conversation = (await request('/conversations', { mode: 'codex' })).body;
   assert.equal((await request(`/conversations/${conversation.id}/agent/submit`, { submissionId: randomUUID(), hostId, content: 'Isolated relay fixture.' })).status, 200);
-  const command = (await request(`/agent/executors/${connectionId}/poll`)).body.commands[0];
+  // Submission acknowledges the durable queue before asynchronous dispatch.
+  // Empty long polls remain valid while its next store write is finishing.
+  let command;
+  const dispatchDeadline = Date.now() + 10000;
+  while (!command && Date.now() < dispatchDeadline) {
+    const poll = await request(`/agent/executors/${connectionId}/poll`);
+    assert.equal(poll.status, 200, 'executor polling must succeed while waiting for dispatch');
+    assert.ok(Array.isArray(poll.body.commands), 'executor poll must return a command list');
+    command = poll.body.commands[0];
+    if (!command) await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.ok(command?.runId, 'executor run command did not arrive within the bounded dispatch wait');
+  assert.equal(command.type, 'run');
   assert.equal((await request(`/agent/executors/${connectionId}/events`, { runId: command.runId, sequence: 1, event: 'started', data: {} })).status, 200);
   const relay = origin + `/api/agent/executors/${connectionId}/runs/${command.runId}/model/responses`;
   const send = body => fetch(relay, { method: 'POST', headers: { Authorization: `Bearer ${command.relayToken}`, 'Content-Type': 'application/json' }, body, signal: AbortSignal.timeout(10000) });

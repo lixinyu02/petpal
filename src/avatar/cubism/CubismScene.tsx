@@ -4,6 +4,7 @@ import type { PetCommand } from '../../pet/PetScene';
 import type { PetAction, PetBehaviorState, PetInteraction } from '../../pet/behavior';
 import { createAvatarPerformance, type PerformanceInput } from '../performance.mjs';
 import { createAvatarPresence } from '../presence.mjs';
+import { createCompanionActionState } from '../action-state.mjs';
 import { createVisibleSceneLoop, updateSceneDataset } from '../scene-loop.mjs';
 import { bindCompanionGestures, portraitContains, portraitCoordinates, cubismPortraitCoordinates, portraitRegion, type CompanionGestureContext } from '../../pet/interaction.mjs';
 import { createCompanionFeedback } from '../../pet/gesture-feedback.mjs';
@@ -29,6 +30,7 @@ export default function CubismScene(props: CubismSceneProps) {
   const host = useRef<HTMLDivElement>(null);
   const callbacks = useRef(props); callbacks.current = props;
   const requested = useRef(command); requested.current = command;
+  const actionState = useRef(createCompanionActionState()).current;
   const quietInput = useRef<((input: PerformanceInput) => void) | undefined>(undefined);
   const readyCallbackSent = useRef(false);
   const [mode, setMode] = useState<'loading' | 'cubism' | 'fallback'>('loading');
@@ -42,7 +44,8 @@ export default function CubismScene(props: CubismSceneProps) {
     const surface = document.createElement('canvas'); container.appendChild(surface);
     surface.style.visibility = 'hidden'; surface.setAttribute('aria-hidden', 'true'); surface.tabIndex = -1;
     let disposed = false, inView = true, runtime: CubismAvatar | undefined;
-    let action: PetAction = 'idle', time = 0, actionStart = 0, lastId = -1, last = 0, frames = 0, sequence = 0;
+    const initialAction = actionState.snapshot();
+    let action: PetAction = initialAction.action, actionRevision = initialAction.revision, time = 0, actionStart = 0, last = 0, frames = 0, sequence = 0;
     let pointerX = 0, pointerY = 0, gazeX = 0, gazeY = 0;
     const abort = new AbortController(), performance = createAvatarPerformance(), presence = createAvatarPresence();
     const media = matchMedia('(prefers-reduced-motion: reduce)');
@@ -94,8 +97,9 @@ export default function CubismScene(props: CubismSceneProps) {
     const intersection = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => { inView = entries[0]?.isIntersecting !== false; visibility(); }) : undefined;
     intersection?.observe(container); document.addEventListener('visibilitychange', visibility);
     const interact = (next: PetInteraction, userGesture = false, context?: CompanionGestureContext) => {
-      if (action === 'sleep' && next !== 'wake' && next !== 'sleep') return;
-      action = next === 'wake' ? 'idle' : next as PetAction; actionStart = time;
+      const nextState = actionState.transition(next);
+      if (!nextState) return;
+      action = nextState.action; actionRevision = nextState.revision; actionStart = time;
       localInput = { utteranceId: `cubism-interaction-${++sequence}`, text: '', phase: 'idle' };
       if (next === 'sleep') performance.reset();
       else if (next === 'pet' || next === 'jump' || next === 'wake' && userGesture) {
@@ -111,7 +115,7 @@ export default function CubismScene(props: CubismSceneProps) {
       enabled: () => interactive && Boolean(runtime) && !disposed && !document.hidden && inView && surface.getAttribute('aria-hidden') !== 'true',
       hitTest: (x, y) => portraitContains(hitCoordinates(x, y)),
       regionAt: referencePortrait ? (x, y) => portraitRegion(hitCoordinates(x, y)) : undefined,
-      getAction: () => action, emit: (next, context) => interact(next, true, context),
+      getAction: () => actionState.snapshot().action, emit: (next, context) => interact(next, true, context),
       onPointer: (x, y) => { const rect = container.getBoundingClientRect(); pointerX = clamp((x - rect.left) / Math.max(1, rect.width) * 2 - 1); pointerY = clamp(1 - (y - rect.top) / Math.max(1, rect.height) * 2); },
       onLeave: () => { pointerX = pointerY = 0; delete surface.dataset.hoverRegion; },
       onFeedback: value => { if (value.phase === 'cancel') delete surface.dataset.hoverRegion; else if (value.region) surface.dataset.hoverRegion = value.region; return feedback.update(value, surface); },
@@ -122,8 +126,13 @@ export default function CubismScene(props: CubismSceneProps) {
       if (disposed || !runtime || document.hidden || !inView) return;
       if (last && now - last < 1000 / 30) return;
       const elapsed = last ? Math.max(0, (now - last) / 1000) : 0; last = now; time += elapsed;
+      const sharedAction = actionState.snapshot();
+      if (actionRevision !== sharedAction.revision) {
+        action = sharedAction.action; actionRevision = sharedAction.revision; actionStart = time;
+        if (action === 'sleep') performance.reset();
+      }
       const next = requested.current;
-      if (next && next.id !== lastId) { lastId = next.id; interact(next.action); }
+      if (next && actionState.consumeCommand(next.id)) interact(next.action);
       if (action !== 'sleep' && action !== 'idle' && time - actionStart > (action === 'eat' ? 4 : 2.7)) interact('wake');
       const sleeping = action === 'sleep', supplied = callbacks.current.performanceInput;
       const input = sleeping ? supplied || { utteranceId: 'sleep', text: '', phase: 'idle' as const } : supplied && (supplied.phase !== 'idle' || action === 'idle') ? supplied : localInput;
@@ -134,6 +143,9 @@ export default function CubismScene(props: CubismSceneProps) {
       // Head/eye/body rotation and gaze follow belong to the actual MOC rig.
       // Only rigid lift/approach remain outside it; never apply the same pose twice.
       surface.style.transform = `translateY(${body.yPercent}%) scale(${body.scale})`;
+      // A stationary pointer can change regions when this canvas moves or
+      // resizes. Cancel its old dwell/hold before that stale hotspot reacts.
+      unbind.refresh();
       gazeX = follow.gazeX; gazeY = follow.gazeY;
       try {
         runtime.update(elapsed, pose, follow, {
@@ -166,10 +178,10 @@ export default function CubismScene(props: CubismSceneProps) {
       document.removeEventListener('visibilitychange', visibility); window.removeEventListener('resize', resize);
       surface.remove();
     };
-  }, [modelUrl, compact, interactive]);
+  }, [modelUrl, compact, interactive, actionState]);
 
   useEffect(() => { if (props.performanceInput) quietInput.current?.(props.performanceInput); }, [props.performanceInput]);
   return <div ref={host} className={`pet-three-scene anime-scene cubism-scene ${className}`} data-character-style={referencePortrait ? 'akari-soft' : undefined}>
-    {mode !== 'cubism' && <AnimeScene {...props} className="cubism-fallback" onReady={ready} />}
+    {mode !== 'cubism' && <AnimeScene {...props} actionState={actionState} className="cubism-fallback" onReady={ready} />}
   </div>;
 }

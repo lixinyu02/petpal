@@ -10,6 +10,26 @@ const runtimes = new WeakMap();
 const stopped = signal => { if (signal?.aborted) throw signal.reason || new DOMException('Aborted', 'AbortError'); };
 const parseJson = bytes => JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
 
+/** Cancel one canvas's wait without cancelling a shared Core/Framework download. */
+export function waitForCubismDependency(dependency, signal) {
+  if (!signal) return Promise.resolve(dependency);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (failed, value) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', cancel);
+      if (failed) reject(value); else resolve(value);
+    };
+    const cancel = () => finish(true, signal.reason || new DOMException('Aborted', 'AbortError'));
+    // Keep observing both outcomes even after cancellation: a late shared
+    // rejection must not become unhandled or revive the discarded canvas.
+    Promise.resolve(dependency).then(value => finish(false, value), error => finish(true, error));
+    if (signal.aborted) cancel();
+    else signal.addEventListener('abort', cancel, { once: true });
+  });
+}
+
 function localRuntimeUrl(path, location, prefix = CUBISM_RUNTIME_ROOT) {
   const url = new URL(path, location.href);
   if (url.origin !== location.origin || url.username || url.password || url.search || url.hash || !url.pathname.startsWith(prefix)) throw new Error('Cubism runtime must be bundled at the same origin.');
@@ -344,6 +364,7 @@ export function createCubismFrameController({ model, avatar, bridge, motions = n
 
 /** Uses real Cubism Core/Framework only. Missing runtime returns a rejected load for safe fallback. */
 export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, signal, compact = false }) {
+  stopped(signal);
   const document = canvas.ownerDocument, window = document.defaultView;
   if (!window) throw new Error('Cubism window is unavailable.');
   const location = window.location;
@@ -367,8 +388,8 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
     }
   };
   try {
-    const core = await loadCubismCore({ document, window, coreUrl }); stopped(signal);
-    const framework = await loadFramework(frameworkUrl); module = framework; stopped(signal);
+    const core = await waitForCubismDependency(loadCubismCore({ document, window, coreUrl }), signal); stopped(signal);
+    const framework = await waitForCubismDependency(loadFramework(frameworkUrl), signal); module = framework; stopped(signal);
     lease = acquireCubismFramework(framework, core);
     const bytes = await fetchCubismBytes(modelPath.href, { signal, maxBytes: 256 * 1024 });
     const manifest = parseJson(bytes), resources = validateCubismModel(manifest, modelPath.href);
