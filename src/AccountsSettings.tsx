@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Check, Loader2, LogOut, Plus, ShieldCheck, UserRound } from 'lucide-react';
 import { api, logout, isSessionChanged, type AgentAccess, type ManagedUser, type Provider, type User } from './api';
 import './accounts.css';
-import TaskNotificationsSettings from './TaskNotificationsSettings';
 
 type Edit = {id?:string;username:string;displayName:string;password:string;providerIds:string[];disabled:boolean;isOwner:boolean;agentAccess:AgentAccess};
 export default function AccountsSettings({connected,user,providers,connect}:{connected:boolean;user?:User;providers:Provider[];connect():void}){
@@ -20,7 +19,6 @@ export default function AccountsSettings({connected,user,providers,connect}:{con
   return<div className="settings-section accounts-settings">
     <div className="section-title"><div><h2>我的账号</h2><p>聊天记录、伙伴偏好和语音资料分别保存在各自账号中。</p></div><UserRound size={24}/></div>
     <div className="account-identity"><div><strong>{user?.displayName||'尚未登录'}</strong><span>{user?`@${user.username} · ${user.isOwner?'主机管理员':'成员'}`:'由管理员提供账号和密码'}</span></div><div className="button-row"><button className="secondary-button" onClick={connect}>{connected?'切换账号':'登录账号'}</button>{connected&&<button className="secondary-button" onClick={logout}><LogOut size={15}/>退出登录</button>}</div></div>
-    <TaskNotificationsSettings connected={connected}/>
     {error&&<p className="form-error" role="alert">{error}</p>}{notice&&<p className="field-help" role="status">{notice}</p>}
     {connected&&admin&&<><div className="section-title account-management-title"><div><h2>成员与模型授权</h2><p>按账号分配模型与 Agent 执行范围；新账号默认只有 Chat。</p></div><button className="primary-button" onClick={()=>{setError('');setEditing({username:'',displayName:'',password:'',providerIds:[],disabled:false,isOwner:false,agentAccess:'none'});}}><Plus size={16}/>创建账号</button></div><div className="account-list">{users.map(item=><div className="account-row" key={item.id}><div><strong>{item.displayName}</strong><span>@{item.username} · {item.isOwner?'主机管理员':item.disabled?'已停用':'成员'}</span><small>{item.isOwner?'全部模型 · 可使用主机 Codex':`已分配 ${item.providerIds.length} 个模型 · ${item.canUseCodex ? (item.agentAccess === 'full' ? 'Agent 完整访问' : 'Agent 工作区') : 'Chat'}`}{item.hasPassword?'':' · 尚未设置登录密码'}</small></div><button className="secondary-button" onClick={()=>{setError('');setEditing({id:item.id,username:item.username,displayName:item.displayName,password:'',providerIds:[...item.providerIds],disabled:item.disabled,isOwner:item.isOwner,agentAccess:item.agentAccess || 'none'});}}>管理账号</button></div>)}</div></>}
     {connected&&!admin&&<div className="info-note"><ShieldCheck size={18}/><p>模型授权、密码重置和账号停用由主机管理员管理。你可以独立调整伙伴、默认模型和语音设置。</p></div>}

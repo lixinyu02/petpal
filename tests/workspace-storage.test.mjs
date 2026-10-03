@@ -60,7 +60,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false}={}){
     './browser-setup-draft.mjs':{createBrowserSetupDraft},'./platform/computer-use':{nativeComputerUse:()=>undefined},'./platform/music-mcp':{nativeMusicMcp:()=>undefined},
     './platform/task-notification-session':{taskNotificationSession:{subscribe(){},snapshot:()=>({navigation:null}),takeNavigation(){}}},'./desktop-settings.mjs':{reasoningEfforts},
   };
-  for(const name of ['DownloadsView','BrandMark','CompanionOptions','ChatMessages','ConversationHistory','AgentQueue','UpdatesSettings','CatV2','WorkspaceDisclosure','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings'])modules[`./${name}`]=component(name);
+  for(const name of ['DownloadsView','BrandMark','CompanionOptions','ChatMessages','ConversationHistory','AgentQueue','UpdatesSettings','CatV2','WorkspaceDisclosure','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','ClientBehaviorSettings'])modules[`./${name}`]=component(name);
   const module={exports:{}},context={module,exports:module.exports,require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);return modules[name];},
     window,document,location:{search:'?chat=1',origin:'https://fixture.invalid'},URL,URLSearchParams,AbortController,DOMException,
     setTimeout(callback){const id=++timerId;timers.set(id,callback);return id;},clearTimeout:id=>timers.delete(id)};

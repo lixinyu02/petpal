@@ -9,13 +9,19 @@ const { readDesktopServiceSettings } = require('./service-settings.cjs');
 const { createDesktopRemoteHttp, isPetPalReleaseUrl } = require('./remote-http.cjs');
 const { mainWindowLayout, petWindowLayout } = require('./window-layout.cjs');
 const { createStartupDiagnostics, startupFailureMessage } = require('./startup-diagnostics.cjs');
+const { createAppPreferences } = require('./app-preferences.cjs');
+const { createAppPreferencesHandlers, verifyPreferencesSessionConnection } = require('./app-preferences-ipc.cjs');
 const { spawn } = require('node:child_process');
 
 let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
 let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor;
+let appPreferences;
 let startupDiagnostics, startupPhase = 'electron-ready', startupFailed = false;
 const root = path.resolve(__dirname, '..');
 const iconPath = path.join(__dirname, 'assets', 'icon.png');
+// Login-item lookup and writes must share the packaged application's fixed ID.
+// This identifies the running process; it does not register a system startup item.
+if (process.platform === 'win32' && app.isPackaged) app.setAppUserModelId('com.petpal.desktop');
 if (process.argv.includes('--smoke-test') && process.env.PETPAL_SMOKE_PROFILE) {
   const profile = path.resolve(process.env.PETPAL_SMOKE_PROFILE);
   fsSync.mkdirSync(profile, { recursive: true });
@@ -149,7 +155,7 @@ function trackWindowDisplay(win, isPet = false) {
   });
 }
 
-function createMain() {
+function createMain(showOnReady = true) {
   mainWindow = new BrowserWindow({
     ...mainWindowLayout(screen.getPrimaryDisplay().workArea),
     title: '小伴 PetPal', icon: iconPath, backgroundColor: '#f7f6f2', show: false,
@@ -157,10 +163,11 @@ function createMain() {
   });
   trackWindowDisplay(mainWindow);
   secureWindow(mainWindow);
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => { if (showOnReady || !tray) mainWindow.show(); });
   mainWindow.on('close', event => {
+    if (!quitting && tray && appPreferences.current().closeToTray) { event.preventDefault(); mainWindow.hide(); return; }
     remoteHttp?.cancelOwner(mainWindow.webContents);
-    if (!quitting && tray) { event.preventDefault(); mainWindow.hide(); }
+    if (!quitting) { event.preventDefault(); app.quit(); }
   });
   mainWindow.on('closed', () => { mainWindow = null; });
   mainWindow.webContents.on('render-process-gone', (event, details) => { void executor?.disconnect().catch(() => {}); rendererFailure(event, details); });
@@ -168,6 +175,12 @@ function createMain() {
   mainLoaded = mainWindow.loadURL(origin);
   // The boot sequence owns this rejection even if creating the other window fails first.
   void mainLoaded.catch(() => {});
+}
+
+function applyPetWindowPreferences() {
+  if (!petWindow || petWindow.isDestroyed()) return;
+  const enabled = appPreferences.current().petAlwaysOnTop;
+  petWindow.setAlwaysOnTop(enabled, enabled ? process.platform === 'win32' ? 'pop-up-menu' : 'floating' : 'normal');
 }
 
 function showMain() {
@@ -182,13 +195,13 @@ function showPet() {
     const area = screen.getPrimaryDisplay().workArea;
     petWindow = new BrowserWindow({
       ...petWindowLayout(area),
-      frame: false, transparent: true, resizable: false, hasShadow: false, alwaysOnTop: true,
+      frame: false, transparent: true, resizable: false, hasShadow: false, alwaysOnTop: appPreferences.current().petAlwaysOnTop,
       skipTaskbar: true, show: false, title: '小伴桌宠', icon: iconPath,
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
     });
     trackWindowDisplay(petWindow, true);
     // Windows requires pop-up-menu to retain the native WS_EX_TOPMOST flag.
-    petWindow.setAlwaysOnTop(true, process.platform === 'win32' ? 'pop-up-menu' : 'floating');
+    applyPetWindowPreferences();
     if (process.platform !== 'win32') petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     secureWindow(petWindow);
     petWindow.once('ready-to-show', () => petWindow?.showInactive());
@@ -654,6 +667,8 @@ async function boot() {
   const { createPetServer } = await import(pathToFileURL(path.join(root, 'server', 'app.mjs')).href);
   await startupMilestone('service-settings');
   const serviceSettings = await readDesktopServiceSettings(app.getPath('userData'));
+  appPreferences = createAppPreferences({ app });
+  await appPreferences.load();
   await startupMilestone('workspace');
   const workspaceRoot = process.env.PETPAL_WORKSPACE || path.join(app.getPath('userData'), 'workspace');
   await fs.mkdir(workspaceRoot, { recursive: true });
@@ -669,6 +684,12 @@ async function boot() {
   await startupMilestone('backend-listen');
   const port = await listenDesktopBackend(backend.server);
   origin = `http://127.0.0.1:${port}`;
+  for (const [channel, handler] of Object.entries(createAppPreferencesHandlers(appPreferences, {
+    isAllowed: event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting,
+    readConnection: event => event.sender.executeJavaScript(`(() => { try { const value = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); return value && { url: value.url === '' ? location.origin : value.url, token: value.token }; } catch { return null; } })()`),
+    verifyConnection: verifyPreferencesSessionConnection,
+    onUpdated: applyPetWindowPreferences,
+  }))) ipcMain.handle(channel, handler);
   await startupMilestone('executor-create');
   const executorModule = await import(pathToFileURL(path.join(__dirname, 'executor.mjs')).href);
   executor = new executorModule.DesktopExecutor({ dataDir: path.join(app.getPath('userData'), 'executor'), musicMcpDataDir: path.join(app.getPath('userData'), 'data') });
@@ -723,8 +744,9 @@ async function boot() {
   ]));
   tray.on('double-click', showMain);
   await startupMilestone('window-create');
-  createMain();
-  showPet();
+  const launchPreferences = appPreferences.current(), smoke = process.argv.includes('--smoke-test');
+  createMain(smoke || !launchPreferences.startMinimized);
+  if (smoke || launchPreferences.showPetOnLaunch) showPet();
   await startupMilestone('window-load');
   await Promise.all([mainLoaded, petLoaded]);
   await startupMilestone('ready');
@@ -763,7 +785,40 @@ async function boot() {
       return response.json();
     });
     if (process.argv.includes('--startup-only')) {
+      let preferencesEvidence;
+      if (process.argv.includes('--preferences-smoke')) {
+        if (!process.env.PETPAL_SMOKE_PROFILE || app.isPackaged) throw new Error('Preferences smoke requires an isolated development profile');
+        const before = await mainWindow.webContents.executeJavaScript('window.petpal.preferences.status()');
+        if (before.autoLaunchSupported || before.autoLaunch) throw new Error('Development smoke must not register a system startup item');
+        const changed = await mainWindow.webContents.executeJavaScript('window.petpal.preferences.update({startMinimized:true,showPetOnLaunch:false,closeToTray:false,petAlwaysOnTop:false})');
+        const written = JSON.parse(await fs.readFile(path.join(app.getPath('userData'), 'app-preferences.json'), 'utf8'));
+        if (!changed.startMinimized || changed.showPetOnLaunch || changed.closeToTray || changed.petAlwaysOnTop || petWindow.isAlwaysOnTop() || !written.startMinimized || written.showPetOnLaunch || written.closeToTray || written.petAlwaysOnTop)
+          throw new Error('Preferences did not persist or update the native window');
+        const restored = await mainWindow.webContents.executeJavaScript(`window.petpal.preferences.update(${JSON.stringify({startMinimized:before.startMinimized,showPetOnLaunch:before.showPetOnLaunch,closeToTray:before.closeToTray,petAlwaysOnTop:before.petAlwaysOnTop})})`);
+        if (petWindow.isAlwaysOnTop() !== before.petAlwaysOnTop) throw new Error('Native topmost preference did not restore');
+        await mainWindow.loadURL(`${origin}/?chat=1&settings=1`);
+        const ui = await mainWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+          const deadline = Date.now() + 20000; let opened = false;
+          const check = () => {
+            const tab = [...document.querySelectorAll('.settings-tabs button')].find(button => button.textContent.trim() === '设备连接');
+            if (!opened && tab && !tab.disabled) { opened = true; tab.click(); }
+            const panel = document.querySelector('.client-behavior-settings');
+            const inputs = panel && [...panel.querySelectorAll('input[role="switch"]')];
+            if (inputs?.length === 5 && !panel.querySelector('[role="alert"]') && panel.getAttribute('aria-busy') === 'false') {
+              if (!inputs.find(input => input.getAttribute('aria-label') === '开机自启')?.disabled) return reject(new Error('Development UI must disable system autostart'));
+              panel.scrollIntoView({ block: 'start' });
+              return resolve({ switches: inputs.map(input => ({ label: input.getAttribute('aria-label'), checked: input.checked, disabled: input.disabled })), realBridge: true });
+            }
+            if (Date.now() >= deadline) return reject(new Error('Native preferences UI did not become ready'));
+            setTimeout(check, 40);
+          }; check();
+        })`);
+        await mainWindow.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+        if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'preferences.png'), (await mainWindow.webContents.capturePage()).toPNG());
+        preferencesEvidence = { before, changed, restored, ui, realBridge: true, persisted: true, nativeTopmostChanged: true, systemAutoLaunchChanged: false };
+      }
       const result = { event: 'desktop-startup-smoke', startupReady: true, health, loginGate,
+        ...(preferencesEvidence ? { preferences: preferencesEvidence } : {}),
         bridge: { url: bridge.url, hasToken: bridge.hasToken }, executor: executorBridge, musicMcp: musicMcpBridge,
         runtimeRoot: path.dirname(process.execPath), electronVersion: process.versions.electron,
         codex: { available: codex.available, running: codex.running, authenticated: codex.authenticated },
@@ -893,7 +948,7 @@ async function boot() {
       const bytes = await fs.readFile(absolute);
       return [{ path: relative.split(path.sep).join('/'), bytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }];
     };
-    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
+    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
     if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'result.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
     if (!health.ok || !bridge.hasToken || !codex.available || !desktopTools.opencli.available || desktopTools.opencli.version !== '1.8.8') throw new Error('Desktop smoke prerequisite failed');
@@ -904,7 +959,7 @@ async function boot() {
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on('second-instance', () => { if (origin) showMain(); });
+  app.on('second-instance', (_event, argv = []) => { if (origin && !argv.includes('--petpal-autostart')) showMain(); });
   app.whenReady().then(async () => { await startupMilestone('electron-ready'); await boot(); }).catch(handleStartupFailure);
   app.on('activate', () => { if (origin) showMain(); });
   app.on('window-all-closed', () => { if (!tray) app.quit(); });
@@ -913,7 +968,7 @@ else {
     event.preventDefault(); quitting = true;
     tray?.destroy(); tray = null;
     (async () => {
-      const outcomes = await Promise.allSettled([executor?.close(), remoteHttp?.close(), updates?.close({ preserveHandoff: Boolean(pendingUpdate) }), backend?.close()]);
+      const outcomes = await Promise.allSettled([appPreferences?.close(), executor?.close(), remoteHttp?.close(), updates?.close({ preserveHandoff: Boolean(pendingUpdate) }), backend?.close()]);
       const failed = outcomes.find(outcome => outcome.status === 'rejected');
       if (failed) throw failed.reason;
       if (pendingUpdate) await launchPreparedUpdate(pendingUpdate);

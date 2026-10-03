@@ -96,13 +96,13 @@ function declaration(name) {
 }
 function deferred() { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; }
 
-async function bootHarness(t, { args = [], loadError, deferredLoads = false } = {}) {
+async function bootHarness(t, { args = [], loadError, deferredLoads = false, preferences = {} } = {}) {
   const f = await fixture(t), dialogs = [], diagnostics = [], windows = [], logs = [], loads = [deferred(), deferred()];
   const app = { quitCount: 0, getPath: () => f.userData, getVersion: () => metadata.appVersion,
     whenReady: () => Promise.resolve(), quit() { this.quitCount++; } };
   class Window extends EventEmitter {
     constructor() { super(); this.webContents = new EventEmitter(); this.index = windows.length; windows.push(this); }
-    show() {} focus() {} showInactive() {} setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {}
+    show() { this.showCount = (this.showCount || 0) + 1; } focus() {} showInactive() {} setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} isDestroyed() { return false; }
     loadURL() {
       if (loadError && this.index === 0) return Promise.reject(loadError);
       return deferredLoads ? loads[this.index].promise : Promise.resolve();
@@ -124,6 +124,8 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false } = 
     Tray: class { setToolTip() {} setContextMenu() {} on() {} },
     nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, Menu: { buildFromTemplate: value => value },
     readDesktopServiceSettings: async () => ({ codexHttpOrigins: '' }),
+    createAppPreferences: () => ({ load: async () => {}, current: () => ({ startMinimized: false, showPetOnLaunch: true, closeToTray: true, petAlwaysOnTop: true, ...preferences }) }),
+    createAppPreferencesHandlers: () => ({}), verifyPreferencesSessionConnection: async () => ({}),
     serverModule: { createPetServer: async () => backendStub },
     executorModuleStub: { DesktopExecutor: class { async disconnect() {} }, createExecutorHandlers: () => ({}), createMusicMcpHandlers: () => ({}), createComputerUseMcpHandlers: () => ({}), createOpenCliHandlers: () => ({}) },
     updaterModuleStub: { DesktopUpdateManager: class {}, createDesktopUpdateHandlers: () => ({}) },
@@ -143,10 +145,10 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false } = 
     .replace("await import(pathToFileURL(path.join(__dirname, 'executor.mjs')).href)", 'executorModuleStub')
     .replace("await import(pathToFileURL(path.join(__dirname, 'updates.mjs')).href)", 'updaterModuleStub');
   vm.runInContext(`let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
-    let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor;
+    let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor, appPreferences;
     let startupDiagnostics, startupPhase = 'electron-ready', startupFailed = false;
     const root = ${JSON.stringify(f.root)}, __dirname = ${JSON.stringify(f.root)}, iconPath = 'fixture-icon';
-    ${['getStartupDiagnostics', 'startupMilestone', 'handleStartupFailure', 'rendererFailure', 'createMain', 'showPet'].map(declaration).join('\n')}
+    ${['getStartupDiagnostics', 'startupMilestone', 'handleStartupFailure', 'rendererFailure', 'createMain', 'showPet', 'applyPetWindowPreferences'].map(declaration).join('\n')}
     ${boot}`, context);
   const lifecycle = parsed.statements.find(node => ts.isIfStatement(node) && node.expression.getText(parsed).includes('requestSingleInstanceLock'));
   const startupStatement = lifecycle.elseStatement.statements.find(node => ts.isExpressionStatement(node) && node.getText(parsed).startsWith('app.whenReady()'));
@@ -181,6 +183,16 @@ test('ordinary startup awaits both main and floating-pet pages before becoming r
   assert.equal(f.diagnostics.includes('ready'), false);
   f.loads[1].resolve();
   await boot;
+  assert.equal(f.diagnostics.at(-1), 'ready');
+  assert.equal(f.app.quitCount, 0);
+});
+
+test('saved tray-only startup completes without opening either visible window', async t => {
+  const f = await bootHarness(t, { preferences: { startMinimized: true, showPetOnLaunch: false } });
+  await f.start();
+  assert.equal(f.windows.length, 1);
+  f.windows[0].emit('ready-to-show');
+  assert.equal(f.windows[0].showCount || 0, 0);
   assert.equal(f.diagnostics.at(-1), 'ready');
   assert.equal(f.app.quitCount, 0);
 });

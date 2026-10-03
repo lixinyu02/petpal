@@ -17,12 +17,28 @@ test('HTTP relay keeps central key private, enforces run/model credentials and e
   const server=await createPetServer({dataDir:directory,token:'fixture-owner-session',codex:{async status(){return {available:true,authenticated:true};},async close(){},run(){throw new Error('central must not execute');}},executorsOptions:{pollMs:5,stopMs:20,fetchImpl:async(url,init)=>{upstream.push({url,init});return new Response(upstreamOutput,{headers:{'Content-Type':'text/event-stream'}});}}});
   await listenFixture(server.server);const origin=`http://127.0.0.1:${server.server.address().port}`;
   t.after(async()=>{await server.close();assert.ok(directory.startsWith(path.join(tmpdir(),'petpal-executor-relay-')));await rm(directory,{recursive:true,force:true});});
-  const request=async(route,{method='GET',body,token='fixture-owner-session'}={})=>{const response=await fetch(origin+'/api'+route,{method,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)})});return {status:response.status,body:await response.json()};};
+  const request=async(route,{method='GET',body,token='fixture-owner-session',signal}={})=>{const response=await fetch(origin+'/api'+route,{method,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},signal,...(body===undefined?{}:{body:JSON.stringify(body)})});return {status:response.status,body:await response.json()};};
   const registration=await request('/agent/executors/register',{method:'POST',body:{deviceId:randomUUID(),name:'Relay PC',platform:'win32',arch:'x64'}});assert.equal(registration.status,200);
   const {hostId,connectionId}=registration.body;
   const chat=(await request('/conversations',{method:'POST',body:{mode:'codex'}})).body;
   const submission=await request(`/conversations/${chat.id}/agent/submit`,{method:'POST',body:{submissionId:randomUUID(),hostId,content:'run fixture'}});assert.equal(submission.status,200);
-  const command=(await request(`/agent/executors/${connectionId}/poll`)).body.commands[0];assert.equal(command.type,'run');assert.doesNotMatch(JSON.stringify(command),/fixture-central-private-key|fixed-upstream/);
+  // The durable submit acknowledgement precedes asynchronous dispatch; a short
+  // poll may legitimately return no command while the running state is saved.
+  const pollDeadline=Date.now()+5000;
+  let command,pollStatus,pollError;
+  while(!command&&Date.now()<pollDeadline){
+    let result;
+    try{result=await request(`/agent/executors/${connectionId}/poll`,{signal:AbortSignal.timeout(Math.max(1,pollDeadline-Date.now()))});}
+    catch(error){if(error.name!=='TimeoutError')throw error;pollError=error.name;break;}
+    pollStatus=result.status;assert.equal(pollStatus,200);assert.ok(Array.isArray(result.body.commands));command=result.body.commands[0];
+  }
+  if(!command){
+    let agent,diagnosticError;
+    try{agent=(await request(`/conversations/${chat.id}`,{signal:AbortSignal.timeout(1000)})).body.agent;}
+    catch(error){diagnosticError=error.name;}
+    assert.fail(`Executor command deadline exceeded: ${JSON.stringify({pollStatus,pollError,diagnosticError,paused:agent?.paused,queue:agent?.queue.map(item=>({id:item.id,submissionId:item.submissionId})),run:agent?.run?{id:agent.run.id,status:agent.run.status}:null,submissions:agent?.submissions.map(item=>({entryId:item.entryId,status:item.status}))})}`);
+  }
+  assert.equal(command.type,'run');assert.doesNotMatch(JSON.stringify(command),/fixture-central-private-key|fixed-upstream/);
   const events=`/agent/executors/${connectionId}/events`,relay=`/agent/executors/${connectionId}/runs/${command.runId}/model/responses`;
   assert.equal((await request(events,{method:'POST',body:{runId:command.runId,sequence:1,event:'started',data:{}}})).status,200);
   assert.equal((await request('/state',{token:command.relayToken})).status,401);

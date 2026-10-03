@@ -16,6 +16,8 @@ files:
   - desktop/media-permissions.cjs
   - desktop/service-settings.cjs
   - desktop/startup-diagnostics.cjs
+  - desktop/app-preferences.cjs
+  - desktop/app-preferences-ipc.cjs
   - desktop/remote-http.cjs
   - desktop/executor.mjs
   - desktop/assets/**

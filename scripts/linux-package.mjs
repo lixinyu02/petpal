@@ -24,6 +24,7 @@ const codexVersion = metadata.dependencies['@openai/codex'];
 const opencliVersion = metadata.dependencies['@jackwener/opencli'];
 const requiredApplicationSource = ['server/updates.mjs', 'desktop/updates.mjs', 'server/app.mjs', 'server/auth.mjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/index.mjs', 'server/providers.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'NOTICE'];
 requiredApplicationSource.push('server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs');
+requiredApplicationSource.push('desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs');
 requiredApplicationSource.push('server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs');
 requiredApplicationSource.push('server/opencli-browser-policies.mjs', 'server/opencli-browser-adapters.mjs', 'server/opencli-browser-setup.mjs');
 requiredApplicationSource.push('server/computer-use-mcp.mjs','server/computer-use-tool-names.mjs','server/computer-use-mcp-routes.mjs','server/dynamic-tool-output.mjs','server/model-request-limits.mjs');
@@ -283,7 +284,7 @@ try {
       appId: 'com.petpal.desktop', productName: 'PetPal', asar: false, electronVersion, electronDist: runtime,
       npmRebuild: false, nodeGypRebuild: false, buildDependenciesFromSource: false,
       removePackageScripts: false, removePackageKeywords: false,
-      directories: { output: builderOutput }, files: ['dist/**', 'server/**', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'desktop/updates.mjs', 'desktop/assets/**', 'package.json', 'NOTICE'],
+      directories: { output: builderOutput }, files: ['dist/**', 'server/**', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'desktop/updates.mjs', 'desktop/assets/**', 'package.json', 'NOTICE'],
       linux: { executableName: 'petpal', category: 'Utility' },
     } });
     const unpacked = path.join(builderOutput, arch === 'x64' ? 'linux-unpacked' : `linux-${arch}-unpacked`);

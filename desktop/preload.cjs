@@ -32,11 +32,21 @@ function updateCall(action, ...args) {
   return ipcRenderer.invoke(`petpal:updates:${action}`, token, ...args);
 }
 
+function preferenceUpdate(patch) {
+  let connection = null;
+  try { const value = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); if (value) connection = { url: value.url === '' ? location.origin : value.url, token: value.token }; } catch { /* logged out */ }
+  return ipcRenderer.invoke('petpal:app-preferences:update', connection, patch);
+}
+
 contextBridge.exposeInMainWorld('petpal', Object.freeze({
   connection: () => ipcRenderer.invoke('petpal:connection'),
   showPet: () => ipcRenderer.invoke('petpal:show-pet'),
   showMain: () => ipcRenderer.invoke('petpal:show-main'),
   hidePet: () => ipcRenderer.invoke('petpal:hide-pet'),
+  preferences: Object.freeze({
+    status: () => ipcRenderer.invoke('petpal:app-preferences:status'),
+    update: preferenceUpdate,
+  }),
   remoteRequest,
   remoteAbort: id => ipcRenderer.invoke('petpal:remote:abort', id),
   remoteAck: (id, sequence) => ipcRenderer.invoke('petpal:remote:ack', id, sequence),
