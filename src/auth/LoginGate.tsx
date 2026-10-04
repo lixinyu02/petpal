@@ -25,7 +25,7 @@ export function ConnectionDialog({ close }: { close?(): void }) {
   const pageEntrance = useUiEntrance<HTMLElement>('login-page', !close);
   const scrimEntrance = useUiEntrance<HTMLDivElement>('connection-dialog', !!close);
   const formContent = <section className={close ? 'modal' : 'login-form'} aria-labelledby="connection-title">
-    <div className="modal-heading"><span className="dialog-icon"><Link2 size={23} aria-hidden="true"/></span>{close && <button className="icon-button" aria-label="关闭连接窗口" onClick={close}><X size={20} aria-hidden="true"/></button>}</div>
+    <div className="modal-heading"><span className="dialog-icon"><Link2 size={23} aria-hidden="true"/></span>{close && <button className="icon-button" data-ui-dismiss="dialog" aria-label="关闭连接窗口" onClick={close}><X size={20} aria-hidden="true"/></button>}</div>
     <h2 id="connection-title">登录你的小伴</h2><p>聊天、语音与 Agent 工作，都从你的账号开始。{window.petpal?.executor && '登录后，此电脑会出现在同账号的 Agent 执行列表中。'}</p>
     <div className="auth-modes" role="group" aria-label="登录方式"><button aria-pressed={method === 'password'} className={method === 'password' ? 'active' : ''} onClick={() => setMethod('password')}>账号密码</button><button aria-pressed={method === 'token'} className={method === 'token' ? 'active' : ''} onClick={() => setMethod('token')}>管理员配对</button></div>
     <form onSubmit={submit}><fieldset disabled={busy} className="login-fields">
@@ -37,7 +37,7 @@ export function ConnectionDialog({ close }: { close?(): void }) {
     {window.petpal && <button className="secondary-button full-button auth-owner" disabled={busy} onClick={localOwner}>以本机管理员身份登录</button>}
     <p className="field-help login-note"><ShieldCheck size={14} aria-hidden="true"/>管理员分配模型与 Agent 权限；登录凭据仅保留当前会话。</p>
   </section>;
-  return close ? <div ref={scrimEntrance} className="modal-backdrop" role="dialog" aria-modal="true">{formContent}</div> : <main ref={pageEntrance} className="login-page"><a href="/" className="login-brand"><BrandMark size={36}/><span>小伴<small>PetPal</small></span></a><div className="login-layout"><div className="login-welcome"><span>你的日常伙伴</span><h1>聊聊想法，<br/>一起把事情做好。</h1><img src="/avatars/akari/idle.webp" alt="温柔的二次元伙伴" width="1024" height="1536" decoding="async" fetchPriority="high" onError={e => { e.currentTarget.style.display = 'none'; }}/></div>{formContent}</div></main>;
+  return close ? <div ref={scrimEntrance} className="modal-backdrop" data-ui-layer="dialog" role="dialog" aria-modal="true">{formContent}</div> : <main ref={pageEntrance} className="login-page"><a href="/" className="login-brand"><BrandMark size={36}/><span>小伴<small>PetPal</small></span></a><div className="login-layout"><div className="login-welcome"><span>你的日常伙伴</span><h1>聊聊想法，<br/>一起把事情做好。</h1><img src="/avatars/akari/idle.webp" alt="温柔的二次元伙伴" width="1024" height="1536" decoding="async" fetchPriority="high" onError={e => { e.currentTarget.style.display = 'none'; }}/></div>{formContent}</div></main>;
 }
 
 export default function LoginGate({ children }: { children: ReactNode }) {

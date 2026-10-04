@@ -16,6 +16,7 @@ const { createCentralServerHandlers } = require('./central-server-ipc.cjs');
 const { spawn } = require('node:child_process');
 
 let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
+let pendingMainReveal = false, mainWindowCreated = false;
 let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor;
 let appPreferences, centralServer;
 let startupDiagnostics, startupPhase = 'electron-ready', startupFailed = false;
@@ -163,15 +164,21 @@ function createMain(showOnReady = true) {
     title: '小伴 PetPal', icon: iconPath, backgroundColor: '#f7f6f2', show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
+  mainWindowCreated = true;
+  const win = mainWindow;
   trackWindowDisplay(mainWindow);
   secureWindow(mainWindow);
-  mainWindow.once('ready-to-show', () => { if (showOnReady || !tray) mainWindow.show(); });
+  win.once('ready-to-show', () => {
+    if (quitting || mainWindow !== win || win.isDestroyed()) return;
+    if (pendingMainReveal) showMain();
+    else if (showOnReady || !tray) win.show();
+  });
   mainWindow.on('close', event => {
     if (!quitting && tray && appPreferences.current().closeToTray) { event.preventDefault(); mainWindow.hide(); return; }
     remoteHttp?.cancelOwner(mainWindow.webContents);
     if (!quitting) { event.preventDefault(); app.quit(); }
   });
-  mainWindow.on('closed', () => { mainWindow = null; });
+  win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
   mainWindow.webContents.on('render-process-gone', (event, details) => { void executor?.disconnect().catch(() => {}); rendererFailure(event, details); });
   mainWindow.webContents.on('destroyed', () => { void executor?.disconnect().catch(() => {}); });
   mainLoaded = mainWindow.loadURL(origin);
@@ -186,6 +193,11 @@ function applyPetWindowPreferences() {
 }
 
 function showMain() {
+  if (quitting) return;
+  // A manual relaunch can arrive before the backend or initial window exists.
+  // Let boot create that window once, then reveal it when it is ready.
+  if (!origin || (!mainWindow && !mainWindowCreated)) { pendingMainReveal = true; return; }
+  pendingMainReveal = false;
   if (!mainWindow) createMain();
   if (mainWindow.isMinimized()) mainWindow.restore();
   fitWindowToDisplay(mainWindow);
@@ -193,7 +205,8 @@ function showMain() {
 }
 
 function showPet() {
-  if (!petWindow) {
+  if (quitting) return;
+  if (!petWindow || petWindow.isDestroyed()) {
     const area = screen.getPrimaryDisplay().workArea;
     petWindow = new BrowserWindow({
       ...petWindowLayout(area),
@@ -201,14 +214,26 @@ function showPet() {
       skipTaskbar: true, show: false, title: '小伴桌宠', icon: iconPath,
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
     });
-    trackWindowDisplay(petWindow, true);
+    const win = petWindow;
+    trackWindowDisplay(win, true);
     // Windows requires pop-up-menu to retain the native WS_EX_TOPMOST flag.
     applyPetWindowPreferences();
-    if (process.platform !== 'win32') petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    secureWindow(petWindow);
-    petWindow.once('ready-to-show', () => petWindow?.showInactive());
-    petWindow.on('closed', () => { petWindow = null; });
-    petLoaded = petWindow.loadURL(`${origin}/?pet=1`);
+    if (process.platform !== 'win32') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    secureWindow(win);
+    win.once('ready-to-show', () => { if (!quitting && petWindow === win && !win.isDestroyed()) win.showInactive(); });
+    win.on('closed', () => { if (petWindow === win) petWindow = null; });
+    win.webContents.on('render-process-gone', (_event, details = {}) => {
+      if (quitting || details.reason === 'clean-exit') return;
+      // The companion is optional; its renderer must not stop the server or Agent.
+      if (petWindow === win) petWindow = null;
+      if (!win.isDestroyed()) win.destroy();
+    });
+    petLoaded = win.loadURL(`${origin}/?pet=1`).catch(error => {
+      // Closing a failed renderer also rejects its initial navigation. Keep that
+      // stale window's load from failing the otherwise healthy backend startup.
+      if (petWindow !== win || win.isDestroyed()) return;
+      throw error;
+    });
     void petLoaded.catch(() => {});
   } else { fitWindowToDisplay(petWindow, true); petWindow.showInactive(); }
 }
@@ -977,7 +1002,7 @@ async function boot() {
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on('second-instance', (_event, argv = []) => { if (origin && !argv.includes('--petpal-autostart')) showMain(); });
+  app.on('second-instance', (_event, argv = []) => { if (!argv.includes('--petpal-autostart')) showMain(); });
   app.whenReady().then(async () => { await startupMilestone('electron-ready'); await boot(); }).catch(handleStartupFailure);
   app.on('activate', () => { if (origin) showMain(); });
   app.on('window-all-closed', () => { if (!tray) app.quit(); });

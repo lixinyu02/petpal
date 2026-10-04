@@ -31,7 +31,7 @@ function harness({ tray = true } = {}) {
     const declaration = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
     assert.ok(declaration, name); return declaration.getText(parsed);
   });
-  vm.runInContext(`let mainWindow,petWindow,mainLoaded,petLoaded,quitting=false;let tray=${tray ? '{}' : 'null'};let origin='http://localhost';${functions.join('\n')}`, context);
+  vm.runInContext(`let mainWindow,petWindow,mainLoaded,petLoaded,quitting=false;let pendingMainReveal=false,mainWindowCreated=false;let tray=${tray ? '{}' : 'null'};let origin='http://localhost';${functions.join('\n')}`, context);
   return { preferences, windows, calls, context };
 }
 function close(win) { let prevented = false; win.emit('close', { preventDefault() { prevented = true; } }); return prevented; }

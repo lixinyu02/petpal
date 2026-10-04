@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import {isPassiveNativeOverlay} from '../src/auth/overlay-entry.mjs';
 import * as uiMotion from '../src/platform/ui-motion.mjs';
+import {mountInteractionLayers} from '../src/platform/interaction-layers.mjs';
 
 const compile=async file=>ts.transpileModule(await readFile(new URL(file,import.meta.url),'utf8'),{
   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true},
@@ -44,6 +45,7 @@ function fixture({native=true,enabled=true,href='https://app.example/?chat=1&set
   const preference={readCompanionCatEnabled:()=>catEnabled,useCompanionCatEnabled:()=>[catEnabled,value=>{catEnabled=value;}]};
   const nativeOverlay={status:()=>{const request=deferred();pending.push(request);return request.promise;},stop:()=>Promise.resolve()};
   const modules={
+    './platform/interaction-layers.mjs':{mountInteractionLayers},
     react,'react-dom/client':{createRoot:()=>({render:tree=>{capturedRoot=tree;}})},
     'react/jsx-runtime':{jsx:(type,{children,...props})=>react.createElement(type,props,...(Array.isArray(children)?children:children===undefined?[]:[children])),jsxs:(type,{children,...props})=>react.createElement(type,props,...(Array.isArray(children)?children:children===undefined?[]:[children]))},
     '@capacitor/core':{Capacitor:{isNativePlatform:()=>native,getPlatform:()=>native?'android':'web'}},

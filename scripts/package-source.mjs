@@ -165,6 +165,7 @@ const requiredFiles = [
   'server/app.mjs', 'server/codex.mjs', 'server/auth.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs',
   'desktop/main.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'package-lock.json', 'android/gradle/wrapper/gradle-wrapper.jar',
   'android/app/src/main/AndroidManifest.xml', 'android/app/src/main/java/com/petpal/app/MainActivity.java', 'android/app/src/main/java/com/petpal/app/LocalMediaChromeClient.java',
+  'android/app/src/main/java/com/petpal/app/BackNavigationPolicy.java', 'android/app/src/test/java/com/petpal/app/BackNavigationPolicyTest.java',
   'android/app/src/main/java/com/petpal/app/PetOverlayService.java', 'android/app/src/main/java/com/petpal/app/PetOverlayWebView.java',
   'android/app/src/main/java/com/petpal/app/OverlayAssetPolicy.java', 'android/app/src/test/java/com/petpal/app/OverlayAssetPolicyTest.java',
   'tests/auth-race.test.mjs', 'tests/native-media-permissions.test.mjs',

@@ -16,6 +16,7 @@ export default function MediaDevicesSettings({ scope }: { scope: string }) {
   const [level, setLevel] = useState(0);
   const storage = useRef<ReturnType<typeof createDevicePreferences> | null>(null);
   const mounted = useRef(false), generation = useRef(0), enumeration = useRef(0);
+  const sessionActive = useRef(false), captureRequests = useRef(0), refreshQueued = useRef(false);
   const stream = useRef<MediaStream | null>(null), context = useRef<AudioContext | null>(null);
   const video = useRef<HTMLVideoElement>(null), audio = useRef<HTMLAudioElement | null>(null);
   const frame = useRef(0), mediaUrl = useRef('');
@@ -32,36 +33,51 @@ export default function MediaDevicesSettings({ scope }: { scope: string }) {
     if (update && mounted.current) { setActive(''); setPending(false); setLevel(0); }
   }
   async function refresh() {
-    if (!available) return;
+    if (!available || !mounted.current || !sessionActive.current || document.hidden) return;
+    // Some browsers cannot enumerate while the system permission prompt is open.
+    if (captureRequests.current) { refreshQueued.current = true; return; }
     const revision = ++enumeration.current;
-    try { const listed = await navigator.mediaDevices.enumerateDevices(); if (mounted.current && revision === enumeration.current) setDevices(listed); }
-    catch (e) { if (mounted.current && revision === enumeration.current) setError(mediaFailure(e)); }
+    const current = () => mounted.current && sessionActive.current && revision === enumeration.current && !document.hidden;
+    try { const listed = await navigator.mediaDevices.enumerateDevices(); if (current()) setDevices(listed); }
+    catch (e) { if (current()) setError(mediaFailure(e)); }
   }
   useEffect(() => {
-    mounted.current = true;
+    mounted.current = true; sessionActive.current = true;
+    let resumeFrame = 0;
+    const cancelResume = () => { cancelAnimationFrame(resumeFrame); resumeFrame = 0; };
+    const resume = () => {
+      if (!sessionActive.current || document.hidden) return;
+      // Returning from system settings can dispatch visibility, focus and pageshow together.
+      cancelResume();
+      resumeFrame = requestAnimationFrame(() => { resumeFrame = 0; void refresh(); });
+    };
     let local: Storage | undefined; try { local = window.localStorage; } catch { /* Session-only device selection remains available. */ }
     storage.current = createDevicePreferences(local, scope); setPreferences(storage.current.read());
     void refresh();
     const changed = () => { void refresh(); };
-    const hidden = () => { if (document.hidden) stop(); };
-    const leaving = () => stop();
-    const sessionChanged = () => { ++enumeration.current; stop(); setDevices([]); setPreferences(defaults); storage.current?.dispose(); };
+    const visibility = () => { if (document.hidden) { cancelResume(); ++enumeration.current; stop(); } else resume(); };
+    const leaving = () => { cancelResume(); ++enumeration.current; stop(); };
+    const sessionChanged = () => { sessionActive.current = false; refreshQueued.current = false; cancelResume(); ++enumeration.current; stop(); setDevices([]); setPreferences(defaults); storage.current?.dispose(); };
     navigator.mediaDevices?.addEventListener('devicechange', changed);
-    document.addEventListener('visibilitychange', hidden); window.addEventListener('pagehide', leaving); window.addEventListener('petpal:session-change', sessionChanged);
+    document.addEventListener('visibilitychange', visibility); window.addEventListener('pagehide', leaving); window.addEventListener('petpal:session-change', sessionChanged);
+    window.addEventListener('focus', resume); window.addEventListener('pageshow', resume);
     return () => {
-      mounted.current = false; ++enumeration.current; stop(false); storage.current?.dispose(); storage.current = null;
+      mounted.current = false; sessionActive.current = false; refreshQueued.current = false; cancelResume(); ++enumeration.current; stop(false); storage.current?.dispose(); storage.current = null;
       navigator.mediaDevices?.removeEventListener('devicechange', changed);
-      document.removeEventListener('visibilitychange', hidden); window.removeEventListener('pagehide', leaving); window.removeEventListener('petpal:session-change', sessionChanged);
+      document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', leaving); window.removeEventListener('petpal:session-change', sessionChanged);
+      window.removeEventListener('focus', resume); window.removeEventListener('pageshow', resume);
     };
   }, [scope]);
   function select(field: DeviceField, value: string) {
+    if (!mounted.current || !sessionActive.current) return;
     stop(); setError(''); setMessage('设备选择已更新。');
     const next = { ...preferences, [field]: value }; setPreferences(storage.current?.write(next) ?? next);
     if(field==='speakerId')window.dispatchEvent(new Event('petpal:audio-output-change'));
   }
   async function startCapture(kind: 'microphone' | 'camera') {
+    if (!mounted.current || !sessionActive.current || captureRequests.current) return;
     stop(); setError(''); setMessage(''); setPending(true);
-    const revision = generation.current;
+    const revision = generation.current; ++captureRequests.current;
     try {
       const captured = await captureDevice(kind, kind === 'microphone' ? preferences.microphoneId : preferences.cameraId);
       if (!mounted.current || revision !== generation.current || document.hidden) { captured.getTracks().forEach(track => track.stop()); return; }
@@ -87,8 +103,13 @@ export default function MediaDevicesSettings({ scope }: { scope: string }) {
       setActive(kind); setPending(false); setMessage(kind === 'microphone' ? '正在检查输入电平，不录音、不上传，也不会通过扬声器回放。' : '摄像头预览仅在当前页面显示，不拍照、不录制、不上传。');
       void refresh();
     } catch (e) { if (mounted.current && revision === generation.current) { stop(); setError(mediaFailure(e)); } }
+    finally {
+      --captureRequests.current;
+      if (!captureRequests.current && refreshQueued.current) { refreshQueued.current = false; void refresh(); }
+    }
   }
   async function testOutput() {
+    if (!mounted.current || !sessionActive.current || captureRequests.current) return;
     stop(); setError(''); setMessage(''); setPending(true);
     const revision = generation.current;
     try {

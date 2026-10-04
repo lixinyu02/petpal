@@ -1,0 +1,1 @@
+export function composerKeyAction(event:Pick<KeyboardEvent,'key'|'isComposing'|'keyCode'|'defaultPrevented'|'shiftKey'|'altKey'|'ctrlKey'|'metaKey'>,options?:{touch?:boolean}):'none'|'newline'|'send';

@@ -7,6 +7,7 @@ import './theme.css';
 import './ui-motion.css';
 import './ui-polish.css';
 import { mountUiMotionLifecycle } from './platform/ui-motion.ts';
+import { mountInteractionLayers } from './platform/interaction-layers.mjs';
 import {mountThemeLifecycle} from './platform/theme.ts';
 import { useViewport } from './platform/useViewport';
 import { getIdentity, getSessionEpoch, initConnection, subscribeSession } from './api';
@@ -24,6 +25,7 @@ const overlay = isPassiveNativeOverlay(location.href, Capacitor.isNativePlatform
 function SessionRoot(){
   useViewport();
   useLayoutEffect(() => mountUiMotionLifecycle({ disabled: overlay }), []);
+  useEffect(() => overlay ? undefined : mountInteractionLayers(), []);
   useEffect(()=>mountThemeLifecycle({transparent:overlay}),[]);
   const epoch=useSyncExternalStore(subscribeSession,getSessionEpoch,getSessionEpoch);
   const [catEnabled]=useCompanionCatEnabled(),ownerIdentity=getIdentity();

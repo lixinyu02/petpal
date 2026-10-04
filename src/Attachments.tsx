@@ -59,14 +59,14 @@ function SavedImage({attachment}:{attachment:Attachment}) {
     const observer=new IntersectionObserver(entries=>setVisible(entries[0].isIntersecting),{rootMargin:'250px'});observer.observe(container.current);
     return()=>observer.disconnect();
   },[]);
-  useEffect(()=>{if(!expanded)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape')setExpanded(false);};document.addEventListener('keydown',close);return()=>document.removeEventListener('keydown',close);},[expanded]);
+  useEffect(()=>{if(!expanded)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();setExpanded(false);}};document.addEventListener('keydown',close);return()=>document.removeEventListener('keydown',close);},[expanded]);
   useEffect(()=>{
     if(!visible&&!expanded)return;
     const controller=new AbortController();let objectUrl='';setError(false);setUrl('');
     void (async()=>{const release=await imageSlot(controller.signal);try{return await apiBlob(`/attachments/${encodeURIComponent(attachment.id)}`,{signal:controller.signal});}finally{release();}})().then(blob=>{if(controller.signal.aborted)return;objectUrl=URL.createObjectURL(blob);setUrl(objectUrl);}).catch(error=>{if(!controller.signal.aborted&&!isSessionChanged(error))setError(true);});
     return()=>{controller.abort();if(objectUrl)URL.revokeObjectURL(objectUrl);};
   },[attachment.id,retry,visible]);
-  return <div ref={container} className="message-image-slot">{url?<button type="button" className="message-image" title="查看图片" onClick={()=>setExpanded(true)}><img src={url} alt={attachment.name||'消息图片'}/></button>:<button className="message-image-placeholder" disabled={!error} onClick={()=>setRetry(value=>value+1)}>{error?'图片加载失败 · 重试':visible?<Loader2 size={18} className="spin"/>:'图片'}</button>}{expanded&&url&&<div className="image-preview-backdrop" role="dialog" aria-modal="true" aria-label="查看消息图片" onClick={()=>setExpanded(false)}><button autoFocus type="button" aria-label="关闭图片" onClick={()=>setExpanded(false)}><X size={22}/></button><img src={url} alt={attachment.name||'消息图片'} onClick={event=>event.stopPropagation()}/></div>}</div>;
+  return <div ref={container} className="message-image-slot">{url?<button type="button" className="message-image" title="查看图片" onClick={()=>setExpanded(true)}><img src={url} alt={attachment.name||'消息图片'}/></button>:<button className="message-image-placeholder" disabled={!error} onClick={()=>setRetry(value=>value+1)}>{error?'图片加载失败 · 重试':visible?<Loader2 size={18} className="spin"/>:'图片'}</button>}{expanded&&url&&<div className="image-preview-backdrop" data-ui-layer="dialog" role="dialog" aria-modal="true" aria-label="查看消息图片" onClick={()=>setExpanded(false)}><button autoFocus type="button" data-ui-dismiss="dialog" aria-label="关闭图片" onClick={()=>setExpanded(false)}><X size={22}/></button><img src={url} alt={attachment.name||'消息图片'} onClick={event=>event.stopPropagation()}/></div>}</div>;
 }
 export function MessageImages({items}:{items?:Attachment[]}) {
   if(!items?.length)return null;
