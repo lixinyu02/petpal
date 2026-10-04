@@ -9,6 +9,7 @@ import type { PetAction } from './pet/behavior';
 import { useVoiceConversation } from './voice/useVoiceConversation';
 import './voice-conversation.css';
 import {ChatAssistantControls,ChatAssistantTasks,useChatAssistant} from './ChatAssistant';
+import {useUiEntrance} from './platform/ui-motion.ts';
 
 const words: Record<PetAction, string> = { idle: '我就在你旁边。', walk: '走两步，再回来陪你。', pet: '呼噜…这样就很舒服。', eat: '啊呜，谢谢你的零食。', sleep: '呼…陪你安静一会儿。', jump: '看到你，就有一点开心。' };
 const animeWords: Record<PetAction, string> = { idle: '今天也一起度过吧。', walk: '我就在这里，听你说。', pet: '嗯，感觉被温柔地照顾着。', eat: '谢谢你的点心。', sleep: '闭上眼睛，陪你安静一会儿。', jump: '嗨，我看到你啦。' };
@@ -25,7 +26,8 @@ export default function CompanionWorld() {
   const [syncNote, setSyncNote] = useState('');
   const selectionRevision = useRef(0);
   const [action, setAction] = useState<PetAction>('idle');
-  const [ready, setReady] = useState(false);
+  const [readyKind, setReadyKind] = useState<CompanionKind|null>(null);
+  const ready=readyKind===kind;
   const captions = useRef<HTMLDivElement>(null);
   const voiceScope=session?.instanceId&&user?`${session.instanceId}:${user.id}`:'guest';
   const chatAssistant=useChatAssistant({scope:voiceScope,allowed:!!user?.canUseCodex,defaultHostId:session?.settings.chatAssistantHostId,onSettingsChanged:settings=>setSession(previous=>previous?{...previous,settings}:previous)});
@@ -44,13 +46,13 @@ export default function CompanionWorld() {
   const voiceLabels = {idle:'语音聊天',starting:'正在连接…',listening:'正在聆听',recognizing:'正在识别…',thinking:'正在思考…',speaking:`${name}在回应`,error:'语音聊天已暂停'};
   const hasCaptions = Boolean(voice.transcript || voice.reply || voice.listening);
   useEffect(() => { if (action === 'sleep') voice.stop(); }, [action, voice.stop]);
-  useEffect(() => { voice.stop();setAction('idle');setReady(false); }, [kind]);
+  useEffect(() => { voice.stop();setAction('idle');setReadyKind(null); }, [kind]);
   useEffect(() => { if (captions.current) captions.current.scrollTop = captions.current.scrollHeight; }, [voice.transcript, voice.reply]);
   async function choose(next: CompanionKind) {
     if (kind === next) return;
     voice.stop();
     const revision = ++selectionRevision.current;
-    setAction('idle'); setReady(false); setSyncNote('');
+    setAction('idle'); setReadyKind(null); setSyncNote('');
     try { await chooseCompanion(next); }
     catch { if (revision === selectionRevision.current) setSyncNote('已在此设备切换；下次连接时将同步。'); }
   }
@@ -65,16 +67,20 @@ export default function CompanionWorld() {
     return () => { alive = false; };
   }, []);
   function beginVoice() { setVoiceOpen(true); if (action !== 'sleep') void voice.start(); }
+  const introEntrance=useUiEntrance<HTMLDivElement>(`companion-intro:${kind}`,ready);
+  const auraEntrance=useUiEntrance<HTMLDivElement>(`companion-aura:${kind}`,ready);
+  const replyEntrance=useUiEntrance<HTMLDivElement>(`companion-reply:${kind}:${action}`,ready&&!voiceOpen);
+  const voiceEntrance=useUiEntrance<HTMLElement>('companion-voice-panel',voiceOpen);
   return <main className={`companion-world companion-${kind}${voiceOpen ? ' companion-voice-open' : ''}`} data-ready={ready} data-companion-kind={kind} data-voice-phase={voice.phase}>
     <header className="companion-header">
       <a className="companion-brand" href="/" aria-label="小伴首页"><BrandMark size={32}/><span>小伴<small>PetPal</small></span></a>
       <nav aria-label="工作台入口">{user?.canUseCodex && <a className="companion-codex" aria-label="Agent 工作台" href="/?chat=1&mode=codex"><Terminal size={18} aria-hidden="true"/><span>Agent</span></a>}<a className="companion-settings" href="/?chat=1&settings=1" aria-label="连接与设置"><Settings2 size={18} aria-hidden="true"/></a><a className="companion-chat" href="/?chat=1"><MessageCircle size={18} aria-hidden="true"/>聊聊天<ArrowUpRight size={15} aria-hidden="true"/></a></nav>
     </header>
     <section className="companion-space" aria-label="伙伴陪伴空间" data-action={action}>
-      <div className="companion-intro"><span className="companion-presence"><i/>{action === 'sleep' ? '安心睡着，也在陪你' : '在你身边'}</span><h1>{name}</h1></div>
+      <div ref={introEntrance} className="companion-intro"><span className="companion-presence"><i/>{action === 'sleep' ? '安心睡着，也在陪你' : '在你身边'}</span><h1>{name}</h1></div>
       {catEnabled&&<div className="companion-switch" role="group" aria-label="选择陪伴角色"><button aria-pressed={kind === 'anime'} onClick={() => choose('anime')}>二次元伙伴</button><button aria-pressed={kind === 'cat'} onClick={() => choose('cat')}>3D 小猫</button></div>}
-      <div className="companion-stage"><div className="companion-aura" aria-hidden="true"/><div className="companion-floor"/><CompanionScene key={kind} kind={kind} performanceInput={voiceOpen ? voice.performanceInput : undefined} onReady={() => setReady(true)} onState={state => setAction(state.action)}/></div>
-      {voiceOpen ? <section className="companion-voice-panel" aria-label="伙伴语音聊天" aria-describedby="companion-voice-help">
+      <div className="companion-stage"><div ref={auraEntrance} className="companion-aura" aria-hidden="true"/><div className="companion-floor" aria-hidden="true"/><CompanionScene key={kind} kind={kind} performanceInput={voiceOpen ? voice.performanceInput : undefined} onReady={() => setReadyKind(kind)} onState={state => setAction(state.action)}/></div>
+      {voiceOpen ? <section ref={voiceEntrance} className="companion-voice-panel" aria-label="伙伴语音聊天" aria-describedby="companion-voice-help">
         <div className="voice-conversation-heading"><span role="status">{voice.phase === 'starting' || voice.phase === 'recognizing' || voice.phase === 'thinking' ? <Loader2 size={15} className="spin" aria-hidden="true"/> : voice.speaking ? <AudioLines size={16} aria-hidden="true"/> : <Mic size={15} aria-hidden="true"/>} {voiceLabels[voice.phase]}</span><span className="ui-voice-bars" aria-hidden="true"><i/><i/><i/><i/><i/></span><button aria-label="关闭语音聊天" onClick={() => {voice.stop();setVoiceOpen(false);}}><X size={16} aria-hidden="true"/></button></div>
         <div className="voice-conversation-toolbar">
           <label className="voice-conversation-model"><span>模型</span><select aria-label="语音聊天模型" value={providerId} disabled={voice.active} onChange={event => setProviderId(event.target.value)}>{session?.providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
@@ -93,7 +99,7 @@ export default function CompanionWorld() {
           {voice.listening ? <button className="voice-primary" disabled={!voice.hasUtterance} onClick={() => void voice.finishUtterance()}><Check size={16} aria-hidden="true"/>说完了</button> : <button className="voice-primary" disabled={voice.phase === 'starting'} onClick={() => void voice.interrupt()}><Mic size={16} aria-hidden="true"/>打断，我来说</button>}
           <button onClick={voice.stop}><Square size={13} aria-hidden="true"/>结束对话</button>
         </> : <button className="voice-primary" disabled={!user || !providerId || action === 'sleep'} onClick={beginVoice}><Mic size={16} aria-hidden="true"/>{voice.phase === 'error' ? '重新开始' : '开始语音聊天'}</button>}</div>
-      </section> : <div className="companion-reply" role="status" aria-live="polite"><span>{(kind === 'anime' ? animeWords : words)[action]}</span></div>}
+      </section> : <div ref={replyEntrance} className="companion-reply" role="status" aria-live="polite"><span>{(kind === 'anime' ? animeWords : words)[action]}</span></div>}
       {(!voiceOpen || syncNote || action === 'sleep') && <p className="companion-hint">{syncNote || (action === 'sleep' ? '轻触唤醒。' : '轻触回应，长按休息。')}</p>}
       <details className="interaction-help"><summary>相处的小方式</summary><p>双击打个招呼；鼠标按住轻轻划过，像一次抚摸。<br/>也可以按 Tab 选中伙伴，用 Enter 或空格回应，长按休息，连按两次打招呼。</p></details>
     </section>

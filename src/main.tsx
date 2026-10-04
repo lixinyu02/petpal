@@ -5,6 +5,7 @@ import './natural-companion.css';
 import './adaptive-screen.css';
 import './theme.css';
 import './ui-motion.css';
+import './ui-polish.css';
 import { mountUiMotionLifecycle } from './platform/ui-motion.ts';
 import {mountThemeLifecycle} from './platform/theme.ts';
 import { useViewport } from './platform/useViewport';

@@ -7,6 +7,7 @@ import AgentPermissions,{defaultAgentPermissions} from './AgentPermissions';
 import {ExecutionHostPicker,ModelPicker} from './WorkspaceControls';
 import ProjectDirectory from './ProjectDirectory';
 import {projectDirectoryIssue} from './project-directory-preferences.mjs';
+import {useUiEntrance} from './platform/ui-motion.ts';
 import './chat-assistant.css';
 
 const taskLabels={deciding:'正在安排',queued:'已排队',running:'执行中',completed:'已完成',error:'未完成',cancelled:'已取消',unknown:'状态待确认'};
@@ -82,6 +83,7 @@ export function useChatAssistant({scope,allowed,hostState,defaultHostId,onSettin
 export function ChatAssistantControls({assistant,allowed,user,providers,disabled=false,compact=false,localHostId='',onDownload}:{assistant:ReturnType<typeof useChatAssistant>;allowed:boolean;user?:User;providers:Provider[];disabled?:boolean;compact?:boolean;localHostId?:string;onDownload?():void}) {
   const id=useId(),{value,hosts}=assistant;
   const [open,setOpen]=useState(false),[placement,setPlacement]=useState<{layer:CSSProperties;panel:CSSProperties;sheet:boolean}>(),[ownedPortal,setOwnedPortal]=useState('');
+  const layer=useUiEntrance<HTMLDivElement>(`${id}-dialog`,open);
   const trigger=useRef<HTMLButtonElement>(null),panel=useRef<HTMLElement>(null),body=useRef<HTMLDivElement>(null),heading=useRef<HTMLDivElement>(null),closeButton=useRef<HTMLButtonElement>(null);
   disabled=disabled||assistant.savingDefault;
   const selected=hosts.find(host=>host.id===value.hostId),issue=chatAssistantTargetIssue(value,hosts,providers,!!user?.isOwner)||chatAssistantDefaultIssue(value,assistant.savedHostId)||projectDirectoryIssue(value.projectDirectory||'',selected);
@@ -167,7 +169,7 @@ export function ChatAssistantControls({assistant,allowed,user,providers,disabled
     <button ref={trigger} type="button" className={`chat-assistant-trigger${value.enabled?' is-enabled':''}`} aria-label={`Chat + Agent 设置：${value.enabled?'开启':'关闭'}，${targetSummary}`} aria-haspopup="dialog" aria-expanded={open} aria-controls={open?`${id}-dialog`:undefined} onClick={()=>setOpen(previous=>!previous)}>
       <Terminal size={14} aria-hidden="true"/><span className="chat-assistant-trigger-copy"><strong>Chat + Agent</strong><small>{targetSummary}</small></span><span className="chat-assistant-trigger-state">{value.enabled?'开':'关'}</span><Settings2 size={13} aria-hidden="true"/>
     </button>
-    {open&&createPortal(<div className="chat-assistant-layer" style={placement?.layer} onClick={event=>{if(event.target===event.currentTarget)setOpen(false);}}>
+    {open&&createPortal(<div ref={layer} className="chat-assistant-layer" style={placement?.layer} onClick={event=>{if(event.target===event.currentTarget)setOpen(false);}}>
       <section ref={panel} id={`${id}-dialog`} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} aria-owns={ownedPortal||undefined} tabIndex={-1} className={`chat-assistant-dialog${placement?.sheet?' is-sheet':''}`} style={placement?.panel}>
         <div ref={heading} className="chat-assistant-dialog-heading"><div><h2 id={`${id}-title`}>Chat + Agent</h2><p id={`${id}-description`}>需要操作电脑时交给后台 Agent，聊天继续。</p></div><button ref={closeButton} type="button" aria-label="关闭 Chat + Agent 设置" onClick={()=>setOpen(false)}><X size={18}/></button></div>
         <div ref={body} className="chat-assistant-options">

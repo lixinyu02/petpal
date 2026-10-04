@@ -1,0 +1,238 @@
+/* Warm, readable interface chrome. Keep the portrait grid and native overlays unchanged. */
+:root{
+  --ui-polish-muted:#65766a;
+  --ui-polish-soft:#f0f3eb;
+  --ui-polish-edge:#dde5d8;
+  --ui-polish-control:#fcfdf9;
+  --ui-polish-accent:#315e49;
+}
+html[data-theme="night"]{
+  --ui-polish-muted:#b1beb5;
+  --ui-polish-soft:#28342c;
+  --ui-polish-edge:#3a483f;
+  --ui-polish-control:#263129;
+  --ui-polish-accent:#b6d8c1;
+}
+
+/* The character owns the center; the footer is a compact group in normal document flow. */
+.companion-world .companion-footer{
+  justify-content:center;align-items:center;flex-wrap:wrap;gap:12px;
+}
+.companion-world .companion-footer>a,
+.companion-world .companion-footer>button{
+  justify-content:center;min-height:44px;border-radius:14px;padding:9px 14px;
+  font-size:13px;line-height:1.5;gap:8px;
+}
+.companion-world .companion-footer>.companion-voice-entry{
+  background:#335f49;color:#fffef8;border:1px solid transparent;padding-inline:18px;
+}
+.companion-world .companion-footer>a,
+.companion-world .companion-footer>button:not(.companion-voice-entry){
+  color:var(--ui-polish-muted);background:transparent;
+}
+.companion-world .companion-intro h1{font-weight:550;letter-spacing:2.5px;line-height:1.4}
+.companion-world .companion-presence{letter-spacing:.45px;color:var(--ui-polish-muted)}
+.companion-world .companion-reply{font-weight:500;letter-spacing:0;color:var(--theme-ink,#30433b)}
+.companion-world .companion-hint,
+.companion-world .interaction-help{color:var(--ui-polish-muted)}
+.companion-world .interaction-help summary{text-decoration-thickness:1px;text-decoration-color:var(--ui-polish-edge)}
+.companion-world .companion-voice-panel{border-radius:0}
+.companion-world .voice-conversation-heading{font-weight:550;letter-spacing:0}
+.companion-world .voice-conversation-toolbar{border-color:var(--ui-polish-edge)}
+
+/* Calm headings and dependable text contrast are more useful than extra setting cards. */
+.app-shell .settings-page .settings-heading h1{
+  font-size:clamp(26px,2.6vw,32px);font-weight:550;line-height:1.45;letter-spacing:-.45px;
+}
+.app-shell .settings-page .settings-heading>p{font-size:13px;line-height:1.85;max-width:620px}
+.app-shell .settings-page .settings-tabs{gap:25px;margin-block:28px 25px;border-color:var(--ui-polish-edge)}
+.app-shell .settings-page .settings-tabs>button{font-size:13px;min-height:46px;font-weight:500}
+.app-shell .settings-page .settings-section h2{font-size:17px;line-height:1.55;font-weight:550}
+.app-shell .settings-page .section-title p{font-size:12px;line-height:1.85}
+.app-shell .settings-page :is(.field-help,.central-server-note,.client-behavior-note){font-size:11px;line-height:1.85}
+.app-shell .settings-page .client-behavior-copy strong{font-size:13px;line-height:1.6}
+.app-shell .settings-page .client-behavior-copy small{font-size:11px;line-height:1.8}
+.app-shell .settings-page :is(.device-row,.provider-row,.account-row,.account-identity){border-color:var(--ui-polish-edge)}
+.app-shell .settings-page :is(.device-row p,.provider-details>span,.account-row span){line-height:1.8}
+.app-shell .settings-page :is(.device-row h3,.provider-details strong,.account-row strong){font-weight:550}
+
+html:not([data-theme="night"]) .app-shell .settings-page :is(.settings-heading>p,.section-title p,.field-help,.client-behavior-copy small,.client-behavior-note,.device-row p,.provider-details>span,.provider-details small,.account-row span,.central-server-note){
+  color:var(--ui-polish-muted);
+}
+html:not([data-theme="night"]) .app-shell .settings-page :is(.settings-section h2,.device-row h3,.provider-details strong,.client-behavior-copy strong,.central-server-toggle strong){
+  color:var(--theme-ink,#30433b);
+}
+.app-shell .settings-page :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),textarea,select){
+  border-radius:11px;border-color:var(--ui-polish-edge);background:var(--ui-polish-control);
+}
+.app-shell .settings-page :is(.primary-button,.secondary-button,.danger-button){border-radius:11px;min-height:40px}
+.app-shell :is(.primary-button,.secondary-button,.danger-button,.new-chat){border-radius:11px}
+.app-shell .icon-button{border-radius:8px}
+.app-shell .companion-panel-toggle{
+  background:var(--ui-polish-soft);color:var(--ui-polish-muted);border-radius:11px;
+  min-height:40px;padding:7px 10px;
+}
+
+/* Modes and model/host selectors share one visual scale. Their popup coordinate systems stay intact. */
+.app-shell .workspace-mode-row{align-items:center}
+.app-shell .workspace-mode-row .mode-switch{
+  align-items:center;min-height:50px;padding:3px;border-radius:13px;
+  background:var(--ui-polish-soft);gap:3px;
+}
+html .app-shell .workspace-mode-row .mode-switch>button{
+  min-height:44px;border-radius:10px;font-size:13px;font-weight:550;line-height:1.45;
+}
+html .app-shell .workspace-controls:is(.is-chat,.is-agent) .workspace-model-trigger,
+html .app-shell .workspace-controls.is-agent .workspace-context-row :is(.workspace-model-trigger,.workspace-host-control),
+html .app-shell .workspace-host-control,
+html .app-shell .workspace-host-picker>summary{
+  min-height:50px;border-radius:12px;border-color:transparent;background:var(--ui-polish-soft);
+  box-shadow:none;
+}
+.app-shell .workspace-model-trigger{padding-block:8px}
+.app-shell .workspace-model-current strong{font-weight:550;line-height:1.5}
+.app-shell .workspace-model-current small{color:var(--ui-polish-muted)}
+.app-shell .workspace-controls{border-color:var(--ui-polish-edge)}
+.app-shell .workspace-target-segments{border-radius:11px;border-color:transparent;background:var(--ui-polish-soft)}
+.app-shell .workspace-target-segments>button{border-radius:8px}
+html:not([data-theme="night"]) .app-shell .mode-switch>button[aria-pressed="true"]{
+  background:var(--ui-polish-control);color:var(--ui-polish-accent);box-shadow:0 1px 4px #263f2910;
+}
+
+/* Readable welcome and conversation, without putting another frame around them. */
+.app-shell .welcome h1{font-weight:550;letter-spacing:-.6px;line-height:1.45}
+.app-shell .welcome>p{font-size:14px;line-height:1.9;color:var(--ui-polish-muted);max-width:470px}
+.app-shell .welcome .eyebrow{color:var(--ui-polish-muted)}
+.app-shell .welcome .suggestions{gap:18px}
+.app-shell .welcome .suggestions>button{
+  border-color:var(--ui-polish-edge);border-radius:0;font-size:13px;line-height:1.6;
+  color:var(--ui-polish-accent);
+}
+.app-shell .message-author{font-size:12px;font-weight:550;line-height:1.55}
+.app-shell .message-author>span{font-size:10px;font-weight:400;color:var(--ui-polish-muted)}
+.app-shell .message-text{font-size:14px;line-height:1.9}
+.app-shell .message-user .message-text{border-radius:14px;background:var(--ui-polish-soft)}
+.app-shell .message-avatar{border-radius:10px}
+.app-shell .message-actions{gap:10px}
+.app-shell .message-read{border-radius:9px}
+.app-shell .composer{
+  border-radius:16px;border-color:var(--ui-polish-edge);background:var(--ui-polish-control);
+  box-shadow:0 5px 20px #2b48340a;
+}
+.app-shell .composer:focus-within{border-color:#829b82;box-shadow:0 0 0 3px #7a987416}
+.app-shell .composer textarea{font-size:14px;line-height:1.7}
+.app-shell .composer-hint,
+.app-shell .composer-footnote{color:var(--ui-polish-muted)}
+.app-shell .composer .send-button{border-radius:12px}
+
+/* Login stays unboxed, with a complete two-way selector and clear field labels. */
+.login-page .login-form h2{font-size:28px;font-weight:550;line-height:1.45;letter-spacing:-.4px}
+.login-page .login-form>p{font-size:13px;line-height:1.8;color:var(--ui-polish-muted)}
+.login-page .login-form .auth-modes{
+  gap:4px;border:0;background:var(--ui-polish-soft);padding:4px;border-radius:13px;
+}
+.login-page .login-form .auth-modes>button{
+  display:flex;align-items:center;justify-content:center;flex:1;min-width:0;min-height:42px;
+  border:0;border-radius:10px;padding:8px 12px;font-size:13px;line-height:1.5;color:var(--ui-polish-muted);
+}
+.login-page .login-form .auth-modes>button.active{
+  background:var(--ui-polish-control);color:var(--ui-polish-accent);font-weight:550;box-shadow:0 1px 4px #263f2910;
+}
+.login-page .login-fields{gap:19px}
+.login-page .login-fields label{font-size:13px;color:var(--ui-polish-muted);gap:8px}
+.login-page .login-fields input{
+  min-height:46px;border-radius:11px;font-size:14px;line-height:1.6;
+  background:var(--ui-polish-control);border-color:var(--ui-polish-edge);
+}
+.login-page .login-fields .primary-button{min-height:44px;border-radius:11px;font-size:13px}
+.login-page .login-note{font-size:11px;line-height:1.8}
+.modal{border-radius:18px}
+.modal :is(.primary-button,.secondary-button,.danger-button){border-radius:11px}
+
+.downloads-view .downloads-heading h2{font-weight:550;letter-spacing:-.45px;line-height:1.5}
+.downloads-view :is(.downloads-heading p,.downloads-install,.downloads-footer p){line-height:1.85;color:var(--ui-polish-muted)}
+.downloads-view :is(.downloads-row,.downloads-list){border-color:var(--ui-polish-edge)}
+.downloads-view .downloads-actions .primary-button{border-radius:11px;min-height:42px}
+
+/* Preserve the established dark palette even if lazy feature styles load later. */
+html[data-theme="night"] .companion-world .companion-footer>.companion-voice-entry{
+  background:#3c7158!important;color:#f4f8f3!important;border-color:transparent!important;
+}
+html[data-theme="night"] .companion-world .companion-footer>.companion-voice-entry:hover:not(:disabled){background:#487e63!important}
+html[data-theme="night"] .app-shell :is(.workspace-model-trigger,.workspace-host-control,.workspace-host-picker>summary){
+  background:var(--ui-polish-control)!important;border-color:transparent!important;
+}
+html[data-theme="night"] .app-shell .composer{box-shadow:0 5px 20px #0002!important}
+html[data-theme="night"] .app-shell .composer:focus-within{box-shadow:0 0 0 3px #86ad921a!important}
+html[data-theme="night"] .app-shell .companion-panel-toggle{
+  background:var(--ui-polish-soft)!important;color:var(--ui-polish-accent)!important;
+}
+html[data-theme="night"] .app-shell .companion-panel-toggle:hover,
+html[data-theme="night"] .app-shell .companion-panel-toggle[aria-expanded="true"]{background:var(--ui-polish-control)!important}
+html[data-theme="night"] .login-page .login-form .auth-modes>button.active{border:0!important;border-radius:10px}
+
+/* Fresh markers run once and end on the marked node. No persistent idle animation. */
+html .companion-world :is(.companion-intro,.companion-reply,.companion-voice-panel,.companion-aura){
+  animation:none!important;transition:none!important;
+}
+/* Old character-wrapper entrances must not restart when motion returns to full. */
+.companion-world.companion-anime .cubism-scene[data-character-style="akari-soft"],
+.companion-world .anime-scene{animation:none!important}
+.companion-world .companion-aura{--ui-aura-visible:1;opacity:var(--ui-aura-visible)}
+.companion-world.companion-anime .companion-aura{--ui-aura-visible:.92;opacity:.92}
+.companion-world .companion-space[data-action="sleep"] .companion-aura{--ui-aura-visible:.35}
+.companion-world.companion-anime .companion-space[data-action="sleep"] .companion-aura{--ui-aura-visible:.42}
+@media(prefers-reduced-motion:no-preference){
+  html[data-ui-motion="full"] .companion-world .companion-intro[data-ui-enter="true"]{
+    animation:ui-rise-in 260ms cubic-bezier(.2,.75,.25,1) both!important;
+  }
+  html[data-ui-motion="full"] .companion-world .companion-reply[data-ui-enter="true"]{
+    animation:ui-surface-in 220ms ease-out both!important;
+  }
+  html[data-ui-motion="full"] .companion-world .companion-voice-panel[data-ui-enter="true"]{
+    animation:ui-surface-in 300ms ease-out both!important;
+  }
+  html[data-ui-motion="full"] .companion-world .companion-aura[data-ui-enter="true"]{
+    animation:ui-aura-arrive 700ms cubic-bezier(.2,.7,.3,1) both!important;
+  }
+}
+@keyframes ui-aura-arrive{
+  from{opacity:0;transform:scale(.94)}
+  to{opacity:var(--ui-aura-visible,1);transform:scale(1)}
+}
+/* Sleep cancels a still-running reveal and lets the existing .35 opacity apply. */
+html .companion-world .companion-space[data-action="sleep"] .companion-aura{animation:none!important}
+
+@media(max-width:650px){
+  .companion-world .companion-footer{gap:9px}
+  .companion-world .companion-footer>a,
+  .companion-world .companion-footer>button{font-size:12px;padding-inline:12px}
+  .companion-world .companion-footer>.companion-voice-entry{padding-inline:16px}
+  .app-shell .settings-page .settings-tabs{gap:20px;margin-block:23px 23px}
+  .app-shell .settings-page .settings-tabs>button{font-size:12px}
+  .app-shell .settings-page .settings-heading>p{font-size:12px}
+  .app-shell .settings-page .section-title p{font-size:11px}
+  .app-shell .settings-page :is(.primary-button,.secondary-button,.danger-button){min-height:44px}
+  .app-shell .welcome>p{font-size:13px}
+  .app-shell .welcome .suggestions{gap:12px}
+  .app-shell .welcome .suggestions>button{font-size:12px}
+  .app-shell .composer textarea{font-size:16px}
+  .login-page .login-fields input{font-size:16px}
+}
+@media(max-width:360px){
+  .companion-world .companion-footer{gap:5px}
+  .companion-world .companion-footer>a,
+  .companion-world .companion-footer>button{padding-inline:10px;font-size:11px}
+  .companion-world .companion-footer>.companion-voice-entry{padding-inline:13px}
+  .app-shell .settings-page .settings-heading h1{font-size:26px}
+}
+/* Short screens retain the existing grid and canvas rows; only chrome stays compact. */
+html[data-short-viewport="true"] .companion-world .companion-footer>a,
+html[data-short-viewport="true"] .companion-world .companion-footer>button{
+  min-height:40px;padding-block:7px;
+}
+html[data-short-viewport="true"] .app-shell .workspace-mode-row .mode-switch{min-height:46px}
+html[data-short-viewport="true"] .app-shell .workspace-mode-row .mode-switch>button{min-height:40px}
+html[data-short-viewport="true"] .app-shell .workspace-controls:is(.is-chat,.is-agent) .workspace-model-trigger,
+html[data-short-viewport="true"] .app-shell .workspace-controls.is-agent .workspace-context-row :is(.workspace-model-trigger,.workspace-host-control),
+html[data-short-viewport="true"] .app-shell :is(.workspace-host-control,.workspace-host-picker>summary){min-height:46px}
