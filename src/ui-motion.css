@@ -1,0 +1,158 @@
+/* UI-only movement. The lifecycle removes finite entry markers when they expire,
+   when the document hides, or when motion is reduced. Character renderers stay separate. */
+html :is(.app-shell,.login-page,.modal-backdrop,.downloads-view,.companion-world) :is(button,a,input,textarea,select,summary),
+html :is(.client-behavior-switch,.theme-choice>span,.suggestion-arrow,.sidebar,.composer,.ui-voice-bars,.ui-voice-bars>i,.workspace-model-trigger>svg:last-child,.workspace-host-picker>summary>.disclosure-chevron,.workspace-disclosure .disclosure-chevron),
+html .client-behavior-switch::after,
+html .settings-tabs>button::after,
+html .composer::after{
+  transition:none!important;
+}
+html :is(.welcome,.message,.message-avatar,.modal,.toast,.ui-toast,.chat-assistant-layer,.chat-assistant-dialog,.chat-latest-button,.typing-dots>i,.spin,.ui-message-enter,.ui-view-enter,.ui-voice-bars>i){
+  animation:none!important;
+}
+
+/* A static voice mark keeps its meaning without depending on movement. */
+.ui-voice-bars{
+  display:inline-flex;align-items:center;justify-content:center;gap:3px;
+  width:27px;height:18px;flex:0 0 27px;color:var(--green,#285e4b);opacity:.74;
+  pointer-events:none;vertical-align:middle;
+}
+.ui-voice-bars>i{
+  display:block;flex:0 0 3px;width:3px;height:14px;border-radius:2px;
+  background:currentColor;transform:scaleY(.3);transform-origin:50% 50%;
+}
+.ui-voice-bars>i:nth-child(2),.ui-voice-bars>i:nth-child(4){transform:scaleY(.56)}
+.ui-voice-bars>i:nth-child(3){transform:scaleY(.82)}
+.companion-world:not([data-voice-phase="listening"]):not([data-voice-phase="speaking"]) .ui-voice-bars{opacity:.4}
+
+/* Existing focus colors remain immediate; this ring adds presence without resizing input. */
+.app-shell .composer{position:relative}
+.app-shell .composer::after{
+  content:'';position:absolute;inset:0;border:1px solid var(--green,#285e4b);
+  border-radius:inherit;opacity:0;pointer-events:none;
+}
+.app-shell .composer:focus-within::after{opacity:.45}
+
+/* Keep tab indicators mounted so their selected state can settle without layout changes. */
+.settings-tabs>button::after{
+  content:'';position:absolute;inset:auto 0 -1px;height:2px;
+  background:var(--green,#285e4b);opacity:0;transform:scaleX(.76);transform-origin:50% 50%;
+}
+.settings-tabs>button.active::after{opacity:1;transform:scaleX(1)}
+
+@media(prefers-reduced-motion:no-preference){
+  /* Entry opacity is attached only to fresh views. Settings may contain a portrait,
+     so only its heading and tabs move; the view itself fades in place. */
+  html[data-ui-motion="full"] :is(.settings-page,.login-page,.downloads-view,.welcome)[data-ui-enter="true"]{
+    animation:ui-surface-in 300ms ease-out both!important;
+  }
+  html[data-ui-motion="full"] .ui-view-enter[data-ui-enter="true"]{
+    animation:ui-surface-in 300ms ease-out both!important;
+  }
+  html[data-ui-motion="full"] .settings-page[data-ui-enter="true"] :is(.settings-heading,.settings-tabs){
+    animation:ui-rise-in 260ms cubic-bezier(.2,.75,.25,1) both!important;
+  }
+  html[data-ui-motion="full"] .settings-page[data-ui-enter="true"] .settings-tabs{animation-delay:40ms!important}
+  html[data-ui-motion="full"] .downloads-view[data-ui-enter="true"] .downloads-heading,
+  html[data-ui-motion="full"] .welcome[data-ui-enter="true"]>:is(.welcome-symbol,h1,p){
+    animation:ui-rise-in 260ms cubic-bezier(.2,.75,.25,1) both!important;
+  }
+  html[data-ui-motion="full"] .login-page[data-ui-enter="true"] :is(.login-brand,.login-form,.login-welcome>span,.login-welcome>h1){
+    animation:ui-rise-in 260ms cubic-bezier(.2,.75,.25,1) both!important;
+  }
+  html[data-ui-motion="full"] .login-page[data-ui-enter="true"] .login-form{animation-delay:40ms!important}
+  html[data-ui-motion="full"] .ui-message-enter[data-ui-enter="true"]{
+    animation:ui-message-enter 220ms cubic-bezier(.2,.75,.25,1) both!important;
+  }
+  html[data-ui-motion="full"] .ui-message-enter[data-ui-enter="true"]>.message-avatar{
+    animation:ui-message-avatar-in 220ms cubic-bezier(.2,.75,.25,1) both!important;
+  }
+  html[data-ui-motion="full"] :is(.modal-backdrop,.nav-scrim,.chat-assistant-layer)[data-ui-enter="true"]{
+    animation:ui-surface-in 300ms ease-out both!important;
+  }
+  html[data-ui-motion="full"] :is(.modal,.chat-assistant-dialog)[data-ui-enter="true"]{
+    animation:ui-surface-in 300ms ease-out both!important;
+  }
+  html[data-ui-motion="full"] :is(.modal-backdrop,.chat-assistant-layer)[data-ui-enter="true"]>:is(.modal,.chat-assistant-dialog){
+    animation:ui-surface-in 300ms ease-out both!important;
+  }
+  html[data-ui-motion="full"] :is(.modal,.chat-assistant-dialog)[data-ui-enter="true"]>:is(.modal-heading,.chat-assistant-dialog-heading),
+  html[data-ui-motion="full"] :is(.modal-backdrop,.chat-assistant-layer)[data-ui-enter="true"]>:is(.modal,.chat-assistant-dialog)>:is(.modal-heading,.chat-assistant-dialog-heading){
+    animation:ui-rise-in 220ms cubic-bezier(.2,.75,.25,1) both!important;
+  }
+  html[data-ui-motion="full"] :is(.toast,.ui-toast,.ui-title-enter)[data-ui-enter="true"]{
+    animation:ui-surface-in 180ms ease-out both!important;
+  }
+
+  /* Pointer feedback is limited to interface controls, not pet touch targets. */
+  html[data-ui-motion="full"] :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button){
+    transition:transform 150ms cubic-bezier(.2,.75,.25,1),opacity 150ms ease!important;
+  }
+  html[data-ui-motion="full"] :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button)>svg:not(.spin){
+    transition:transform 150ms cubic-bezier(.2,.75,.25,1),opacity 150ms ease!important;
+  }
+  html[data-ui-motion="full"] :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button):not(:disabled):not([aria-disabled="true"]):active{
+    transform:translateY(1px) scale(.975);
+  }
+  html[data-ui-motion="full"] .settings-tabs>button::after{
+    transition:opacity 160ms ease,transform 180ms cubic-bezier(.2,.75,.25,1)!important;
+  }
+  html[data-ui-motion="full"] :is(.mode-switch,.workspace-target-segments)>button[aria-pressed="true"]>svg:not(.spin){transform:scale(1.08)}
+  html[data-ui-motion="full"] .app-shell .composer::after{transition:opacity 180ms ease!important}
+  html[data-ui-motion="full"] .client-behavior-switch::after,
+  html[data-ui-motion="full"] .theme-choice>span{transition:transform 160ms ease,opacity 160ms ease!important}
+  html[data-ui-motion="full"] .suggestion-arrow{transition:transform 160ms ease!important}
+  html[data-ui-motion="full"] :is(.workspace-model-trigger>svg:last-child,.workspace-host-picker>summary>.disclosure-chevron,.workspace-disclosure .disclosure-chevron){transition:transform 160ms ease!important}
+  html[data-ui-motion="full"] .sidebar{transition:transform 200ms cubic-bezier(.2,.75,.25,1)!important}
+
+  /* Busy spinners follow their mounted operation. Reading keeps its existing color feedback. */
+  html[data-ui-motion="full"] :is(.app-shell,.login-page,.modal-backdrop,.downloads-view,.companion-world) .spin{
+    animation:ui-busy-turn 1s linear infinite!important;
+  }
+  /* Decorative bars follow the current ASR/TTS phase. The real input meter remains authoritative. */
+  html[data-ui-motion="full"] .companion-world[data-voice-phase="listening"] .ui-voice-bars>i{
+    animation:ui-voice-listening 920ms ease-in-out infinite!important;
+  }
+  html[data-ui-motion="full"] .companion-world[data-voice-phase="speaking"] .ui-voice-bars>i{
+    animation:ui-voice-speaking 660ms ease-in-out infinite!important;
+  }
+  html[data-ui-motion="full"] .companion-world:is([data-voice-phase="listening"],[data-voice-phase="speaking"]) .ui-voice-bars>i:nth-child(2){animation-delay:-130ms!important}
+  html[data-ui-motion="full"] .companion-world:is([data-voice-phase="listening"],[data-voice-phase="speaking"]) .ui-voice-bars>i:nth-child(3){animation-delay:-290ms!important}
+  html[data-ui-motion="full"] .companion-world:is([data-voice-phase="listening"],[data-voice-phase="speaking"]) .ui-voice-bars>i:nth-child(4){animation-delay:-420ms!important}
+  html[data-ui-motion="full"] .companion-world:is([data-voice-phase="listening"],[data-voice-phase="speaking"]) .ui-voice-bars>i:nth-child(5){animation-delay:-170ms!important}
+
+  @media(hover:hover) and (pointer:fine){
+    html[data-ui-motion="full"] :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button):not(:disabled):not([aria-disabled="true"]):hover:not(:active){
+      transform:translateY(-1px);
+    }
+    html[data-ui-motion="full"] :is(.primary-button,.secondary-button,.new-chat,.icon-button,.message-read,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry):not(:disabled):not([aria-disabled="true"]):hover>svg:not(.spin){transform:scale(1.07)}
+  }
+}
+
+/* No hover displacement or replay when reduced, unavailable or hidden. Positioning
+   transforms such as the centered "latest message" button are kept intact. */
+html:not([data-ui-motion="full"]) :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button),
+html:not([data-ui-motion="full"]) :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button)>svg:not(.spin),
+html:not([data-ui-motion="full"]) .suggestions>button:hover .suggestion-arrow{transform:none!important}
+html:not([data-ui-motion="full"]) .chat-latest-button:active{transform:translateX(-50%)!important}
+html:not([data-ui-motion="full"]) .settings-tabs>button::after,
+html:not([data-ui-motion="full"]) .composer::after{transition:none!important}
+html:not([data-ui-motion="full"]) :is(.workspace-model-popup,.workspace-disclosure-content){animation:none!important}
+
+@media(prefers-reduced-motion:reduce){
+  html :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button),
+  html :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button)>svg:not(.spin),
+  html .suggestions>button:hover .suggestion-arrow{transform:none!important}
+  html .chat-latest-button:active{transform:translateX(-50%)!important}
+  html .settings-tabs>button::after,
+  html .composer::after{transition:none!important}
+  html :is(.workspace-model-popup,.workspace-disclosure-content){animation:none!important}
+}
+
+@keyframes ui-surface-in{from{opacity:0}to{opacity:1}}
+@keyframes ui-rise-in{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+@keyframes ui-message-enter{from{opacity:0}to{opacity:1}}
+@keyframes ui-message-avatar-in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+@keyframes ui-busy-turn{to{transform:rotate(360deg)}}
+@keyframes ui-voice-listening{0%,100%{transform:scaleY(.25);opacity:.65}48%{transform:scaleY(.72);opacity:1}}
+@keyframes ui-voice-speaking{0%,100%{transform:scaleY(.36);opacity:.72}36%{transform:scaleY(1);opacity:1}70%{transform:scaleY(.5);opacity:.88}}

@@ -4,18 +4,20 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import ts from 'typescript';
 import {isPassiveNativeOverlay} from '../src/auth/overlay-entry.mjs';
+import * as uiMotion from '../src/platform/ui-motion.mjs';
 
 const compile=async file=>ts.transpileModule(await readFile(new URL(file,import.meta.url),'utf8'),{
   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true},
 }).outputText;
-const [rootSource,settingsSource]=await Promise.all([compile('../src/main.tsx'),compile('../src/CompanionOptions.tsx')]);
+const [rootSource,settingsSource,motionSource]=await Promise.all([compile('../src/main.tsx'),compile('../src/CompanionOptions.tsx'),compile('../src/platform/ui-motion.ts')]);
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 
 /** Run the actual TSX effects, rather than repeating their gate in a test helper. */
 function fixture({native=true,enabled=true,href='https://app.example/?chat=1&settings=1'}={}){
   let active,capturedRoot,epoch=1,identity={instanceId:'server-a',userId:'alice'},catEnabled=enabled;
-  const pending=[],shown=[],events=new EventTarget();
+  const pending=[],shown=[],events=new EventTarget(),document=new EventTarget();
+  document.getElementById=()=>({});
   const react={
     StrictMode:Symbol('StrictMode'),Suspense:Symbol('Suspense'),
     createElement:(type,props,...children)=>({type,props:{...props,children}}),lazy:loader=>({loader}),
@@ -25,12 +27,18 @@ function fixture({native=true,enabled=true,href='https://app.example/?chat=1&set
       if(!owner.hooks[index])owner.hooks[index]={state:initial};
       return[owner.hooks[index].state,value=>{owner.hooks[index].state=typeof value==='function'?value(owner.hooks[index].state):value;}];
     },
+    useRef:initial=>{
+      const owner=active,index=owner.index++;
+      if(!owner.hooks[index])owner.hooks[index]={ref:{current:initial}};
+      return owner.hooks[index].ref;
+    },
     useEffect:(effect,deps)=>{
       const owner=active,index=owner.index++,previous=owner.hooks[index];
       if(!previous||!deps||deps.some((value,at)=>!Object.is(value,previous.deps?.[at])))owner.effects.push(()=>{
         previous?.cleanup?.();owner.hooks[index]={deps,cleanup:effect()};
       });
     },
+    useLayoutEffect:(effect,deps)=>react.useEffect(effect,deps),
   };
   const api={getSessionEpoch:()=>epoch,getIdentity:()=>identity,subscribeSession:()=>()=>{},initConnection:()=>Promise.resolve()};
   const preference={readCompanionCatEnabled:()=>catEnabled,useCompanionCatEnabled:()=>[catEnabled,value=>{catEnabled=value;}]};
@@ -41,6 +49,7 @@ function fixture({native=true,enabled=true,href='https://app.example/?chat=1&set
     '@capacitor/core':{Capacitor:{isNativePlatform:()=>native,getPlatform:()=>native?'android':'web'}},
     './platform/useViewport':{useViewport:()=>{}},'./api':api,'./avatar/preference':preference,
     './platform/theme.ts':{mountThemeLifecycle:()=>()=>{}},
+    './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window:events,document,...options})},
     './platform/overlay':{PetOverlay:nativeOverlay,showPet:async options=>{shown.push(options.companionKind);}},
     './platform/task-notification-session':{mountTaskNotificationSession:()=>()=>{},taskNotificationSession:{subscribe:()=>()=>{},snapshot:()=>({status:null,busy:false,error:'',navigation:null}),takeNavigation:()=>null}},
     './auth/LoginGate':{default:Symbol('LoginGate'),__esModule:true},'./auth/overlay-entry.mjs':{isPassiveNativeOverlay},
@@ -52,9 +61,11 @@ function fixture({native=true,enabled=true,href='https://app.example/?chat=1&set
       if(name.endsWith('.css'))return{};
       if(!Object.hasOwn(modules,name))throw new Error(`Unexpected dependency: ${name}`);
       return modules[name];
-    },location:new URL(href),window:events,document:{getElementById:()=>({})},URLSearchParams,Promise});
+    },location:new URL(href),window:events,document,URLSearchParams,Promise});
     return module.exports;
   };
+  // Execute the real hook bridge with a DOM-less controller; decoration stays off.
+  modules['./platform/ui-motion.ts']=load(motionSource);
   load(rootSource);
   const SessionRoot=capturedRoot.props.children[0].type,CompanionOptions=load(settingsSource).default;
   const mount=component=>{

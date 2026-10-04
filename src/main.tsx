@@ -1,9 +1,11 @@
-import React, { lazy, Suspense, useEffect, useState, useSyncExternalStore } from 'react';
+import React, { lazy, Suspense, useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import ReactDOM from 'react-dom/client';
 import './styles.css';
 import './natural-companion.css';
 import './adaptive-screen.css';
 import './theme.css';
+import './ui-motion.css';
+import { mountUiMotionLifecycle } from './platform/ui-motion.ts';
 import {mountThemeLifecycle} from './platform/theme.ts';
 import { useViewport } from './platform/useViewport';
 import { getIdentity, getSessionEpoch, initConnection, subscribeSession } from './api';
@@ -20,6 +22,7 @@ const params = new URLSearchParams(location.search);
 const overlay = isPassiveNativeOverlay(location.href, Capacitor.isNativePlatform() || !!window.petpal);
 function SessionRoot(){
   useViewport();
+  useLayoutEffect(() => mountUiMotionLifecycle({ disabled: overlay }), []);
   useEffect(()=>mountThemeLifecycle({transparent:overlay}),[]);
   const epoch=useSyncExternalStore(subscribeSession,getSessionEpoch,getSessionEpoch);
   const [catEnabled]=useCompanionCatEnabled(),ownerIdentity=getIdentity();

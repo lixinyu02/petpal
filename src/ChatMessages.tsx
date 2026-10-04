@@ -1,8 +1,10 @@
-import {memo} from 'react';
+import {memo,useLayoutEffect,useRef} from 'react';
 import {Copy,CornerDownRight,Loader2,PawPrint,Square,Volume2} from 'lucide-react';
 import {MessageImages} from './Attachments';
 import MessageMarkdown from './MessageMarkdown';
 import type {Message} from './api';
+import {advanceMessageMotion,attachMessageMotion,canAnimateMessageMotion,createMessageMotionTracker} from './chat-message-motion.mjs';
+import type {MessageMotionLifecycle,MessageMotionTracker} from './chat-message-motion.mjs';
 
 type RowProps={message:Message;petName:string;mode:'chat'|'codex';working:boolean;busy:boolean;sleeping:boolean;supported:boolean;feedback:string;reading:boolean;pending:boolean;error:string;onRead(message:Message):void;onStop():void;onNotice(notice:string):void};
 export const ChatMessageRow=memo(function ChatMessageRow({message,petName,mode,working,busy,sleeping,supported,feedback,reading,pending,error,onRead,onStop,onNotice}:RowProps) {
@@ -25,10 +27,23 @@ export const ChatMessageRow=memo(function ChatMessageRow({message,petName,mode,w
   </div>;
 });
 
-type Props={messages:Message[];petName:string;mode:'chat'|'codex';working:boolean;busy:boolean;sleeping:boolean;speechId:string;speechPlaying:boolean;speechPending:boolean;speechSupported:boolean;speechFeedback:string;speechError:string;onRead(message:Message):void;onStop():void;onNotice(notice:string):void};
+type Props={conversationId?:string;messages:Message[];petName:string;mode:'chat'|'codex';working:boolean;busy:boolean;sleeping:boolean;speechId:string;speechPlaying:boolean;speechPending:boolean;speechSupported:boolean;speechFeedback:string;speechError:string;onRead(message:Message):void;onStop():void;onNotice(notice:string):void};
 /** Audio level and character boundaries belong to the portrait, not the message list. */
-export default memo(function ChatMessages({messages,petName,mode,working,busy,sleeping,speechId,speechPlaying,speechPending,speechSupported,speechFeedback,speechError,onRead,onStop,onNotice}:Props) {
-  return <div className="messages">{messages.map(message=>{
+export default memo(function ChatMessages({conversationId='new',messages,petName,mode,working,busy,sleeping,speechId,speechPlaying,speechPending,speechSupported,speechFeedback,speechError,onRead,onStop,onNotice}:Props) {
+  const list=useRef<HTMLDivElement>(null),tracker=useRef<MessageMotionTracker|null>(null),motion=useRef<MessageMotionLifecycle|null>(null),scope=useRef<string|null>(null);
+  useLayoutEffect(()=>{
+    const element=list.current;if(!element)return;
+    const lifecycle=attachMessageMotion(element,element.ownerDocument);motion.current=lifecycle;
+    return()=>{lifecycle.dispose();motion.current=null;};
+  },[]);
+  useLayoutEffect(()=>{
+    const element=list.current;if(!element)return;
+    if(!tracker.current)tracker.current=createMessageMotionTracker();
+    if(scope.current!==conversationId){motion.current?.clear();scope.current=conversationId;}
+    const arrivals=advanceMessageMotion(tracker.current,conversationId,messages.map(message=>message.id),canAnimateMessageMotion(element.ownerDocument));
+    motion.current?.enter(arrivals);
+  },[messages,conversationId]);
+  return <div ref={list} className="messages">{messages.map(message=>{
     const owns=speechId.startsWith(message.id+'-manual-')||speechId.startsWith(message.id+'-auto-');
     return <ChatMessageRow key={message.id} message={message} petName={petName} mode={mode} working={working} busy={busy} sleeping={sleeping} supported={speechSupported} feedback={speechFeedback} reading={owns&&speechPlaying} pending={owns&&speechPending} error={owns?speechError:''} onRead={onRead} onStop={onStop} onNotice={onNotice}/>;
   })}</div>;

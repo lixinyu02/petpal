@@ -11,9 +11,13 @@ import {createChatDisplay} from '../src/chat-display.mjs';
 import {mergeAssistantTask,mergeChatAssistantConversation} from '../src/chat-assistant-preferences.mjs';
 import {createBrowserSetupDraft} from '../src/browser-setup-draft.mjs';
 import {reasoningEfforts} from '../src/desktop-settings.mjs';
+import * as uiMotion from '../src/platform/ui-motion.mjs';
 
 const source=ts.transpileModule(await readFile(new URL('../src/App.tsx',import.meta.url),'utf8'),{
   fileName:'App.tsx',compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true},
+}).outputText;
+const motionSource=ts.transpileModule(await readFile(new URL('../src/platform/ui-motion.ts',import.meta.url),'utf8'),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true},
 }).outputText;
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const nodes=tree=>Array.isArray(tree)?tree.flatMap(nodes):!tree||typeof tree!=='object'?[]:[tree,...nodes(tree.props?.children)];
@@ -39,6 +43,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false}={}){
     useState(initial){const at=index++;if(!hooks[at])hooks[at]={state:typeof initial==='function'?initial():initial};return[hooks[at].state,value=>{hooks[at].state=typeof value==='function'?value(hooks[at].state):value;}];},
     useRef(initial){const at=index++;if(!hooks[at])hooks[at]={ref:{current:initial}};return hooks[at].ref;},
     useEffect(effect,deps){const at=index++,previous=hooks[at];if(!previous||deps.some((value,i)=>!Object.is(value,previous.deps?.[i])))effects.push(()=>{previous?.cleanup?.();hooks[at]={deps,cleanup:effect()};});},
+    useLayoutEffect(effect,deps){react.useEffect(effect,deps);},
     useMemo:callback=>callback(),useCallback:callback=>callback,useSyncExternalStore:(_subscribe,snapshot)=>snapshot(),
   };
   const element=(type,props)=>({type,props}),component=name=>({__esModule:true,default:Symbol(name)});
@@ -61,12 +66,17 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false}={}){
     './avatar/useSpeech':{useSpeech:()=>speech},'./platform/overlay':{PetOverlay:{},showPet(){}},
     './browser-setup-draft.mjs':{createBrowserSetupDraft},'./platform/computer-use':{nativeComputerUse:()=>undefined},'./platform/music-mcp':{nativeMusicMcp:()=>undefined},
     './platform/task-notification-session':{taskNotificationSession:{subscribe(){},snapshot:()=>({navigation:null}),takeNavigation(){}}},'./desktop-settings.mjs':{reasoningEfforts},
+    './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
   };
   for(const name of ['DownloadsView','BrandMark','CompanionOptions','ChatMessages','ConversationHistory','AgentQueue','UpdatesSettings','CatV2','WorkspaceDisclosure','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','ClientBehaviorSettings'])modules[`./${name}`]=component(name);
   const module={exports:{}},context={module,exports:module.exports,require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);return modules[name];},
     window,document,location:{search:'?chat=1',origin:'https://fixture.invalid'},URL,URLSearchParams,AbortController,DOMException,
     setTimeout(callback){const id=++timerId;timers.set(id,callback);return id;},clearTimeout:id=>timers.delete(id)};
   Object.defineProperty(context,'localStorage',{get:readStorage});
+  // Execute the actual hook bridge without a documentElement, preserving the off path.
+  const motionModule={exports:{}};
+  vm.runInNewContext(motionSource,{module:motionModule,exports:motionModule.exports,require:context.require,window,document});
+  modules['./platform/ui-motion.ts']=motionModule.exports;
   vm.runInNewContext(source,context);const Component=module.exports.default;
   const render=()=>{index=0;effects.length=0;tree=Component();for(const effect of effects)effect();return tree;};
   const find=(type,predicate=()=>true)=>nodes(tree).find(node=>node.type===type&&predicate(node.props));

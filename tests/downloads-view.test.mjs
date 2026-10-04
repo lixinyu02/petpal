@@ -43,6 +43,7 @@ function downloadFixture(packages,{serverUrl='',catalog={}}={}){
     useState(initial){const at=index++;if(!hooks[at])hooks[at]={state:typeof initial==='function'?initial():initial};return[hooks[at].state,value=>{hooks[at].state=typeof value==='function'?value(hooks[at].state):value;}];},
     useRef(initial){const at=index++;if(!hooks[at])hooks[at]={ref:{current:initial}};return hooks[at].ref;},
     useEffect(effect,deps){const at=index++,previous=hooks[at];if(!previous||deps.some((value,i)=>!Object.is(value,previous.deps?.[i])))effects.push(()=>{previous?.cleanup?.();hooks[at]={deps,cleanup:effect()};});},
+    useLayoutEffect(effect,deps){react.useEffect(effect,deps);},
   };
   const apiFixture={serverUrl,api:async path=>{assert.equal(path,'/downloads');return{packages,checkedAt:'2026-10-03T00:00:00Z',error:null,stale:false,retryAt:null,...catalog};}};
   const Component=load(react,apiFixture).default;

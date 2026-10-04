@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import {useUiEntrance} from './platform/ui-motion.ts';
 import { ArrowUpRight, Download, Laptop, Monitor, RefreshCw, Smartphone } from 'lucide-react';
 import { api, getConnection, getSessionEpoch, isSessionChanged, type DownloadPackage, type DownloadsCatalog } from './api';
 import './downloads.css';
@@ -35,6 +36,7 @@ export function latestStableDownloadPackages(packages: Package[], newestKnown?: 
 }
 
 export default function DownloadsView() {
+  const entrance = useUiEntrance<HTMLElement>('downloads');
   const [catalog, setCatalog] = useState<Catalog | null>(null), [error, setError] = useState(''), [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0), [clock, setClock] = useState(Date.now()), [selected, setSelected] = useState<Partial<Record<Platform, string>>>({});
   const epoch = useRef(getSessionEpoch()).current;
@@ -58,7 +60,7 @@ export default function DownloadsView() {
   const failure = error || catalog?.error;
   const latestPackages = latestStableDownloadPackages(catalog?.packages || [], catalog?.latestVersion);
   const downloadUrl = (item: Package) => item.url.startsWith('/downloads/') ? `${getConnection().url}${item.url}` : item.url;
-  return <section className="downloads-view" aria-labelledby="downloads-title" aria-busy={loading}>
+  return <section ref={entrance} className="downloads-view" aria-labelledby="downloads-title" aria-busy={loading}>
     <header className="downloads-heading"><div><span className="downloads-eyebrow">小伴 · PetPal</span><h2 id="downloads-title">下载客户端</h2><p>仅提供最新正式版，选择适合设备的架构与格式。</p></div>
       <button className="secondary-button" disabled={loading || retrySeconds > 0} onClick={() => setRevision(value => value + 1)}><RefreshCw size={15} className={loading ? 'spin' : ''}/>{loading ? '正在读取…' : retrySeconds ? `${retrySeconds} 秒后重试` : failure ? '重试' : '刷新列表'}</button>
     </header>
