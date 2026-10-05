@@ -214,11 +214,14 @@ test('Agent grants, chosen model and conversation/computer ownership are enforce
   assert.equal((await f.json(`/conversations/${memberChat.id}/assistant/tasks/${child.id}/stop`, { token: foreign.token, method: 'POST', body: {} })).status, 404);
 });
 
-test('deleting a parent Chat first clears its running child and cannot leave orphaned tasks', async t => {
+test('deleting a parent Chat requires an explicit task stop before idle child cleanup', async t => {
   const f = await fixture(t), chat = await f.createChat();
   const first = await f.send(chat); const background = first.events.find(event => event.type === 'task').data.task; await until(() => f.calls.length === 1);
   assert.equal((await f.json(`/conversations/${background.conversationId}`, { method: 'DELETE' })).status, 409);
   assert.equal(f.calls[0].args.signal.aborted, false);
+  assert.equal((await f.json(`/conversations/${chat.id}`, { method: 'DELETE' })).status, 409);
+  assert.equal(f.calls[0].args.signal.aborted, false);
+  assert.equal((await f.json(`/conversations/${chat.id}/assistant/tasks/${background.id}/stop`, { method: 'POST', body: {} })).status, 200);
   assert.equal((await f.json(`/conversations/${chat.id}`, { method: 'DELETE' })).status, 200);
   assert.equal(f.calls[0].args.signal.aborted, true);
   assert.equal((await f.json(`/conversations/${chat.id}`)).status, 404); assert.equal((await f.json(`/conversations/${background.conversationId}`)).status, 404);

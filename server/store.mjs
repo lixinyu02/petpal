@@ -9,6 +9,7 @@ import { validateExecutionHosts } from './executors.mjs';
 import { restoreAssistantTasks } from './chat-assistant.mjs';
 import { validateStoredNotifications } from './notifications.mjs';
 import { validateStoredAutomations } from './automation-schema.mjs';
+import { validateStoredOrganization, createOrganizationPersistence } from './conversation-organization.mjs';
 
 export const isCompanionKind = value => value === 'anime' || value === 'cat';
 const isChatAssistantHostId = value => value === null || typeof value === 'string' && (value === 'central' || /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value));
@@ -106,6 +107,8 @@ export class JsonStore {
     }
     if (validateStoredNotifications(state)) changed = true;
     if (validateStoredAutomations(state)) changed = true;
+    if (validateStoredOrganization(state)) changed = true;
+    this.organizationPersistence = createOrganizationPersistence(this);
     this.#chatAssistantHosts = new Map(state.users.map(user => [user.id, (user.id === state.ownerId ? state.settings : user.settings).chatAssistantHostId]));
     if (changed) await this.save();
     return this;
@@ -141,6 +144,7 @@ export class JsonStore {
       // An unrelated concurrent save cannot capture an undurable event or
       // overwrite a newly committed feed with an older in-memory copy.
       const snapshot = JSON.parse(captured);
+      this.organizationPersistence?.prepare(snapshot, operation?.organization);
       this.#prepareChatAssistantHosts(snapshot, operation?.chatAssistantDefaultHost);
       this.notificationPersistence?.prepare(snapshot, operation);
       await this.automationPersistence?.prepare(snapshot, operation);
@@ -149,11 +153,13 @@ export class JsonStore {
       try {
         const handle = await open(temporary, 'wx', 0o600);
         try { await handle.writeFile(contents, 'utf8'); await handle.sync(); } finally { await handle.close(); }
+        await chmod(temporary, 0o600).catch(error => { if (process.platform !== 'win32') throw error; });
+        this.organizationPersistence?.beforeCommit(snapshot);
         await rename(temporary, this.file);
         // Only an atomically replaced file can become the public default.
         this.#commitChatAssistantHosts(snapshot);
+        this.organizationPersistence?.commit(snapshot);
         this.automationPersistence?.commit(snapshot.automations, snapshot);
-        await chmod(this.file, 0o600).catch(error => { if (process.platform !== 'win32') throw error; });
         this.notificationPersistence?.commit(snapshot.notifications);
       } finally { await unlink(temporary).catch(() => {}); }
     });

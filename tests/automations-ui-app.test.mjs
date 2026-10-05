@@ -13,6 +13,7 @@ import {createBrowserSetupDraft} from '../src/browser-setup-draft.mjs';
 import {reasoningEfforts} from '../src/desktop-settings.mjs';
 import * as uiMotion from '../src/platform/ui-motion.mjs';
 import {composerKeyAction} from '../src/composer-keyboard.mjs';
+import * as organizationSync from '../src/conversation-organization-sync.mjs';
 
 const source=ts.transpileModule(await readFile(new URL('../src/App.tsx',import.meta.url),'utf8'),{
   fileName:'App.tsx',compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true},
@@ -26,7 +27,7 @@ const text=tree=>Array.isArray(tree)?tree.map(text).join(''):tree==null||typeof 
 
 /** Execute App's real effects and navigation handlers. Only child UIs, browser surfaces
  * and network are isolated; notification and history decisions stay in App.tsx. */
-function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],registeredAutomationIds=[],search='?chat=1',failAgentSubmit=false,handleAgentControl=false}={}){
+function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],initialProjects=[],organizationResponse,registeredAutomationIds=[],search='?chat=1',failAgentSubmit=false,handleAgentControl=false}={}){
   const permissions={access:'read-only',approval:'ask'},identity={instanceId:'fixture-service',userId:'fixture-user'};
   const state={instanceId:identity.instanceId,user:{id:identity.userId,username:'fixture',displayName:'Fixture',isOwner:false,canUseCodex,agentAccess:canUseCodex?'full':'none'},
     settings:{petName:'Fixture companion',persona:'Fixture',companionKind:'anime',defaultProviderId:'model'},
@@ -34,9 +35,9 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
   const hosts=[{id:'central',name:'Fixture server',kind:'central',platform:'linux',online:true},
     {id:'pc-one',name:'Fixture PC one',kind:'desktop',platform:'win32',online:true,codex:{available:true}},
     {id:'pc-two',name:'Fixture PC two',kind:'desktop',platform:'linux',online:true,codex:{available:true}}];
-  const hooks=[],effects=[],timers=new Map(),calls=[],requests=[],streams=[],navigations=[],backendConversations=[...initialConversations],window=new EventTarget(),document=new EventTarget();
+  const hooks=[],effects=[],timers=new Map(),calls=[],requests=[],streams=[],navigations=[],backendConversations=structuredClone(initialConversations),backendProjects=structuredClone(initialProjects),delayedResponses=[],apiFailures=[],window=new EventTarget(),document=new EventTarget();
   let notificationSnapshot={navigation:null},notificationTakes=0;
-  let index=0,tree,timerId=0,getterReads=0;
+  let index=0,tree,timerId=0,getterReads=0,createdConversations=initialConversations.length,createdProjects=initialProjects.length,sessionEpoch=1;
   Object.assign(window,{matchMedia:query=>({matches:query==='(pointer: coarse)'&&touch,addEventListener(){},removeEventListener(){}})});
   if(desktop)window.petpal={};
   const readStorage=()=>{getterReads++;if(deniedGetter)throw new DOMException('Storage is blocked','SecurityError');return storage;};
@@ -52,23 +53,53 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
   };
   const element=(type,props)=>({type,props}),component=name=>({__esModule:true,default:Symbol(name)});
   const controls=Object.fromEntries(['ModelPicker','ExecutionTarget','AgentOnboarding'].map(name=>[name,Symbol(name)]));
-  const api={getConnection:()=>({url:'https://fixture.invalid',token:'fixture-token'}),getIdentity:()=>identity,getSessionEpoch:()=>1,
-    initConnection:async()=>({url:'https://fixture.invalid',token:'fixture-token'}),isSessionChanged:()=>false,SessionChangedError:Error,
+  class SessionChangedError extends Error {constructor(){super('Fixture account changed');this.name='SessionChangedError';}}
+  const api={getConnection:()=>({url:'https://fixture.invalid',token:'fixture-token'}),getIdentity:()=>identity,getSessionEpoch:()=>sessionEpoch,
+    initConnection:async()=>({url:'https://fixture.invalid',token:'fixture-token'}),isSessionChanged:error=>error instanceof SessionChangedError,SessionChangedError,
     api:async(path,options={})=>{
-      calls.push(path);requests.push({path,method:options.method||'GET',body:options.body?JSON.parse(options.body):undefined});
-      if(path==='/state')return{...state,conversations:publicConversations()};
+      const method=options.method||'GET',body=options.body?JSON.parse(options.body):undefined;
+      calls.push(path);requests.push({path,method,body});
+      const failure=apiFailures.findIndex(item=>item.path===path&&item.method===method);if(failure>=0)throw apiFailures.splice(failure,1)[0].error;
+      const response=async value=>{
+        const snapshot=structuredClone(value),at=delayedResponses.findIndex(entry=>entry.path===path&&entry.method===method);
+        if(at<0)return snapshot;
+        const delayed=delayedResponses.splice(at,1)[0];delayed.started.resolve(snapshot);await delayed.release.promise;
+        return delayed.value===undefined?snapshot:structuredClone(delayed.value);
+      };
+      if(path==='/state')return response({...state,projects:backendProjects,conversations:publicConversations()});
       if(path==='/agent/hosts')return{hosts};
       if(path==='/conversations'&&options.method==='POST'){
-        const body=JSON.parse(options.body),conversation={id:`fixture-chat-${backendConversations.length+1}`,mode:body.mode,providerId:body.providerId,title:'Fixture chat',messages:[]};
-        backendConversations.push(conversation);return conversation;
+        const conversation={id:`fixture-chat-${++createdConversations}`,mode:body.mode,providerId:body.providerId,title:'Fixture chat',messages:[],projectId:body.projectId??null,archivedAt:null};
+        backendConversations.push(conversation);return response(conversation);
       }
-      if(/^\/conversations\/[^/]+$/.test(path)&&!options.method){const conversation=backendConversations.find(item=>item.id===path.split('/')[2]);assert.ok(conversation);return conversation;}
-      if(handleAgentControl&&callControl(path,options))return{};
+      if(path==='/projects'&&method==='POST'){
+        const project={id:`fixture-project-${++createdProjects}`,name:body.name,createdAt:'2026-10-06T00:00:00.000Z',updatedAt:'2026-10-06T00:00:00.000Z'};backendProjects.push(project);return response(project);
+      }
+      if(/^\/projects\/[^/]+$/.test(path)){
+        const at=backendProjects.findIndex(item=>item.id===path.split('/')[2]);assert.ok(at>=0,'project operation must belong to fixture account');
+        if(method==='PATCH'){backendProjects[at]={...backendProjects[at],name:body.name};return response(backendProjects[at]);}
+        if(method==='DELETE'){const [removed]=backendProjects.splice(at,1);for(const item of backendConversations)if(item.projectId===removed.id)item.projectId=null;return response({ok:true});}
+      }
+      const organization=/^\/conversations\/([^/]+)\/organization$/.exec(path);
+      if(organization&&method==='PATCH'){
+        const item=backendConversations.find(item=>item.id===organization[1]);assert.ok(item,'organization operation must use an existing conversation');
+        if(body.title!==undefined){item.title=body.title;item.customTitle=body.title;}
+        if(body.projectId!==undefined)item.projectId=body.projectId;
+        if(body.archived!==undefined)item.archivedAt=body.archived?'2026-10-06T00:00:00.000Z':null;
+        return response(organizationResponse?organizationResponse(structuredClone(item),body):item);
+      }
+      if(/^\/conversations\/[^/]+$/.test(path)&&method==='GET'){const conversation=backendConversations.find(item=>item.id===path.split('/')[2]);assert.ok(conversation);return response(conversation);}
+      if(path.endsWith('/agent/submit')&&!failAgentSubmit){
+        const at=backendConversations.findIndex(item=>item.id===path.split('/')[2]);assert.ok(at>=0);
+        const item=backendConversations[at];item.agent={revision:1,paused:false,queue:[],run:{id:'fixture-run',submissionId:body.submissionId,status:'completed',providerId:'model',permissions,hostId:'central'},submissions:[{submissionId:body.submissionId,status:'completed'}],approvals:[]};
+        return response({conversation:item,submission:{submissionId:body.submissionId,status:'completed'}});
+      }
+      if(handleAgentControl&&callControl(path,options))return response({});
       if(path.endsWith('/agent/submit')&&failAgentSubmit)throw Error('Fixture lost the submission acknowledgement');
       throw Error(`Unexpected API call: ${path}`);
     },
     streamMessage:async(id,content,signal,onEvent,attachmentIds,assistant)=>{
-      const stream={id,content,signal,attachmentIds,assistant};streams.push(stream);
+      const stream={id,content,signal,attachmentIds,assistant,emit:onEvent};streams.push(stream);
       if(holdStream){
         let abort;
         try{await new Promise((resolve,reject)=>{
@@ -102,7 +133,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     './companion-mount.mjs':{watchCompanionBreakpoint},'./chat-display.mjs':{createChatDisplay},'./useChatScroll':{useChatScroll:()=>({contentRef:{current:null},onScroll(){},latest(){},showLatest:false})},
     './AgentPermissions':{...component('AgentPermissions'),defaultAgentPermissions:permissions},
     './ProjectDirectory':{...component('ProjectDirectory'),useProjectDirectory:()=>({value:'',change(){}})},
-    './project-directory-preferences.mjs':projectPreferences,'./execution-hosts.mjs':executionHosts,
+    './project-directory-preferences.mjs':projectPreferences,'./execution-hosts.mjs':executionHosts,'./conversation-organization-sync.mjs':organizationSync,
     './ChatAssistant':{ChatAssistantControls:Symbol('ChatAssistantControls'),ChatAssistantTasks:Symbol('ChatAssistantTasks'),useChatAssistant:()=>({value:{hostId:'',providerId:'',enabled:false,permissions},snapshot:()=>undefined})},
     './chat-assistant-preferences.mjs':{mergeAssistantTask,mergeChatAssistantConversation},
     './Attachments':{useAttachments:()=>attachments,AttachmentInput:Symbol('AttachmentInput'),AttachmentDrafts:Symbol('AttachmentDrafts'),MessageImages:Symbol('MessageImages')},
@@ -125,6 +156,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
   const render=()=>{index=0;effects.length=0;tree=Component();for(const effect of effects)effect();return tree;};
   const find=(type,predicate=()=>true)=>nodes(tree).find(node=>node.type===type&&predicate(node.props));
   render();
+  const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return{promise,resolve};};
   return{find,calls,requests,streams,navigations,attachments,get getterReads(){return getterReads;},text:()=>text(tree),
     ready:async()=>{for(let attempt=0;attempt<3;attempt++){await flush();render();}},
     enterAgent(){find('button',props=>props['aria-label']==='Agent 执行任务').props.onClick();render();},
@@ -134,10 +166,20 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     selectHistory(id){find(modules['./ConversationHistory'].default).props.onSelect(id);render();},
     get selectedId(){return find(modules['./ConversationHistory'].default)?.props.selectedId;},
     history(){return Array.from(find(modules['./ConversationHistory'].default)?.props.conversations || []);},
+    historyProps(){return find(modules['./ConversationHistory'].default)?.props;},
+    filter(filter,archived=false){this.historyProps().onFilter(filter,archived);render();},
+    async organize(id,patch){await this.historyProps().onOrganize(id,patch);render();},
+    async createProject(name){await this.historyProps().onCreateProject(name);render();},
+    async renameProject(id,name){await this.historyProps().onRenameProject(id,name);render();},
+    async deleteProject(id){await this.historyProps().onDeleteProject(id);render();},
+    submit(){const pending=find('form',props=>props.className?.includes('composer')).props.onSubmit({preventDefault(){}});render();return pending;},
+    delayNext(path,method='GET'){const item={path,method,started:deferred(),release:deferred()};delayedResponses.push(item);return{started:item.started.promise,release(value){item.value=value;item.release.resolve();}};},
+    failNext(path,method,error=Object.assign(new Error('Fixture durable save failed'),{status:500})){apiFailures.push({path,method,error});},
+    changeSession(){sessionEpoch++;},
     automation(){return nodes(tree).find(node=>typeof node.props?.onEditingChange==='function'&&typeof node.props?.onOpenConversation==='function');},
     automationEditing(value,{rerender=true}={}){const node=this.automation();assert.ok(node,'automation view is mounted');node.props.onEditingChange(value);if(rerender)render();},
     automationResult(id){this.automation().props.onOpenConversation(id);render();},
-    click(label){const node=find('button',props=>props['aria-label']===label||text(props.children)===label);assert.ok(node,`Missing button ${label}`);node.props.onClick();render();},
+    click(label){const node=find('button',props=>props['aria-label']===label||text(props.children)===label);assert.ok(node,`Missing button ${label}`);const pending=node.props.onClick();render();return pending;},
     component(name){return find(controls[name]||modules[`./${name}`]?.default);},
     deleteHistory(id){find(modules['./ConversationHistory'].default).props.onDelete(id);render();},
     render,
@@ -152,7 +194,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     suggestion(label){find('button',props=>text(props.children)===label).props.onClick();render();},
     prepareBrowser(){nodes(tree).find(node=>typeof node.props?.onPrepareBrowser==='function').props.onPrepareBrowser();render();},
     setAttachments(items=[],uploading=false){attachments.items=[...items];attachments.uploading=uploading;render();},
-    notify(conversation){const visible=publicConversations().filter(item=>item.id!==conversation.id);if(!registeredAutomationIds.includes(conversation.automationId))visible.push(conversation);notificationSnapshot={navigation:{epoch:1,...identity,state:{...state,conversations:visible},conversation}};render();},
+    notify(conversation){const visible=publicConversations().filter(item=>item.id!==conversation.id);if(!registeredAutomationIds.includes(conversation.automationId))visible.push(conversation);notificationSnapshot={navigation:{epoch:1,...identity,state:{...state,projects:structuredClone(backendProjects),conversations:visible},conversation}};render();},
     get notificationTakes(){return notificationTakes;},
     selectedHost:()=>find(controls.ExecutionTarget)?.props.value,
     chooseHost(id){find(controls.ExecutionTarget).props.onChange(id);render();},
@@ -265,4 +307,99 @@ test('a result from a deleted automation remains read-only in recent history and
   assert.deepEqual(f.history().map(item => item.id), [orphan.id]); f.selectHistory(orphan.id); await f.ready(); assert.equal(f.find('textarea', props => props['aria-label'] === '消息'), undefined);
   assert.equal(f.component('AgentQueue'), undefined); f.deleteHistory(orphan.id); assert.equal(f.requests.some(item => item.method === 'DELETE'), false);
   f.click('删除对话'); await f.ready(); assert.equal(f.requests.filter(item => item.method === 'DELETE' && item.path === `/conversations/${orphan.id}`).length, 1); assert.deepEqual(f.history(), []);
+});
+
+const project=(id,name=id)=>({id,name,createdAt:'2026-10-06T00:00:00.000Z',updatedAt:'2026-10-06T00:00:00.000Z'});
+const idleAgent=(id,extra={})=>conversation(id,{mode:'codex',agent:{revision:1,paused:false,queue:[],submissions:[],approvals:[]},...extra});
+
+test('project filter changes preserve the selected conversation, unsent text and image drafts',async t=>{
+  const stored=conversation('organized-chat',{projectId:'work',messages:[{id:'prior',role:'assistant',content:'原来记录',status:'complete'}]});
+  const f=workspaceFixture({initialConversations:[stored],initialProjects:[project('work','工作'),project('personal','个人')]});t.after(()=>f.close());await f.ready();f.selectHistory(stored.id);await f.ready();
+  f.typeDraft('这个输入还没有发送');const image={id:'draft-image',name:'draft.png'};f.setAttachments([image]);const cleared=f.attachments.clearCount;
+  f.filter('personal',true);await f.ready();
+  assert.equal(f.selectedId,stored.id);assert.equal(f.historyProps().projectFilter,'personal');assert.equal(f.historyProps().archived,true);
+  assert.equal(f.find('textarea',props=>props['aria-label']==='消息').props.value,'这个输入还没有发送');assert.deepEqual(f.attachments.items,[image]);assert.equal(f.attachments.clearCount,cleared);
+  assert.ok(f.requests.every(item=>item.method==='GET'),'classification browsing cannot mutate conversations or execute tasks');
+});
+
+for(const mode of ['chat','codex'])test(`new ${mode} conversations inherit the chosen project and return from archive view`,async t=>{
+  const f=workspaceFixture({canUseCodex:true,initialProjects:[project('work','工作')]});t.after(()=>f.close());await f.ready();
+  f.filter('work',true);if(mode==='codex')f.enterAgent();else f.newChat();await f.ready();
+  assert.equal(f.historyProps().projectFilter,'work');assert.equal(f.historyProps().archived,false);
+  f.typeDraft(mode==='chat'?'在这个项目里聊天':'在这个项目里执行');await f.submit();await f.ready();
+  const creation=f.requests.find(item=>item.path==='/conversations'&&item.method==='POST');assert.ok(creation);assert.equal(creation.body.mode,mode);assert.equal(creation.body.projectId,'work');
+  const created=f.history().find(item=>item.id===f.selectedId);assert.ok(created);assert.equal(created.projectId,'work');assert.equal(created.archivedAt,null);
+});
+
+test('project create, rename and deletion keep assigned conversations and selected drafts intact',async t=>{
+  const saved=conversation('project-dialogue',{messages:[{id:'original',role:'assistant',content:'不能丢失的聊天',status:'complete'}]});
+  const f=workspaceFixture({initialConversations:[saved]});t.after(()=>f.close());await f.ready();f.selectHistory(saved.id);await f.ready();f.typeDraft('仍未发送');
+  await f.createProject('学习');const created=f.historyProps().projects.find(item=>item.name==='学习');assert.ok(created);assert.equal(f.historyProps().projectFilter,created.id);
+  await f.organize(saved.id,{projectId:created.id,title:'学习记录'});await f.renameProject(created.id,'阅读笔记');
+  assert.equal(f.historyProps().projects.find(item=>item.id===created.id).name,'阅读笔记');assert.equal(f.history().find(item=>item.id===saved.id).title,'学习记录');
+  await f.deleteProject(created.id);await f.ready();
+  assert.equal(f.historyProps().projects.length,0);assert.equal(f.historyProps().projectFilter,'unassigned');assert.equal(f.selectedId,saved.id);
+  const retained=f.history().find(item=>item.id===saved.id);assert.ok(retained);assert.equal(retained.projectId,null);assert.deepEqual(retained.messages,saved.messages);
+  assert.equal(f.find('textarea',props=>props['aria-label']==='消息').props.value,'仍未发送');assert.equal(f.requests.some(item=>item.method==='DELETE'&&item.path.startsWith('/conversations/')),false);
+});
+
+test('archived URL and task-notification entries align the history view and stay reachable',async t=>{
+  const archived=conversation('archived-linked',{projectId:'work',archivedAt:'2026-10-06T00:00:00.000Z'});
+  const f=workspaceFixture({initialConversations:[archived],initialProjects:[project('work')],search:`?chat=1&conversation=${archived.id}`});t.after(()=>f.close());await f.ready();
+  assert.equal(f.selectedId,archived.id);assert.equal(f.historyProps().archived,true);assert.ok(f.history().some(item=>item.id===archived.id));
+  f.newChat();f.filter('unassigned',false);f.notify(archived);await f.ready();
+  assert.equal(f.selectedId,archived.id);assert.equal(f.historyProps().projectFilter,'work');assert.equal(f.historyProps().archived,true);assert.equal(f.notificationTakes,1);
+});
+
+test('organizing a live Chat preserves its pending message content and the selected input',async t=>{
+  const saved=conversation('streaming-metadata',{messages:[{id:'original',role:'assistant',content:'原来的完整记录',status:'complete'}]});
+  const f=workspaceFixture({initialConversations:[saved],holdStream:true,organizationResponse:item=>({...item,messages:[]})});t.after(()=>f.close());await f.ready();f.selectHistory(saved.id);await f.ready();f.typeDraft('尚在生成的下一轮');
+  const sending=f.submit();await f.ready();assert.equal(f.streams.length,1);
+  await f.organize(saved.id,{title:'正在进行的对话',archived:true});await f.ready();
+  const updated=f.history().find(item=>item.id===saved.id);assert.equal(updated.title,'正在进行的对话');assert.ok(updated.archivedAt);assert.equal(updated.messages.length,3);assert.equal(updated.messages.at(-2).content,'尚在生成的下一轮');assert.equal(updated.messages.at(-1).status,'streaming');
+  assert.equal(f.selectedId,saved.id);f.streams[0].complete();await sending;await f.ready();assert.equal(f.history().find(item=>item.id===saved.id).title,'正在进行的对话');
+});
+
+test('selected deletion retains unsent draft/images and a rapid repeated confirmation performs one durable delete',async t=>{
+  const saved=conversation('delete-with-draft');const f=workspaceFixture({initialConversations:[saved],handleAgentControl:true});t.after(()=>f.close());await f.ready();f.selectHistory(saved.id);await f.ready();f.typeDraft('不要清空我的输入');const image={id:'draft-retained',name:'retained.png'};f.setAttachments([image]);const clears=f.attachments.clearCount;
+  f.deleteHistory(saved.id);assert.equal(f.requests.some(item=>item.method==='DELETE'),false);const pending=f.delayNext(`/conversations/${saved.id}`,'DELETE');const confirm=f.find('button',props=>text(props.children)==='删除对话');assert.ok(confirm);confirm.props.onClick();confirm.props.onClick();f.render();await pending.started;
+  assert.equal(f.requests.filter(item=>item.method==='DELETE').length,1);pending.release();await f.ready();assert.equal(f.selectedId,null);assert.deepEqual(f.history(),[]);
+  assert.equal(f.find('textarea',props=>props['aria-label']==='消息').props.value,'不要清空我的输入');assert.deepEqual(f.attachments.items,[image]);assert.equal(f.attachments.clearCount,clears);assert.ok(f.text().includes('输入已保留'));
+});
+
+test('an Agent poll captured before organization cannot revert its durable title, archive or project',async t=>{
+  const saved=idleAgent('late-metadata-poll');const f=workspaceFixture({canUseCodex:true,initialConversations:[saved],initialProjects:[project('work')]});t.after(()=>f.close());await f.ready();
+  const delayed=f.delayNext(`/conversations/${saved.id}`);f.selectHistory(saved.id);await delayed.started;
+  await f.organize(saved.id,{title:'已经重命名',projectId:'work',archived:true});delayed.release();await f.ready();
+  const retained=f.history().find(item=>item.id===saved.id);assert.equal(retained.title,'已经重命名');assert.equal(retained.projectId,'work');assert.ok(retained.archivedAt);
+});
+
+test('an Agent GET completed after deletion cannot revive the conversation in history',async t=>{
+  const saved=idleAgent('late-deleted-poll');const f=workspaceFixture({canUseCodex:true,initialConversations:[saved],handleAgentControl:true});t.after(()=>f.close());await f.ready();
+  const delayed=f.delayNext(`/conversations/${saved.id}`);f.selectHistory(saved.id);await delayed.started;f.deleteHistory(saved.id);await f.click('删除对话');await f.ready();
+  assert.equal(f.selectedId,null);assert.deepEqual(f.history(),[]);delayed.release();await f.ready();assert.equal(f.selectedId,null);assert.deepEqual(f.history(),[]);
+});
+
+test('a state refresh requested before organization cannot restore deleted history or stale project metadata',async t=>{
+  const active=conversation('active-for-refresh'),rename=conversation('keep-with-new-title'),removed=conversation('remove-before-refresh');
+  const f=workspaceFixture({initialConversations:[active,rename,removed],initialProjects:[project('work')],handleAgentControl:true});t.after(()=>f.close());await f.ready();f.selectHistory(active.id);await f.ready();
+  const delayed=f.delayNext('/state');f.typeDraft('引发一次普通刷新');const sending=f.submit();await delayed.started;
+  await f.organize(rename.id,{title:'刷新也不能改回的名字',projectId:'work',archived:true});await f.renameProject('work','已经更新的项目');f.deleteHistory(removed.id);await f.click('删除对话');await f.ready();
+  delayed.release();await sending;await f.ready();
+  const retained=f.history().find(item=>item.id===rename.id);assert.equal(retained.title,'刷新也不能改回的名字');assert.equal(retained.projectId,'work');assert.ok(retained.archivedAt);assert.equal(f.historyProps().projects.find(item=>item.id==='work').name,'已经更新的项目');assert.equal(f.history().some(item=>item.id===removed.id),false);
+});
+
+test('failed organization writes leave visible metadata untouched and failed delete keeps confirmation and drafts',async t=>{
+  const saved=conversation('failed-write-retains');const f=workspaceFixture({initialConversations:[saved],handleAgentControl:true});t.after(()=>f.close());await f.ready();f.selectHistory(saved.id);await f.ready();f.typeDraft('失败以后仍保留草稿');
+  f.failNext(`/conversations/${saved.id}/organization`,'PATCH');await assert.rejects(f.organize(saved.id,{title:'未成功的名字',archived:true}),/durable save failed/);await f.ready();
+  assert.equal(f.history()[0].title,saved.title);assert.equal(f.history()[0].archivedAt,undefined);
+  f.failNext(`/conversations/${saved.id}`,'DELETE');f.deleteHistory(saved.id);await f.click('删除对话');await f.ready();
+  assert.equal(f.selectedId,saved.id);assert.ok(f.find('section',props=>props.role==='alertdialog'||props.role==='dialog'));assert.ok(f.text().includes('durable save failed'));assert.equal(f.find('textarea',props=>props['aria-label']==='消息').props.value,'失败以后仍保留草稿');
+  await f.click('删除对话');await f.ready();assert.equal(f.selectedId,null);assert.deepEqual(f.history(),[]);
+});
+
+test('organization responses belonging to an earlier account cannot publish metadata into the current workspace',async t=>{
+  const saved=conversation('epoch-fenced');const f=workspaceFixture({initialConversations:[saved]});t.after(()=>f.close());await f.ready();
+  const delayed=f.delayNext(`/conversations/${saved.id}/organization`,'PATCH');const pending=f.organize(saved.id,{title:'旧账号迟来的改名'});await delayed.started;f.changeSession();delayed.release();
+  await assert.rejects(pending,error=>error.name==='SessionChangedError');await f.ready();assert.equal(f.history()[0].title,saved.title);assert.equal(f.history()[0].customTitle,undefined);
 });

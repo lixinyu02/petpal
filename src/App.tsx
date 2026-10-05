@@ -3,6 +3,7 @@ import {composerKeyAction} from './composer-keyboard.mjs';
 import CompanionOptions from './CompanionOptions';
 import ChatMessages from './ChatMessages';
 import ConversationHistory from './ConversationHistory';
+import {creationProjectId,conversationHistoryScope,mergeConversationOrganization,mergeOrganizationSnapshot} from './conversation-organization-sync.mjs';
 import {watchCompanionBreakpoint} from './companion-mount.mjs';
 import {createChatDisplay,type ChatDisplay} from './chat-display.mjs';
 import {useChatScroll} from './useChatScroll';
@@ -40,7 +41,7 @@ import {nativeComputerUse} from './platform/computer-use';
 import { nativeMusicMcp } from './platform/music-mcp';
 import { taskNotificationSession } from './platform/task-notification-session';
 import { reasoningEfforts } from './desktop-settings.mjs';
-import { api, getConnection, getIdentity, getSessionEpoch, initConnection, connectWithToken, login, isSessionChanged, SessionChangedError, streamMessage, type AgentHost, type AgentPermissions as Permissions, type AgentSubmission, type Connection, type Conversation, type Message, type NativeExecutorStatus, type Provider, type ReasoningEffort, type State } from './api';
+import { api, getConnection, getIdentity, getSessionEpoch, initConnection, connectWithToken, login, isSessionChanged, SessionChangedError, streamMessage, type AgentHost, type AgentPermissions as Permissions, type AgentSubmission, type Connection, type Conversation, type ConversationOrganization, type ConversationProject, type Message, type NativeExecutorStatus, type Provider, type ReasoningEffort, type State } from './api';
 
 const DownloadsView = lazy(() => import('./DownloadsView'));
 const AutomationsView = lazy(() => import('./AutomationsView'));
@@ -67,6 +68,10 @@ export default function App() {
   const taskNotifications=useSyncExternalStore(taskNotificationSession.subscribe,taskNotificationSession.snapshot,taskNotificationSession.snapshot);
   const [companionKind] = useCompanion();
   const [state, setState] = useState<State>(emptyState);
+  const [projectFilter,setProjectFilter]=useState('all');
+  const [historyArchived,setHistoryArchived]=useState(false);
+  const organizationRevision=useRef(0);
+  const deletedConversationIds=useRef(new Set<string>());
   const [loadedAutomationConversation,setLoadedAutomationConversation]=useState<Conversation|null>(null);
   const loadedAutomationConversationRef=useRef(loadedAutomationConversation);loadedAutomationConversationRef.current=loadedAutomationConversation;
   function cacheAutomationConversation(value:Conversation|null){loadedAutomationConversationRef.current=value;setLoadedAutomationConversation(value);}
@@ -120,6 +125,9 @@ export default function App() {
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteBusy,setDeleteBusy]=useState(false);
+  const [deleteError,setDeleteError]=useState('');
+  const deleteLock=useRef(false);
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const [responsePerformance, setResponsePerformance] = useState<PerformanceInput>({ utteranceId: '', text: '', phase: 'idle' });
   const voiceScope = state.instanceId && state.user ? `${state.instanceId}:${state.user.id}` : `guest:${getConnection().url || location.origin}`;
@@ -139,6 +147,8 @@ export default function App() {
   const petOnly = new URLSearchParams(location.search).get('pet') === '1';
   const conversation = useMemo(()=>loadedAutomationConversation?.id===selected?loadedAutomationConversation:state.conversations.find(c => c.id === selected),[state.conversations,selected,loadedAutomationConversation]);
   const historyConversations = useMemo(()=>state.conversations.filter(c => !c.backgroundParentId),[state.conversations]);
+  const projects=state.projects??[];
+  useEffect(()=>{if(projectFilter!=='all'&&projectFilter!=='unassigned'&&!projects.some(item=>item.id===projectFilter))setProjectFilter('unassigned');},[state.projects,projectFilter]);
   const provider = state.providers.find(p => p.id === (conversation?.providerId || providerId));
   const currentMode = conversation?.mode || mode;
   const agentRunning = currentMode==='codex' && (conversation?.agent?.run?.status==='running'||conversation?.agent?.run?.status==='stopping');
@@ -203,10 +213,11 @@ export default function App() {
   async function refresh() {
     if (getSessionEpoch() !== accountEpoch) throw new SessionChangedError();
     const defaultRevision=chatAssistantDefaultRevision.current;
+    const readRevision=organizationRevision.current;
     const next = await api<State>('/state');
     if (getSessionEpoch() !== accountEpoch) throw new SessionChangedError();
     // A response requested before the successful write must not undo its target.
-    setState(previous=>({...next,settings:defaultRevision===chatAssistantDefaultRevision.current?next.settings:{...next.settings,chatAssistantHostId:previous.settings.chatAssistantHostId}}));
+    setState(previous=>({...mergeOrganizationSnapshot(previous,next,readRevision!==organizationRevision.current,deletedConversationIds.current),settings:defaultRevision===chatAssistantDefaultRevision.current?next.settings:{...next.settings,chatAssistantHostId:previous.settings.chatAssistantHostId}}));
     setConnected(true); await hydrateCompanion(next.settings.companionKind || 'anime').catch(() => {});
     setProviderId(previous => next.providers.some(p => p.id === previous) ? previous : next.settings.defaultProviderId || next.providers[0]?.id || '');
     return next;
@@ -218,7 +229,7 @@ export default function App() {
       const next = await api<State>('/state');
       if (alive && getSessionEpoch() === accountEpoch) { setState(next); await hydrateCompanion(next.settings.companionKind || 'anime').catch(() => {}); setProviderId(next.settings.defaultProviderId || next.providers[0]?.id || ''); setConnected(true); if(!next.user?.canUseCodex)setMode('chat'); if(!next.user?.isOwner)setAgentProviderId(next.codex.eligibleProviderIds?.[0]||'');
         const linked=next.conversations.find(item=>item.id===new URLSearchParams(location.search).get('conversation'));
-        if(linked&&(linked.mode!=='codex'||next.user?.canUseCodex)){setSelected(linked.id);setMode(linked.mode);if(linked.mode==='codex'){setAgentHostId(linked.agent?.run?.hostId||linked.agentHostId||linked.threadHostId||'central');setAgentProviderId(linked.agent?.run?.providerId||(next.user?.isOwner?'':next.codex.eligibleProviderIds?.[0]||''));setPermissions(linked.agent?.run?.permissions||{...defaultAgentPermissions});}}
+        if(linked&&(linked.mode!=='codex'||next.user?.canUseCodex)){setSelected(linked.id);setMode(linked.mode);setHistoryArchived(!!linked.archivedAt);if(linked.mode==='codex'){setAgentHostId(linked.agent?.run?.hostId||linked.agentHostId||linked.threadHostId||'central');setAgentProviderId(linked.agent?.run?.providerId||(next.user?.isOwner?'':next.codex.eligibleProviderIds?.[0]||''));setPermissions(linked.agent?.run?.permissions||{...defaultAgentPermissions});}}
         else setSelected(null);
       }
     }).catch(e => { if (alive) setError(e.message); }).finally(() => { if (alive) setReady(true); });
@@ -263,8 +274,9 @@ export default function App() {
     if(draft.trim()||attachments.items.length||attachments.uploading||pendingNavigation){setNotice('收到任务结果，输入内容已保留，完成编辑后再打开。');return;}
     taskNotificationSession.takeNavigation();
     // Notification snapshots may wait while a reply runs; keep this page's default.
-    setState(previous=>({...target.state,settings:{...target.state.settings,chatAssistantHostId:previous.settings.chatAssistantHostId},conversations:target.state.conversations.map(item=>item.id===target.conversation.id?target.conversation:item)}));
-    historySelection.current.select(target.conversation);setView('chat');setMobileNav(false);setNotice('已打开任务结果。');
+    if(deletedConversationIds.current.has(target.conversation.id)){setNotice('这段对话已删除。');return;}
+    setState(previous=>({...mergeOrganizationSnapshot(previous,{...target.state,conversations:target.state.conversations.map(item=>item.id===target.conversation.id?target.conversation:item)},organizationRevision.current>0,deletedConversationIds.current),settings:{...target.state.settings,chatAssistantHostId:previous.settings.chatAssistantHostId}}));
+    historySelection.current.select(mergeConversationOrganization(historySelection.current.conversations.find(item=>item.id===target.conversation.id),target.conversation,organizationRevision.current>0));setView('chat');setMobileNav(false);setNotice('已打开任务结果。');
   },[taskNotifications.navigation,accountEpoch,ready,busy,agentRunning,agentSubmitting,unconfirmed,switchingModel,draft,attachments.items.length,attachments.uploading,pendingNavigation,automationEditing]);
   useEffect(()=>{if(companionPanelOpen)setCompanionPanelMounted(true);},[companionPanelOpen]);
   useEffect(()=>watchCompanionBreakpoint(window.matchMedia('(max-width: 960px)'),()=>setCompanionPanelMounted(true)),[]);
@@ -336,7 +348,7 @@ export default function App() {
     stopPresentation();
     cacheAutomationConversation(null);
     attachments.clear();setPermissions({...defaultAgentPermissions});setAgentProviderId(state.user?.isOwner?'':state.codex.eligibleProviderIds?.[0]||'');agentSubmissionRef.current=null;
-    setSelected(null); setMode(nextMode === 'codex' && !state.user?.canUseCodex ? 'chat' : nextMode); setProviderId(state.settings.defaultProviderId || state.providers[0]?.id || ''); setView('chat'); setDraft(''); setError(''); setMobileNav(false); setApprovals([]);
+    setSelected(null); setHistoryArchived(false); setMode(nextMode === 'codex' && !state.user?.canUseCodex ? 'chat' : nextMode); setProviderId(state.settings.defaultProviderId || state.providers[0]?.id || ''); setView('chat'); setDraft(''); setError(''); setMobileNav(false); setApprovals([]);
   }
   function selectChat(c: Conversation) {
     if(c.id===selected){if(c.automationId)cacheAutomationConversation(c);requestNavigation({kind:'page',view:'chat'});return;}
@@ -344,15 +356,19 @@ export default function App() {
   }
   async function openAutomationConversation(id:string){
     if(getSessionEpoch()!==accountEpoch)throw new SessionChangedError();
+    const readRevision=organizationRevision.current;
     const next=await api<Conversation>(`/conversations/${encodeURIComponent(id)}`);
     if(getSessionEpoch()!==accountEpoch)throw new SessionChangedError();
-    if(!next.automationId)setState(previous=>({...previous,conversations:[next,...previous.conversations.filter(item=>item.id!==next.id)]}));selectChat(next);
+    if(deletedConversationIds.current.has(next.id))throw new Error('这段对话已删除。');
+    const selectedNext=mergeConversationOrganization(historySelection.current.conversations.find(item=>item.id===next.id),next,readRevision!==organizationRevision.current);
+    if(!next.automationId)setState(previous=>({...previous,conversations:[mergeConversationOrganization(previous.conversations.find(item=>item.id===next.id),next,readRevision!==organizationRevision.current),...previous.conversations.filter(item=>item.id!==next.id)]}));selectChat(selectedNext);
   }
   function switchConversation(c:Conversation) {
     stopPresentation();
     cacheAutomationConversation(c.automationId?c:null);
     attachments.clear();setDraft('');agentSubmissionRef.current=null;setAgentProviderId(c.agent?.run?.providerId || (state.user?.isOwner?'':state.codex.eligibleProviderIds?.[0]||''));setPermissions(c.agent?.run?.permissions||{...defaultAgentPermissions});
     if(c.mode==='codex')setAgentHostId(c.agent?.run?.hostId||c.agentHostId||c.threadHostId||'central');
+    const scope=conversationHistoryScope(c,projectFilter);setProjectFilter(scope.projectFilter);setHistoryArchived(scope.archived);
     setSelected(c.id); setMode(c.mode); setView('chat'); setError(''); setMobileNav(false); setApprovals([]);
   }
   // Memoized navigation always selects the current conversation and observes
@@ -360,7 +376,29 @@ export default function App() {
   const historySelection=useRef({conversations:state.conversations,select:selectChat});
   historySelection.current={conversations:state.conversations,select:selectChat};
   const selectHistory=useCallback((id:string)=>{const current=historySelection.current;const item=current.conversations.find(c=>c.id===id);if(item)current.select(item);},[]);
-  const deleteHistory=useCallback((id:string)=>setDeleting(id),[]);
+  const deleteHistory=useCallback((id:string)=>{setDeleteError('');setDeleting(id);},[]);
+  const filterHistory=useCallback((filter:string,archived:boolean)=>{setProjectFilter(filter);setHistoryArchived(archived);},[]);
+  const organizeHistory=useCallback(async(id:string,patch:ConversationOrganization)=>{
+    const updated=await api<Conversation>(`/conversations/${encodeURIComponent(id)}/organization`,{method:'PATCH',body:JSON.stringify(patch)});
+    if(getSessionEpoch()!==accountEpoch)throw new SessionChangedError();
+    organizationRevision.current++;
+    setState(previous=>({...previous,conversations:previous.conversations.map(item=>item.id===id?{...item,title:updated.title,customTitle:updated.customTitle,projectId:updated.projectId??null,archivedAt:updated.archivedAt??null}:item)}));
+  },[accountEpoch]);
+  const createHistoryProject=useCallback(async(name:string)=>{
+    const project=await api<ConversationProject>('/projects',{method:'POST',body:JSON.stringify({name})});
+    if(getSessionEpoch()!==accountEpoch)throw new SessionChangedError();
+    organizationRevision.current++;setState(previous=>({...previous,projects:[...(previous.projects??[]),project]}));setProjectFilter(project.id);setHistoryArchived(false);
+  },[accountEpoch]);
+  const renameHistoryProject=useCallback(async(id:string,name:string)=>{
+    const project=await api<ConversationProject>(`/projects/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({name})});
+    if(getSessionEpoch()!==accountEpoch)throw new SessionChangedError();
+    organizationRevision.current++;setState(previous=>({...previous,projects:(previous.projects??[]).map(item=>item.id===id?project:item)}));
+  },[accountEpoch]);
+  const deleteHistoryProject=useCallback(async(id:string)=>{
+    await api(`/projects/${encodeURIComponent(id)}`,{method:'DELETE'});
+    if(getSessionEpoch()!==accountEpoch)throw new SessionChangedError();
+    organizationRevision.current++;setState(previous=>({...previous,projects:(previous.projects??[]).filter(item=>item.id!==id),conversations:previous.conversations.map(item=>item.projectId===id?{...item,projectId:null}:item)}));setProjectFilter(previous=>previous===id?'unassigned':previous);
+  },[accountEpoch]);
   function openMode(next:'chat'|'codex') {
     if(next===currentMode){requestNavigation({kind:'page',view:'chat'});return;}
     newChat(next);
@@ -396,6 +434,7 @@ export default function App() {
     speech.prepare();
     const controller = new AbortController(); abortRef.current = controller;
     const requestId = ++requestSequence.current;
+    const readRevision=organizationRevision.current;
     let target = conversation;
     let assistantId = `pending-${Date.now()}`;
     let accepted = false;
@@ -405,13 +444,13 @@ export default function App() {
     performancePhase('thinking', '', assistantId);
     try {
       if (!target) {
-        target = await api<Conversation>('/conversations', { method: 'POST', body: JSON.stringify({ mode: currentMode, ...(currentMode === 'chat' ? { providerId: provider!.id } : {}) }) });
+        target = await api<Conversation>('/conversations', { method: 'POST', body: JSON.stringify({ mode: currentMode, projectId:creationProjectId(projectFilter,projects), ...(currentMode === 'chat' ? { providerId: provider!.id } : {}) }) });
         setSelected(target.id); setState(s => ({ ...s, conversations: [target!, ...s.conversations] }));
       }
       controller.signal.throwIfAborted();
       activeRef.current = target.id;
       const pending: Message[] = [...target.messages, { id: `user-${Date.now()}`, role: 'user', content,attachments:images }, { id: assistantId, role: 'assistant', content: '', status: 'streaming' }];
-      setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? { ...c, title: c.messages.length ? c.title : content.slice(0, 32), messages: pending } : c) }));
+      setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? { ...c, title: c.customTitle|| (c.messages.length ? c.title : content.slice(0, 32)), messages: pending } : c) }));
       setDraft('');
       display=createChatDisplay({isCurrent:()=>!controller.signal.aborted&&requestSequence.current===requestId&&getSessionEpoch()===accountEpoch,onText:delta=>{
         setStatus('');
@@ -433,11 +472,11 @@ export default function App() {
         if (event.type === 'status') { performancePhase('thinking', responseText, assistantId); setStatus(event.data.message || event.data.text || event.data.status || '正在处理中…'); }
         if (event.type === 'task') { setState(s=>({...s,conversations:s.conversations.map(c=>c.id===target!.id?{...c,assistantTasks:mergeAssistantTask(c.assistantTasks||[],event.data.task)}:c)})); }
         if (event.type === 'approval') { performancePhase('thinking', responseText, assistantId); setApprovals(a => [...a.filter(item => item.id !== String(event.data.id)), { id: String(event.data.id), kind: event.data.kind || '操作请求', description: event.data.description || 'Codex 请求执行操作，请检查后决定。' }]); }
-        if (event.type === 'error') { failed = true; performancePhase('error', responseText, assistantId); if (foregroundAssistantMessage(event.data.conversation,event.data.assistantMessageId||serverAssistantId)?.status !== 'cancelled') setError(event.data.message || '回复失败，请检查连接后重试。'); if (event.data.conversation) setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? event.data.conversation : c) })); }
+        if (event.type === 'error') { failed = true; performancePhase('error', responseText, assistantId); if (foregroundAssistantMessage(event.data.conversation,event.data.assistantMessageId||serverAssistantId)?.status !== 'cancelled') setError(event.data.message || '回复失败，请检查连接后重试。'); if (event.data.conversation) setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? mergeConversationOrganization(c,event.data.conversation,readRevision!==organizationRevision.current) : c) })); }
         if (event.type === 'done') {
           if (event.data.conversation) {
             finalReply = foregroundAssistantMessage(event.data.conversation,event.data.assistantMessageId||serverAssistantId);
-            setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? event.data.conversation : c) }));
+            setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? mergeConversationOrganization(c,event.data.conversation,readRevision!==organizationRevision.current) : c) }));
           }
           if (!failed) finishResponse(responseText || finalReply?.content || '', assistantId, requestId);
         }
@@ -475,14 +514,25 @@ export default function App() {
     catch (e) { setError((e as Error).message); }
   }
   async function deleteChat(id: string) {
-    if (selected === id) stopPresentation();
-    try { await api(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }); if (selected === id) setSelected(null); await refresh(); setDeleting(null); }
-    catch (e) { setError((e as Error).message); }
+    if(deleteLock.current)return;
+    if(selected===id&&(busyRef.current||agentSendLock.current||agentSubmitting||unconfirmed||switchingModelRef.current)){setDeleteError('请先完成或停止当前回复，再删除对话。');return;}
+    deleteLock.current=true;setDeleteBusy(true);setDeleteError('');
+    try {
+      await api(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if(getSessionEpoch()!==accountEpoch)throw new SessionChangedError();
+      organizationRevision.current++;deletedConversationIds.current.add(id);
+      setState(previous=>({...previous,conversations:previous.conversations.filter(item=>item.id!==id)}));
+      if(selected===id){stopPresentation();requestSequence.current++;displayRef.current?.close();abortRef.current?.abort();activeRef.current=null;cacheAutomationConversation(null);agentSubmissionRef.current=null;setApprovals([]);setMode(currentMode);setSelected(null);}
+      setDeleting(null);setNotice(draftRef.current.trim()||attachmentsRef.current.items.length?'对话已删除，未发送的输入已保留。':'对话已删除。');
+    } catch (e) { if(!isSessionChanged(e))setDeleteError((e as Error).message); }
+    finally{deleteLock.current=false;if(getSessionEpoch()===accountEpoch)setDeleteBusy(false);}
   }
   function chooseSuggestion(text: string) { setDraft(text); inputRef.current?.focus(); }
   async function refreshConversation(id:string,signal?:AbortSignal) {
+    const readRevision=organizationRevision.current;
     const updated=await api<Conversation>(`/conversations/${encodeURIComponent(id)}`,{signal});
     if(getSessionEpoch()!==accountEpoch)throw new SessionChangedError();
+    if(deletedConversationIds.current.has(id))throw new DOMException('这段对话已删除。','AbortError');
     if(loadedAutomationConversationRef.current?.id===id){
       const before=loadedAutomationConversationRef.current;
       if(!before.agent||!updated.agent||before.agent.revision<=updated.agent.revision){if(JSON.stringify(before)!==JSON.stringify(updated))cacheAutomationConversation(updated);}
@@ -492,7 +542,8 @@ export default function App() {
       const before=previous.conversations.find(item=>item.id===id);
       if(before?.agent&&updated.agent&&before.agent.revision>updated.agent.revision)return previous;
       if(before&&JSON.stringify(before)===JSON.stringify(updated))return previous;
-      return {...previous,conversations:before?previous.conversations.map(item=>item.id===id?updated:item):[updated,...previous.conversations]};
+      const merged=mergeConversationOrganization(before,updated,readRevision!==organizationRevision.current);
+      return {...previous,conversations:before?previous.conversations.map(item=>item.id===id?merged:item):[merged,...previous.conversations]};
     });
     return updated;
   }
@@ -515,7 +566,7 @@ export default function App() {
         }
         if(last&&(last.content!==lastText||!running)){lastText=last.content;performancePhase(running?(last.content?'speaking':'thinking'):'idle',last.content,last.id);}
         initialized=true;
-      }catch(error){if(!controller.signal.aborted&&!isSessionChanged(error))setError((error as Error).message);}
+      }catch(error){if(!controller.signal.aborted&&!isSessionChanged(error)&&(error as Error).name!=='AbortError')setError((error as Error).message);}
       if(!controller.signal.aborted)timer=setTimeout(()=>void poll(),running?800:2500);
     };
     void poll();return()=>{controller.abort();if(timer)clearTimeout(timer);};
@@ -539,10 +590,11 @@ export default function App() {
     const submissionHostId=selectedHostId;
     chatScroll.latest();
     agentSendLock.current=true;setAgentSubmitting(true);setError('');stopPresentation();speech.prepare();
+    const readRevision=organizationRevision.current;
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),40000);
     try{
       let target=conversation;
-      if(!target){target=await api<Conversation>('/conversations',{method:'POST',body:JSON.stringify({mode:'codex'}),signal:controller.signal});setSelected(target.id);setState(previous=>({...previous,conversations:[target!,...previous.conversations]}));}
+      if(!target){target=await api<Conversation>('/conversations',{method:'POST',body:JSON.stringify({mode:'codex',projectId:creationProjectId(projectFilter,projects)}),signal:controller.signal});setSelected(target.id);setState(previous=>({...previous,conversations:[target!,...previous.conversations]}));}
       if(!agentSubmissionRef.current){
         const run=target.agent?.run,isRunning=run?.status==='running'||run?.status==='stopping';
         const kind=isRunning&&sendChoice==='steer'?'steer':'submit';
@@ -553,7 +605,7 @@ export default function App() {
       }
       const pending=agentSubmissionRef.current;
       const result=await api<{conversation:Conversation;submission:AgentSubmission}>(`/conversations/${encodeURIComponent(pending.conversationId)}/agent/${pending.kind}`,{method:'POST',body:JSON.stringify({...pending.payload,submissionId:pending.id}),signal:controller.signal});
-      setState(previous=>({...previous,conversations:previous.conversations.map(item=>item.id===result.conversation.id&&(!item.agent||!result.conversation.agent||item.agent.revision<=result.conversation.agent.revision)?result.conversation:item)}));
+      setState(previous=>({...previous,conversations:previous.conversations.map(item=>item.id===result.conversation.id&&(!item.agent||!result.conversation.agent||item.agent.revision<=result.conversation.agent.revision)?mergeConversationOrganization(item,result.conversation,readRevision!==organizationRevision.current):item)}));
       resolveSubmission(result.submission);
       await refreshConversation(target.id);
     }catch(error){if(!isSessionChanged(error)&&getSessionEpoch()===accountEpoch){
@@ -571,9 +623,10 @@ export default function App() {
     if (!conversation) { setProviderId(nextId); return; }
     if (conversation.mode !== 'chat' || conversation.providerId === nextId) return;
     switchingModelRef.current = true; setSwitchingModel(true); setError('');
+    const readRevision=organizationRevision.current;
     try {
       const updated = await api<Conversation>(`/conversations/${encodeURIComponent(conversation.id)}`, { method: 'PATCH', body: JSON.stringify({ providerId: nextId }) });
-      setState(previous => ({ ...previous, conversations: previous.conversations.map(item => item.id === updated.id ? updated : item) }));
+      setState(previous => ({ ...previous, conversations: previous.conversations.map(item => item.id === updated.id ? mergeConversationOrganization(item,updated,readRevision!==organizationRevision.current) : item) }));
       setProviderId(nextId); setNotice('模型已切换，将沿用当前对话内容。');
     } catch (error) { if (!isSessionChanged(error)) setError((error as Error).message); }
     finally { switchingModelRef.current = false; if (getSessionEpoch() === accountEpoch) setSwitchingModel(false); }
@@ -603,8 +656,7 @@ export default function App() {
         <button className={view === 'chat' ? 'active' : ''} onClick={() => requestNavigation({kind:'page',view:'chat'})}><MessageCircle size={18} aria-hidden="true"/>对话</button>
         <button className={view === 'automations' ? 'active' : ''} onClick={() => requestNavigation({kind:'page',view:'automations'})}><CalendarClock size={18} aria-hidden="true"/>自动化</button>
       </nav>
-      <div className="history-heading"><span>最近的对话</span><History size={14} aria-hidden="true"/></div>
-      <ConversationHistory conversations={historyConversations} selectedId={selected} active={view==='chat'} busy={busy} onSelect={selectHistory} onDelete={deleteHistory}/>
+      <ConversationHistory conversations={historyConversations} projects={projects} projectFilter={projectFilter} archived={historyArchived} selectedId={selected} active={view==='chat'} busy={busy||deleteBusy} onFilter={filterHistory} onSelect={selectHistory} onDelete={deleteHistory} onOrganize={organizeHistory} onCreateProject={createHistoryProject} onRenameProject={renameHistoryProject} onDeleteProject={deleteHistoryProject}/>
       <div className="sidebar-bottom"><button className={`settings-link ${view==='downloads'?'active':''}`} onClick={()=>requestNavigation({kind:'page',view:'downloads'})}><Download size={18} aria-hidden="true"/>下载客户端</button>
         <button className={`settings-link ${view === 'settings' ? 'active' : ''}`} onClick={() => requestNavigation({kind:'page',view:'settings'})}><Settings2 size={18} aria-hidden="true"/>连接与设置</button>
         <button className="host-status" onClick={() => requestNavigation({kind:'connection'})}><span className={`status-light ${connected ? 'online' : ''}`}/><span>{connected ? state.user?.displayName || '个人服务已连接' : '登录你的个人服务'}<small>{window.petpal ? '桌面 · 账号与执行电脑' : Capacitor.isNativePlatform() ? 'Android · 远程服务' : 'Web · 个人空间'}</small></span><ChevronDown size={14} aria-hidden="true"/></button>
@@ -660,7 +712,7 @@ export default function App() {
     {notice && <div ref={toastEntrance} className="toast" role="status"><Check size={16} aria-hidden="true"/>{notice}</div>}
     {connectionOpen && <ConnectionDialog close={() => setConnectionOpen(false)}/>}
     {pendingNavigation && <div ref={pendingNavigationEntrance} className="modal-backdrop" data-ui-layer="dialog"><section className="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="draft-navigation-title" aria-describedby="draft-navigation-description"><h2 id="draft-navigation-title">{automationEditing.dirty?'保留自动化修改吗？':'保留这次输入吗？'}</h2><p id="draft-navigation-description">{automationEditing.dirty?'计划尚未保存。切换后会丢弃当前自动化修改；对话草稿会保留。':'消息还未发送。切换后会丢弃当前文字和图片；正在上传的图片也会取消。'}</p><div className="button-row"><button autoFocus className="secondary-button" data-ui-dismiss="dialog" onClick={() => setPendingNavigation(null)}>继续编辑</button><button className="danger-button" disabled={busy||agentRunning||agentSubmitting||unconfirmed||switchingModel||automationEditing.busy} onClick={confirmNavigation}>丢弃并切换</button></div></section></div>}
-    {deleting && <div ref={deleteEntrance} className="modal-backdrop" data-ui-layer="dialog"><section className="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title"><h2 id="delete-title">删除这段对话？</h2><p>这会删除个人服务中保存的聊天记录，无法恢复。</p><div className="button-row"><button className="secondary-button" data-ui-dismiss="dialog" onClick={() => setDeleting(null)}>保留</button><button className="danger-button" onClick={() => deleteChat(deleting)}>删除对话</button></div></section></div>}
+    {deleting && <div ref={deleteEntrance} className="modal-backdrop" data-ui-layer="dialog"><section className="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title" aria-busy={deleteBusy}><h2 id="delete-title">删除这段对话？</h2><p>这会永久删除这段对话及所属的后台任务记录。可以先归档保留；未发送的输入会保留。</p>{deleteError&&<div className="form-error" role="alert">{deleteError}</div>}<div className="button-row"><button disabled={deleteBusy} className="secondary-button" data-ui-dismiss="dialog" onClick={() => setDeleting(null)}>保留</button><button disabled={deleteBusy} className="danger-button" onClick={() => deleteChat(deleting)}>{deleteBusy?'正在删除…':'删除对话'}</button></div></section></div>}
   </div>;
 }
 

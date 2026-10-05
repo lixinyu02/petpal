@@ -31,6 +31,7 @@ import { MODEL_REQUEST_BYTES } from './model-request-limits.mjs';
 import { createNotificationService } from './notifications.mjs';
 import { createAutomationService } from './automations.mjs';
 import { executeAutomationTool, withAutomationTools } from './automation-tools.mjs';
+import { organizationPatch, organizationText, visibleProject } from './conversation-organization.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const now = () => new Date().toISOString();
@@ -102,6 +103,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     return value;
   };
   const active = new Map();
+  const deletingConversations = new Set();
   const probes = new Set();
   const approvals = new Map();
   const limitLogin = createLoginLimiter();
@@ -183,7 +185,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     return permissions;
   };
   const requireCurrentAuth = req => {
-    if (req.user.disabled || (!req.bootstrap && !state.sessions.some(session => session.tokenHash === req.sessionHash && session.userId === req.user.id && session.expiresAt > Date.now()))) throw failure(401, '登录凭据已过期或已撤销。');
+    if (req.user.disabled || !state.users.some(user => user.id === req.user.id && !user.disabled) || (!req.bootstrap && !state.sessions.some(session => session.tokenHash === req.sessionHash && session.userId === req.user.id && session.expiresAt > Date.now()))) throw failure(401, '登录凭据已过期或已撤销。');
   };
   // Only the native final handoff may recheck an existing owner session after
   // backend.close(); no HTTP route accepts the allowClosing option.
@@ -205,13 +207,22 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const status = redactCodex(await readCodexStatus());
     return { ...(isOwner(user) ? status : { available: status.available, running: status.running, authenticated: status.authenticated, configured: status.configured, error: status.error, message: status.message }), ...publicCodexConfig(state.codexConfig), eligibleProviderIds: eligibleProviders(user) };
   };
-  const visibleConversation = conversation => ({ id: conversation.id, title: conversation.title, mode: conversation.mode, providerId: conversation.providerId, ...(conversation.backgroundParentId ? { backgroundParentId: conversation.backgroundParentId } : {}), ...(conversation.automationId ? { automationId: conversation.automationId } : {}), messages: conversation.messages.map(message => ({ ...message, ...(message.attachmentIds?.length ? { attachments: imageAttachments.metadata(conversation.userId, message.attachmentIds) } : {}) })), createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, ...(conversation.assistantTasks?.length ? { assistantTasks: chatAssistant.snapshot(conversation) } : {}), ...(conversation.threadId ? { threadId: conversation.threadId } : {}), ...(conversation.mode === 'codex' ? { codexRevision: conversation.codexRevision, codexConfigChanged: conversation.codexRevision !== state.codexConfig.revision, agentHostId: conversation.agentHostId ?? 'central', threadHostId: conversation.threadHostId ?? 'central', ...(conversation.agentProjectDirectory ? { agentProjectDirectory: conversation.agentProjectDirectory } : {}), ...(conversation.threadProjectDirectory ? { threadProjectDirectory: conversation.threadProjectDirectory } : {}), agent: agentTasks.snapshot(conversation) } : {}) });
+  const visibleConversation = conversation => ({ id: conversation.id, title: conversation.customTitle ?? conversation.title, ...(conversation.customTitle !== undefined ? { customTitle: conversation.customTitle } : {}), projectId: conversation.projectId ?? null, archivedAt: conversation.archivedAt ?? null, mode: conversation.mode, providerId: conversation.providerId, ...(conversation.backgroundParentId ? { backgroundParentId: conversation.backgroundParentId } : {}), ...(conversation.automationId ? { automationId: conversation.automationId } : {}), messages: conversation.messages.map(message => ({ ...message, ...(message.attachmentIds?.length ? { attachments: imageAttachments.metadata(conversation.userId, message.attachmentIds) } : {}) })), createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, ...(conversation.assistantTasks?.length ? { assistantTasks: chatAssistant.snapshot(conversation) } : {}), ...(conversation.threadId ? { threadId: conversation.threadId } : {}), ...(conversation.mode === 'codex' ? { codexRevision: conversation.codexRevision, codexConfigChanged: conversation.codexRevision !== state.codexConfig.revision, agentHostId: conversation.agentHostId ?? 'central', threadHostId: conversation.threadHostId ?? 'central', ...(conversation.agentProjectDirectory ? { agentProjectDirectory: conversation.agentProjectDirectory } : {}), ...(conversation.threadProjectDirectory ? { threadProjectDirectory: conversation.threadProjectDirectory } : {}), agent: agentTasks.snapshot(conversation) } : {}) });
   const publicState = async user => {
     await Promise.all(state.conversations.filter(item => item.userId === user.id && item.mode === 'chat' && item.assistantTasks?.length).map(item => chatAssistant.refresh(item)));
     const automationResults = new Set(state.automations.jobs.filter(job => job.userId === user.id).flatMap(job => job.runs.map(run => run.conversationId).filter(Boolean)));
-    return { instanceId: state.instanceId, user: visibleUser(user), settings: settingsFor(user), providers: state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider => visibleProvider(provider, user)), conversations: state.conversations.filter(item => item.userId === user.id && (!item.automationId || !automationResults.has(item.id))).map(visibleConversation), codex: await userCodexStatus(user) };
+    return { instanceId: state.instanceId, user: visibleUser(user), settings: settingsFor(user), providers: state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider => visibleProvider(provider, user)), projects: state.projects.filter(project => project.userId === user.id).map(visibleProject), conversations: state.conversations.filter(item => item.userId === user.id && (!item.automationId || !automationResults.has(item.id))).map(visibleConversation), codex: await userCodexStatus(user) };
   };
-  const assertIdle = id => { if (active.has(id)) throw failure(409, '这个会话正在回复，请先停止。'); };
+  const assertAvailable = id => {
+    if (!state.conversations.some(item => item.id === id)) throw failure(404, '会话不存在。');
+    if (deletingConversations.has(id)) throw failure(409, '这个会话正在删除，请稍后重试。');
+  };
+  const assertIdle = id => { assertAvailable(id); if (active.has(id)) throw failure(409, '这个会话正在回复，请先停止。'); };
+  const assertDeletable = conversation => {
+    if (!state.conversations.includes(conversation)) throw failure(404, '会话不存在。');
+    const related = [conversation, ...state.conversations.filter(item => item.backgroundParentId === conversation.id && item.userId === conversation.userId)];
+    if (related.some(item => active.has(item.id) || item.agent?.queue?.length || ['running', 'stopping', 'unknown'].includes(item.agent?.run?.status) || item.agent?.submissions?.some(entry => ['queued', 'running', 'dispatching', 'uncertain'].includes(entry.status))) || conversation.assistantTasks?.some(item => ['deciding', 'queued', 'running', 'unknown'].includes(item.status))) throw failure(409, '这个会话仍有执行中、排队或状态未知的任务，请先停止任务并确认执行电脑已结束，再删除。');
+  };
   const stopTasks = async predicate => {
     asr.revoke(predicate);
     executors.revoke(predicate);
@@ -260,6 +271,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       if (entry.projectDirectory && entry.projectAccess === 'full' && !isOwner(user) && user.agentAccess !== 'full') throw failure(403, '外部项目的 Agent 授权已撤销，请重新选择默认工作区。');
       const conversation = state.conversations.find(item => item.id === entry.conversationId && item.userId === user.id);
       if (!conversation || conversation.mode !== 'codex' || conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Agent 会话已删除或配置已变化，请新建会话。');
+      assertAvailable(conversation.id);
       imageAttachments.metadata(user.id, entry.attachmentIds);
       assertImageSupport(entry.providerId ? providerById(entry.providerId, user) : state.codexConfig, [...conversation.messages, entry]);
       const current = resolveAgentModel(user.id, entry.providerId);
@@ -786,6 +798,23 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     catch (error) { if (!res.destroyed) res.status(502).json({ ok: false, message: error.message }); }
     finally { probes.delete(probe); }
   });
+  app.post('/api/projects', async (req, res) => {
+    if (Object.keys(req.body).some(key => key !== 'name')) throw failure(400, '项目创建只接受 name 字段。');
+    const id = randomUUID(), name = organizationText(req.body.name, '项目名称', 60);
+    await store.save({ organization: { kind: 'project-create', id, name, userId: req.user.id, authorize: () => requireCurrentAuth(req) } });
+    requireCurrentAuth(req); res.status(201).json(visibleProject(state.projects.find(project => project.id === id && project.userId === req.user.id)));
+  });
+  app.patch('/api/projects/:id', async (req, res) => {
+    if (Object.keys(req.body).length !== 1 || !Object.hasOwn(req.body, 'name')) throw failure(400, '项目更新只接受 name 字段。');
+    const name = organizationText(req.body.name, '项目名称', 60);
+    await store.save({ organization: { kind: 'project-rename', id: req.params.id, name, userId: req.user.id, authorize: () => requireCurrentAuth(req) } });
+    requireCurrentAuth(req); res.json(visibleProject(state.projects.find(project => project.id === req.params.id && project.userId === req.user.id)));
+  });
+  app.delete('/api/projects/:id', async (req, res) => {
+    if (Object.keys(req.body).length) throw failure(400, '删除项目不接受附加字段。');
+    await store.save({ organization: { kind: 'project-delete', id: req.params.id, userId: req.user.id, authorize: () => requireCurrentAuth(req) } });
+    requireCurrentAuth(req); res.json({ ok: true });
+  });
   app.post('/api/conversations', async (req, res) => {
     const { mode = 'chat' } = req.body ?? {};
     const providerId = req.body?.providerId ?? settingsFor(req.user).defaultProviderId;
@@ -794,8 +823,17 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const automationResults = new Set(state.automations.jobs.filter(job => job.userId === req.user.id).flatMap(job => job.runs.map(run => run.conversationId).filter(Boolean)));
     if (state.conversations.filter(item => item.userId === req.user.id && (!item.automationId || !automationResults.has(item.id))).length >= 200) throw failure(400, '最多保存 200 个会话，请先删除旧会话。');
     if (mode === 'chat' && providerId !== undefined && providerId !== null && providerId !== '') providerById(providerId, req.user);
-    const conversation = { id: randomUUID(), userId: req.user.id, title: mode === 'codex' ? '新的工作会话' : '新的聊天', mode, providerId: mode === 'chat' ? providerId || null : null, messages: [], createdAt: now(), updatedAt: now(), ...(mode === 'codex' ? { codexRevision: state.codexConfig.revision } : {}) };
-    state.conversations.unshift(conversation); await store.save(); res.status(201).json(visibleConversation(conversation));
+    const projectId = req.body.projectId === undefined ? null : organizationPatch({ projectId: req.body.projectId }).projectId;
+    const conversation = { id: randomUUID(), userId: req.user.id, title: mode === 'codex' ? '新的工作会话' : '新的聊天', projectId, archivedAt: null, mode, providerId: mode === 'chat' ? providerId || null : null, messages: [], createdAt: now(), updatedAt: now(), ...(mode === 'codex' ? { codexRevision: state.codexConfig.revision } : {}) };
+    await store.save({ organization: { kind: 'conversation-create', conversation, userId: req.user.id, authorize: () => {
+      requireCurrentAuth(req);
+      if (mode === 'codex') { requireCodex(req.user); if (configChanging || conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Codex 配置已变化，请稍后重试。'); }
+      else if (providerId) providerById(providerId, req.user);
+    }, validateLive: () => {
+      const results = new Set(state.automations.jobs.filter(job => job.userId === req.user.id).flatMap(job => job.runs.map(run => run.conversationId).filter(Boolean)));
+      if (state.conversations.filter(item => item.userId === req.user.id && (!item.automationId || !results.has(item.id))).length >= 200) throw failure(400, '最多保存 200 个会话，请先删除旧会话。');
+    } } });
+    requireCurrentAuth(req); res.status(201).json(visibleConversation(conversationById(conversation.id, req.user)));
   });
   app.get('/api/conversations/:id', async (req, res) => {
     const conversation = conversationById(req.params.id, req.user);
@@ -811,17 +849,23 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     conversation.providerId = provider.id; conversation.updatedAt = now();
     await store.save(); res.json(visibleConversation(conversation));
   });
+  app.patch('/api/conversations/:id/organization', async (req, res) => {
+    const conversation = conversationById(req.params.id, req.user), patch = organizationPatch(req.body);
+    assertAvailable(conversation.id);
+    await store.save({ organization: { kind: 'conversation-update', id: conversation.id, userId: req.user.id, patch, authorize: () => requireCurrentAuth(req), validateLive: () => assertAvailable(conversation.id) } });
+    requireCurrentAuth(req); res.json(visibleConversation(conversationById(conversation.id, req.user)));
+  });
   app.delete('/api/conversations/:id', async (req, res) => {
     const conversation = conversationById(req.params.id, req.user); assertIdle(conversation.id);
     if (conversation.backgroundParentId) throw failure(409, '请通过所属聊天管理后台任务，不能独立删除其任务记录。');
-    if (conversation.mode === 'codex') await agentTasks.stop(conversation, { clear: true });
-    else {
-      for (const record of conversation.assistantTasks ?? []) await chatAssistant.stop(conversation, record.id);
-      const children = state.conversations.filter(item => item.backgroundParentId === conversation.id && item.userId === req.user.id);
-      for (const child of children) await agentTasks.stop(child, { clear: true });
-      state.conversations = state.conversations.filter(item => !children.includes(item));
-    }
-    state.conversations.splice(state.conversations.indexOf(conversation), 1); await store.save(); res.json({ ok: true });
+    if (Object.keys(req.body).length) throw failure(400, '删除对话不接受附加字段。');
+    assertDeletable(conversation);
+    const ids = [conversation.id, ...state.conversations.filter(item => item.backgroundParentId === conversation.id && item.userId === req.user.id).map(item => item.id)];
+    for (const id of ids) deletingConversations.add(id);
+    try {
+      await store.save({ organization: { kind: 'conversation-delete', id: conversation.id, userId: req.user.id, authorize: () => requireCurrentAuth(req), validateLive: () => assertDeletable(conversation) } });
+      requireCurrentAuth(req); res.json({ ok: true });
+    } finally { for (const id of ids) deletingConversations.delete(id); }
   });
   app.post('/api/conversations/:id/assistant/tasks/:taskId/stop', async (req, res) => {
     const conversation = conversationById(req.params.id, req.user);
@@ -901,6 +945,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const agentConversation = (req, removing = false) => {
     requireCurrentAuth(req); if (!removing) requireCodex(req.user);
     const conversation = conversationById(req.params.id, req.user);
+    assertAvailable(conversation.id);
     if (conversation.automationId) throw failure(409, '自动化结果会话只能查看或停止，请在自动化页面管理计划。');
     if (conversation.mode !== 'codex') throw failure(400, '只有 Agent 会话可使用任务队列。');
     if (!removing && conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Agent 配置已变化，请新建会话。');
