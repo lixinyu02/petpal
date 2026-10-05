@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {foregroundAssistantMessage} from '../src/chat-assistant-preferences.mjs';
 import assert from 'node:assert/strict';
 import {chatAssistantDefaultIssue,chatAssistantTargetIssue,mergeAssistantTask,mergeChatAssistantConversation,readChatAssistantPreferences,restoreChatAssistantPreferences,saveChatAssistantPreferences,snapshotChatAssistant} from '../src/chat-assistant-preferences.mjs';
 
@@ -85,4 +86,23 @@ test('background progress cannot overwrite a foreground reply or replay an older
   const delivered={...old,messages:[...completed.messages,{id:'background-result',status:'complete',content:'result'}]};
   assert.deepEqual(mergeChatAssistantConversation(completed,delivered,null,false).messages.map(message=>message.id),['user','reply','background-result']);
   assert.equal(mergeChatAssistantConversation(delivered,completed,null,false).messages,delivered.messages);
+});
+
+test('new durable task reports merge during a foreground stream without replacing its text or replaying reports',()=>{
+  const before={id:'chat',messages:[{id:'user'},{id:'reply',status:'streaming',content:'fresh'}],assistantTasks:[]};
+  const report={id:'report',role:'assistant',status:'complete',content:'仍在执行',assistantTaskId:'task',assistantTaskReport:'progress'};
+  const polled={...before,messages:[{id:'user'},{id:'reply',status:'streaming',content:'old'},report]};
+  const merged=mergeChatAssistantConversation(before,polled,'chat',true);
+  assert.equal(merged.messages[1],before.messages[1]);assert.equal(merged.messages[1].content,'fresh');assert.equal(merged.messages[2],report);
+  assert.equal(mergeChatAssistantConversation(merged,polled,'chat',true).messages,merged.messages);
+});
+
+test('foreground completion and cancellation stay attached to their own reply when background reports finish later',()=>{
+  const cancelled={id:'foreground',role:'assistant',status:'cancelled',content:'partial'};
+  const report={id:'result',role:'assistant',status:'complete',content:'task done',assistantTaskId:'task',assistantTaskReport:'result'};
+  const conversation={messages:[{id:'user',role:'user'},cancelled,report]};
+  assert.equal(foregroundAssistantMessage(conversation,'foreground'),cancelled);
+  assert.equal(foregroundAssistantMessage(conversation),cancelled);
+  assert.equal(foregroundAssistantMessage(conversation,'missing'),undefined);
+  assert.equal(foregroundAssistantMessage(conversation,'result'),undefined);
 });

@@ -19,18 +19,18 @@ function harness(options={}){
   return{machine,states,sessions,plays,chats,streams,feed(level=.05){callbacks.onFrame(new Float32Array(6000).fill(level),level);},error(error){callbacks.onError(error);},deny(){allowed=false;},expire(){current=false;},get counts(){return{captureStarts,captureStops,capturePauses,outputStops,unlocks};}};
 }
 
-test('one half-duplex turn cleans speaker labels, streams ordered sentences and listens only after all TTS ends',async()=>{
+test('one turn cleans speaker labels, streams ordered sentences and retains one AEC microphone acquisition',async()=>{
   const h=harness();await h.machine.start();assert.equal(h.machine.snapshot().phase,'listening');
   h.feed(0);h.feed();await flush();assert.deepEqual(h.sessions[0].frames.map(f=>f.length),[4800,6000]);
   h.sessions[0].transcript('Speaker 0: 你好');assert.equal(h.machine.snapshot().transcript,'你好');
-  const finishing=h.machine.finishUtterance();await flush();assert.equal(h.machine.snapshot().phase,'recognizing');assert.equal(h.counts.capturePauses,1);
-  h.feed();assert.equal(h.sessions[0].frames.length,2,'no self-listening or continued capture after finishing');
+  const finishing=h.machine.finishUtterance();await flush();assert.equal(h.machine.snapshot().phase,'recognizing');assert.equal(h.counts.capturePauses,0);
+  h.feed();assert.equal(h.sessions[0].frames.length,2,'recognition finishing never uploads further microphone frames');
   h.sessions[0].final.resolve('Speaker 0: 你好小伴。');await flush();assert.equal(h.streams[0].text,'你好小伴。');assert.equal(h.chats.length,1);
   h.streams[0].onEvent({type:'delta',data:{text:'今天我们可以一起听音乐。'}});await flush();assert.equal(h.plays.length,1);
   h.streams[0].onEvent({type:'delta',data:{text:'然后慢慢聊一聊今天的趣事。'}});h.streams[0].onEvent({type:'done',data:{}});h.streams[0].resolve();await flush();
   assert.equal(h.machine.snapshot().phase,'speaking');assert.equal(h.counts.captureStarts,1);assert.equal(h.plays.length,1);
   h.plays[0].resolve();await flush();assert.equal(h.plays.length,2);assert.equal(h.counts.captureStarts,1);
-  h.plays[1].resolve();assert.equal(await finishing,true);assert.equal(h.machine.snapshot().phase,'listening');assert.equal(h.counts.captureStarts,2);assert.equal(h.counts.unlocks,1);
+  h.plays[1].resolve();assert.equal(await finishing,true);assert.equal(h.machine.snapshot().phase,'listening');assert.equal(h.counts.captureStarts,1);assert.equal(h.counts.unlocks,1);
   h.feed();await flush();const second=h.machine.finishUtterance();h.sessions[1].final.resolve('继续');await flush();assert.equal(h.chats.length,1);assert.equal(h.streams[1].id,'conversation');
   h.machine.stop();h.streams[1].resolve();await second;assert.equal(h.counts.captureStops,1);
 });
@@ -104,4 +104,10 @@ test('speech awaiter rejects stopped/error states and only resolves complete aud
   waiting.observe({utteranceId:'one',ended:true,active:false,pending:false,charIndex:4,text:'done'});await result;
   const failed=waiting.begin('two');waiting.observe({utteranceId:'two',ended:true,active:false,pending:false,charIndex:0,text:'fail'});waiting.observe({utteranceId:'two',ended:true,active:false,pending:false,charIndex:0,text:'fail',error:'stream failed'});await assert.rejects(failed,/stream failed/);
   const abort=new AbortController();let stopped=0;const cancelled=waiting.begin('three',abort.signal,()=>stopped++);abort.abort();await assert.rejects(cancelled,{name:'AbortError'});assert.equal(stopped,1);
+});
+test('confirmed upstream silence markers at transcript edges never become a Chat request',()=>{
+  assert.equal(cleanTranscript('Speaker 0:你好，请介绍一下你自己。[Silence]'),'你好，请介绍一下你自己。');
+  assert.equal(cleanTranscript('Speaker 0:[Silence]'),'');
+  assert.equal(cleanTranscript('[Silence] [Silence]'),'');
+  assert.equal(cleanTranscript('文字中的 [Silence] 示例'),'文字中的 [Silence] 示例');
 });

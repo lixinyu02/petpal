@@ -59,5 +59,15 @@ export function mergeChatAssistantConversation(before,updated,activeId,busy) {
   const assistantTasks=(updated.assistantTasks||[]).reduce(mergeAssistantTask,before.assistantTasks||[]);
   // A parent poll can have started before the next Chat reply began or completed.
   const replacing=(!busy||activeId!==before.id)&&updated.messages.length>=before.messages.length&&!updated.messages.some(message=>message.status==='streaming');
-  return {...before,assistantTasks,messages:replacing?updated.messages:before.messages};
+  // Durable background reports may arrive while the foreground reply is streaming.
+  // Merge only new reports; an older stream snapshot must never replace local text.
+  const ids=new Set(before.messages.map(message=>message.id));
+  const reports=updated.messages.filter(message=>message.role==='assistant'&&message.assistantTaskId&&message.status==='complete'&&!ids.has(message.id));
+  return {...before,assistantTasks,messages:replacing?updated.messages:reports.length?[...before.messages,...reports]:before.messages};
+}
+
+/** Timer-delivered task reports can follow the current Chat reply in the same snapshot. */
+export function foregroundAssistantMessage(conversation, messageId) {
+  const ordinary=message=>message.role==='assistant'&&!message.assistantTaskId&&!message.assistantTaskReport;
+  return messageId?conversation?.messages?.find(message=>message.id===messageId&&ordinary(message)):conversation?.messages?.findLast(ordinary);
 }

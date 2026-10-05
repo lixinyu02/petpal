@@ -9,7 +9,8 @@ export function createVoiceConversation(options:{
  unlock():Promise<boolean>;verify(signal:AbortSignal):Promise<unknown>;stopSpeech():void;
  openAsr(signal:AbortSignal,onTranscript:(text:string)=>void):Promise<AsrSession>;
  createChat(providerId:string,signal:AbortSignal):Promise<string>;
+ stopChat?(id:string,signal:AbortSignal):Promise<unknown>;
  getChatRequest?():ChatAssistantRequest|undefined;
  streamChat(id:string,text:string,signal:AbortSignal,onEvent:(event:{type:string;data:Record<string,any>})=>void,request?:ChatAssistantRequest):Promise<unknown>;
  play(text:string,id:string,signal:AbortSignal):Promise<void>;
-}):{start():Promise<void>;stop():void;interrupt():Promise<void>;finishUtterance():Promise<boolean>;snapshot():VoiceConversationState;dispose():void};
+}):{start():Promise<void>;stop():void;interrupt():Promise<void>;finishUtterance():Promise<boolean>;notifyReport(report:{id:string;text:string;plainText?:boolean}):boolean;snapshot():VoiceConversationState;dispose():void};

@@ -32,16 +32,19 @@ export function audioLevel(samples) {
 }
 
 /** Silence only retains a 200 ms pre-roll; an utterance never exceeds 45 seconds. */
-export function createVoiceGate({ threshold = .014, silenceMs = 900, preRollMs = 200, maxSeconds = 45 } = {}) {
-  if (!(threshold > 0 && threshold < 1 && silenceMs >= 250 && silenceMs <= 3000 && preRollMs >= 0 && preRollMs <= 500 && maxSeconds > 0 && maxSeconds <= 45)) throw new Error('Invalid voice gate configuration.');
-  let active = false, silence = 0, total = 0, preRoll = new Float32Array(0);
+export function createVoiceGate({ threshold = .014, silenceMs = 900, preRollMs = 200, minSpeechMs = 0, maxSeconds = 45 } = {}) {
+  if (!(threshold > 0 && threshold < 1 && silenceMs >= 250 && silenceMs <= 3000 && preRollMs >= 0 && preRollMs <= 500 && minSpeechMs >= 0 && minSpeechMs <= 1000 && maxSeconds > 0 && maxSeconds <= 45)) throw new Error('Invalid voice gate configuration.');
+  let active = false, silence = 0, total = 0, voicedSamples = 0, onset = [], preRoll = new Float32Array(0);
   const preLimit = Math.floor(VOICE_RATE * preRollMs / 1000), maxSamples = Math.floor(VOICE_RATE * maxSeconds);
-  const reset = () => { active = false; silence = total = 0; preRoll = new Float32Array(0); };
+  const minSpeechSamples = Math.floor(VOICE_RATE * minSpeechMs / 1000);
+  const reset = () => { active = false; silence = total = voicedSamples = 0; onset = []; preRoll = new Float32Array(0); };
   return {
     push(frame) {
       const level = audioLevel(frame), voiced = level >= threshold;
       if (!frame.length) return { started: false, ended: false, samples: [], level, reason: '' };
       if (!active && !voiced) {
+        // A click or brief noise must not satisfy the sustained-speech gate.
+        voicedSamples = 0; onset = [];
         const previous = preRoll; preRoll = new Float32Array(Math.min(preLimit, previous.length + frame.length));
         const fromCurrent = Math.min(preRoll.length, frame.length), fromPrevious = preRoll.length - fromCurrent;
         if (fromPrevious) preRoll.set(previous.subarray(previous.length - fromPrevious));
@@ -49,9 +52,15 @@ export function createVoiceGate({ threshold = .014, silenceMs = 900, preRollMs =
         return { started: false, ended: false, samples: [], level, reason: '' };
       }
       const started = !active, samples = [];
-      if (started) { active = true; if (preRoll.length) samples.push(preRoll); total = preRoll.length; preRoll = new Float32Array(0); }
-      const take = Math.min(frame.length, maxSamples - total);
-      if (take) samples.push(frame.slice(0, take)); total += take;
+      let incoming = [frame];
+      if (started) {
+        onset.push(frame.slice()); voicedSamples += frame.length;
+        if (voicedSamples < minSpeechSamples) return { started:false, ended:false, samples:[], level, reason:'' };
+        active = true; if (preRoll.length) samples.push(preRoll); total = preRoll.length; preRoll = new Float32Array(0);
+        incoming = onset; onset = []; voicedSamples = 0;
+      }
+      let take = 0;
+      for (const input of incoming) { const size = Math.min(input.length, maxSamples - total); if(size)samples.push(input.slice(0,size)); total += size; take += size; }
       silence = voiced ? 0 : silence + take / VOICE_RATE * 1000;
       const reason = total >= maxSamples ? 'limit' : silence >= silenceMs ? 'silence' : '';
       return { started, ended: Boolean(reason), samples, level, reason };

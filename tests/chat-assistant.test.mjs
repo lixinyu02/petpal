@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { createChatAssistant, normalizeChatAssistant, restoreAssistantTasks, assistantTasksSnapshot } from '../server/chat-assistant.mjs';
+import { createChatAssistant, normalizeChatAssistant, restoreAssistantTasks, assistantTasksSnapshot, assistantTaskContext } from '../server/chat-assistant.mjs';
 import { createAgentTasks } from '../server/agent-tasks.mjs';
 
 const deferred=()=>{let resolve;const promise=new Promise(yes=>{resolve=yes;});return {resolve,promise};};
@@ -143,4 +143,88 @@ test('real Agent queue runs behind Chat, preserves approvals and returns results
   assert.equal(active.has(chat.id),false);assert.equal(active.has(record.conversationId),true);assert.equal(agents.snapshot(store.state.conversations.find(item=>item.id===record.conversationId)).approvals.length,1);
   done.resolve();await until(()=>!active.size);await manager.refresh(chat);
   assert.equal(record.status,'completed');assert.match(chat.messages[0].content,/已完成播放器/);assert.equal(approvals.size,0);
+});
+
+test('background reconciliation durably returns a final result without a foreground read or new dispatch',async t=>{
+  const f=fixture(t,{reconcileIntervalMs:5}),{record}=await f.manager.prepare(f.chat,f.auth,f.options,'检查播放器',[]);
+  await f.manager.dispatch(record,'只读检查播放器');const child=f.submitted[0].child,runId=randomUUID();
+  child.agent={queue:[],submissions:[],run:{id:runId,submissionId:record.id,status:'completed',finishedAt:new Date().toISOString()}};
+  child.messages.push({id:randomUUID(),role:'assistant',agentRunId:runId,content:'检测完成，播放器未启动。',status:'complete'});
+  await until(()=>f.saves.at(-1)?.conversations.find(item=>item.id===f.chat.id)?.messages.some(message=>message.assistantTaskReport==='result'));
+  const result=f.chat.messages[0];assert.equal(result.assistantTaskId,record.id);assert.equal(result.assistantTaskReport,'result');assert.match(result.content,/后台任务已完成/);
+  await new Promise(resolve=>setTimeout(resolve,20));assert.equal(f.chat.messages.length,1);assert.equal(f.submitted.length,1);
+});
+
+test('long tasks report after thirty seconds, then at most once every two minutes with a persisted cap',async t=>{
+  let taskTime=Date.parse('2026-10-06T00:00:00.000Z');
+  const f=fixture(t,{clock:()=>taskTime,reconcileIntervalMs:60000}),{record}=await f.manager.prepare(f.chat,f.auth,f.options,'慢任务',[]);
+  await f.manager.dispatch(record,'执行慢任务');taskTime+=29999;await f.manager.refresh(f.chat);assert.equal(f.chat.messages.length,0);
+  taskTime++;await Promise.all([f.manager.refresh(f.chat),f.manager.refresh(f.chat)]);
+  assert.equal(f.chat.messages.length,1);assert.equal(record.progressReports.length,1);assert.match(f.chat.messages[0].content,/等待执行.*尚未收到最终结果/u);
+  assert.equal(f.chat.messages[0].assistantTaskReport,'progress');
+  taskTime+=119999;await f.manager.refresh(f.chat);assert.equal(f.chat.messages.length,1);
+  taskTime++;const child=f.submitted[0].child,runId=randomUUID();
+  child.agent={queue:[],submissions:[],approvals:[{id:'approval'}],run:{id:runId,submissionId:record.id,status:'running',message:'工具工作中'}};
+  await f.manager.refresh(f.chat);assert.equal(record.progressReports.length,2);assert.match(f.chat.messages[1].content,/等待你的确认/u);
+  child.agent.run.status='stopping';taskTime+=120000;await f.manager.refresh(f.chat);assert.match(f.chat.messages[2].content,/正在停止/u);
+  child.agent.approvals=[];child.agent.run.status='running';
+  for(let index=0;index<8;index++){taskTime+=120000;await f.manager.refresh(f.chat);}
+  assert.equal(record.progressReports.length,6);assert.equal(f.chat.messages.length,6);
+  assert.equal(restoreAssistantTasks(f.chat,f.store.state.executionHosts,f.store.state.conversations),false);
+  child.agent.run.status='completed';child.messages.push({role:'assistant',agentRunId:runId,content:'任务完成。'});
+  await f.manager.refresh(f.chat);assert.equal(f.chat.messages.length,7);assert.equal(f.chat.messages.at(-1).assistantTaskReport,'result');assert.equal(f.submitted.length,1);
+});
+
+test('failed progress persistence retries the same message and never consumes another report slot',async t=>{
+  let taskTime=Date.parse('2026-10-06T00:00:00.000Z');
+  const f=fixture(t,{clock:()=>taskTime,reconcileIntervalMs:60000}),{record}=await f.manager.prepare(f.chat,f.auth,f.options,'慢任务',[]);
+  await f.manager.dispatch(record,'执行慢任务');taskTime+=30000;
+  let saves=0;f.store.save=async()=>{if(++saves===1)throw new Error('report disk unavailable');};
+  await assert.rejects(f.manager.refresh(f.chat),/report disk unavailable/u);const messageId=f.chat.messages[0].id;
+  await f.manager.refresh(f.chat);assert.equal(saves,2);assert.equal(f.chat.messages.length,1);assert.equal(f.chat.messages[0].id,messageId);assert.equal(record.progressReports.length,1);
+});
+
+test('restoration rejects corrupt progress metadata and accepts existing untagged final replies',async t=>{
+  let taskTime=Date.parse('2026-10-06T00:00:00.000Z');
+  const f=fixture(t,{clock:()=>taskTime,reconcileIntervalMs:60000}),{record}=await f.manager.prepare(f.chat,f.auth,f.options,'慢任务',[]);
+  await f.manager.dispatch(record,'执行慢任务');taskTime+=30000;await f.manager.refresh(f.chat);
+  const corrupt=change=>{const chat=structuredClone(f.chat);change(chat);assert.throws(()=>restoreAssistantTasks(chat,f.store.state.executionHosts,[chat,...f.store.state.conversations.filter(item=>item!==f.chat)]));};
+  corrupt(chat=>{chat.assistantTasks[0].lastProgressAt='bad';});
+  corrupt(chat=>{chat.assistantTasks[0].progressReports.push({...chat.assistantTasks[0].progressReports[0]});});
+  corrupt(chat=>{chat.messages[0].assistantTaskId=randomUUID();});
+  corrupt(chat=>{chat.messages[0].assistantTaskReport='result';});
+  corrupt(chat=>{chat.assistantTasks[0].progressReports=[];});
+  const child=f.submitted[0].child,runId=randomUUID();child.agent={queue:[],submissions:[],run:{id:runId,submissionId:record.id,status:'completed'}};
+  await f.manager.refresh(f.chat);delete f.chat.messages.at(-1).assistantTaskReport;
+  assert.equal(restoreAssistantTasks(f.chat,f.store.state.executionHosts,f.store.state.conversations),false);
+});
+
+test('current task context is bounded, excludes authorization secrets and tells Chat not to redispatch',async t=>{
+  const f=fixture(t),{record}=await f.manager.prepare(f.chat,f.auth,f.options,'任务',[]);await f.manager.dispatch(record,'执行任务');
+  const context=assistantTaskContext(f.chat);assert.match(context,/queued/u);assert.match(context,/尚未完成/u);assert.match(context,/不应再次派发/u);
+  assert.doesNotMatch(context,/private-session|fingerprint|permissions|provider-one|attachmentIds|codexRevision/u);
+  assert.equal(assistantTaskContext({messages:[]}), '');
+  f.chat.assistantTasks.push(...Array.from({length:12},(_,index)=>({...record,id:randomUUID(),message:`known-${index}`})));
+  const bounded=f.manager.context(f.chat);assert.doesNotMatch(bounded,/known-0"/u);assert.match(bounded,/known-11/u);
+});
+
+test('failed or cancelled output is labeled incomplete, and a later child run cannot replace the original result',async t=>{
+  const f=fixture(t),{record}=await f.manager.prepare(f.chat,f.auth,f.options,'任务',[]);await f.manager.dispatch(record,'执行任务');
+  const child=f.submitted[0].child,originalRunId=randomUUID();
+  child.agent={queue:[],submissions:[{submissionId:record.id,entryId:originalRunId,status:'error',error:'执行中断。'}],run:{id:randomUUID(),submissionId:randomUUID(),status:'running'}};
+  child.messages.push({role:'assistant',agentRunId:originalRunId,content:'只完成第一步。'},{role:'assistant',agentRunId:child.agent.run.id,content:'另一项任务的输出。'});
+  await f.manager.refresh(f.chat);assert.match(f.chat.messages[0].content,/后台任务未完成/u);assert.match(f.chat.messages[0].content,/结束前的输出/u);assert.match(f.chat.messages[0].content,/只完成第一步/u);assert.doesNotMatch(f.chat.messages[0].content,/另一项任务/u);
+  await f.manager.refresh(f.chat);assert.equal(f.chat.messages.length,1);
+});
+
+test('a restored unknown Agent is reported once and never replays model decisions or submissions',async t=>{
+  const f=fixture(t,{reconcileIntervalMs:60000}),{record}=await f.manager.prepare(f.chat,f.auth,f.options,'任务',[]);await f.manager.dispatch(record,'执行任务');
+  const restored=structuredClone(f.store.state),chat=restored.conversations.find(item=>item.id===f.chat.id),child=restored.conversations.find(item=>item.id===record.conversationId),runId=randomUUID();
+  child.agent={queue:[],submissions:[],run:{id:runId,submissionId:record.id,status:'unknown',error:'服务中断，执行结果待确认。'}};
+  child.messages.push({role:'assistant',agentRunId:runId,content:'处理中'});
+  restoreAssistantTasks(chat,restored.executionHosts,restored.conversations);
+  const manager=createChatAssistant({store:{state:restored,save:async()=>{}},agentTasks:f.agentTasks,authorize:()=>assert.fail('restoration cannot authorize work'),resolveHost:()=>assert.fail('restoration cannot pick a host'),revision:()=>f.revisionId,reconcileIntervalMs:5});t.after(()=>manager.close());
+  await until(()=>chat.messages.some(message=>message.assistantTaskReport==='result'));
+  assert.equal(chat.assistantTasks[0].status,'unknown');assert.match(chat.messages[0].content,/状态待确认.*不会自动重试/u);
+  await manager.dispatch(chat.assistantTasks[0],'不能重试');assert.equal(f.submitted.length,1);assert.equal(chat.messages.length,1);
 });

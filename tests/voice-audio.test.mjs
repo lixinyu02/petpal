@@ -46,3 +46,15 @@ test('the shipped worklet mixes channels and emits only 250ms 24kHz Float32 fram
   }
   assert.equal(frames.length,2);assert.ok(frames.every(frame=>frame.length===6000&&Math.abs(frame[0]-.4)<1e-6));
 });
+
+test('interruption gate rejects brief noise and quieter echo, and preserves sustained onset with bounded pre-roll',()=>{
+  const gate=createVoiceGate({threshold:.028,minSpeechMs:500}),quiet=new Float32Array(6000).fill(.02),voiced=new Float32Array(6000).fill(.05);
+  for(let i=0;i<200;i++)assert.equal(gate.push(quiet).started,false);
+  assert.equal(gate.push(voiced).started,false);
+  assert.equal(gate.push(quiet).started,false,'quiet between clicks resets the sustained-speech requirement');
+  assert.equal(gate.push(voiced).started,false);
+  const detected=gate.push(voiced);assert.equal(detected.started,true);assert.deepEqual(detected.samples.map(frame=>frame.length),[4800,6000,6000]);
+  assert.equal(detected.samples[0][0],quiet[0]);assert.equal(detected.samples[1][0],voiced[0]);
+  gate.reset();assert.equal(gate.push(voiced).started,false);assert.equal(gate.push(voiced).started,true);
+  assert.throws(()=>createVoiceGate({minSpeechMs:1001}),/Invalid/);
+});

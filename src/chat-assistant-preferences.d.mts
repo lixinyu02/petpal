@@ -1,4 +1,4 @@
-import type {AgentHost,AgentPermissions,AssistantTask,ChatAssistantConfig,Conversation,Provider} from './api';
+import type {AgentHost,AgentPermissions,AssistantTask,ChatAssistantConfig,Conversation,Provider,Message} from './api';
 export type ChatAssistantPreferences={hostId:string;providerId:string;projectDirectory?:string};
 export function readChatAssistantPreferences(storage:Pick<Storage,'getItem'>|undefined,scope:string):ChatAssistantPreferences;
 export function saveChatAssistantPreferences(storage:Pick<Storage,'getItem'|'setItem'>|undefined,scope:string,value:ChatAssistantPreferences):void;
@@ -9,3 +9,4 @@ export function snapshotChatAssistant(value:ChatAssistantPreferences&{enabled:bo
 export function chatAssistantForHost<T extends ChatAssistantPreferences>(value:T,hostId:string,storage:Pick<Storage,'getItem'>|undefined,scope:string):T&{projectDirectory:string};
 export function mergeAssistantTask(tasks:AssistantTask[],task:AssistantTask|undefined):AssistantTask[];
 export function mergeChatAssistantConversation(before:Conversation,updated:Conversation,activeId:string|null,busy:boolean):Conversation;
+export function foregroundAssistantMessage(conversation:Conversation|undefined,messageId?:string):Message|undefined;

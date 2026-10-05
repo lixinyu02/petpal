@@ -13,7 +13,7 @@ import AgentQueue from './AgentQueue';
 import ProjectDirectory, {useProjectDirectory} from './ProjectDirectory';
 import {executionProjectDirectory,projectDirectoryIssue} from './project-directory-preferences.mjs';
 import {ChatAssistantControls,ChatAssistantTasks,useChatAssistant} from './ChatAssistant';
-import {mergeAssistantTask,mergeChatAssistantConversation} from './chat-assistant-preferences.mjs';
+import {mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMessage} from './chat-assistant-preferences.mjs';
 import { executionHostLock, readExecutionHost, resolveExecutionHostId, saveExecutionHost } from './execution-hosts.mjs';
 import { useAttachments, AttachmentInput, AttachmentDrafts, MessageImages } from './Attachments';
 import './workspace.css';
@@ -400,6 +400,7 @@ export default function App() {
     let assistantId = `pending-${Date.now()}`;
     let accepted = false;
     let responseText = '', finalReply: Message | undefined;
+    let serverAssistantId: string | undefined;
     let failed = false, display:ChatDisplay|undefined;
     performancePhase('thinking', '', assistantId);
     try {
@@ -423,7 +424,7 @@ export default function App() {
         if (controller.signal.aborted || requestSequence.current !== requestId || getSessionEpoch() !== accountEpoch) return;
         if(event.type!=='delta')display?.flush();
         if(event.type==='done'||event.type==='error')display?.close();
-        if (event.type === 'meta') {accepted = true;attachments.clear();}
+        if (event.type === 'meta') {accepted = true;serverAssistantId=event.data.assistantMessageId;attachments.clear();}
         if (event.type === 'delta') {
           accepted = true;
           const delta = typeof event.data.text === 'string' ? event.data.text : '';
@@ -432,10 +433,10 @@ export default function App() {
         if (event.type === 'status') { performancePhase('thinking', responseText, assistantId); setStatus(event.data.message || event.data.text || event.data.status || '正在处理中…'); }
         if (event.type === 'task') { setState(s=>({...s,conversations:s.conversations.map(c=>c.id===target!.id?{...c,assistantTasks:mergeAssistantTask(c.assistantTasks||[],event.data.task)}:c)})); }
         if (event.type === 'approval') { performancePhase('thinking', responseText, assistantId); setApprovals(a => [...a.filter(item => item.id !== String(event.data.id)), { id: String(event.data.id), kind: event.data.kind || '操作请求', description: event.data.description || 'Codex 请求执行操作，请检查后决定。' }]); }
-        if (event.type === 'error') { failed = true; performancePhase('error', responseText, assistantId); if (event.data.conversation?.messages?.at(-1)?.status !== 'cancelled') setError(event.data.message || '回复失败，请检查连接后重试。'); if (event.data.conversation) setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? event.data.conversation : c) })); }
+        if (event.type === 'error') { failed = true; performancePhase('error', responseText, assistantId); if (foregroundAssistantMessage(event.data.conversation,event.data.assistantMessageId||serverAssistantId)?.status !== 'cancelled') setError(event.data.message || '回复失败，请检查连接后重试。'); if (event.data.conversation) setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? event.data.conversation : c) })); }
         if (event.type === 'done') {
           if (event.data.conversation) {
-            finalReply = event.data.conversation.messages?.at(-1);
+            finalReply = foregroundAssistantMessage(event.data.conversation,event.data.assistantMessageId||serverAssistantId);
             setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? event.data.conversation : c) }));
           }
           if (!failed) finishResponse(responseText || finalReply?.content || '', assistantId, requestId);

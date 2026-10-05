@@ -86,14 +86,14 @@ export default function CompanionWorld() {
           <label className="voice-conversation-model"><span>模型</span><select aria-label="语音聊天模型" value={providerId} disabled={voice.active} onChange={event => setProviderId(event.target.value)}>{session?.providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
           {user?.canUseCodex&&<ChatAssistantControls assistant={chatAssistant} allowed={!!user?.canUseCodex} user={user} providers={session?.providers.filter(provider=>session.codex.eligibleProviderIds?.includes(provider.id))||[]} disabled={voice.recognizing||voice.thinking||voice.speaking} localHostId={localHostId} onDownload={()=>location.assign('/?chat=1&downloads=1')} compact/>}
         </div>
-        <p id="companion-voice-help" hidden>直接说话，停顿后自动发送。回应时可以打断。使用已选麦克风与扬声器，记录保存在当前账号。</p>
+        <p id="companion-voice-help" className="voice-conversation-help">直接说话，停顿后发送；回应时再开口即可打断。后台任务会在空闲时汇报。</p>
         <div ref={captions} className="voice-conversation-captions" aria-label="语音对话字幕" hidden={!hasCaptions}>
           {voice.transcript && <p className="voice-caption-user"><span>你</span>{voice.transcript}</p>}
           {voice.reply && <div className="voice-caption-reply"><span className="voice-caption-author">{name}</span><MessageMarkdown content={voice.reply} compact/></div>}
           {!voice.transcript && !voice.reply && voice.listening && <p className="voice-caption-empty">直接说话，停顿后发送。</p>}
         </div>
         <ChatAssistantTasks conversationId={voice.conversationId} tasks={voice.assistantTasks} onUpdate={voice.updateAssistantTasks}/>
-        {voice.listening && <meter className="voice-input-level" aria-label="语音聊天麦克风电平" min={0} max={1} value={voice.level}/>}
+        {(voice.listening||voice.thinking||voice.speaking) && <meter className="voice-input-level" aria-label="语音聊天麦克风电平" min={0} max={1} value={voice.level}/>}
         {voice.error && <p className="voice-conversation-error" role="alert">{voice.error} <a href="/?chat=1&settings=1">检查语音设置</a></p>}
         <div className="voice-conversation-actions">{voice.active ? <>
           {voice.listening ? <button className="voice-primary" disabled={!voice.hasUtterance} onClick={() => void voice.finishUtterance()}><Check size={16} aria-hidden="true"/>说完了</button> : <button className="voice-primary" disabled={voice.phase === 'starting'} onClick={() => void voice.interrupt()}><Mic size={16} aria-hidden="true"/>打断，我来说</button>}

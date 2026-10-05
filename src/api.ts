@@ -26,7 +26,7 @@ export type DownloadPackage = {
 };
 export type DownloadsCatalog = {repository:string;releasesUrl:string;checkedAt:string|null;stale:boolean;error:string|null;
   retryAt:string|null;packages:DownloadPackage[];latestVersion?:string|null;source?:'server'|'github'|'mixed'|'none';notices?:string[]};
-export type Message = { id: string; role: 'user' | 'assistant'; content: string; model?: string; status?: string; createdAt?: string; attachments?:Attachment[]; steered?:boolean };
+export type Message = { id: string; role: 'user' | 'assistant'; content: string; model?: string; status?: string; createdAt?: string; attachments?:Attachment[]; steered?:boolean; assistantTaskId?:string; assistantTaskReport?:'progress'|'result' };
 export type AgentQueueEntry = { id:string; submissionId:string; revision:number; content:string; attachmentIds:string[]; permissions:AgentPermissions; providerId:string|null; model:string; effort:string; createdAt:string;hostId?:string;hostName?:string;projectDirectory?:string };
 export type AgentRun = { id:string; submissionId:string; status:'running'|'stopping'|'completed'|'cancelled'|'error'|'unknown'; turnId:string|null; permissions:AgentPermissions; providerId:string|null; model:string; effort:string; startedAt:string; finishedAt?:string; error?:string;hostId?:string;hostName?:string;projectDirectory?:string };
 export type AgentSubmission = {submissionId:string;entryId:string;status:'queued'|'running'|'completed'|'cancelled'|'error'|'steered'|'uncertain';content?:string;createdAt?:string};

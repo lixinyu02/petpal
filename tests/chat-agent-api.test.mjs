@@ -32,12 +32,13 @@ function events(source) {
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-chat-agent-api-'));
-  const upstreamRequests = [], calls = [], control = { failFollowUp: false };
+  const upstreamRequests = [], calls = [], control = { failFollowUp: false, followUpGate: null };
   const upstream = http.createServer(async (req, res) => {
     const bytes = []; for await (const chunk of req) bytes.push(chunk);
     const body = JSON.parse(Buffer.concat(bytes).toString()); upstreamRequests.push(body);
     res.setHeader('Content-Type', 'application/json');
     if (body.tool_choice === 'none') {
+      if (control.followUpGate) await control.followUpGate;
       if (control.failFollowUp) { res.statusCode = 503; res.end(JSON.stringify({ error: { message: 'fixture follow-up unavailable' } })); return; }
       const output = body.input.findLast(item => item.type === 'function_call_output');
       assert.ok(output, 'follow-up must carry the dispatch receipt');
@@ -103,6 +104,9 @@ test('Chat finishes while its Agent runs independently, allowing another Chat tu
   const f = await fixture(t), chat = await f.createChat();
   const first = await f.send(chat);
   assert.equal(first.status, 200); assert.ok(first.events.some(event => event.type === 'done')); assert.ok(!first.events.some(event => event.type === 'error'));
+  const foregroundId=first.events.find(event=>event.type==='meta').data.assistantMessageId;
+  assert.equal(first.events.find(event=>event.type==='done').data.assistantMessageId,foregroundId);
+  assert.ok(first.events.find(event=>event.type==='done').data.conversation.messages.some(message=>message.id===foregroundId&&message.role==='assistant'&&!message.assistantTaskId));
   const background = first.events.find(event => event.type === 'task')?.data.task;
   assert.ok(background?.id); assert.ok(background.conversationId); assert.equal(background.hostId, 'central');
   await until(() => f.calls.length === 1);
@@ -140,6 +144,37 @@ test('ordinary Chat and a disabled collaborator neither expose tools nor create 
   assert.equal((await f.json('/state')).data.conversations.filter(item => item.mode === 'codex').length, 0);
 });
 
+test('plain Chat receives fresh running and completed task facts without foreground task polling', async t => {
+  const f=await fixture(t),chat=await f.createChat(),first=await f.send(chat);
+  const task=first.events.find(event=>event.type==='task').data.task;await until(()=>f.calls.length===1);
+  const running=await f.send(chat,{content:'之前那项任务当前进度怎么样？'});
+  assert.ok(running.events.some(event=>event.type==='done'));
+  const runningRequest=f.upstreamRequests.at(-1);assert.equal(runningRequest.tools,undefined);assert.match(runningRequest.instructions,/"status":"running"/u);assert.match(runningRequest.instructions,/不应再次派发/u);
+  for(const credential of [bootstrap,fixtureChatApiKey,fixtureAgentProviderApiKey,fixtureAgentConfigApiKey])assert.equal(runningRequest.instructions.includes(credential),false);
+  f.calls[0].args.onEvent('delta',{text:'此前任务的最终结果已经保存。'});f.calls[0].resolve({text:'此前任务的最终结果已经保存。',threadId:'fresh-context-thread'});
+  await until(async()=>{const disk=JSON.parse(await readFile(path.join(f.directory,'state.json'),'utf8'));return disk.conversations.find(item=>item.id===task.conversationId)?.agent?.run?.status==='completed';});
+  const completed=await f.send(chat,{content:'之前那项任务完成了吗？'});assert.ok(completed.events.some(event=>event.type==='done'));
+  const completedRequest=f.upstreamRequests.at(-1);assert.equal(completedRequest.tools,undefined);assert.match(completedRequest.instructions,/"status":"completed"/u);
+  assert.ok(completedRequest.input.some(message=>message.role==='assistant'&&String(message.content).includes('此前任务的最终结果已经保存。')));
+  assert.equal(f.calls.length,1);
+  const disk=JSON.parse(await readFile(path.join(f.directory,'state.json'),'utf8'));
+  assert.equal(disk.conversations.find(item=>item.id===chat.id).messages.filter(message=>message.assistantTaskId===task.id&&message.assistantTaskReport==='result').length,1);
+});
+
+test('the exact foreground reply remains identifiable when a background result becomes the message tail',async t=>{
+  const f=await fixture(t),chat=await f.createChat();let release;
+  f.control.followUpGate=new Promise(resolve=>{release=resolve;});t.after(()=>release());
+  const response=f.send(chat);await until(()=>f.calls.length===1&&f.upstreamRequests.length===2);
+  f.calls[0].resolve({text:'后台先完成。'});
+  await until(async()=>{const disk=JSON.parse(await readFile(path.join(f.directory,'state.json'),'utf8'));return disk.conversations.find(item=>item.backgroundParentId===chat.id)?.agent?.run?.status==='completed';});
+  const during=(await f.json(`/conversations/${chat.id}`)).data;
+  assert.equal(during.messages.at(-1).assistantTaskReport,'result');assert.ok(during.messages.some(message=>message.role==='assistant'&&message.status==='streaming'));
+  release();const reply=await response,done=reply.events.find(event=>event.type==='done').data;
+  assert.equal(done.assistantMessageId,reply.events.find(event=>event.type==='meta').data.assistantMessageId);
+  const foreground=done.conversation.messages.find(message=>message.id===done.assistantMessageId);
+  assert.equal(foreground.status,'complete');assert.equal(foreground.assistantTaskId,undefined);assert.notEqual(done.conversation.messages.at(-1).id,foreground.id);
+});
+
 test('duplicate Chat submissions preserve message IDs and never repeat model decision or Agent dispatch', async t => {
   const f = await fixture(t), chat = await f.createChat(), body = f.submission();
   const first = await f.send(chat, body); assert.ok(first.events.some(event => event.type === 'done')); await until(() => f.calls.length === 1);
@@ -147,6 +182,7 @@ test('duplicate Chat submissions preserve message IDs and never repeat model dec
   const modelRequests = f.upstreamRequests.length;
   const duplicate = await f.send(chat, body);
   assert.equal(duplicate.status, 200); assert.equal(duplicate.events.filter(event => event.type === 'done').length, 1);
+  assert.equal(duplicate.events.find(event=>event.type==='done').data.assistantMessageId,first.events.find(event=>event.type==='done').data.assistantMessageId);
   assert.deepEqual((await f.json(`/conversations/${chat.id}`)).data.messages, before.messages);
   assert.equal(f.calls.length, 1); assert.equal(f.upstreamRequests.length, modelRequests);
   const changed = await f.send(chat, { ...body, content: '不同内容也要求 QQ音乐 放歌。' });
@@ -194,6 +230,7 @@ test('deleting a parent Chat first clears its running child and cannot leave orp
 test('a failed Chat follow-up keeps the already queued Agent visible and independently stoppable', async t => {
   const f = await fixture(t), chat = await f.createChat(); f.control.failFollowUp = true;
   const first = await f.send(chat); assert.ok(first.events.some(event => event.type === 'error')); assert.ok(!first.events.some(event => event.type === 'done'));
+  assert.equal(first.events.find(event=>event.type==='error').data.assistantMessageId,first.events.find(event=>event.type==='meta').data.assistantMessageId);
   const background = first.events.find(event => event.type === 'task').data.task; await until(() => f.calls.length === 1);
   const tracked = (await f.json(`/conversations/${chat.id}`)).data;
   assert.equal(tracked.assistantTasks[0].id, background.id); assert.equal(tracked.assistantTasks[0].status, 'running'); assert.equal(f.calls[0].args.signal.aborted, false);

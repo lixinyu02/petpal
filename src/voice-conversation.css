@@ -26,6 +26,7 @@
 .voice-conversation-actions button:focus-visible,.voice-conversation-heading button:focus-visible,.companion-voice-entry:focus-visible { outline:2px solid #66896b;outline-offset:3px; }
 .voice-conversation-error { font-size:13px;color:#995e4b;line-height:1.6;margin:8px 0;overflow-wrap:anywhere; }
 .voice-conversation-error a { text-decoration:underline; }
+.voice-conversation-help { margin:4px 0 8px;font-size:12px;line-height:1.6;color:var(--text-muted,#6b7b6b); }
 .companion-world .companion-voice-entry { display:flex;align-items:center;gap:8px;min-height:44px;border-radius:24px;padding:8px 16px;background:#e8eedf;color:#3d634f; }
 .companion-world.companion-voice-open .companion-space { min-height:480px;flex-basis:480px;grid-template-rows:auto auto minmax(180px,1fr) auto; padding-bottom:16px; }
 .companion-world .companion-switch button { min-height:44px; }
