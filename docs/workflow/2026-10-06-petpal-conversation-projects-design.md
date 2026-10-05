@@ -41,3 +41,9 @@ server/store/app、api types、App 导航与创建入口、ConversationHistory �
 ## Verification Plan
 
 HTTP 账号隔离、字段校验、Chat/Agent 生命周期、忙碌删除、旧版迁移、重载、并发快照与失败恢复；组件 memo/无正文泄漏/可访问操作测试；相关前端导航和任务回归，TypeScript/Vite 构建。Chrome 实测新建项目、重命名、移动、归档/恢复、删除项目保留对话、删除确认、刷新持久性及 412×960 无横向溢出。上线前备份、只替换后端/网页并保留客户端下载和更新清单，公网 health/index 验证。
+
+## Acceptance
+
+2026-10-06 完成：563/563 定向回归、TypeScript 与隔离 Vite 构建通过。Chrome 桌面及准确的 412×960 CSS 视口验证项目创建/重命名、对话重命名/移动、归档/恢复、草稿保留、刷新持久化和删除确认取消；删除项目保留正文及空闲 Agent 真正删除由隔离 HTTP 额外验证。并发审查修复了整理保存提前复制实时正文导致后续旧快照回滚的问题。
+
+公网 `https://magicdatou.top:44318/` 已部署网页与后端，旧数据完成加法迁移；新接口未登录返回 401，test 登录后的 state 已含账号隔离项目及对话 metadata。停机前确认 35 个会话无活动任务，备份旧数据与后端来源后重启，网络设置保持。15 份客户端文件的大小/mtime 和 4 份发布/更新元数据 SHA-256 均保持。没有重打安装包或做安卓/Windows/Ubuntu 原生安装验收。证据：`evidence/conversation-projects-20261006/`（私有、Git ignored）。
