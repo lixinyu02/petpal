@@ -3,7 +3,7 @@
 - Date: 2026-10-05
 - Complexity: L2
 - Related design: 2026-10-05-petpal-automations-099-design.md
-- Current status: issue-1 done; issue-2 in_progress
+- Current status: issue-1 done; issue-2 done
 
 ## issue-1
 
@@ -23,6 +23,6 @@
 - 范围: 六包、Windows真实运行/其他平台包验收、新后端和静态上线、两源升级与最新版下载
 - 依赖: issue-1 done
 - 验收标准: 冻结源码与六包一致；0.9.9 stable/sequence11/Android19；完整公网字节回读；页面可管理自动化，现有业务权限保持；旧包可恢复归档
-- 状态: in_progress
-- 验证方式: pending
-- commit: pending
+- 状态: done
+- 验证方式: 冻结六包完整审计；Windows EXE/ZIP 原始完整启动、重复启动、实际 UI 中央服务器恢复验收；Android/Ubuntu 为包审计边界。原 Actions run 37286309400 attempt1 完成六包服务器/GitHub完整字节及18项事件验证；正式Release、两源sequence11/code19、13旧文件可恢复归档和15当前文件HTTP验证通过。生产Chrome自动化/下载412×960与320×320、注销和最终2用户/5模型/33会话业务保持通过；服务清理恢复与下载重试保留，详见acceptance-0.9.9.md。
+- commit: 76f6a54（0.9.9版本冻结）；正式发布验收由本次 docs(issue-2) 提交收尾

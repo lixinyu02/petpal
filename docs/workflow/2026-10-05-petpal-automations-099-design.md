@@ -2,7 +2,7 @@
 
 - Date: 2026-10-05
 - Complexity: L2
-- Status: implementation
+- Status: delivered
 - Baseline: main `9b3da8a`，0.9.8 正式交付已完成。
 
 ## Background
@@ -66,3 +66,7 @@ unknown 阻止恢复与再次运行，也不能继续使用旧 grant。用户核
 隔离时钟/存储/执行器测试一次性/每日/工作日/间隔、DST、重启/断线/重复请求、并发保存、错误回滚及跨账号/权限撤销/陈旧revision。真实TSX事件测试表单保护、暂停/编辑/请求失败/账号切换。Codex动态工具审批与远程relay绑定测试；隔离实跑Agent创建计划、触发固定无工具回复并完成通知，不操作用户软件。
 
 完整回归与TypeScript，通过后冻结新源码构建六包。Windows EXE/ZIP真实启动与工具注册，Ubuntu双架构完整依赖/ELF/隐私审计，Android完整CRC/web/DEX/证书/版本读回。Chrome验证线上自动化和新版下载入口。GitHub stable/服务器镜像完整字节回读、两源sequence11/Android19及旧公开包可恢复归档。证据准确区分目标设备、真实模型、fixture与云端读回。
+
+## Delivery
+
+0.9.9 已按冻结源码 `76f6a54c713a9f42eac3d4db384706f95fca848e` 正式发布，生产网页与后端为0.9.9，GitHub与服务器更新源为sequence11，Android versionCode19。六包双源完整字节验证、旧0.9.8公共下载可恢复归档及Chrome最终入口通过。最终回归2058/2058；真实GPT-6.1 Sol仅在隔离环境验证计划创建和无桌面工具的定时回复。Windows两包真实运行通过，Android/Ubuntu本轮为完整包审计。后端清理时出现的约六秒退出/恢复与云端下载重试、未知原因和各项验收边界均保留在 `docs/acceptance-0.9.9.md`。
