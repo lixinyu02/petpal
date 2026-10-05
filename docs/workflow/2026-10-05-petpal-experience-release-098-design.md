@@ -2,7 +2,7 @@
 
 - Date: 2026-10-05
 - Complexity: L2
-- Status: implementing
+- Status: complete
 - Baseline: local main `01289a987f1e11e177f19208fd0b89b5308b2bc0`，开工 clean。
 
 ## Background and Goals
@@ -19,8 +19,16 @@
 
 ## Boundaries and Risks
 
-不修改生产模型/API/账号授权、重试已有 Agent、调用真实语音或操作用户软件，不触 RK3566/PSTX/相关 WSL。生产只更新网页和下载资产；没有后端业务改动则不重启后端。签名私钥只在私有目录读取，不输出或提交。Windows 未提供 Authenticode，不宣称已签名；Android 保留开发证书以支持旧安装升级。没有 Android/Ubuntu 设备时，分别记录包审计与真实运行边界。
+不修改生产模型/API/账号授权、重试已有 Agent、调用上游 ASR/TTS 或操作用户软件，不触 RK3566/PSTX/相关 WSL。Windows默认启动验收只允许系统本地中文音色播放固定短句“你好，我是小伴。”并检查结束事件，不打开麦克风/摄像头或发送个人文本。生产只更新网页和下载资产；没有后端业务改动则不重启后端。签名私钥只在私有目录读取，不输出或提交。Windows 未提供 Authenticode，不宣称已签名；Android 保留开发证书以支持旧安装升级。没有 Android/Ubuntu 设备时，分别记录包审计与真实运行边界。
 
 ## Verification
 
 实际 App handlers 回归、DOM/键盘焦点、CSS 视口和 Windows 工具合同测试；TypeScript、最终一次全套串行回归。Chrome 插件对本地隔离 UI 与正式下载页验收。Android APK v1/v2 与旧证书一致，ZIP CRC/完整网页字节/原生类及 privacy 检查；Ubuntu tar 完整字节、ELF/权限/GLIBC/native来源/依赖闭包；Windows EXE+完整解压 ZIP 真实启动、两个窗口 Cubism V12、登录/执行器/中央服务器/CLI状态和退出进程清理。发布前后两源五目标签名、sequence、版本、文件摘要及公网读回。
+
+## Delivered
+
+六个0.9.8正式包已发布，tag固定构建源码 `5205e7e544182a504647a7a2273908e40c0db2c7`，[GitHub Release](https://github.com/lixinyu02/petpal/releases/tag/v0.9.8) 为latest stable。Windows EXE与ZIP真实启动/重复启动/中央服务器配置和退出清理通过；Android与Ubuntu分别完成完整包审计，保留真机未验收边界。完整确认轮1933/1933通过，早期fixture失败未重现且原因未确定，没有修改协议或增加重试掩盖失败。
+
+线上275项静态资源已部署，服务器下载优先、GitHub备用；两源五目标sequence10均通过。旧版13项公开下载可恢复归档，历史GitHub Release保留。Chrome实际412×960与320×320完成新版下载选择/短屏导航/登录门禁验收，截图和结构化记录保存在 `evidence/release-098-20261005/`。六包公网完整回读由原始GitHub Actions执行并明确归属，本机四metadata及服务器EXE完整回读另行保留。
+
+生产后端没有业务代码改动或重启，health仍报告既有0.9.7进程且HTTPS200/ok。测试没有发送聊天、Agent或模型/语音配置写请求，仅登录和退出test会话；不声称生产数据全量快照对比或上游业务全面复验。详细证据、安装方式与已知限制见 `docs/acceptance-0.9.8.md`。
