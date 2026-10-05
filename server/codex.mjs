@@ -12,6 +12,7 @@ import { AGENT_ACCESS, AGENT_APPROVAL, defaultAgentPermissions, normalizeAgentPe
 import { normalizeReasoningEffort } from './providers.mjs';
 import { dynamicToolContentItems } from './dynamic-tool-output.mjs';
 import { resolveProjectDirectory } from './project-directory.mjs';
+import { isAutomationTool } from './automation-tools.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -437,20 +438,24 @@ export class CodexBridge {
     if (run.dynamicCalls.has(p.callId)) { reject('工具 callId 已处理，禁止重复执行。'); return; }
     if (run.dynamicCalls.size >= 128) { reject('本轮工具调用数量达到上限。'); return; }
     if (!p.arguments || typeof p.arguments !== 'object' || Array.isArray(p.arguments) || JSON.stringify(p.arguments).length > 16_384) { reject('工具参数必须是大小受限的 JSON 对象。'); return; }
-    const call = { rpcId: message.id, run, name: p.tool, arguments: structuredClone(p.arguments), controller: new AbortController(), replied: false, started: false };
+    const call = { rpcId: message.id, callId: p.callId, run, name: p.tool, arguments: structuredClone(p.arguments), controller: new AbortController(), replied: false, started: false };
     run.dynamicCalls.set(p.callId, call);
     let description;
     try {
-      description = this.desktopTools.describe(call.name, call.arguments);
+      description = this.desktopTools.describe(call.name, call.arguments, { conversationId: run.conversationId, callId: call.callId, turnId: run.turnId });
       if (!description || typeof description.description !== 'string' || !description.description.trim() || typeof description.approvalRequired !== 'boolean') throw new Error('工具未提供可审阅的描述。');
+      if (isAutomationTool(call.name) && description.description.length > 8000) throw new Error('自动化操作详情超过审批长度，请缩短完整指令。');
     } catch (error) { this._replyDynamic(call, false, { error: safeText(this._redact(error.message)) }); return; }
-    if (description.approvalRequired && run.permissions.access !== 'full-access') {
+    // Only the fixed control-plane catalogue can declare read-only access.
+    // A desktop tool cannot lower its full-access guard via its description.
+    const automationAccess = isAutomationTool(call.name) && description.accessRequired === 'read-only';
+    if (description.approvalRequired && !automationAccess && run.permissions.access !== 'full-access') {
       this._replyDynamic(call, false, { error: '主机音乐、浏览器与 Computer Use 操作需要完全访问权限；当前只允许查询状态。' }); return;
     }
     if (description.approvalRequired && run.permissions.approval !== 'auto') {
       const id = randomUUID();
       this.approvals.set(id, { rpcId: message.id, run, dynamic: call });
-      this._emit(run, 'approval', { id, kind: 'desktopTool', description: safeText(this._redact(description.description)).slice(0, 8000) });
+      this._emit(run, 'approval', { id, kind: automationAccess ? 'automation' : 'desktopTool', description: safeText(this._redact(description.description)).slice(0, 8000), ...(automationAccess ? { automation: { callId: call.callId, name: call.name, arguments: structuredClone(call.arguments) } } : {}) });
     } else this._executeDynamic(call);
   }
 
@@ -478,7 +483,7 @@ export class CodexBridge {
       if (run.settled || run.aborted || call.controller.signal.aborted) throw abortError();
       this._emit(run, 'status', { state: 'working', message: '正在执行已授权的桌面工具' });
       call.controller.signal.throwIfAborted();
-      const result = await this.desktopTools.execute(call.name, call.arguments, { signal: call.controller.signal, conversationId:run.conversationId });
+      const result = await this.desktopTools.execute(call.name, call.arguments, { signal: call.controller.signal, conversationId: run.conversationId, callId: call.callId, turnId: run.turnId });
       call.controller.signal.throwIfAborted();
       this._replyDynamic(call, result?.ok !== false, result ?? {});
     }).catch(error => {
@@ -552,7 +557,7 @@ export class CodexBridge {
       const workingDirectory = await resolveProjectDirectory(projectDirectory, { workspaceRoot: this.workspaceRoot, allowExternal: projectAccess === 'full' });
       if (signal?.aborted) throw abortError();
       const { sandboxPolicy, ...threadPermissions } = codexPermissionParams(permissions, workingDirectory);
-      const threadParams = { cwd: workingDirectory, ...threadPermissions, ...(model ? { model } : {}), developerInstructions: '根据本轮访问范围执行任务。音乐优先使用 PetPal 桌面工具；搜索、队列、音量、歌词先通过 petpal_music_mcp_tools 获取本机真实工具与参数，再用 petpal_music_mcp_call。网易云 MCP 仅支持 Windows；播放/暂停/上一首/下一首使用 petpal_music_command 的指定客户端媒体会话，不使用全局热键。QQ MCP 只提供查询和播放链接，返回 URL 不代表桌面已经播放；排行榜用 detail(type=top)。未启用时提示用户在该电脑的电脑助手设置中准备 MCP，不自行安装或更改配置。网页查询先调用 petpal_opencli_sites 获取选中执行电脑的可调用命令与参数，再调用 petpal_opencli_query；这是包内 OpenCLI，公开查询不需要 Chrome 扩展。用户要求准备浏览器时，先用 petpal_opencli_setup status 检查所选执行电脑。Chrome 缺失才用 install-browser 下载验证官方安装器；prepared 只代表下载就绪，协议、系统安装/提权由用户完成。open-extension 仅打开官方商店页，扩展页面权限由用户确认；之后在该电脑的OpenCLI设置显式连接在线档案。不得用shell或npx回退安装，不修改默认浏览器或自动选档案；旧客户端没有setup工具时提示更新。库存存在不等于可调用或已联网验收，不执行未开放命令，不用 shell/npx/自建HTTP脚本替代。OpenCLI 关闭时提示在该执行电脑的电脑助手设置启用，不自行改配置。音乐网页操作使用 petpal_browser，需要扩展与显式Chrome档案。桌面操作使用 petpal_computer_use_tools 发现当前执行电脑的真实工具与 schema，再调用 petpal_computer_use_call。先发现应用和窗口，再检查 Accessibility；需要视觉信息时获取目标窗口截图，根据最近的 Accessibility/截图执行鼠标键盘或窗口操作，操作后重新读取状态验证结果。过时的窗口、控件和坐标不可复用；截图失败时不得凭猜测点击。Windows 的完全访问和自动运行仍继承执行器的系统身份，不代表管理员权限。打开软件触发 UAC 或安全桌面时，停止启动重试、鼠标键盘和唤醒尝试，明确等待执行电脑上的用户确认；截图全黑不能直接判为休眠或 DRM，应先只读检查权限提示或桌面状态，无法确认时请用户在本机查看。不要禁用 UAC、改兼容性管理员标记、创建提权任务或后台自动同意；管理员确认取消或启动器退出时必须说明游戏或软件主界面未验证。Computer Use 未启用时提示配置，不运行 npx 安装，不修改 MCP 启动参数或环境。受限权限不允许操作主机软件。失败时如实说明，不得声称已完成。', ...(this.apiMode ? { modelProvider: 'petpal' } : {}) };
+      const threadParams = { cwd: workingDirectory, ...threadPermissions, ...(model ? { model } : {}), developerInstructions: '自动化使用 petpal_automation_list/create/pause：只管理当前账号，创建时执行电脑、模型、项目目录与权限继承本轮，不允许自行扩大范围；时间规则明确时才创建，模糊时间先向用户确认。创建 requestId 使用一次 UUID v4，查询结果或确认相同请求时保留原 ID 和全部参数；网络结果未知不能换 ID 重建。每轮最多创建10项，暂停先读取最新 revision；任务关闭网页或退出登录后仍生效，电脑离线或错过时间跳过，不补跑。工具不存在时请更新所选执行电脑客户端，不以 shell/cron 绕过。根据本轮访问范围执行任务。音乐优先使用 PetPal 桌面工具；搜索、队列、音量、歌词先通过 petpal_music_mcp_tools 获取本机真实工具与参数，再用 petpal_music_mcp_call。网易云 MCP 仅支持 Windows；播放/暂停/上一首/下一首使用 petpal_music_command 的指定客户端媒体会话，不使用全局热键。QQ MCP 只提供查询和播放链接，返回 URL 不代表桌面已经播放；排行榜用 detail(type=top)。未启用时提示用户在该电脑的电脑助手设置中准备 MCP，不自行安装或更改配置。网页查询先调用 petpal_opencli_sites 获取选中执行电脑的可调用命令与参数，再调用 petpal_opencli_query；这是包内 OpenCLI，公开查询不需要 Chrome 扩展。用户要求准备浏览器时，先用 petpal_opencli_setup status 检查所选执行电脑。Chrome 缺失才用 install-browser 下载验证官方安装器；prepared 只代表下载就绪，协议、系统安装/提权由用户完成。open-extension 仅打开官方商店页，扩展页面权限由用户确认；之后在该电脑的OpenCLI设置显式连接在线档案。不得用shell或npx回退安装，不修改默认浏览器或自动选档案；旧客户端没有setup工具时提示更新。库存存在不等于可调用或已联网验收，不执行未开放命令，不用 shell/npx/自建HTTP脚本替代。OpenCLI 关闭时提示在该执行电脑的电脑助手设置启用，不自行改配置。音乐网页操作使用 petpal_browser，需要扩展与显式Chrome档案。桌面操作使用 petpal_computer_use_tools 发现当前执行电脑的真实工具与 schema，再调用 petpal_computer_use_call。先发现应用和窗口，再检查 Accessibility；需要视觉信息时获取目标窗口截图，根据最近的 Accessibility/截图执行鼠标键盘或窗口操作，操作后重新读取状态验证结果。过时的窗口、控件和坐标不可复用；截图失败时不得凭猜测点击。Windows 的完全访问和自动运行仍继承执行器的系统身份，不代表管理员权限。打开软件触发 UAC 或安全桌面时，停止启动重试、鼠标键盘和唤醒尝试，明确等待执行电脑上的用户确认；截图全黑不能直接判为休眠或 DRM，应先只读检查权限提示或桌面状态，无法确认时请用户在本机查看。不要禁用 UAC、改兼容性管理员标记、创建提权任务或后台自动同意；管理员确认取消或启动器退出时必须说明游戏或软件主界面未验证。Computer Use 未启用时提示配置，不运行 npx 安装，不修改 MCP 启动参数或环境。受限权限不允许操作主机软件。失败时如实说明，不得声称已完成。', ...(this.apiMode ? { modelProvider: 'petpal' } : {}) };
       const result = await this._rpc(threadId ? 'thread/resume' : 'thread/start', { ...threadParams, ...(threadId ? { threadId } : { dynamicTools: this.desktopTools?.specs ?? [] }) });
       const actualId = result.thread?.id;
       if (typeof actualId !== 'string' || !actualId) throw new Error('Codex 未返回有效会话 ID');

@@ -116,9 +116,52 @@ test('a Chat-dispatched Agent notification navigates to its owned parent Chat',a
   h.pending={...navigation,conversationId:'chat-parent',source:'chat-agent'};await h.controller.consume();assert.equal(h.controller.snapshot().navigation.conversation.id,'chat-parent');assert.equal(h.controller.snapshot().navigation.conversation.mode,'chat');
 });
 
-test('unowned or deleted conversations never navigate or fetch any full conversation',async()=>{
+test('missing summaries require an authenticated exact read and ordinary conversations cannot use the automation exception',async()=>{
   const h=harness({refreshState:async()=>({instanceId:'instance-one',user:{id:'user-one'},conversations:[]})});h.pending=navigation;
-  await h.controller.consume();assert.equal(h.controller.snapshot().navigation,null);assert.match(h.controller.snapshot().error,/不属于/);assert.equal(h.calls.some(call=>Array.isArray(call)&&call[0]==='conversation'),false);
+  await h.controller.consume();assert.equal(h.controller.snapshot().navigation,null);assert.match(h.controller.snapshot().error,/自动化|已结束/);assert.equal(h.calls.filter(call=>Array.isArray(call)&&call[0]==='conversation').length,1);
+});
+
+test('registered automation notifications absent from recent history use the exact owned completed run without inserting a summary',async()=>{
+  for(const status of ['completed','error']){
+    const conversation={id:navigation.conversationId,mode:'codex',automationId:'automation-one',messages:[],agent:{run:{id:navigation.runId,status}}};
+    const h=harness({refreshState:async signal=>{h.calls.push(['state',signal]);return{instanceId:'instance-one',user:{id:'user-one'},conversations:[]};},fetchConversation:async(id,signal)=>{h.calls.push(['conversation',id,signal]);return conversation;}});h.pending=navigation;
+    await h.controller.consume();const result=h.controller.takeNavigation();assert.ok(result);assert.equal(result.conversation,conversation);assert.deepEqual(result.state.conversations,[]);
+    assert.equal(result.userId,'user-one');assert.equal(result.instanceId,'instance-one');assert.equal(result.epoch,3);assert.equal(result.runId,navigation.runId);
+    const exact=h.calls.filter(call=>Array.isArray(call)&&call[0]==='conversation');assert.equal(exact.length,1);assert.equal(exact[0][1],navigation.conversationId);
+  }
+});
+
+test('hidden automation notification rejects wrong IDs, mismatched runs, non-final statuses and unrelated sources',async()=>{
+  const valid={id:navigation.conversationId,mode:'codex',automationId:'automation-one',messages:[],agent:{run:{id:navigation.runId,status:'completed'}}};
+  const cases=[
+    {conversation:{...valid,id:'different-conversation'}},
+    {conversation:{...valid,mode:'chat'}},
+    {conversation:{...valid,automationId:''}},
+    {conversation:{...valid,automationId:'https://attacker.example'}},
+    {conversation:{...valid,agent:{run:{id:'different-run',status:'completed'}}}},
+    ...['claiming','queued','running','stopping','unknown','cancelled'].map(status=>({conversation:{...valid,agent:{run:{id:navigation.runId,status}}}})),
+    {conversation:valid,target:{...navigation,agentConversationId:'different-agent'}},
+    {conversation:{...valid,mode:'chat'},target:{...navigation,source:'chat-agent'}},
+  ];
+  for(const scenario of cases){
+    const h=harness({refreshState:async()=>({instanceId:'instance-one',user:{id:'user-one'},conversations:[]}),fetchConversation:async()=>scenario.conversation});h.pending=scenario.target||navigation;
+    await h.controller.consume();assert.equal(h.controller.snapshot().navigation,null);assert.ok(h.controller.snapshot().error);assert.equal(h.controller.takeNavigation(),null);
+  }
+});
+
+test('automation exception never bypasses current service and account identity checks before the exact read',async()=>{
+  for(const patch of [{instanceId:'other-instance'},{user:{id:'other-user'}}]){
+    const h=harness({refreshState:async()=>({instanceId:'instance-one',user:{id:'user-one'},conversations:[],...patch})});h.pending=navigation;
+    await h.controller.consume();assert.equal(h.controller.snapshot().navigation,null);assert.equal(h.calls.some(call=>Array.isArray(call)&&call[0]==='conversation'),false);
+  }
+});
+
+test('account change while the exact hidden automation read is pending aborts and discards its late result',async()=>{
+  const full=deferred();let signal;
+  const h=harness({refreshState:async()=>({instanceId:'instance-one',user:{id:'user-one'},conversations:[]}),fetchConversation:async(_id,nextSignal)=>{signal=nextSignal;return full.promise;}});h.pending=navigation;
+  const consumed=h.controller.consume();await new Promise(resolve=>setImmediate(resolve));h.scope={...h.scope,epoch:4,userId:'other-user'};await h.controller.invalidate();assert.equal(signal.aborted,true);
+  full.resolve({id:navigation.conversationId,mode:'codex',automationId:'automation-one',messages:[],agent:{run:{id:navigation.runId,status:'completed'}}});await consumed;
+  assert.equal(h.controller.snapshot().navigation,null);assert.equal(h.controller.takeNavigation(),null);
 });
 
 test('network failure retains consumed target for foreground retry under the same account',async()=>{

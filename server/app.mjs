@@ -29,10 +29,12 @@ import { mountComputerUseMcpRoutes } from './computer-use-mcp-routes.mjs';
 import { mountOpenCliRoutes } from './opencli-routes.mjs';
 import { MODEL_REQUEST_BYTES } from './model-request-limits.mjs';
 import { createNotificationService } from './notifications.mjs';
+import { createAutomationService } from './automations.mjs';
+import { executeAutomationTool, withAutomationTools } from './automation-tools.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const now = () => new Date().toISOString();
-const failure = (status, message) => Object.assign(new Error(message), { status });
+const failure = (status, message, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 
 function hostingPublicOrigin(value) {
   if (value === '') return '';
@@ -55,7 +57,7 @@ function safeCodexStatus(value) {
   return value && typeof value === 'object' ? value : { available: false, error: 'Codex 状态不可用。' };
 }
 
-export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, asrOptions, executorsOptions, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
+export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, asrOptions, executorsOptions, automationOptions, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
   const codexPolicy = { allowedHttpOrigins: parseCodexHttpOrigins(codexHttpOrigins) };
   const store = await new JsonStore(dataDir).init();
   const accessToken = await store.token(token ?? process.env.PETPAL_TOKEN);
@@ -73,7 +75,18 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const cosyvoice = await createCosyVoiceService({ ...cosyvoiceOptions, store, dataDir });
   const asr = createAsrService({ ...asrOptions, store, authorizeSession: auth => authorizeAsrIdentity(auth) });
   await store.save();
-  const localTools = desktopTools ?? createDesktopTools({ dataDir,musicMcpScope:`${state.instanceId}:${state.ownerId}`,scopeForConversation:id=>{const conversation=state.conversations.find(item=>item.id===id);return conversation?`${state.instanceId}:${conversation.userId}`:null;} });
+  let automations;
+  const trustedAutomationEntry = call => {
+    const task = active.get(call?.conversationId), entry = task?.agentEntry;
+    const conversation = state.conversations.find(item => item.id === call?.conversationId);
+    if (!entry || task.controller.signal.aborted || entry.hostId !== 'central' || conversation?.agent?.run?.id !== entry.id || conversation.agent.run.status !== 'running') throw failure(401, '自动化工具只允许当前实际 Agent 任务调用，请使用任务入口。');
+    authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId, entry.projectDirectory);
+    return entry;
+  };
+  const localTools = withAutomationTools(desktopTools ?? createDesktopTools({ dataDir,musicMcpScope:`${state.instanceId}:${state.ownerId}`,scopeForConversation:id=>{const conversation=state.conversations.find(item=>item.id===id);return conversation?`${state.instanceId}:${conversation.userId}`:null;} }), {
+    resolveContext: trustedAutomationEntry,
+    execute: (name, args, call) => executeAutomationTool(automations, call.context, name, args, call),
+  });
   const createBridge = config => (codexFactory ?? (options => new CodexBridge(options)))({ workspaceRoot, dataDir, config, desktopTools: localTools });
   let bridge = codex ?? createBridge(state.codexConfig);
   let configChanging = false, configSwap = null, codexReaders = 0;
@@ -145,6 +158,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const value = await executors.attachment(req.params.connectionId, req.params.runId, req.params.id, req.headers.authorization);
     res.set({ 'Content-Type': value.record.mimeType, 'Content-Length': String(value.bytes.length), 'Content-Security-Policy': "default-src 'none'; sandbox" }).send(value.bytes);
   });
+  app.post('/api/agent/executors/:connectionId/runs/:runId/automations/tools', express.json({ limit: '64kb', strict: true }), async (req, res) => {
+    if (Object.keys(req.query).length) throw failure(400, '自动化工具回调不接受查询字段。');
+    res.json(await executors.automation(req.params.connectionId, req.params.runId, req.headers.authorization, req.body));
+  });
   app.use('/api', express.json({ limit: '128kb', strict: true }));
   app.use('/api', (req, res, next) => {
     if (req.body !== undefined && (Array.isArray(req.body) || !req.body || typeof req.body !== 'object')) return next(failure(400, '请求正文必须是 JSON 对象。'));
@@ -188,10 +205,11 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const status = redactCodex(await readCodexStatus());
     return { ...(isOwner(user) ? status : { available: status.available, running: status.running, authenticated: status.authenticated, configured: status.configured, error: status.error, message: status.message }), ...publicCodexConfig(state.codexConfig), eligibleProviderIds: eligibleProviders(user) };
   };
-  const visibleConversation = conversation => ({ id: conversation.id, title: conversation.title, mode: conversation.mode, providerId: conversation.providerId, ...(conversation.backgroundParentId ? { backgroundParentId: conversation.backgroundParentId } : {}), messages: conversation.messages.map(message => ({ ...message, ...(message.attachmentIds?.length ? { attachments: imageAttachments.metadata(conversation.userId, message.attachmentIds) } : {}) })), createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, ...(conversation.assistantTasks?.length ? { assistantTasks: chatAssistant.snapshot(conversation) } : {}), ...(conversation.threadId ? { threadId: conversation.threadId } : {}), ...(conversation.mode === 'codex' ? { codexRevision: conversation.codexRevision, codexConfigChanged: conversation.codexRevision !== state.codexConfig.revision, agentHostId: conversation.agentHostId ?? 'central', threadHostId: conversation.threadHostId ?? 'central', ...(conversation.agentProjectDirectory ? { agentProjectDirectory: conversation.agentProjectDirectory } : {}), ...(conversation.threadProjectDirectory ? { threadProjectDirectory: conversation.threadProjectDirectory } : {}), agent: agentTasks.snapshot(conversation) } : {}) });
+  const visibleConversation = conversation => ({ id: conversation.id, title: conversation.title, mode: conversation.mode, providerId: conversation.providerId, ...(conversation.backgroundParentId ? { backgroundParentId: conversation.backgroundParentId } : {}), ...(conversation.automationId ? { automationId: conversation.automationId } : {}), messages: conversation.messages.map(message => ({ ...message, ...(message.attachmentIds?.length ? { attachments: imageAttachments.metadata(conversation.userId, message.attachmentIds) } : {}) })), createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, ...(conversation.assistantTasks?.length ? { assistantTasks: chatAssistant.snapshot(conversation) } : {}), ...(conversation.threadId ? { threadId: conversation.threadId } : {}), ...(conversation.mode === 'codex' ? { codexRevision: conversation.codexRevision, codexConfigChanged: conversation.codexRevision !== state.codexConfig.revision, agentHostId: conversation.agentHostId ?? 'central', threadHostId: conversation.threadHostId ?? 'central', ...(conversation.agentProjectDirectory ? { agentProjectDirectory: conversation.agentProjectDirectory } : {}), ...(conversation.threadProjectDirectory ? { threadProjectDirectory: conversation.threadProjectDirectory } : {}), agent: agentTasks.snapshot(conversation) } : {}) });
   const publicState = async user => {
     await Promise.all(state.conversations.filter(item => item.userId === user.id && item.mode === 'chat' && item.assistantTasks?.length).map(item => chatAssistant.refresh(item)));
-    return { instanceId: state.instanceId, user: visibleUser(user), settings: settingsFor(user), providers: state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider => visibleProvider(provider, user)), conversations: state.conversations.filter(item => item.userId === user.id).map(visibleConversation), codex: await userCodexStatus(user) };
+    const automationResults = new Set(state.automations.jobs.filter(job => job.userId === user.id).flatMap(job => job.runs.map(run => run.conversationId).filter(Boolean)));
+    return { instanceId: state.instanceId, user: visibleUser(user), settings: settingsFor(user), providers: state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider => visibleProvider(provider, user)), conversations: state.conversations.filter(item => item.userId === user.id && (!item.automationId || !automationResults.has(item.id))).map(visibleConversation), codex: await userCodexStatus(user) };
   };
   const assertIdle = id => { if (active.has(id)) throw failure(409, '这个会话正在回复，请先停止。'); };
   const stopTasks = async predicate => {
@@ -218,6 +236,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     return { model: provider.model, effort: provider.reasoningEffort || '', codexRevision: config.revision };
   };
   const authorizeAgentIdentity = auth => {
+    if (auth?.automation !== undefined) {
+      const identity = automations.authorizePrincipal(auth), user = state.users.find(item => item.id === identity.userId);
+      return { user, expiresAt: undefined };
+    }
     const user = state.users.find(item => item.id === auth.userId);
     const session = state.sessions.find(item => item.userId === user?.id && item.tokenHash === auth.sessionHash && item.expiresAt > Date.now());
     const bootstrap = auth.bootstrap && secureEqual(auth.sessionHash, ownerTokenHash) && isOwner(user ?? {});
@@ -233,6 +255,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   };
   const authorizeAgentEntry = entry => {
       const { user, expiresAt } = authorizeAgentIdentity(entry.auth);
+      if (entry.auth.automation !== undefined) automations.authorizePrincipal(entry.auth, entry);
       requirePermissions(user, entry.permissions);
       if (entry.projectDirectory && entry.projectAccess === 'full' && !isOwner(user) && user.agentAccess !== 'full') throw failure(403, '外部项目的 Agent 授权已撤销，请重新选择默认工作区。');
       const conversation = state.conversations.find(item => item.id === entry.conversationId && item.userId === user.id);
@@ -250,8 +273,11 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (!user || user.disabled || (!bootstrap && !session)) throw failure(401, '执行电脑登录已结束。');
     requireCodex(user);
   };
-  const executors = createExecutors({ ...executorsOptions, store, authorizeSession: authorizeExecutorSession, authorizeEntry: authorizeAgentEntry, readAttachment: imageAttachments.read, getConfig: () => state.codexConfig, redact: redactCodex });
+  const executors = createExecutors({ ...executorsOptions, store, authorizeSession: authorizeExecutorSession, authorizeEntry: authorizeAgentEntry, readAttachment: imageAttachments.read, getConfig: () => state.codexConfig, redact: redactCodex,
+    automationTool: (name, args, call) => { authorizeAgentEntry(call.entry); return executeAutomationTool(automations, call.entry, name, args, call); },
+  });
   const notifications = createNotificationService({ store, authorize: auth => {
+    if (auth?.automation !== undefined) throw failure(401, '自动化执行凭据不能用于通知设备注册。');
     const identity = authorizeAgentIdentity(auth); requireCodex(identity.user);
     const issued = auth.bootstrap ? 0 : Date.parse(state.sessions.find(session => session.tokenHash === auth.sessionHash).createdAt);
     return { ...identity, sourceCreatedAt: Number.isFinite(issued) ? issued : 0 };
@@ -266,6 +292,79 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     },
     authorize: entry => { const expiresAt = authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId ?? 'central', entry.projectDirectory); return expiresAt; },
     authorizeRemoval: entry => authorizeAgentIdentity(entry.auth).expiresAt,
+  });
+  const authorizeAutomation = (userId, spec, { online, dispatch = false }) => {
+    const user = state.users.find(item => item.id === userId);
+    if (!user || user.disabled) throw failure(401, '自动化账号已失效。');
+    requirePermissions(user, spec.permissions);
+    if (state.codexConfig.mode !== 'api' || !state.codexConfig.model) throw failure(409, '自动化需要配置可用的 Responses Agent 模型。');
+    resolveAgentModel(userId, spec.providerId);
+    const host = executors.hostFor(userId, spec.hostId);
+    normalizeProjectDirectory(spec.projectDirectory, host.platform);
+    if (online) executors.target(userId, spec.hostId, spec.projectDirectory);
+    if (dispatch && (spec.hostId === 'central' ? [...active.values()].some(task => task.mode === 'codex' && (task.agentEntry?.hostId ?? 'central') === 'central') : executors.isBusy(userId, spec.hostId))) throw failure(409, '固定执行电脑正在运行其他任务，本次计划已跳过。', 'executor_busy');
+    return { hostName: host.name, providerName: spec.providerId ? providerById(spec.providerId, user).name : '默认 Agent 模型' };
+  };
+  automations = createAutomationService({ ...automationOptions, store, authorize: authorizeAutomation, redact: redactCodex,
+    onAcknowledge({ job, run }, snapshot) {
+      const conversation = snapshot.conversations.find(item => item.id === run.conversationId && item.userId === job.userId && item.automationId === job.id && item.automationRunId === run.id);
+      const agent = conversation?.agent;
+      if (!agent) return;
+      let changed = false;
+      if (agent.run?.submissionId === run.id && agent.run.status === 'unknown') {
+        agent.run.status = 'cancelled'; agent.run.finishedAt = run.acknowledgedAt;
+        agent.run.error = '用户已确认执行电脑上的先前任务已停止，未自动重派。'; changed = true;
+      }
+      for (const receipt of agent.submissions) if (receipt.submissionId === run.id && receipt.status === 'uncertain') { receipt.status = 'cancelled'; changed = true; }
+      if (changed) { agent.revision++; conversation.updatedAt = run.acknowledgedAt; }
+    },
+    async dispatch({ job, run, auth, bindConversation }) {
+      if (shuttingDown) throw failure(503, '服务正在退出。');
+      automations.authorizePrincipal(auth);
+      const retainedRuns = new Set(job.runs.map(item => item.id)), sources = new Set(automations.list(job.userId).automations.map(item => item.sourceConversationId).filter(Boolean));
+      const expired = state.conversations.map((conversation, index) => ({ conversation, index })).filter(({ conversation }) => conversation.userId === job.userId && conversation.automationId === job.id && conversation.automationRunId && !retainedRuns.has(conversation.automationRunId) && !sources.has(conversation.id) && !active.has(conversation.id) && !conversation.agent?.queue?.length && (['completed', 'error', 'cancelled'].includes(conversation.agent?.run?.status) || conversation.automationDispatchFailed === true && !conversation.agent?.submissions?.length));
+      // Only generated terminal results beyond this job's retained receipts are
+      // pruned. Ordinary chats, source chats and uncertain work stay untouched.
+      state.conversations = state.conversations.filter(conversation => !expired.some(item => item.conversation === conversation));
+      const conversation = { id: randomUUID(), userId: job.userId, automationId: job.id, automationRunId: run.id, title: job.title, mode: 'codex', providerId: null, codexRevision: state.codexConfig.revision, agentHostId: run.snapshot.hostId, messages: [], createdAt: now(), updatedAt: now() };
+      state.conversations.unshift(conversation);
+      try { await store.save(); }
+      catch (error) {
+        const index = state.conversations.indexOf(conversation); if (index >= 0) state.conversations.splice(index, 1);
+        for (const item of expired) if (!state.conversations.includes(item.conversation)) state.conversations.splice(Math.min(item.index, state.conversations.length), 0, item.conversation);
+        throw error;
+      }
+      try {
+        await bindConversation(conversation.id);
+        automations.authorizePrincipal(auth);
+        const submission = await agentTasks.submit(conversation, { submissionId: run.id, content: run.snapshot.prompt, hostId: run.snapshot.hostId, providerId: run.snapshot.providerId, projectDirectory: run.snapshot.projectDirectory, permissions: run.snapshot.permissions }, auth);
+        return { status: submission.status === 'running' ? 'running' : 'queued' };
+      } catch (error) {
+        const bound = state.automations.jobs.find(item => item.id === job.id && item.userId === job.userId)?.runs.some(item => item.id === run.id && item.conversationId === conversation.id);
+        if (!active.has(conversation.id) && !conversation.agent?.queue?.length && !conversation.agent?.submissions?.length) {
+          if (!bound) state.conversations = state.conversations.filter(item => item !== conversation);
+          else {
+            conversation.automationDispatchFailed = true;
+            conversation.messages.push({ id: randomUUID(), role: 'assistant', content: '', status: 'error', error: `自动化任务未派发：${String(redactCodex(error.message || '启动失败')).slice(0, 400)}`, createdAt: now() });
+          }
+          await store.save();
+        }
+        throw error;
+      }
+    },
+    observe(run) {
+      const conversation = state.conversations.find(item => item.id === run.conversationId && item.userId === run.userId && item.automationId === run.automationId);
+      if (!conversation) return { status: 'error', message: '自动化结果会话已删除，未重新派发。' };
+      const agent = conversation.agent, receipt = agent?.submissions?.find(item => item.submissionId === run.id), current = agent?.run;
+      if (current?.submissionId === run.id) {
+        const status = current.status === 'stopping' ? 'running' : current.status;
+        return { status, ...(current.finishedAt ? { finishedAt: current.finishedAt } : {}), ...(current.error || current.message ? { message: current.error || current.message } : {}) };
+      }
+      if (receipt?.status === 'queued') return { status: 'queued' };
+      if (receipt?.status === 'dispatching') return { status: 'claiming' };
+      if (receipt?.status === 'uncertain') return { status: 'unknown', message: '无法确认任务派发结果，不会自动重试。' };
+      return { status: 'error', message: receipt?.error || '自动化任务没有有效派发记录，未重新派发。' };
+    },
   });
   const chatAssistant = createChatAssistant({ store, agentTasks, revision: () => state.codexConfig.revision,
     resolveHost: (userId, hostId, options) => {
@@ -344,7 +443,47 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     res.json(await notifications.remove(executorAuth(req), req.params.deviceId));
   });
   app.get('/api/agent/hosts', async (req, res) => {
-    requireCodex(req.user); const hosts = executors.list(req.user.id); hosts[0] = { ...hosts[0], codex: { ...await userCodexStatus(req.user), projectDirectory: true } }; requireCurrentAuth(req); res.json({ hosts });
+    requireCodex(req.user); const hosts = executors.list(req.user.id); hosts[0] = { ...hosts[0], codex: { ...await userCodexStatus(req.user), projectDirectory: true, automations: true } }; requireCurrentAuth(req); res.json({ hosts });
+  });
+  const automationRequest = req => {
+    requireCurrentAuth(req); requireCodex(req.user);
+    if (Object.keys(req.query).length) throw failure(400, '自动化接口不接受查询字段。');
+  };
+  app.get('/api/automations', (req, res) => { automationRequest(req); res.json(automations.list(req.user.id)); });
+  app.post('/api/automations', async (req, res) => {
+    automationRequest(req); const automation = await automations.create(req.user.id, req.body, { guard: () => automationRequest(req) }); requireCurrentAuth(req); requireCodex(req.user); res.status(201).json({ automation });
+  });
+  app.patch('/api/automations/preferences', async (req, res) => {
+    automationRequest(req); const value = await automations.preferences(req.user.id, req.body, { guard: () => automationRequest(req) }); requireCurrentAuth(req); res.json(value);
+  });
+  app.patch('/api/automations/:id', async (req, res) => {
+    automationRequest(req); const automation = await automations.update(req.user.id, req.params.id, req.body, { guard: () => automationRequest(req) }); requireCurrentAuth(req); requireCodex(req.user); res.json({ automation });
+  });
+  app.delete('/api/automations/:id', async (req, res) => {
+    automationRequest(req); await automations.remove(req.user.id, req.params.id, req.body, { guard: () => automationRequest(req) });
+    // The durable grant is revoked before stopping execution. A timeout or
+    // lost HTTP reply cannot authorize a callback on the deleted job.
+    await Promise.all(state.conversations.filter(conversation => conversation.userId === req.user.id && conversation.automationId === req.params.id).map(conversation => agentTasks.stop(conversation, { clear: true })));
+    const sources = new Set(automations.list(req.user.id).automations.map(job => job.sourceConversationId).filter(Boolean));
+    state.conversations = state.conversations.filter(conversation => conversation.userId !== req.user.id || conversation.automationId !== req.params.id || sources.has(conversation.id) || active.has(conversation.id) || !(['completed', 'error', 'cancelled'].includes(conversation.agent?.run?.status) || conversation.automationDispatchFailed === true && !conversation.agent?.queue?.length && !conversation.agent?.submissions?.length));
+    await store.save();
+    requireCurrentAuth(req); res.json({ deleted: true });
+  });
+  app.post('/api/automations/:id/acknowledge', async (req, res) => {
+    automationRequest(req);
+    if (Object.keys(req.body).some(key => !['revision', 'runId'].includes(key))) throw failure(400, '确认状态只接受 revision 和 runId。');
+    const job = automations.list(req.user.id).automations.find(item => item.id === req.params.id);
+    if (!job) throw failure(404, '自动化不存在。');
+    if (job.revision !== req.body.revision) throw failure(409, '自动化已变化，请刷新后再确认。');
+    const run = job.runs.find(item => item.id === req.body.runId && item.status === 'unknown');
+    if (!run) throw failure(409, '只有状态未知的运行可由用户确认已停止。');
+    const conversation = state.conversations.find(item => item.id === run.conversationId && item.userId === req.user.id && item.automationId === job.id && item.automationRunId === run.id);
+    if (conversation) await agentTasks.stop(conversation, { clear: true });
+    requireCurrentAuth(req);
+    res.json({ automation: await automations.acknowledge(req.user.id, job.id, req.body, { guard: () => automationRequest(req) }) });
+  });
+  app.post('/api/automations/:id/run', async (req, res) => {
+    automationRequest(req); const run = await automations.run(req.user.id, req.params.id, req.body, { guard: () => automationRequest(req) }); requireCurrentAuth(req); requireCodex(req.user); res.json({ run });
   });
   app.post('/api/agent/executors/register', async (req, res) => { requireCodex(req.user); res.json(await executors.register(executorAuth(req), req.body)); });
   app.post('/api/agent/executors/:connectionId/heartbeat', (req, res) => { if (Object.keys(req.body).length) throw failure(400, '续租不接受附加字段。'); res.json(executors.heartbeat(req.params.connectionId, executorAuth(req))); });
@@ -652,7 +791,8 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const providerId = req.body?.providerId ?? settingsFor(req.user).defaultProviderId;
     if (!['chat', 'codex'].includes(mode)) throw failure(400, '会话模式无效。');
     if (mode === 'codex') { requireCodex(req.user); if (configChanging) throw failure(409, 'Codex 配置正在切换，请稍后重试。'); }
-    if (state.conversations.filter(item => item.userId === req.user.id).length >= 200) throw failure(400, '最多保存 200 个会话，请先删除旧会话。');
+    const automationResults = new Set(state.automations.jobs.filter(job => job.userId === req.user.id).flatMap(job => job.runs.map(run => run.conversationId).filter(Boolean)));
+    if (state.conversations.filter(item => item.userId === req.user.id && (!item.automationId || !automationResults.has(item.id))).length >= 200) throw failure(400, '最多保存 200 个会话，请先删除旧会话。');
     if (mode === 'chat' && providerId !== undefined && providerId !== null && providerId !== '') providerById(providerId, req.user);
     const conversation = { id: randomUUID(), userId: req.user.id, title: mode === 'codex' ? '新的工作会话' : '新的聊天', mode, providerId: mode === 'chat' ? providerId || null : null, messages: [], createdAt: now(), updatedAt: now(), ...(mode === 'codex' ? { codexRevision: state.codexConfig.revision } : {}) };
     state.conversations.unshift(conversation); await store.save(); res.status(201).json(visibleConversation(conversation));
@@ -761,6 +901,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const agentConversation = (req, removing = false) => {
     requireCurrentAuth(req); if (!removing) requireCodex(req.user);
     const conversation = conversationById(req.params.id, req.user);
+    if (conversation.automationId) throw failure(409, '自动化结果会话只能查看或停止，请在自动化页面管理计划。');
     if (conversation.mode !== 'codex') throw failure(400, '只有 Agent 会话可使用任务队列。');
     if (!removing && conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Agent 配置已变化，请新建会话。');
     return conversation;
@@ -787,6 +928,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
 
   app.post('/api/conversations/:id/messages', async (req, res) => {
     const conversation = conversationById(req.params.id, req.user); assertIdle(conversation.id);
+    if (conversation.automationId) throw failure(409, '自动化结果会话只能查看或停止，请创建普通对话。');
     const collaborationOptions = normalizeChatAssistant(req.body.assistant, req.body.submissionId);
     if (collaborationOptions && conversation.mode !== 'chat') throw failure(400, 'Chat + Agent 仅用于聊天会话。');
     if (conversation.mode === 'codex') {
@@ -991,6 +1133,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   let closing;
   const close = () => closing ??= (async () => {
     shuttingDown = true;
+    await automations.close();
     const closingListeners = [...listeners];
     const httpClosed = Promise.all(closingListeners.map(listener => listener.listening ? new Promise((resolve, reject) => {
       listener.close(error => error ? reject(error) : resolve()); listener.closeIdleConnections();
@@ -1008,5 +1151,6 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (failed) throw failed.reason;
     if (saveError) throw saveError;
   })();
-  return { server, token: accessToken, close, updates, hosting };
+  if (automationOptions?.autoStart !== false) await automations.start();
+  return { server, token: accessToken, close, updates, hosting, automations };
 }

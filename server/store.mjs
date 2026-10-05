@@ -8,6 +8,7 @@ import { restoreAgentState } from './agent-tasks.mjs';
 import { validateExecutionHosts } from './executors.mjs';
 import { restoreAssistantTasks } from './chat-assistant.mjs';
 import { validateStoredNotifications } from './notifications.mjs';
+import { validateStoredAutomations } from './automation-schema.mjs';
 
 export const isCompanionKind = value => value === 'anime' || value === 'cat';
 const isChatAssistantHostId = value => value === null || typeof value === 'string' && (value === 'central' || /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value));
@@ -104,6 +105,7 @@ export class JsonStore {
       }
     }
     if (validateStoredNotifications(state)) changed = true;
+    if (validateStoredAutomations(state)) changed = true;
     this.#chatAssistantHosts = new Map(state.users.map(user => [user.id, (user.id === state.ownerId ? state.settings : user.settings).chatAssistantHostId]));
     if (changed) await this.save();
     return this;
@@ -141,6 +143,7 @@ export class JsonStore {
       const snapshot = JSON.parse(captured);
       this.#prepareChatAssistantHosts(snapshot, operation?.chatAssistantDefaultHost);
       this.notificationPersistence?.prepare(snapshot, operation);
+      await this.automationPersistence?.prepare(snapshot, operation);
       const contents = `${JSON.stringify(snapshot, null, 2)}\n`;
       const temporary = `${this.file}.${randomBytes(8).toString('hex')}.tmp`;
       try {
@@ -149,6 +152,7 @@ export class JsonStore {
         await rename(temporary, this.file);
         // Only an atomically replaced file can become the public default.
         this.#commitChatAssistantHosts(snapshot);
+        this.automationPersistence?.commit(snapshot.automations, snapshot);
         await chmod(this.file, 0o600).catch(error => { if (process.platform !== 'win32') throw error; });
         this.notificationPersistence?.commit(snapshot.notifications);
       } finally { await unlink(temporary).catch(() => {}); }

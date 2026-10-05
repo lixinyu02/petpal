@@ -3,6 +3,7 @@ import { tokenHash, secureEqual } from './auth.mjs';
 import { createExecutorRelayRedactor } from './executor-relay.mjs';
 import { MODEL_REQUEST_BYTES } from './model-request-limits.mjs';
 import { normalizeProjectDirectory } from './project-directory.mjs';
+import { describeAutomationTool, validateAutomationTool } from './automation-tools.mjs';
 
 const failure = (status, message, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 const unknown = () => failure(409, '执行电脑已断开，任务执行状态未知；队列已暂停，不会自动重试。', 'execution_unknown');
@@ -27,7 +28,7 @@ export function validateExecutionHosts(state) {
 }
 
 /** Central coordinator. Sessions are credentials; client type is never authorization. */
-export function createExecutors({ store, authorizeSession, authorizeEntry, readAttachment, getConfig, redact = value => value,
+export function createExecutors({ store, authorizeSession, authorizeEntry, readAttachment, getConfig, automationTool, redact = value => value,
   fetchImpl = fetch, leaseMs = 30000, pollMs = 20000, commandMs = 20000, stopMs = 10000, clock = Date.now } = {}) {
   const connections = new Map(), current = new Map();
   let closed = false, registration = Promise.resolve();
@@ -81,7 +82,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
   const list = userId => {
     sweep();
     return [localHost, ...store.state.executionHosts.filter(host => host.userId === userId).map(host => ({ id: host.id, name: host.name, platform: host.platform, kind: 'desktop', online: current.has(host.id), lastSeenAt: current.has(host.id) ? connections.get(current.get(host.id)).lastSeenAt : host.lastSeenAt,
-      codex: { available: current.has(host.id), authenticated: current.has(host.id), configured: getConfig().mode === 'api' && Boolean(getConfig().model), supportsSteer: true, projectDirectory: current.has(host.id) && connections.get(current.get(host.id)).capabilities.projectDirectory === true, mode: 'api', model: getConfig().model, executionMode: 'remote-cli' } }))];
+      codex: { available: current.has(host.id), authenticated: current.has(host.id), configured: getConfig().mode === 'api' && Boolean(getConfig().model), supportsSteer: true, projectDirectory: current.has(host.id) && connections.get(current.get(host.id)).capabilities.projectDirectory === true, automations: Boolean(automationTool) && current.has(host.id) && connections.get(current.get(host.id)).capabilities.automations === true, mode: 'api', model: getConfig().model, executionMode: 'remote-cli' } }))];
   };
   const target = (userId, id = 'central', projectDirectory) => {
     const host = hostFor(userId, id);
@@ -93,11 +94,12 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
     }
     return { hostId: host.id, hostName: host.name };
   };
+  const isBusy = (userId, id) => { hostFor(userId, id); if (id === 'central') return false; return Boolean(live(connections.get(current.get(id))).run); };
   async function register(auth, body) {
     if (!fields(body, ['deviceId','name','platform','arch','capabilities']) || !uuid(body.deviceId) || !text(body.name, 120) || !['win32','linux','darwin'].includes(body.platform) || !text(body.arch, 32) ||
-        body.capabilities !== undefined && (!fields(body.capabilities, ['projectDirectory']) || body.capabilities.projectDirectory !== true)) throw failure(400, '执行电脑注册字段无效。');
+        body.capabilities !== undefined && (!fields(body.capabilities, ['projectDirectory', 'automations']) || body.capabilities.projectDirectory !== true || body.capabilities.automations !== undefined && body.capabilities.automations !== true)) throw failure(400, '执行电脑注册字段无效。');
     const metadata = Object.fromEntries(['deviceId','name','platform','arch'].map(key => [key, body[key]]));
-    const capabilities = { projectDirectory: body.capabilities?.projectDirectory === true };
+    const capabilities = { projectDirectory: body.capabilities?.projectDirectory === true, automations: body.capabilities?.automations === true };
     const work = registration.catch(() => {}).then(async () => {
       authorizeSession(auth); if (closed) throw failure(503, '执行服务正在退出。');
       let host = store.state.executionHosts.find(item => item.userId === auth.userId && item.deviceId === body.deviceId);
@@ -111,7 +113,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
       await store.save(); authorizeSession(auth); if (closed) throw failure(503, '执行服务正在退出。');
       const connection = { id: randomUUID(), host, capabilities, auth: { ...auth }, expiresAt: clock()+leaseMs, lastSeenAt: stamp(), commands: [], run: null, recent: new Map(), waiter: null, polling: false };
       connections.set(connection.id, connection); current.set(host.id, connection.id);
-      return { hostId: host.id, connectionId: connection.id, leaseMs, pollMs };
+      return { hostId: host.id, connectionId: connection.id, leaseMs, pollMs, ...(capabilities.automations && automationTool ? { capabilities: { automations: true } } : {}) };
     }); registration = work; return work;
   }
   const heartbeat = (id, auth) => { const connection = verify(id, auth); connection.expiresAt = clock()+leaseMs; connection.lastSeenAt = stamp(); return { ok: true, leaseMs }; };
@@ -170,7 +172,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
         if (connection.run) throw failure(409, '这台电脑正在执行其他任务，请稍后重试。');
         let resolve, reject; const done = new Promise((yes, no) => { resolve = yes; reject = no; }); done.catch(() => {});
         const token = randomBytes(32).toString('base64url');
-        const run = boundRun = { id: entry.id, connection, entry, args, resolve, reject, done, tokenHash: tokenHash(token), expiresAt: clock()+60*60*1000, attachments: new Map(), relays: new Set(), pending: new Map(), approvals: new Map(), sequence: 0, eventHash: '', started: false, dispatched: false, stopping: false, settled: false };
+        const run = boundRun = { id: entry.id, connection, entry, args, resolve, reject, done, tokenHash: tokenHash(token), expiresAt: clock()+60*60*1000, attachments: new Map(), relays: new Set(), automationCalls: new Map(), automationApprovalCalls: new Map(), automationApprovals: new Map(), automationGrants: new Map(), pending: new Map(), approvals: new Map(), sequence: 0, eventHash: '', started: false, dispatched: false, stopping: false, settled: false };
         connection.run = run; connection.recent.set(run.id, run); while (connection.recent.size > 32) connection.recent.delete(connection.recent.keys().next().value);
         run.abort = () => {
           if (run.settled || run.stopping) return; run.stopping = true;
@@ -185,7 +187,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
           checkRun(run); args.signal?.throwIfAborted();
           const attachments = await descriptors(run, entry.attachmentIds);
           checkRun(run); args.signal?.throwIfAborted();
-          enqueue(run, { id: randomUUID(), type: 'run', runId: run.id, conversationId: args.conversationId, prompt: args.prompt, ...(args.threadId ? { threadId: args.threadId } : {}), ...(projectDirectory ? { projectDirectory, projectAccess: entry.projectAccess } : {}), permissions: args.permissions, model: entry.model, effort: entry.effort, codexRevision: entry.codexRevision, relayToken: token, attachments });
+          enqueue(run, { id: randomUUID(), type: 'run', runId: run.id, conversationId: args.conversationId, prompt: args.prompt, ...(args.threadId ? { threadId: args.threadId } : {}), ...(projectDirectory ? { projectDirectory, projectAccess: entry.projectAccess } : {}), ...(connection.capabilities.automations && automationTool ? { automationTools: true } : {}), permissions: args.permissions, model: entry.model, effort: entry.effort, codexRevision: entry.codexRevision, relayToken: token, attachments });
           run.ackTimer = setTimeout(() => settle(run, run.dispatched ? unknown() : failure(409, '执行电脑未领取任务；任务未自动重试。')), commandMs);
         } catch (error) { settle(run, error); }
         return done;
@@ -197,6 +199,13 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
       async approve(id, decision) {
         const run = boundRun, approvalId = run?.approvals.get(id);
         if (!approvalId) throw failure(404, '审批请求已失效。');
+        if (!['accept', 'decline'].includes(decision)) throw failure(400, '审批决定无效。');
+        const automation = run.automationApprovals.get(id);
+        if (automation) {
+          checkRun(run);
+          run.automationGrants.set(automation.callId, { fingerprint: automation.fingerprint, decision, used: false });
+          run.automationApprovals.delete(id);
+        }
         const result = rpc(run, 'approve', { approvalId, decision });
         // One decision attempt consumes the central approval. An uncertain
         // acknowledgement must not leave a button that resends the operation.
@@ -222,7 +231,15 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
     else if (event === 'thread' || event === 'turn') { const key = event+'Id'; if (!fields(data,[key]) || !text(data[key],200)) throw failure(400,'执行标识无效。'); }
     else if (event === 'delta') { if (!fields(data,['text']) || typeof data.text !== 'string' || data.text.length > 32000) throw failure(400,'执行文本无效。'); }
     else if (event === 'status') { if (!fields(data,['message','text','state']) || Object.values(data).some(value => typeof value !== 'string' || value.length > 1000)) throw failure(400,'执行状态无效。'); }
-    else if (event === 'approval') { if (!fields(data,['id','kind','description']) || !text(data.id,200) || !text(data.kind,80) || !contentText(data.description,8000)) throw failure(400,'执行审批无效。'); }
+    else if (event === 'approval') {
+      if (!fields(data, ['id','kind','description', ...(data.kind === 'automation' ? ['automation'] : [])]) || !text(data.id,200) || !text(data.kind,80) || !contentText(data.description,8000)) throw failure(400,'执行审批无效。');
+      if (data.kind === 'automation') {
+        if (!automationTool || !connection.capabilities.automations || !fields(data.automation, ['callId','name','arguments']) || !text(data.automation.callId,256) || !object(data.automation.arguments) || JSON.stringify(data.automation.arguments).length > 16384) throw failure(400, '自动化审批必须包含本轮工具完整参数。');
+        validateAutomationTool(data.automation.name, data.automation.arguments);
+        const description = describeAutomationTool(data.automation.name, data.automation.arguments, run.entry);
+        if (!description.approvalRequired || run.automationApprovalCalls.has(data.automation.callId) || run.automationApprovalCalls.size >= 128) throw failure(409, '自动化审批 callId 已处理或超过本轮上限。');
+      }
+    }
     else if (event === 'approval-resolved') { if (!fields(data,['id']) || !text(data.id,200)) throw failure(400,'执行审批回执无效。'); }
     else if (event === 'complete') { if (!fields(data,['threadId','text']) || (data.threadId !== undefined && !text(data.threadId,200)) || (data.text !== undefined && (typeof data.text !== 'string' || data.text.length > 32000))) throw failure(400,'完成回执无效。'); }
     else if (event === 'error') { if (!fields(data,['message']) || !contentText(data.message,500)) throw failure(400,'失败回执无效。'); }
@@ -239,7 +256,15 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
       if (pending) { clearTimeout(pending.timer); run.pending.delete(data.commandId); if (data.ok) pending.resolve({ok:true,...(data.turnId ? {turnId:data.turnId} : {})}); else pending.reject(failure(409, '执行命令未完成。', data.code === 'turn_not_active' ? data.code : 'command_delivery_uncertain')); }
     } else if (event === 'approval') {
       if (run.approvals.size >= 128 || [...run.approvals.values()].includes(data.id)) { settle(run, unknown()); throw failure(409,'审批标识重复或超过上限。'); }
-      const approval = randomUUID(); run.approvals.set(approval,data.id); emit(event,{...data,id:approval});
+      const approval = randomUUID(); run.approvals.set(approval,data.id);
+      if (data.kind === 'automation') {
+        const request = data.automation, fingerprint = hash(JSON.stringify({ name: request.name, arguments: request.arguments }));
+        run.automationApprovalCalls.set(request.callId, fingerprint);
+        run.automationApprovals.set(approval, { callId: request.callId, fingerprint });
+        // The central account sees a description recomputed from the fixed run
+        // scope and complete parameters, never a client-provided review summary.
+        emit(event, { id: approval, kind: 'automation', description: describeAutomationTool(request.name, request.arguments, run.entry).description });
+      } else emit(event,{...data,id:approval});
     } else if (event === 'approval-resolved') { const approval = [...run.approvals].find(([,remote]) => remote === data.id)?.[0]; if (approval) { run.approvals.delete(approval); emit(event,{id:approval}); } }
     else emit(event,data);
     return { ok: true };
@@ -249,6 +274,34 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
     if (!run || run.id !== runId || typeof authorization !== 'string' || !authorization.startsWith('Bearer ') || authorization.length > 200 || !secureEqual(tokenHash(authorization.slice(7)),run.tokenHash)) throw failure(401,'执行凭据无效或已过期。');
     checkRun(run); return run;
   };
+  async function automation(connectionId, runId, authorization, body) {
+    const run = bearerRun(connectionId, runId, authorization);
+    if (!automationTool || !run.connection.capabilities.automations || !run.started || !run.dispatched) throw failure(409, '当前执行电脑尚不支持自动化工具，请升级客户端。');
+    if (!fields(body, ['callId', 'name', 'arguments']) || !text(body.callId, 256) || !object(body.arguments) || JSON.stringify(body).length > 20000) throw failure(400, '自动化工具回调格式无效。');
+    validateAutomationTool(body.name, body.arguments);
+    const fingerprint = hash(JSON.stringify({ name: body.name, arguments: body.arguments }));
+    const previous = run.automationCalls.get(body.callId);
+    if (previous) {
+      if (previous.fingerprint !== fingerprint) throw failure(409, '工具 callId 已用于另一份请求。');
+      const result = await previous.promise; checkRun(run); return result;
+    }
+    if (body.name !== 'petpal_automation_list' && run.entry.permissions.approval !== 'auto') {
+      const grant = run.automationGrants.get(body.callId);
+      if (!grant || grant.decision !== 'accept' || grant.used || grant.fingerprint !== fingerprint) throw failure(403, '自动化写操作需要当前账号确认完整参数，缺少本轮有效审批。');
+      grant.used = true;
+    }
+    if (run.automationCalls.size >= 128) throw failure(429, '本轮自动化工具请求超过上限。');
+    const controller = new AbortController(); run.relays.add(controller);
+    // Reserve the exact call before crossing the async mutation boundary. A
+    // missing reply never authorizes a second mutation under the same callId.
+    const promise = Promise.resolve().then(async () => {
+      checkRun(run); controller.signal.throwIfAborted();
+      const result = await automationTool(body.name, body.arguments, { entry: run.entry, callId: body.callId, signal: controller.signal, guard: () => { checkRun(run); controller.signal.throwIfAborted(); } });
+      checkRun(run); controller.signal.throwIfAborted(); return result;
+    }).finally(() => { run.relays.delete(controller); });
+    run.automationCalls.set(body.callId, { fingerprint, promise });
+    return promise;
+  }
   async function attachment(connectionId, runId, id, authorization) {
     const run = bearerRun(connectionId,runId,authorization), expected = run.attachments.get(id);
     if (!expected) throw failure(404,'图片不属于当前任务。');
@@ -283,5 +336,5 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
   }
   const revoke = predicate => { for (const connection of [...connections.values()]) if (predicate(connection.auth)) offline(connection); };
   const close = async () => { closed=true;clearInterval(timer);for(const connection of [...connections.values()])offline(connection);await registration.catch(()=>{}); };
-  return { register,heartbeat,poll,disconnect,events,list,target,bind,attachment,relay,revoke,close,hostFor };
+  return { register,heartbeat,poll,disconnect,events,list,target,isBusy,bind,attachment,relay,automation,revoke,close,hostFor };
 }

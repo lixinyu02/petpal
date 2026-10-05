@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { CodexBridge, resolveCodexCommand } from '../server/codex.mjs';
 import { createDesktopTools } from '../server/desktop-tools.mjs';
+import { withAutomationTools } from '../server/automation-tools.mjs';
 import { normalizeAgentPermissions } from '../server/agent-permissions.mjs';
 import { inspectImage, IMAGE_LIMIT } from '../server/attachments.mjs';
 import { normalizeReasoningEffort } from '../server/providers.mjs';
@@ -343,18 +344,24 @@ export class DesktopExecutor {
   async _register(ctx) {
     const body = { deviceId: ctx.deviceId, ...this.metadata };
     let registration;
-    try { registration = await this._json(ctx, '/api/agent/executors/register', { ...body, capabilities: { projectDirectory: true } }); }
+    try { registration = await this._json(ctx, '/api/agent/executors/register', { ...body, capabilities: { projectDirectory: true, automations: true } }); }
     catch (error) {
       // Older servers reject unknown registration fields before creating a
       // connection. Only that negotiation boundary may fall back; never runs.
       this._assert(ctx);
       if (error.status !== 400 || ctx.connectionId) throw error;
-      registration = await this._json(ctx, '/api/agent/executors/register', body);
+      try { registration = await this._json(ctx, '/api/agent/executors/register', { ...body, capabilities: { projectDirectory: true } }); }
+      catch (legacyError) {
+        this._assert(ctx);
+        if (legacyError.status !== 400 || ctx.connectionId) throw legacyError;
+        registration = await this._json(ctx, '/api/agent/executors/register', body);
+      }
     }
     if (!identifier(registration.hostId) || !identifier(registration.connectionId) ||
         !Number.isSafeInteger(registration.leaseMs) || registration.leaseMs < 3000 || registration.leaseMs > 120000 ||
         !Number.isSafeInteger(registration.pollMs) || registration.pollMs < 1000 || registration.pollMs > 60000) throw invalid();
     ctx.hostId = registration.hostId; ctx.connectionId = registration.connectionId;
+    ctx.automationTools = registration.capabilities?.automations === true;
     ctx.leaseMs = registration.leaseMs; ctx.pollMs = registration.pollMs;
     ctx.route = `/api/agent/executors/${ctx.connectionId}`;
   }
@@ -394,7 +401,7 @@ export class DesktopExecutor {
   _validateCommand(command) {
     if (!object(command) || !identifier(command.id) || !identifier(command.runId)) throw invalid();
     const allowed = {
-      run: ['id', 'type', 'runId', 'conversationId', 'prompt', 'threadId', 'projectDirectory', 'projectAccess', 'permissions', 'model', 'effort', 'codexRevision', 'relayToken', 'attachments'],
+      run: ['id', 'type', 'runId', 'conversationId', 'prompt', 'threadId', 'projectDirectory', 'projectAccess', 'automationTools', 'permissions', 'model', 'effort', 'codexRevision', 'relayToken', 'attachments'],
       steer: ['id', 'type', 'runId', 'expectedTurnId', 'content', 'attachments'],
       approve: ['id', 'type', 'runId', 'approvalId', 'decision'], stop: ['id', 'type', 'runId'],
     }[command.type];
@@ -405,6 +412,7 @@ export class DesktopExecutor {
           typeof command.model !== 'string' || !command.model.trim() || command.model.length > 160 || /[\x00-\x1f\x7f]/.test(command.model) ||
           typeof command.relayToken !== 'string' || !command.relayToken || command.relayToken.length > 4096 || /[\x00-\x20\x7f]/.test(command.relayToken)) throw invalid();
       normalizeAgentPermissions(command.permissions); normalizeReasoningEffort(command.effort);
+      if (command.automationTools !== undefined && command.automationTools !== true) throw invalid();
       if (Object.hasOwn(command, 'projectDirectory') !== Object.hasOwn(command, 'projectAccess')) throw invalid();
       if (Object.hasOwn(command, 'projectDirectory')) {
         if (typeof command.projectDirectory !== 'string' || !command.projectDirectory.trim() || !['full', 'workspace'].includes(command.projectAccess)) throw invalid();
@@ -433,6 +441,7 @@ export class DesktopExecutor {
         await Promise.all([ctx.openCliOperation?.done, ctx.openCliCancellation?.done]); this._assert(ctx);
       }
       if (ctx.run) throw invalid();
+      if (command.automationTools && !ctx.automationTools) throw invalid();
       const permissions = normalizeAgentPermissions(command.permissions);
       if (permissions.access === 'full-access' && ctx.account.agentAccess !== 'full' && !ctx.account.isOwner) throw invalid();
       const run = { id: command.runId, commandId: command.id, sequence: 0, pendingBytes: 0, outputBytes: 0, files: new Map(),
@@ -508,7 +517,21 @@ export class DesktopExecutor {
       this._tools(ctx);
       const config = { mode: 'api', revision: command.codexRevision, baseUrl: `${ctx.connection.url}${ctx.route}/runs/${run.id}/model`,
         apiKey: run.relayToken, model: command.model, reasoningEffort: command.effort || '' };
-      run.bridge = this.bridgeFactory({ dataDir: ctx.directory, workspaceRoot: path.join(ctx.directory, 'workspace'), config, desktopTools: ctx.tools });
+      const desktopTools = command.automationTools ? withAutomationTools(ctx.tools, {
+        resolveContext: () => {
+          this._assert(ctx);
+          if (ctx.run !== run || run.stopping || run.controller.signal.aborted || !run.relayToken) throw stopped();
+          return { hostId: ctx.hostId, hostName: this.metadata.name, model: command.model, permissions: command.permissions, projectDirectory: command.projectDirectory };
+        },
+        execute: async (name, args, call) => {
+          if (typeof call.callId !== 'string' || !call.callId || call.callId.length > 256 || /[\x00-\x1f\x7f]/.test(call.callId)) throw invalid();
+          // A tool mutation is sent once. _json has no retry loop; marking the
+          // error nonretryable also prevents callers treating it as a reconnect.
+          try { return await this._json(ctx, `${ctx.route}/runs/${run.id}/automations/tools`, { name, arguments: args, callId: call.callId }, { token: run.relayToken, signal: AbortSignal.any([ctx.controller.signal, run.controller.signal, call.signal]), limit: 256 * 1024 }); }
+          catch (error) { error.retryable = false; throw error; }
+        },
+      }) : ctx.tools;
+      run.bridge = this.bridgeFactory({ dataDir: ctx.directory, workspaceRoot: path.join(ctx.directory, 'workspace'), config, desktopTools });
       this._assert(ctx); run.controller.signal.throwIfAborted();
       result = await run.bridge.run({ conversationId: command.conversationId, prompt: command.prompt, threadId: command.threadId,
         ...(command.projectDirectory ? { projectDirectory: command.projectDirectory, projectAccess: command.projectAccess } : {}),

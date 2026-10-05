@@ -54,10 +54,16 @@ export function createTaskNotificationController({native,session,register,revoke
       const state=await refreshState(controller.signal);assertCurrent(scope,revision);
       if(state?.instanceId!==scope.instanceId||state?.user?.id!==scope.userId)throw sessionError();
       const summary=state.conversations?.find(item=>item.id===navigation.conversationId);
-      if(!summary)throw Object.assign(new Error('这个任务对话已删除，或不属于当前账号。'),{terminal:true});
-      const conversation=await fetchConversation(navigation.conversationId,controller.signal);assertCurrent(scope,revision);
-      if(conversation?.id!==navigation.conversationId||conversation.mode!==summary.mode||!['chat','codex'].includes(conversation.mode))throw Object.assign(new Error('任务对话身份不一致。'),{terminal:true});
+      let conversation;
+      try{conversation=await fetchConversation(navigation.conversationId,controller.signal);}
+      catch(error){if([403,404,410].includes(error?.status))throw Object.assign(new Error('这个任务对话已删除，或不属于当前账号。'),{terminal:true});throw error;}
+      assertCurrent(scope,revision);
+      if(conversation?.id!==navigation.conversationId||summary&&conversation.mode!==summary.mode||!['chat','codex'].includes(conversation?.mode))throw Object.assign(new Error('任务对话身份不一致。'),{terminal:true});
       if(navigation.source==='agent'&&(conversation.mode!=='codex'||navigation.agentConversationId!==conversation.id)||navigation.source==='chat-agent'&&conversation.mode!=='chat')throw Object.assign(new Error('任务通知与对话类型不一致。'),{terminal:true});
+      // Registered automation results are deliberately omitted from recent history.
+      // The authenticated exact read proves ownership; only a real finished run
+      // matching this notification may use that narrow exception.
+      if(!summary&&(!safeId(conversation.automationId)||navigation.source!=='agent'||conversation.agent?.run?.id!==navigation.runId||!['completed','error'].includes(conversation.agent?.run?.status)))throw Object.assign(new Error('自动化通知没有匹配的已结束任务。'),{terminal:true});
       pending=null;
       publish({error:'',navigation:{...navigation,epoch:scope.epoch,instanceId:scope.instanceId,userId:scope.userId,conversation,state}});
     })().catch(error=>{
