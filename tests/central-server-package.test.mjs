@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { COMPUTER_USE_RUNTIME_FILES, COMPUTER_USE_PACKAGE } from '../scripts/computer-use-package.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../', import.meta.url)));
 const centralFiles = ['desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs'];
@@ -49,7 +50,7 @@ test('Windows readback hashes every central module and rejects an absent or modi
   const source = new Map(await Promise.all(centralFiles.map(async file => [file, await readFile(new URL('../' + file, import.meta.url))])));
   for (const file of centralFiles) assert.ok(required.includes(file), `Windows native byte comparison omits ${file}`);
   function harness(packed) {
-    const context = vm.createContext({ assert, path, root, Buffer, digest, relative: value => value,
+    const context = vm.createContext({ assert, path, root, Buffer, digest, relative: value => value, COMPUTER_USE_RUNTIME_FILES, COMPUTER_USE_PACKAGE,
       packedBytes: file => { if (!packed.has(file)) throw new Error(`Missing fixture ASAR member: ${file}`); return packed.get(file); },
       transform: async () => null, readFile: async file => source.get(path.relative(root, file).split(path.sep).join('/')),
       files: [], compared: new Set() });

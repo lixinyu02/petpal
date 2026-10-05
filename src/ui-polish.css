@@ -148,6 +148,19 @@ html:not([data-theme="night"]) .app-shell .mode-switch>button[aria-pressed="true
 .login-page .login-note{font-size:11px;line-height:1.8}
 .modal{border-radius:18px}
 .modal :is(.primary-button,.secondary-button,.danger-button){border-radius:11px}
+/* Keep dialogs inside the visible screen when a software keyboard reduces it. */
+.modal-backdrop{
+  inset:auto;top:var(--app-viewport-top,0px);left:var(--app-viewport-left,0px);
+  width:var(--app-viewport-width,100vw);height:var(--app-viewport-height,100dvh);
+}
+.modal-backdrop .modal{max-height:100%;max-width:100%;min-height:0;min-width:0}
+/* The full navigation must remain reachable even on a short desktop window. */
+.app-shell .sidebar{overflow-y:auto;overscroll-behavior:contain}
+@media(max-width:960px){
+  .app-shell .sidebar{
+    top:var(--app-viewport-top,0px);bottom:auto;height:var(--app-viewport-height,100dvh);
+  }
+}
 
 .downloads-view .downloads-heading h2{font-weight:550;letter-spacing:-.45px;line-height:1.5}
 .downloads-view :is(.downloads-heading p,.downloads-install,.downloads-footer p){line-height:1.85;color:var(--ui-polish-muted)}

@@ -25,7 +25,7 @@ const nodes=tree=>Array.isArray(tree)?tree.flatMap(nodes):!tree||typeof tree!=='
 const text=tree=>Array.isArray(tree)?tree.map(text).join(''):tree==null||typeof tree==='boolean'?'':typeof tree!=='object'?String(tree):text(tree.props?.children);
 
 /** Mount App itself and execute its real effects/handlers. Child UIs and network are isolated. */
-function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false}={}){
+function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],search='?chat=1',failAgentSubmit=false}={}){
   const permissions={access:'read-only',approval:'ask'},identity={instanceId:'fixture-service',userId:'fixture-user'};
   const state={instanceId:identity.instanceId,user:{id:identity.userId,username:'fixture',displayName:'Fixture',isOwner:false,canUseCodex,agentAccess:canUseCodex?'full':'none'},
     settings:{petName:'Fixture companion',persona:'Fixture',companionKind:'anime',defaultProviderId:'model'},
@@ -33,7 +33,8 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
   const hosts=[{id:'central',name:'Fixture server',kind:'central',platform:'linux',online:true},
     {id:'pc-one',name:'Fixture PC one',kind:'desktop',platform:'win32',online:true,codex:{available:true}},
     {id:'pc-two',name:'Fixture PC two',kind:'desktop',platform:'linux',online:true,codex:{available:true}}];
-  const hooks=[],effects=[],timers=new Map(),calls=[],requests=[],streams=[],navigations=[],backendConversations=[],window=new EventTarget(),document=new EventTarget();
+  const hooks=[],effects=[],timers=new Map(),calls=[],requests=[],streams=[],navigations=[],backendConversations=[...initialConversations],window=new EventTarget(),document=new EventTarget();
+  let notificationSnapshot={navigation:null},notificationTakes=0;
   let index=0,tree,timerId=0,getterReads=0;
   Object.assign(window,{matchMedia:query=>({matches:query==='(pointer: coarse)'&&touch,addEventListener(){},removeEventListener(){}})});
   if(desktop)window.petpal={};
@@ -60,6 +61,8 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
         const body=JSON.parse(options.body),conversation={id:`fixture-chat-${backendConversations.length+1}`,mode:body.mode,providerId:body.providerId,title:'Fixture chat',messages:[]};
         backendConversations.push(conversation);return conversation;
       }
+      if(/^\/conversations\/[^/]+$/.test(path)&&!options.method){const conversation=backendConversations.find(item=>item.id===path.split('/')[2]);assert.ok(conversation);return conversation;}
+      if(path.endsWith('/agent/submit')&&failAgentSubmit)throw Error('Fixture lost the submission acknowledgement');
       throw Error(`Unexpected API call: ${path}`);
     },
     streamMessage:async(id,content,signal,onEvent,attachmentIds,assistant)=>{
@@ -79,7 +82,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
       onEvent({type:'meta',data:{}});onEvent({type:'done',data:{conversation:completed}});
     },
   };
-  const attachments={items:[...attachmentItems],uploading:attachmentUploading,error:'',clear(){attachments.items=[];},inputRef:{current:null}};
+  const attachments={items:[...attachmentItems],uploading:attachmentUploading,error:'',clearCount:0,clear(){attachments.items=[];attachments.uploading=false;attachments.clearCount++;},inputRef:{current:null}};
   const speech={enabled:false,playing:false,active:false,pending:false,supported:false,stop(){},prepare(){},speak(){},speakIfEnabled(){}};
   const modules={
     react,'react/jsx-runtime':{jsx:element,jsxs:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
@@ -94,12 +97,12 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     './auth/LoginGate':{ConnectionDialog:Symbol('ConnectionDialog')},'./avatar/preference':{useCompanion:()=>['anime'],hydrateCompanion:async()=>{},readCompanion:()=> 'anime'},
     './avatar/useSpeech':{useSpeech:()=>speech},'./platform/overlay':{PetOverlay:{},showPet(){}},
     './browser-setup-draft.mjs':{createBrowserSetupDraft},'./platform/computer-use':{nativeComputerUse:()=>undefined},'./platform/music-mcp':{nativeMusicMcp:()=>undefined},
-    './platform/task-notification-session':{taskNotificationSession:{subscribe(){},snapshot:()=>({navigation:null}),takeNavigation(){}}},'./desktop-settings.mjs':{reasoningEfforts},
+    './platform/task-notification-session':{taskNotificationSession:{subscribe(){},snapshot:()=>notificationSnapshot,takeNavigation(){notificationTakes++;const previous=notificationSnapshot.navigation;notificationSnapshot={navigation:null};return previous;}}},'./desktop-settings.mjs':{reasoningEfforts},
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
   };
   for(const name of ['DownloadsView','BrandMark','CompanionOptions','ChatMessages','ConversationHistory','AgentQueue','UpdatesSettings','CatV2','WorkspaceDisclosure','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','ClientBehaviorSettings'])modules[`./${name}`]=component(name);
   const module={exports:{}},context={module,exports:module.exports,require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);return modules[name];},
-    window,document,location:{search:'?chat=1',origin:'https://fixture.invalid',assign:path=>navigations.push(path)},URL,URLSearchParams,AbortController,DOMException,
+    window,document,location:{search,origin:'https://fixture.invalid',assign:path=>navigations.push(path)},URL,URLSearchParams,AbortController,DOMException,crypto:{randomUUID:()=>`fixture-submission-${requests.length}`},
     setTimeout(callback){const id=++timerId;timers.set(id,callback);return id;},clearTimeout:id=>timers.delete(id)};
   Object.defineProperty(context,'localStorage',{get:readStorage});
   // Execute the actual hook bridge without a documentElement, preserving the off path.
@@ -113,6 +116,24 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
   return{find,calls,requests,streams,navigations,attachments,get getterReads(){return getterReads;},text:()=>text(tree),
     ready:async()=>{for(let attempt=0;attempt<3;attempt++){await flush();render();}},
     enterAgent(){find('button',props=>props['aria-label']==='Agent 执行任务').props.onClick();render();},
+    enterChat(){find('button',props=>props['aria-label']==='Chat 聊天').props.onClick();render();},
+    newChat(){find('button',props=>props.className==='new-chat').props.onClick();render();},
+    brand(){find('a',props=>props.className==='brand').props.onClick({preventDefault(){}});render();},
+    selectHistory(id){find(modules['./ConversationHistory'].default).props.onSelect(id);render();},
+    get selectedId(){return find(modules['./ConversationHistory'].default)?.props.selectedId;},
+    queueNew(){find(modules['./AgentQueue'].default).props.onNewConversation();render();},
+    clickHome(properties={},className='single-companion-return'){
+      let prevented=false;
+      find('a',props=>props.className===className).props.onClick({button:0,defaultPrevented:false,metaKey:false,ctrlKey:false,shiftKey:false,altKey:false,...properties,preventDefault(){prevented=true;}});
+      render();return prevented;
+    },
+    confirm(){find('button',props=>text(props.children)==='丢弃并切换').props.onClick();render();},
+    cancel(){find('button',props=>text(props.children)==='继续编辑').props.onClick();render();},
+    suggestion(label){find('button',props=>text(props.children)===label).props.onClick();render();},
+    prepareBrowser(){nodes(tree).find(node=>typeof node.props?.onPrepareBrowser==='function').props.onPrepareBrowser();render();},
+    setAttachments(items=[],uploading=false){attachments.items=[...items];attachments.uploading=uploading;render();},
+    notify(conversation){notificationSnapshot={navigation:{epoch:1,...identity,state:{...state,conversations:[...backendConversations,conversation]},conversation}};render();},
+    get notificationTakes(){return notificationTakes;},
     selectedHost:()=>find(controls.ExecutionTarget)?.props.value,
     chooseHost(id){find(controls.ExecutionTarget).props.onChange(id);render();},
     typeDraft(value){find('textarea',props=>props['aria-label']==='消息').props.onChange({target:{value}});render();},
@@ -252,4 +273,119 @@ test('App workspace back respects an outer layer and only an empty idle Chat may
   assert.equal(f.back(),true);assert.deepEqual(f.navigations,['/']);
   assert.equal(f.requests.length,before);assert.equal(f.streams.length,0);
   assert.ok(f.requests.every(item=>item.method==='GET'));
+});
+
+const savedChat=id=>({id,mode:'chat',providerId:'model',title:`Saved ${id}`,messages:[]});
+const draftImage={id:'draft-image',name:'draft.png',type:'image/png'};
+for(const destination of['mode','new','history','home']){
+  for(const input of['text','image','upload']){
+    test(`App ${destination} navigation confirms before discarding unsent ${input}`,async t=>{
+      const f=workspaceFixture({canUseCodex:true,initialConversations:[savedChat('old'),savedChat('other')],search:'?chat=1&conversation=old',
+        ...(input==='image'?{attachmentItems:[draftImage]}:{}),...(input==='upload'?{attachmentUploading:true}:{})});
+      t.after(()=>f.close());await f.ready();if(input==='text')f.typeDraft('需要保留的输入');
+      const navigate=()=>destination==='mode'?f.enterAgent():destination==='new'?f.newChat():destination==='history'?f.selectHistory('other'):f.clickHome();
+      navigate();assert.equal(f.selectedId,'old');assert.deepEqual(f.navigations,[]);assert.equal(f.attachments.clearCount,0);
+      assert.ok(f.find('section',props=>props['aria-labelledby']==='draft-navigation-title'),'use the shared modal layer');
+      assert.equal(f.find('button',props=>text(props.children)==='继续编辑').props['data-ui-dismiss'],'dialog');
+      f.cancel();assert.equal(f.selectedId,'old');assert.equal(f.attachments.clearCount,0);assert.deepEqual(f.navigations,[]);
+      if(input==='text')assert.equal(f.find('textarea').props.value,'需要保留的输入');
+      if(input==='image')assert.deepEqual(f.attachments.items,[draftImage]);
+      if(input==='upload')assert.equal(f.attachments.uploading,true);
+      navigate();f.confirm();assert.equal(f.find('button',props=>text(props.children)==='继续编辑'),undefined);
+      assert.equal(f.find('textarea').props.value,'');assert.deepEqual(f.attachments.items,[]);assert.equal(f.attachments.uploading,false);
+      assert.equal(f.attachments.clearCount,1,'accepted discard must cancel/clear attachments once');
+      assert.equal(f.selectedId,destination==='history'?'other':destination==='home'?'old':null);
+      assert.deepEqual(f.navigations,destination==='home'?['/']:[]);
+      assert.equal(f.find('button',props=>props['aria-label']==='Agent 执行任务').props['aria-pressed'],destination==='mode');
+      assert.ok(f.requests.every(item=>item.method==='GET'),'navigation must never send the draft or start an Agent task');assert.equal(f.streams.length,0);
+    });
+  }
+}
+
+test('App same conversation and same mode preserve a draft without an unnecessary confirmation',async t=>{
+  const f=workspaceFixture({initialConversations:[savedChat('old')],search:'?chat=1&conversation=old',attachmentItems:[draftImage]});
+  t.after(()=>f.close());await f.ready();f.typeDraft('同一个会话');f.selectHistory('old');f.enterChat();
+  assert.equal(f.selectedId,'old');assert.equal(f.find('textarea').props.value,'同一个会话');assert.deepEqual(f.attachments.items,[draftImage]);
+  assert.equal(f.find('button',props=>text(props.children)==='继续编辑'),undefined);assert.equal(f.attachments.clearCount,0);
+});
+
+for(const className of['single-companion-return','motion-preview-link']){
+  test(`App ${className} preserves normal confirmation and modified new-tab clicks`,async t=>{
+    const f=workspaceFixture();t.after(()=>f.close());await f.ready();f.typeDraft('当前标签页的草稿');
+    for(const properties of[{ctrlKey:true},{metaKey:true},{shiftKey:true},{altKey:true},{button:1},{defaultPrevented:true}]){
+      assert.equal(f.clickHome(properties,className),false,'preserve native new-tab and already-handled clicks');
+      assert.equal(f.find('button',props=>text(props.children)==='继续编辑'),undefined);
+    }
+    assert.equal(f.find('textarea').props.value,'当前标签页的草稿');assert.deepEqual(f.navigations,[]);
+    assert.equal(f.clickHome({},className),true);assert.ok(f.find('button',props=>text(props.children)==='继续编辑'));
+  });
+}
+
+for(const action of['mode','new','history','home']){
+  test(`App ${action} navigation cannot interrupt a healthy Chat stream`,async t=>{
+    const f=workspaceFixture({canUseCodex:true,holdStream:true,initialConversations:[savedChat('other')]});
+    t.after(()=>f.close());await f.ready();f.typeDraft('正在回复');f.keyDown();await f.ready();const selected=f.selectedId;
+    if(action==='mode')f.enterAgent();else if(action==='new')f.newChat();else if(action==='history')f.selectHistory('other');else f.clickHome();
+    assert.equal(f.selectedId,selected);assert.equal(f.streams[0].signal.aborted,false);assert.deepEqual(f.navigations,[]);
+    assert.equal(f.find('button',props=>text(props.children)==='继续编辑'),undefined);
+    assert.deepEqual(f.requests.filter(item=>item.method==='POST').map(item=>item.path),['/conversations']);
+  });
+}
+
+test('App discard confirmation rechecks a Chat submission started before its next render',async t=>{
+  const f=workspaceFixture({canUseCodex:true,holdStream:true});t.after(()=>f.close());await f.ready();f.typeDraft('仍然在提交中的消息');f.enterAgent();
+  // Exercise a race directly through App handlers; the real modal also makes the composer inert.
+  f.keyDown();await f.ready();assert.equal(f.find('button',props=>text(props.children)==='丢弃并切换').props.disabled,true);f.confirm();
+  assert.equal(f.find('button',props=>props['aria-label']==='Chat 聊天').props['aria-pressed'],true);
+  assert.equal(f.streams[0].signal.aborted,false);assert.deepEqual(f.navigations,[]);assert.equal(f.attachments.clearCount,0);
+});
+
+test('App discard confirmation cannot bypass an unconfirmed Agent submission',async t=>{
+  const f=workspaceFixture({canUseCodex:true,failAgentSubmit:true});t.after(()=>f.close());await f.ready();f.enterAgent();await f.ready();
+  f.typeDraft('需要确认的任务');f.newChat();f.keyDown();await f.ready();
+  assert.match(f.text(),/上次提交正在等待确认/);assert.equal(f.find('button',props=>text(props.children)==='丢弃并切换').props.disabled,true);
+  const selected=f.selectedId;f.confirm();assert.equal(f.selectedId,selected);assert.equal(f.find('textarea').props.value,'需要确认的任务');
+  assert.equal(f.attachments.clearCount,1,'only the initial empty mode switch clears attachments');
+  assert.equal(f.requests.filter(item=>item.path.endsWith('/agent/submit')).length,1,'confirmation must not create another task');
+});
+
+for(const input of['text','image','upload']){
+  test(`App task-result notification waits for ${input} editing and opens once without sending`,async t=>{
+    const f=workspaceFixture({canUseCodex:true,...(input==='image'?{attachmentItems:[draftImage]}:{}),...(input==='upload'?{attachmentUploading:true}:{})});
+    t.after(()=>f.close());await f.ready();if(input==='text')f.typeDraft('没有发送的消息');f.notify(savedChat('notification-only'));await f.ready();
+    assert.equal(f.notificationTakes,0);assert.equal(f.selectedId,null);assert.equal(f.streams.length,0);
+    if(input==='text')f.typeDraft('');else f.setAttachments();await f.ready();
+    assert.equal(f.notificationTakes,1);assert.equal(f.selectedId,'notification-only','select the fresh notification conversation before its snapshot was present');
+    await f.ready();assert.equal(f.notificationTakes,1);assert.ok(f.requests.every(item=>item.method==='GET'));
+  });
+}
+
+test('App task-result notification remains pending during a discard dialog',async t=>{
+  const f=workspaceFixture({canUseCodex:true,holdStream:true});t.after(()=>f.close());await f.ready();f.typeDraft('输入');f.newChat();f.typeDraft('');
+  f.notify(savedChat('notification-only'));await f.ready();assert.equal(f.notificationTakes,0);assert.equal(f.selectedId,null);
+  f.cancel();await f.ready();assert.equal(f.notificationTakes,1);assert.equal(f.selectedId,'notification-only');
+});
+
+test('App task-result notification stays pending until an in-progress Chat stream finishes',async t=>{
+  const f=workspaceFixture({holdStream:true});t.after(()=>f.close());await f.ready();f.typeDraft('先完成当前回复');f.keyDown();await f.ready();
+  const selected=f.selectedId;f.notify(savedChat('notification-only'));await f.ready();assert.equal(f.notificationTakes,0);assert.equal(f.selectedId,selected);
+  f.streams[0].complete();await f.ready();f.typeDraft('');await f.ready();
+  assert.equal(f.notificationTakes,1);assert.equal(f.selectedId,'notification-only');assert.equal(f.streams.length,1);
+  assert.equal(f.requests.filter(item=>item.method==='POST').length,1,'receiving a result must not send a new message');
+});
+
+test('App brand and Agent queue new-conversation callsites use the same discard protection',async t=>{
+  const f=workspaceFixture({canUseCodex:true,initialConversations:[{id:'agent-old',mode:'codex',title:'Agent',messages:[],agent:{revision:0,queue:[],approvals:[],submissions:[]}}],search:'?chat=1&conversation=agent-old'});
+  t.after(()=>f.close());await f.ready();f.typeDraft('队列草稿');f.queueNew();assert.ok(f.find('button',props=>text(props.children)==='继续编辑'));
+  f.cancel();assert.equal(f.selectedId,'agent-old');f.brand();assert.ok(f.find('button',props=>text(props.children)==='继续编辑'));
+  f.confirm();assert.equal(f.selectedId,null);assert.equal(f.find('button',props=>props['aria-label']==='Chat 聊天').props['aria-pressed'],true);
+  assert.equal(f.find('textarea').props.value,'');assert.ok(f.requests.every(item=>item.method==='GET'));
+});
+
+test('App browser preparation and welcome suggestions still create editable drafts without submitting them',async t=>{
+  const f=workspaceFixture({canUseCodex:true});t.after(()=>f.close());await f.ready();f.enterAgent();await f.ready();f.openView('连接与设置');f.prepareBrowser();
+  assert.match(f.find('textarea').props.value,/浏览器/);assert.equal(f.find('button',props=>text(props.children)==='继续编辑'),undefined);
+  assert.equal(f.find('button',props=>props['aria-label']==='Agent 执行任务').props['aria-pressed'],true);
+  f.suggestion('查询网站信息');assert.match(f.find('textarea').props.value,/OpenCLI/);assert.equal(f.streams.length,0);
+  assert.ok(f.requests.every(item=>item.method==='GET'),'preparing a browser is still a user-reviewed draft');
 });

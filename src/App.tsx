@@ -18,7 +18,7 @@ import { executionHostLock, readExecutionHost, resolveExecutionHostId, saveExecu
 import { useAttachments, AttachmentInput, AttachmentDrafts, MessageImages } from './Attachments';
 import './workspace.css';
 import { ConnectionDialog } from './auth/LoginGate';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type MouseEvent } from 'react';
 import { ArrowDown, ArrowRight, ArrowUp, ArrowUpRight, AudioLines, Download, ListOrdered, CornerDownRight, Check, ChevronDown, CircleHelp, Code2, Coffee, Globe2, History, Link2, Loader2, Menu, MessageCircle, Monitor, MoreHorizontal, PawPrint, Pencil, Plug, Plus, RefreshCw, Settings2, ShieldCheck, Sparkles, Square, Sun, Terminal, Trash2, Unplug, UserRound, Volume2, X } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { PetOverlay as Overlay, showPet } from './platform/overlay';
@@ -56,6 +56,7 @@ const settingsLoading = <div className="loading-view" role="status"><Loader2 cla
 
 const emptyState: State = { settings: { petName: '小伴', companionKind: 'anime', persona: '你是用户温柔、机灵的个人 AI 伙伴。用自然简洁的中文回应，认真倾听；不知道的事情坦诚说明。' }, providers: [], conversations: [], codex: {} };
 type Approval = { id: string; kind: string; description: string };
+type PendingNavigation = {kind:'new';mode:'chat'|'codex'} | {kind:'conversation';id:string} | {kind:'home'};
 const dateFormatter=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric'});
 function browserStorage():Storage|undefined{try{return window.localStorage;}catch{return undefined;}}
 
@@ -104,6 +105,7 @@ export default function App() {
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const [responsePerformance, setResponsePerformance] = useState<PerformanceInput>({ utteranceId: '', text: '', phase: 'idle' });
   const voiceScope = state.instanceId && state.user ? `${state.instanceId}:${state.user.id}` : `guest:${getConnection().url || location.origin}`;
   const speech = useSpeech(view === 'chat' && !connectionOpen && mood !== 'sleep', voiceScope);
@@ -242,11 +244,12 @@ export default function App() {
     const target=taskNotifications.navigation,identity=getIdentity();
     if(!ready||!target||target.epoch!==accountEpoch||getSessionEpoch()!==accountEpoch||target.instanceId!==identity?.instanceId||target.userId!==identity?.userId)return;
     if(busy||agentRunning||agentSubmitting||unconfirmed||switchingModel){setNotice('收到任务结果，当前回复结束后打开。');return;}
+    if(draft.trim()||attachments.items.length||attachments.uploading||pendingNavigation){setNotice('收到任务结果，输入内容已保留，完成编辑后再打开。');return;}
     taskNotificationSession.takeNavigation();
     // Notification snapshots may wait while a reply runs; keep this page's default.
     setState(previous=>({...target.state,settings:{...target.state.settings,chatAssistantHostId:previous.settings.chatAssistantHostId},conversations:target.state.conversations.map(item=>item.id===target.conversation.id?target.conversation:item)}));
     historySelection.current.select(target.conversation);setView('chat');setMobileNav(false);setNotice('已打开任务结果。');
-  },[taskNotifications.navigation,accountEpoch,ready,busy,agentRunning,agentSubmitting,unconfirmed,switchingModel]);
+  },[taskNotifications.navigation,accountEpoch,ready,busy,agentRunning,agentSubmitting,unconfirmed,switchingModel,draft,attachments.items.length,attachments.uploading,pendingNavigation]);
   useEffect(()=>{if(companionPanelOpen)setCompanionPanelMounted(true);},[companionPanelOpen]);
   useEffect(()=>watchCompanionBreakpoint(window.matchMedia('(max-width: 960px)'),()=>setCompanionPanelMounted(true)),[]);
   useEffect(() => {
@@ -261,13 +264,11 @@ export default function App() {
       if (event.defaultPrevented) return;
       event.preventDefault();
       if (view !== 'chat') { setView('chat'); setMobileNav(false); return; }
-      if (busy || agentSubmitting || unconfirmed || switchingModel) { setNotice('请先完成或停止当前回复，再返回伙伴主页。'); return; }
-      if (draft.trim() || attachments.items.length || attachments.uploading) { setNotice('输入内容已保留，请先发送或清空后再返回伙伴主页。'); return; }
-      stopPresentation(); location.assign('/');
+      requestNavigation({kind:'home'});
     };
     window.addEventListener('petpal:workspace-back', back);
     return () => window.removeEventListener('petpal:workspace-back', back);
-  }, [view, busy, agentSubmitting, unconfirmed, switchingModel, draft, attachments.items.length, attachments.uploading, stopPresentation]);
+  }, [view, busy, agentRunning, agentSubmitting, unconfirmed, switchingModel, draft, attachments.items.length, attachments.uploading, stopPresentation]);
 
   function companionState(next: PetBehaviorState) {
     awakeRef.current = next.action !== 'sleep';
@@ -278,17 +279,50 @@ export default function App() {
   function companionInteract(next: PetInteraction) {
     if (next === 'sleep') { awakeRef.current = false; stopPresentation(); }
   }
-  function newChat(nextMode = mode) {
-    if (switchingModelRef.current) { setNotice('正在切换模型，请稍候。'); return; }
-    if (busyRef.current||agentRunning||agentSendLock.current||unconfirmed) { setNotice('先停止当前回复，再开启新对话。'); return; }
+  function navigationBlocked(target:PendingNavigation) {
+    if (switchingModelRef.current) { setNotice('正在切换模型，请稍候。'); return true; }
+    if (busyRef.current||agentRunning||agentSendLock.current||agentSubmitting||unconfirmed) {
+      setNotice(target.kind==='home'?'请先完成或停止当前回复，再返回伙伴主页。':target.kind==='new'?'先停止当前回复，再开启新对话。':'当前对话正在回复，请完成或停止后切换。');return true;
+    }
+    return false;
+  }
+  function requestNavigation(target:PendingNavigation) {
+    if(navigationBlocked(target))return;
+    if(draftRef.current.trim()||attachmentsRef.current.items.length||attachmentsRef.current.uploading){setPendingNavigation(target);return;}
+    performNavigation(target);
+  }
+  function performNavigation(target:PendingNavigation) {
+    if(target.kind==='new'){startNewChat(target.mode);return;}
+    if(target.kind==='conversation'){
+      const next=state.conversations.find(item=>item.id===target.id);
+      if(!next){setNotice('这段对话已不可用，输入内容仍已保留。');return;}
+      switchConversation(next);return;
+    }
+    stopPresentation();attachmentsRef.current.clear();setDraft('');location.assign('/');
+  }
+  function confirmNavigation() {
+    if(!pendingNavigation||navigationBlocked(pendingNavigation))return;
+    performNavigation(pendingNavigation);setPendingNavigation(null);
+  }
+  function homeClick(event:MouseEvent<HTMLAnchorElement>) {
+    if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
+    event.preventDefault();requestNavigation({kind:'home'});
+  }
+  function newChat(nextMode = mode) {requestNavigation({kind:'new',mode:nextMode});}
+  function startNewChat(nextMode:'chat'|'codex') {
     stopPresentation();
     attachments.clear();setPermissions({...defaultAgentPermissions});setAgentProviderId(state.user?.isOwner?'':state.codex.eligibleProviderIds?.[0]||'');agentSubmissionRef.current=null;
     setSelected(null); setMode(nextMode === 'codex' && !state.user?.canUseCodex ? 'chat' : nextMode); setProviderId(state.settings.defaultProviderId || state.providers[0]?.id || ''); setView('chat'); setDraft(''); setError(''); setMobileNav(false); setApprovals([]);
   }
   function selectChat(c: Conversation) {
     if(c.id===selected){setView('chat');setMobileNav(false);return;}
-    if (switchingModelRef.current) { setNotice('正在切换模型，请稍候。'); return; }
-    if (busyRef.current||agentRunning||agentSendLock.current||unconfirmed) { setNotice('当前对话正在回复，请完成或停止后切换。'); return; }
+    const target:PendingNavigation={kind:'conversation',id:c.id};
+    if(navigationBlocked(target))return;
+    if(draftRef.current.trim()||attachmentsRef.current.items.length||attachmentsRef.current.uploading){setPendingNavigation(target);return;}
+    // A notification may supply a conversation before its state snapshot is rendered.
+    switchConversation(c);
+  }
+  function switchConversation(c:Conversation) {
     stopPresentation();
     attachments.clear();setDraft('');agentSubmissionRef.current=null;setAgentProviderId(c.agent?.run?.providerId || (state.user?.isOwner?'':state.codex.eligibleProviderIds?.[0]||''));setPermissions(c.agent?.run?.permissions||{...defaultAgentPermissions});
     if(c.mode==='codex')setAgentHostId(c.agent?.run?.hostId||c.agentHostId||c.threadHostId||'central');
@@ -521,6 +555,7 @@ export default function App() {
   const toastEntrance = useUiEntrance<HTMLDivElement>(notice, !!notice);
   const navigationEntrance = useUiEntrance<HTMLButtonElement>('navigation', mobileNav);
   const deleteEntrance = useUiEntrance<HTMLDivElement>(deleting || '', !!deleting);
+  const pendingNavigationEntrance = useUiEntrance<HTMLDivElement>(pendingNavigation?.kind || '', !!pendingNavigation);
 
   if (petOnly) return <div className="floating-pet"><div className="pet-drag-handle" title="拖动小猫">•••</div><button className="floating-bubble" onClick={() => window.petpal?.showMain()}>{busy ? '我在认真工作…' : `${state.settings.petName}在这里，点我聊聊`}<MessageCircle size={15} aria-hidden="true"/></button><div className="floating-cat"><Cat onState={companionState} onInteract={companionInteract}/></div><button className="floating-hide" aria-label="隐藏桌宠" onClick={() => window.petpal?.hidePet()}><X size={15} aria-hidden="true"/></button></div>;
 
@@ -541,7 +576,7 @@ export default function App() {
     </aside>
 
     <main className="main-area">
-      <header className="topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileNav(true)}><Menu size={21} aria-hidden="true"/></button><span className="breadcrumb">我的空间</span><span className="breadcrumb-divider">/</span><strong ref={titleEntrance} className="ui-title-enter">{view === 'settings' ? '连接与设置' : view==='downloads'?'下载客户端':currentMode === 'codex' ? 'Agent · 执行任务' : 'Chat · 聊天'}</strong></div><div className="topbar-actions">{view === 'chat' && <button type="button" className="companion-panel-toggle" aria-label={companionPanelOpen ? '收起伙伴栏' : '展开伙伴栏'} aria-expanded={companionPanelOpen} aria-controls="workspace-companion-panel" onClick={() => setCompanionPanelOpen(value => !value)}><PawPrint size={16} aria-hidden="true"/><span>{companionPanelOpen ? '收起伙伴' : '伙伴'}</span></button>}<span className="today">{todayLabel}</span><button className="avatar account-entry" aria-label="我的账号" onClick={() => { stopPresentation(); setSettingsTab('accounts'); setView('settings'); }}>{state.user?.displayName?.slice(0,1) || '我'}</button><a className="single-companion-return" href="/" aria-label="回到伙伴身边"><PawPrint size={20} aria-hidden="true"/></a></div></header>
+      <header className="topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileNav(true)}><Menu size={21} aria-hidden="true"/></button><span className="breadcrumb">我的空间</span><span className="breadcrumb-divider">/</span><strong ref={titleEntrance} className="ui-title-enter">{view === 'settings' ? '连接与设置' : view==='downloads'?'下载客户端':currentMode === 'codex' ? 'Agent · 执行任务' : 'Chat · 聊天'}</strong></div><div className="topbar-actions">{view === 'chat' && <button type="button" className="companion-panel-toggle" aria-label={companionPanelOpen ? '收起伙伴栏' : '展开伙伴栏'} aria-expanded={companionPanelOpen} aria-controls="workspace-companion-panel" onClick={() => setCompanionPanelOpen(value => !value)}><PawPrint size={16} aria-hidden="true"/><span>{companionPanelOpen ? '收起伙伴' : '伙伴'}</span></button>}<span className="today">{todayLabel}</span><button className="avatar account-entry" aria-label="我的账号" onClick={() => { stopPresentation(); setSettingsTab('accounts'); setView('settings'); }}>{state.user?.displayName?.slice(0,1) || '我'}</button><a className="single-companion-return" href="/" onClick={homeClick} aria-label="回到伙伴身边"><PawPrint size={20} aria-hidden="true"/></a></div></header>
       {!ready ? <div className="loading-view"><Loader2 className="spin" aria-hidden="true"/>正在准备你的小伴…</div> : view==='downloads'?<Suspense fallback={<div className="loading-view" role="status"><Loader2 className="spin" aria-hidden="true"/>正在打开下载页面…</div>}><DownloadsView/></Suspense>:view === 'settings' ? <SettingsView state={state} connected={connected} refresh={refresh} notice={setNotice} connect={() => setConnectionOpen(true)} initialTab={settingsTab} hasDraft={!!draft.trim()||!!attachments.items.length||working} onDownload={()=>setView('downloads')} onPrepareBrowser={prepareBrowser} prepareBrowserDisabled={working||hostBusy||hostsLoading||!state.user?.canUseCodex||!!draft.trim()||!!attachments.items.length||!!unconfirmed}/> : <div className={`workspace${companionPanelOpen ? ' workspace-companion-visible' : ''}`}>
         <section className="chat-area">
           <div className={`workspace-controls is-${currentMode==='chat'?'chat':'agent'}`}>
@@ -583,11 +618,12 @@ export default function App() {
           </div>
 
         </section>
-        <aside className="pet-panel" id="workspace-companion-panel"><div className="pet-panel-heading"><span>你的小伙伴</span><span className="live-tag"><span/>{mood === 'sleep' ? '打盹中' : speech.active ? '朗读中' : responsePerformance.phase === 'speaking' ? '回应中' : working ? '思考中' : '在你身边'}</span></div><div className="pet-scene"><div className="scene-circle"/><svg className="scene-leaf" viewBox="0 0 90 120" aria-hidden="true"><path d="M42 118V44m0 50C3 85 8 54 42 75m0-9c33-6 40-31 8-28m-8 4C17 32 24 5 42 15" fill="#b7c8a5" stroke="#9bad8a" strokeWidth="2"/><path d="M26 100h34l-5 20H31z" fill="#d9cbb5" stroke="none"/></svg><div className="pet-touch">{companionPanelMounted&&<Cat performanceInput={performanceInput} onState={companionState} onInteract={companionInteract}/>}</div><div className="scene-floor"/></div><div className="pet-name"><h2>{state.settings.petName}</h2><span>{companionKind === 'anime' ? '温柔的二次元伙伴' : '一只喜欢陪着你的小猫'}</span></div><div className="pet-speech">{mood !== 'sleep' && working ? '让我想一想，马上就好…' : petSay}</div><p className="pet-interaction-hint">轻触回应 · 长按休息</p><a className="motion-preview-link" href="/">回到伙伴身边 <ArrowUpRight size={16} aria-hidden="true"/></a><div className="pet-panel-bottom"><div className="quiet-note"><Sparkles size={16} aria-hidden="true"/><p>不用每一刻都很有生产力。<br/>有我陪着，发会儿呆也很好。</p></div>{window.petpal ? <button className="desktop-pet-button" onClick={() => window.petpal?.showPet()}><Monitor size={16} aria-hidden="true"/>放到桌面上<ArrowUpRight size={16} aria-hidden="true"/></button> : Capacitor.isNativePlatform() ? <button className="desktop-pet-button" onClick={() => setView('settings')}><Monitor size={16} aria-hidden="true"/>开启悬浮伙伴<ArrowUpRight size={16} aria-hidden="true"/></button> : <div className="platform-note"><Monitor size={14} aria-hidden="true"/><span>桌面版支持透明悬浮伙伴</span></div>}</div></aside>
+        <aside className="pet-panel" id="workspace-companion-panel"><div className="pet-panel-heading"><span>你的小伙伴</span><span className="live-tag"><span/>{mood === 'sleep' ? '打盹中' : speech.active ? '朗读中' : responsePerformance.phase === 'speaking' ? '回应中' : working ? '思考中' : '在你身边'}</span></div><div className="pet-scene"><div className="scene-circle"/><svg className="scene-leaf" viewBox="0 0 90 120" aria-hidden="true"><path d="M42 118V44m0 50C3 85 8 54 42 75m0-9c33-6 40-31 8-28m-8 4C17 32 24 5 42 15" fill="#b7c8a5" stroke="#9bad8a" strokeWidth="2"/><path d="M26 100h34l-5 20H31z" fill="#d9cbb5" stroke="none"/></svg><div className="pet-touch">{companionPanelMounted&&<Cat performanceInput={performanceInput} onState={companionState} onInteract={companionInteract}/>}</div><div className="scene-floor"/></div><div className="pet-name"><h2>{state.settings.petName}</h2><span>{companionKind === 'anime' ? '温柔的二次元伙伴' : '一只喜欢陪着你的小猫'}</span></div><div className="pet-speech">{mood !== 'sleep' && working ? '让我想一想，马上就好…' : petSay}</div><p className="pet-interaction-hint">轻触回应 · 长按休息</p><a className="motion-preview-link" href="/" onClick={homeClick}>回到伙伴身边 <ArrowUpRight size={16} aria-hidden="true"/></a><div className="pet-panel-bottom"><div className="quiet-note"><Sparkles size={16} aria-hidden="true"/><p>不用每一刻都很有生产力。<br/>有我陪着，发会儿呆也很好。</p></div>{window.petpal ? <button className="desktop-pet-button" onClick={() => window.petpal?.showPet()}><Monitor size={16} aria-hidden="true"/>放到桌面上<ArrowUpRight size={16} aria-hidden="true"/></button> : Capacitor.isNativePlatform() ? <button className="desktop-pet-button" onClick={() => setView('settings')}><Monitor size={16} aria-hidden="true"/>开启悬浮伙伴<ArrowUpRight size={16} aria-hidden="true"/></button> : <div className="platform-note"><Monitor size={14} aria-hidden="true"/><span>桌面版支持透明悬浮伙伴</span></div>}</div></aside>
       </div>}
     </main>
     {notice && <div ref={toastEntrance} className="toast" role="status"><Check size={16} aria-hidden="true"/>{notice}</div>}
     {connectionOpen && <ConnectionDialog close={() => setConnectionOpen(false)}/>}
+    {pendingNavigation && <div ref={pendingNavigationEntrance} className="modal-backdrop" data-ui-layer="dialog"><section className="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="draft-navigation-title" aria-describedby="draft-navigation-description"><h2 id="draft-navigation-title">保留这次输入吗？</h2><p id="draft-navigation-description">消息还未发送。切换后会丢弃当前文字和图片；正在上传的图片也会取消。</p><div className="button-row"><button autoFocus className="secondary-button" data-ui-dismiss="dialog" onClick={() => setPendingNavigation(null)}>继续编辑</button><button className="danger-button" disabled={busy||agentRunning||agentSubmitting||unconfirmed||switchingModel} onClick={confirmNavigation}>丢弃并切换</button></div></section></div>}
     {deleting && <div ref={deleteEntrance} className="modal-backdrop" data-ui-layer="dialog"><section className="modal small-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title"><h2 id="delete-title">删除这段对话？</h2><p>这会删除个人服务中保存的聊天记录，无法恢复。</p><div className="button-row"><button className="secondary-button" data-ui-dismiss="dialog" onClick={() => setDeleting(null)}>保留</button><button className="danger-button" onClick={() => deleteChat(deleting)}>删除对话</button></div></section></div>}
   </div>;
 }

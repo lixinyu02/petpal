@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { openCliEnvironment } from '../server/opencli.mjs';
+import { auditComputerUsePackage, COMPUTER_USE_RUNTIME_FILES, COMPUTER_USE_PACKAGE } from './computer-use-package.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url), asar = require('@electron/asar');
@@ -74,7 +75,9 @@ function packedBytes(file) { return asar.extractFile(archive, path.normalize(fil
 async function compare(file, unpacked = false, sourceOverride) {
   if (compared.has(file)) return;
   const source = sourceOverride || path.join(root, file), packed = packedBytes(file);
-  const transformed = await transform(source), expected = transformed == null ? await readFile(source) : Buffer.from(transformed);
+  // afterPack restores these exact upstream metadata/runtime/license bytes.
+  const restored = file.startsWith(COMPUTER_USE_PACKAGE + '/') && COMPUTER_USE_RUNTIME_FILES.includes(file.slice(COMPUTER_USE_PACKAGE.length + 1));
+  const transformed = restored ? null : await transform(source), expected = transformed == null ? await readFile(source) : Buffer.from(transformed);
   assert.equal(packed.length, expected.length, `${file}: length`);
   assert.equal(digest(packed), digest(expected), `${file}: content differs from frozen source`);
   if (unpacked) {
@@ -93,12 +96,27 @@ for (const absolute of await walk(distDirectory)) {
 }
 for (const absolute of await walk(path.join(root, 'server'))) {
   const file = relative(absolute);
+  // Keep this exclusion aligned with build-windows.mjs, not with the source tree's installed hosts.
+  if (/^server\/native\/computer-use\/linux-/.test(file)) continue;
   if (file.startsWith('server/data/') || /(?:^|\/)\.env|\.test\./.test(file)) continue;
-  await compare(file, file.startsWith('server/native/'));
+  await compare(file, file.startsWith('server/native/') || /^server\/opencli.*\.mjs$/.test(file));
 }
 for (const file of ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs', 'desktop/remote-http.cjs', 'desktop/updates.mjs', 'desktop/executor.mjs', 'package.json']) await compare(file);
 for (const file of ['desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs']) assert.ok(compared.has(file), `Required executor module missing: ${file}`);
 for (const file of ['server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex-config.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1']) assert.ok(compared.has(file), `Required assistant module missing: ${file}`);
+for (const file of ['server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs']) {
+  assert.ok(compared.has(file), `Required OpenCLI module missing: ${file}`);
+  assert.equal(asar.statFile(archive, path.normalize(file)).unpacked, true, `OpenCLI worker closure must be unpacked: ${file}`);
+}
+const excludedNativeMetadata = packedPaths.filter(file => /computer-use-napi\.(?:linux|darwin)-|computer-use-napi\.win32-arm64/.test(file));
+for (const file of excludedNativeMetadata) {
+  assert.equal(asar.statFile(archive, path.normalize(file)).unpacked, true);
+  assert.equal(await exists(path.join(`${archive}.unpacked`, file)), false, `Wrong-platform native binary entered Windows payload: ${file}`);
+}
+assert.ok(!packedPaths.some(file => /^server\/native\/computer-use\/linux-/.test(file)), 'No Linux compatibility helper in Windows payload');
+const computerUseAudit = await auditComputerUsePackage(`${archive}.unpacked`, {
+  platform: 'win32', arch: 'x64', expected: await auditComputerUsePackage(root, { platform: 'win32', arch: 'x64' }),
+});
 const metadata = JSON.parse(packedBytes('package.json'));
 assert.equal(metadata.version, version);
 assert.equal(metadata.dependencies['@jackwener/opencli'], '1.8.8');
@@ -134,9 +152,10 @@ async function collect(directory, sourceDirectory) {
   packages.set(directory, { sourceDirectory, name: pkg.name, version: pkg.version });
   for (const name of Object.keys(pkg.dependencies || {})) await collect(dependencyRoot(name, directory), await sourceDependencyRoot(name, sourceDirectory));
 }
-await collect(dependencyRoot('@jackwener/opencli'), await sourceDependencyRoot('@jackwener/opencli', root));
+for (const name of ['@jackwener/opencli', '@modelcontextprotocol/sdk', '@zavora-ai/computer-use-mcp']) await collect(dependencyRoot(name), await sourceDependencyRoot(name, root));
 const packageRoots = [...packages.keys()].sort((a, b) => b.length - a.length);
 for (const file of packedPaths) {
+  if (excludedNativeMetadata.includes(file)) continue;
   const directory = packageRoots.find(directory => file.startsWith(`${directory}/`));
   if (!directory) continue;
   const info = asar.statFile(archive, path.normalize(file));
@@ -148,15 +167,19 @@ await compare('node_modules/@openai/codex-win32-x64/package.json', true);
 for (const absolute of await walk(path.join(root, 'node_modules/@openai/codex-win32-x64/vendor'))) await compare(relative(absolute), true);
 
 const nativeExe = path.join(payload, 'PetPal.exe'), isolated = path.join(extraction, 'version-only-profile');
-await mkdir(isolated, { recursive: true });
 const env = openCliEnvironment(isolated, process.env);
+for (const key of Object.keys(env)) if (/^path$/i.test(key)) delete env[key];
 env.PATH = `${process.env.SystemRoot}\\System32;${process.env.SystemRoot}`;
+env.CODEX_HOME = path.join(isolated, 'codex-host');
+env.TEMP = path.join(isolated, 'temp'); env.TMP = env.TEMP;
+const workspace = path.join(isolated, 'workspace');
+await Promise.all([env.HOME, env.APPDATA, env.LOCALAPPDATA, env.OPENCLI_CONFIG_DIR, env.XDG_CONFIG_HOME, env.XDG_CACHE_HOME, env.CODEX_HOME, env.TEMP, workspace].map(directory => mkdir(directory, { recursive: true })));
 const runtime = JSON.parse((await run(nativeExe, ['-p', 'JSON.stringify(process.versions)'], { ...options, timeout: 15000, env })).stdout.trim());
 assert.equal(runtime.electron, sourcePackage.devDependencies.electron, 'Final Electron version');
 const opencliEntry = path.join(`${archive}.unpacked`, 'node_modules/@jackwener/opencli/dist/src/main.js');
 const opencliVersion = (await run(nativeExe, [opencliEntry, '--version'], { ...options, timeout: 15000, env })).stdout.trim();
 assert.match(opencliVersion, /(?:^|\s)1\.8\.8(?:\s|$)/, 'Final bundled OpenCLI version');
-const receipt = { executable: relative(executable), version, bytes: (await stat(executable)).size, sha256: await hash(executable), distDirectory: relative(distDirectory), extraction: 'Final portable EXE -> NSIS app-64.7z -> payload/resources/app.asar and unpacked members', extractionDirectory: relative(extraction), asarSha256: await hash(archive), electron: runtime.electron, node: runtime.node, opencliVersion, opencliDependencyPackages: [...packages].map(([packedRoot, entry]) => ({ packedRoot, sourceRoot: relative(entry.sourceDirectory), name: entry.name, version: entry.version })), filesCompared: files.length, webFilesCompared: files.filter(file => file.path.startsWith('dist/')).length, nativeHelperCompared: compared.has('server/native/music-windows.ps1'), startupDiagnosticsCompared: compared.has('desktop/startup-diagnostics.cjs'), files, realApiCalled: false, browserActionExecuted: false, musicActionExecuted: false, deviceMediaRuntimeVerified: false };
+const receipt = { excludedNativeMetadata, computerUseAudit, executable: relative(executable), version, bytes: (await stat(executable)).size, sha256: await hash(executable), distDirectory: relative(distDirectory), extraction: 'Final portable EXE -> NSIS app-64.7z -> payload/resources/app.asar and unpacked members', extractionDirectory: relative(extraction), asarSha256: await hash(archive), electron: runtime.electron, node: runtime.node, opencliVersion, opencliDependencyPackages: [...packages].map(([packedRoot, entry]) => ({ packedRoot, sourceRoot: relative(entry.sourceDirectory), name: entry.name, version: entry.version })), filesCompared: files.length, webFilesCompared: files.filter(file => file.path.startsWith('dist/')).length, nativeHelperCompared: compared.has('server/native/music-windows.ps1'), startupDiagnosticsCompared: compared.has('desktop/startup-diagnostics.cjs'), files, realApiCalled: false, browserActionExecuted: false, musicActionExecuted: false, deviceMediaRuntimeVerified: false };
 await mkdir(path.dirname(receiptPath), { recursive: true });
 await writeFile(receiptPath, JSON.stringify(receipt, null, 2), { flag: cli['--receipt'] ? 'wx' : 'w' });
 console.log(JSON.stringify({ ...receipt, files: undefined, receiptPath: relative(receiptPath) }, null, 2));

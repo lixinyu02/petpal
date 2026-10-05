@@ -2,11 +2,66 @@ param(
   [string]$Executable,
   [string]$EvidenceDirectory,
   [string]$DistDirectory,
-  [string]$MetadataPath
+  [string]$MetadataPath,
+  [switch]$AppFixture,
+  [switch]$Poses
 )
 $ErrorActionPreference = 'Stop'
+function New-WindowsSmokeIsolation {
+  param([string]$IsolationRoot, [string]$OutputDirectory, [switch]$EnableAppFixture, [switch]$EnablePoses)
+  $prior = @{}
+  $cleared = @()
+  $fixedNames = @('PATH', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'OPENCLI_CONFIG_DIR', 'TEMP', 'TMP', 'TMPDIR', 'NODE_OPTIONS', 'NODE_PATH')
+  foreach ($entry in [System.Environment]::GetEnvironmentVariables('Process').GetEnumerator()) {
+    $name = [string]$entry.Key
+    if ($name -in $fixedNames -or $name -match '^(OPENAI_|CODEX_|PETPAL_|ELECTRON_|PORTABLE_EXECUTABLE|ANTHROPIC_|AZURE_OPENAI_|GEMINI_|GOOGLE_API_|CPA_)') {
+      $prior[$name] = [string]$entry.Value
+      $cleared += $name
+    }
+  }
+  $profile = Join-Path $IsolationRoot 'user-data'
+  $childHome = Join-Path $IsolationRoot 'home'
+  $isolated = [ordered]@{
+    PATH="$env:SystemRoot\System32;$env:SystemRoot"
+    HOME=$childHome
+    USERPROFILE=$childHome
+    APPDATA=(Join-Path $childHome 'AppData\Roaming')
+    LOCALAPPDATA=(Join-Path $childHome 'AppData\Local')
+    XDG_CONFIG_HOME=(Join-Path $childHome '.config')
+    XDG_CACHE_HOME=(Join-Path $childHome '.cache')
+    OPENCLI_CONFIG_DIR=(Join-Path $childHome '.opencli')
+    TEMP=(Join-Path $IsolationRoot 'temp')
+    TMP=(Join-Path $IsolationRoot 'temp')
+    TMPDIR=(Join-Path $IsolationRoot 'temp')
+    CODEX_HOME=(Join-Path $IsolationRoot 'codex-host')
+    PETPAL_WORKSPACE=(Join-Path $IsolationRoot 'workspace')
+    PETPAL_SMOKE_DIR=$OutputDirectory
+    PETPAL_SMOKE_PROFILE=$profile
+  }
+  if ($EnableAppFixture) { $isolated.PETPAL_SMOKE_APP = '1' }
+  if ($EnablePoses) { $isolated.PETPAL_SMOKE_POSES = '1' }
+  foreach ($directory in @($profile, $childHome, $isolated.APPDATA, $isolated.LOCALAPPDATA, $isolated.XDG_CONFIG_HOME, $isolated.XDG_CACHE_HOME, $isolated.OPENCLI_CONFIG_DIR, $isolated.TEMP, $isolated.CODEX_HOME, $isolated.PETPAL_WORKSPACE)) {
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+  }
+  # Create CODEX_HOME/workspace before launch. A fresh profile must never load host credentials.
+  foreach ($name in $cleared) { [System.Environment]::SetEnvironmentVariable($name, $null, 'Process') }
+  foreach ($entry in $isolated.GetEnumerator()) { [System.Environment]::SetEnvironmentVariable([string]$entry.Key, [string]$entry.Value, 'Process') }
+  return @{ prior=$prior; isolated=$isolated; cleared=$cleared; root=$IsolationRoot }
+}
+function Restore-WindowsSmokeIsolation {
+  param($Isolation)
+  if (-not $Isolation) { return }
+  foreach ($name in @($Isolation.isolated.Keys) + @($Isolation.cleared)) { [System.Environment]::SetEnvironmentVariable([string]$name, $null, 'Process') }
+  foreach ($entry in $Isolation.prior.GetEnumerator()) { [System.Environment]::SetEnvironmentVariable([string]$entry.Key, [string]$entry.Value, 'Process') }
+}
+function Assert-WindowsSmokeAvatar {
+  param($Avatar, [string]$ExpectedKind, [bool]$ExpectedEnabled, [string]$Phase)
+  if ($Avatar.kind -ne $ExpectedKind -or $Avatar.display.version -ne 3 -or $Avatar.display.kind -ne $ExpectedKind -or $Avatar.display.catEnabled -ne $ExpectedEnabled -or -not $Avatar.visible -or $Avatar.canvasBounds.width -le 0 -or $Avatar.canvasBounds.height -le 0 -or
+    $Avatar.canvasCount -ne 1 -or $Avatar.petCount -ne 1 -or $Avatar.renderFrames -lt 2 -or
+    ($ExpectedKind -eq 'anime' -and ($Avatar.renderer -ne 'cubism' -or $Avatar.cubismModel -ne 'akari-cubism-v12' -or [int64]$Avatar.mocVersion -ne 5 -or [int64]$Avatar.coreVersion -le 0))) { throw "Effective v3 display and Cubism V12 did not synchronize for $Phase." }
+}
 $project = Split-Path -Parent $PSScriptRoot
-$version = (Get-Content -LiteralPath "$project\package.json" -Raw | ConvertFrom-Json).version
+$version = (Get-Content -LiteralPath "$project\package.json" -Raw -Encoding utf8 | ConvertFrom-Json).version
 $versionSeries = ($version.Split('.')[0..1] -join '')
 if ($DistDirectory -and -not $MetadataPath) { throw '-DistDirectory requires -MetadataPath to preserve existing release evidence.' }
 if (-not $Executable) { $Executable = Join-Path $project "releases\desktop\PetPal-$version-Windows-x64.exe" }
@@ -23,34 +78,28 @@ if ($MetadataPath) {
 if (-not (Test-Path -LiteralPath $Executable)) { throw "Desktop executable not found: $Executable" }
 if (-not (Test-Path -LiteralPath (Join-Path $DistDirectory 'index.html') -PathType Leaf)) { throw "Frontend index not found: $DistDirectory" }
 New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
-$priorPath = $env:PATH
-$priorOutput = $env:PETPAL_SMOKE_DIR
-$priorProfile = $env:PETPAL_SMOKE_PROFILE
+$isolation = $null
 $startedAt = Get-Date
 try {
-  $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
-  $env:PETPAL_SMOKE_DIR = $EvidenceDirectory
-  $env:PETPAL_SMOKE_PROFILE = Join-Path $project ('.tools\desktop-smoke-profiles\' + [guid]::NewGuid().ToString('N'))
+  $isolation = New-WindowsSmokeIsolation -IsolationRoot (Join-Path $project ('.tools\desktop-smoke-profiles\' + [guid]::NewGuid().ToString('N'))) -OutputDirectory $EvidenceDirectory -EnableAppFixture:$AppFixture -EnablePoses:$Poses
   $process = Start-Process -FilePath $Executable -ArgumentList '--smoke-test' -WorkingDirectory (Split-Path -Parent $Executable) -WindowStyle Hidden -RedirectStandardOutput (Join-Path $EvidenceDirectory 'stdout.log') -RedirectStandardError (Join-Path $EvidenceDirectory 'stderr.log') -Wait -PassThru
   if ($process.ExitCode -ne 0) { throw "Desktop smoke exited $($process.ExitCode)" }
 } finally {
-  $env:PATH = $priorPath
-  $env:PETPAL_SMOKE_DIR = $priorOutput
-  $env:PETPAL_SMOKE_PROFILE = $priorProfile
+  Restore-WindowsSmokeIsolation -Isolation $isolation
 }
 $resultPath = Join-Path $EvidenceDirectory 'result.json'
 if (-not (Test-Path -LiteralPath $resultPath) -or (Get-Item -LiteralPath $resultPath).LastWriteTime -lt $startedAt) { throw 'Desktop did not write a fresh smoke result.' }
-$result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+$result = Get-Content -LiteralPath $resultPath -Raw -Encoding utf8 | ConvertFrom-Json
 if (-not $result.health.ok -or -not $result.bridge.hasToken -or -not $result.uiReady -or -not $result.codex.available -or -not $result.pet.alwaysOnTop) { throw 'Desktop health, preload, ready UI, bundled Codex, or pet window check failed.' }
 if (-not $result.loginGate.loginVisible -or -not $result.loginGate.protectedContentAbsent -or -not $result.loginGate.noStoredToken -or -not $result.loginGate.explicitOwnerLogin -or -not $result.loginGate.authenticated) { throw 'Desktop login gate or explicit owner login verification failed.' }
 if ($result.health.version -ne $version) { throw 'Desktop backend version does not match this release.' }
-$sourceManifest = Get-Content -LiteralPath "$project\package.json" -Raw | ConvertFrom-Json
+$sourceManifest = Get-Content -LiteralPath "$project\package.json" -Raw -Encoding utf8 | ConvertFrom-Json
 if ($result.electronVersion -ne $sourceManifest.devDependencies.electron) { throw 'The final executable uses a different Electron version.' }
 if (-not $result.desktopTools.opencli.available -or $result.desktopTools.opencli.version -ne '1.8.8' -or $result.desktopTools.opencli.runtime -ne 'bundled' -or -not $result.desktopTools.opencli.readOnlyProbe) { throw 'Bundled OpenCLI read-only status check failed.' }
 if ($result.desktopTools.opencli.daemonState -notin @('stopped', 'external', 'unavailable')) { throw 'Smoke unexpectedly started or attached to an OpenCLI daemon.' }
 if ($result.desktopTools.music.platform -ne 'win32' -or @($result.desktopTools.music.players | Where-Object { $_.id -in @('qqmusic', 'netease') }).Count -ne 2) { throw 'Windows music status did not report both supported players.' }
 if (-not $result.is3d -or $result.renderer.main.petCount -ne 1 -or $result.renderer.pet.petCount -ne 1 -or $result.renderer.main.renderFrames -lt 2 -or $result.renderer.pet.renderFrames -lt 2) { throw 'Live single-cat 3D renderer verification failed.' }
-if (-not $result.switchSynced -or $result.defaultAvatar -ne 'anime' -or $result.avatars.anime.main.renderer -ne 'mesh2d' -or $result.avatars.anime.pet.renderer -ne 'mesh2d' -or $result.avatars.anime.main.petCount -ne 1 -or $result.avatars.anime.pet.petCount -ne 1 -or $result.avatars.anime.main.renderFrames -lt 2 -or $result.avatars.anime.pet.renderFrames -lt 2) { throw 'Anime renderer or shared-window avatar selection verification failed.' }
+if (-not $result.switchSynced -or $result.defaultAvatar -ne 'anime' -or $result.avatars.anime.main.renderer -ne 'cubism' -or $result.avatars.anime.pet.renderer -ne 'cubism' -or $result.avatars.anime.main.petCount -ne 1 -or $result.avatars.anime.pet.petCount -ne 1 -or $result.avatars.anime.main.renderFrames -lt 2 -or $result.avatars.anime.pet.renderFrames -lt 2) { throw 'Cubism renderer or shared-window avatar selection verification failed.' }
 $capability = $result.catCapability
 if (-not $capability.defaultOff.choiceHidden -or $capability.defaultOff.settingsChecked -ne $false -or
   -not $capability.enabled.choiceVisible -or $capability.enabled.settingsChecked -ne $true -or -not $capability.enabled.clickedSettingsSwitch -or -not $capability.enabled.rawPreferenceUnchanged -or
@@ -62,19 +111,17 @@ foreach ($phase in @('defaultOff', 'enabled', 'returned', 'disabled', 'reloaded'
   $expectedEnabled = $phase -in @('enabled', 'returned')
   foreach ($windowName in @('main', 'pet')) {
     $avatar = $capability.$phase.$windowName
-    if ($avatar.kind -ne $expectedKind -or $avatar.display.version -ne 2 -or $avatar.display.kind -ne $expectedKind -or $avatar.display.catEnabled -ne $expectedEnabled -or -not $avatar.visible -or $avatar.canvasBounds.width -le 0 -or $avatar.canvasBounds.height -le 0 -or
-      $avatar.canvasCount -ne 1 -or $avatar.petCount -ne 1 -or $avatar.renderFrames -lt 2 -or
-      ($expectedKind -eq 'anime' -and $avatar.renderer -ne 'mesh2d')) { throw "Effective v2 display did not synchronize for $phase/$windowName." }
+    Assert-WindowsSmokeAvatar -Avatar $avatar -ExpectedKind $expectedKind -ExpectedEnabled $expectedEnabled -Phase "$phase/$windowName"
   }
 }
 Add-Type -AssemblyName System.Drawing
 $pet = [System.Drawing.Bitmap]::FromFile((Join-Path $EvidenceDirectory 'pet.png'))
 try { if ($pet.GetPixel(0,0).A -ne 0) { throw 'Pet window corner is not transparent.' } } finally { $pet.Dispose() }
 if (-not $result.bundleFiles -or $result.bundleFiles.Count -lt 10) { throw 'Packaged runtime did not report resource byte evidence.' }
-foreach ($required in @('desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/remote-http.cjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE')) {
+foreach ($required in @('desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs', 'server/native/music-windows.ps1', 'dist/avatars/akari-cubism-v12/akari.moc3', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE')) {
   if (-not @($result.bundleFiles | Where-Object { $_.path -eq $required }).Count) { throw "Missing required desktop assistant runtime member: $required" }
 }
-$generatedPackage = Get-Content -LiteralPath "$project\package.json" -Raw | ConvertFrom-Json
+$generatedPackage = Get-Content -LiteralPath "$project\package.json" -Raw -Encoding utf8 | ConvertFrom-Json
 # electron-builder removes build-time fields and writes its runtime manifest as two-space LF JSON.
 foreach ($field in @('scripts', 'devDependencies', 'build')) { $generatedPackage.PSObject.Properties.Remove($field) }
 $packageBytes = [System.Text.Encoding]::UTF8.GetBytes(($generatedPackage | ConvertTo-Json -Depth 20).Replace("`r`n", "`n"))
@@ -88,7 +135,7 @@ foreach ($file in $result.bundleFiles) {
   $source = Join-Path $project $file.path
   if ($file.path.StartsWith('dist/', [System.StringComparison]::Ordinal)) { $source = Join-Path $DistDirectory $file.path.Substring(5) }
   if ($file.path -eq 'node_modules/@jackwener/opencli/package.json') {
-    $manifest = Get-Content -LiteralPath $source -Raw | ConvertFrom-Json
+    $manifest = Get-Content -LiteralPath $source -Raw -Encoding utf8 | ConvertFrom-Json
     # These metadata-only fields are stripped by electron-builder's fileTransformer.
     foreach ($field in @('dist','gitHead','build','jspm','ava','xo','nyc','eslintConfig','contributors','bundleDependencies','tags','scripts','keywords','bugs')) { $manifest.PSObject.Properties.Remove($field) }
     $normalizedBytes = [System.Text.Encoding]::UTF8.GetBytes(($manifest | ConvertTo-Json -Depth 100).Replace("`r`n", "`n"))
@@ -116,6 +163,19 @@ $metadata = [ordered]@{
   authenticodeStatus=[string](Get-AuthenticodeSignature -LiteralPath $Executable).Status
   portableSmoke=$result
   restrictedPath=$true
+  environmentIsolation=[ordered]@{
+    freshProfile=$true
+    profile=$isolation.isolated.PETPAL_SMOKE_PROFILE
+    codexHome=$isolation.isolated.CODEX_HOME
+    workspace=$isolation.isolated.PETPAL_WORKSPACE
+    tempDirectory=$isolation.isolated.TEMP
+    credentialEnvironmentCleared=$true
+    inheritedElectronFlagsCleared=$true
+    inheritedPortableFlagsCleared=$true
+    optionalAppFixture=[bool]$AppFixture
+    optionalPoses=[bool]$Poses
+    restored=$true
+  }
   petCornerAlpha=0
   ownedProcessesRemaining=$ownedProcesses.Count
   electronVersion=$result.electronVersion
@@ -128,7 +188,7 @@ $metadata = [ordered]@{
   packagedSourceFilesCompared=@($result.bundleFiles | Where-Object { $_.path -notlike 'dist/*' }).Count
   startupDiagnosticsCompared=@($result.bundleFiles | Where-Object { $_.path -eq 'desktop/startup-diagnostics.cjs' }).Count -eq 1
   generatedPackageSha256=$generatedPackageSha
-  avatarResources=@($result.bundleFiles | Where-Object { $_.path -like 'dist/avatars/akari/*.webp' })
+  avatarResources=@($result.bundleFiles | Where-Object { $_.path -like 'dist/avatars/akari-cubism-v12/*' })
   sourceInputs=$sourceInputs
 }
 $metadataJson = $metadata | ConvertTo-Json -Depth 12
