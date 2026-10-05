@@ -287,7 +287,9 @@ async function loginSmokeMain() {
       if (login && button && !button.disabled) {
         let saved; try { saved = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); } catch {}
         if (saved?.token) return reject(new Error('Fresh desktop silently accepted an owner token'));
-        return resolve({ loginVisible: true, protectedContentAbsent: true, noStoredToken: true });
+        const serviceAddress = document.querySelector('.login-fields input[autocomplete="url"]')?.value;
+        if (saved?.url !== location.origin || saved?.target !== 'local' || serviceAddress !== location.origin) return reject(new Error('Fresh desktop did not default to its embedded local service'));
+        return resolve({ loginVisible: true, protectedContentAbsent: true, noStoredToken: true, defaultLocalService: true, serviceAddress });
       }
       if (Date.now() >= deadline) return reject(new Error('Fresh desktop login gate did not appear'));
       setTimeout(check, 40);

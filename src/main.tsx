@@ -30,7 +30,7 @@ function SessionRoot(){
   const epoch=useSyncExternalStore(subscribeSession,getSessionEpoch,getSessionEpoch);
   const [catEnabled]=useCompanionCatEnabled(),ownerIdentity=getIdentity();
   const[ready,setReady]=useState(overlay);
-  useEffect(()=>{if(overlay)return;let alive=true;void initConnection(Capacitor.getPlatform()==='android'||window.petpal?'https://magicdatou.top:44318':'').finally(()=>{if(alive)setReady(true);}).catch(()=>{});return()=>{alive=false;};},[]);
+  useEffect(()=>{if(overlay)return;let alive=true;void initConnection(Capacitor.getPlatform()==='android'?'https://magicdatou.top:44318':window.petpal?'':location.origin).finally(()=>{if(alive)setReady(true);}).catch(()=>{});return()=>{alive=false;};},[]);
   useEffect(()=>{const change=()=>{if(Capacitor.isNativePlatform())void NativeOverlay.stop().catch(()=>{});};window.addEventListener('petpal:session-change',change);return()=>window.removeEventListener('petpal:session-change',change);},[]);
   useEffect(()=>{
     if(overlay||catEnabled||!Capacitor.isNativePlatform())return;

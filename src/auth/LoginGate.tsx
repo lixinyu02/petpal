@@ -29,7 +29,7 @@ export function ConnectionDialog({ close }: { close?(): void }) {
     <h2 id="connection-title">登录你的小伴</h2><p>聊天、语音与 Agent 工作，都从你的账号开始。{window.petpal?.executor && '登录后，此电脑会出现在同账号的 Agent 执行列表中。'}</p>
     <div className="auth-modes" role="group" aria-label="登录方式"><button aria-pressed={method === 'password'} className={method === 'password' ? 'active' : ''} onClick={() => setMethod('password')}>账号密码</button><button aria-pressed={method === 'token'} className={method === 'token' ? 'active' : ''} onClick={() => setMethod('token')}>管理员配对</button></div>
     <form onSubmit={submit}><fieldset disabled={busy} className="login-fields">
-      <label>服务地址<input placeholder="同站点留空，或 https://pet.example.com" value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} autoComplete="url"/></label>
+      <label>服务地址<input placeholder="默认当前服务，也可填写其他服务器地址" value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} autoComplete="url"/></label>
       {method === 'password' ? <><label>账号名称<input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required maxLength={40}/></label><label>登录密码<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required maxLength={256}/></label></> : <label>配对令牌<input type="password" value={form.token} onChange={e => setForm({ ...form, token: e.target.value })} required autoComplete="off"/></label>}
       {error && <div className="form-error" role="alert">{error}</div>}
       <button className="primary-button full-button" type="submit">{busy ? <Loader2 className="spin" size={17} aria-hidden="true"/> : <ArrowRight size={17} aria-hidden="true"/>}登录并继续</button>
