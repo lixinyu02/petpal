@@ -44,7 +44,7 @@ test('selecting a manual theme forwards only the chosen local preference and ref
   f.update({ preference: 'day', theme: 'day', saved: true });
   assert.equal(f.find('input', props => props.value === 'day').props.checked, true);
   assert.equal(f.find('input', props => props.value === 'auto').props.checked, false);
-  assert.match(text(f.find('p', props => props.role === 'status')), /日间.*手动选择/);
+  assert.match(text(f.find('p', props => props.role === 'status')), /日间.*固定主题/);
 });
 
 test('logged-out settings disable the native group and reject late handlers', () => {

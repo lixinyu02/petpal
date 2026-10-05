@@ -42,7 +42,7 @@ function fixture({ date = localDate(12), preference = null, getDenied = false, s
 test('automatic theme uses the exact local 07:00 and 19:00 boundaries', () => {
   for (const [date, expected] of [[localDate(0), 'night'], [localDate(6, 59, 59, 999), 'night'], [localDate(7), 'day'], [localDate(18, 59, 59, 999), 'day'], [localDate(19), 'night'], [localDate(23, 59), 'night']]) assert.equal(effectiveTheme('auto', date), expected);
   assert.equal(effectiveTheme('day', localDate(1)), 'day'); assert.equal(effectiveTheme('night', localDate(12)), 'night');
-  for (const value of [null, undefined, '', 'dark', 'light', {}, [], 1]) assert.equal(normalizeThemePreference(value), 'auto');
+  for (const value of [null, undefined, '', 'dark', 'light', {}, [], 1]) assert.equal(normalizeThemePreference(value), 'day');
 });
 
 test('next boundary follows the local calendar and does not mutate the input', () => {
@@ -52,9 +52,9 @@ test('next boundary follows the local calendar and does not mutate the input', (
 
 test('initial state and manual preferences apply document appearance and persist only the local theme key', () => {
   const f = fixture({ date: localDate(22) });
-  assert.deepEqual(f.controller.snapshot(), { preference: 'auto', theme: 'night', saved: true });
-  assert.equal(f.document.documentElement.dataset.theme, 'night'); assert.equal(f.document.documentElement.style.colorScheme, 'dark');
-  assert.equal(f.document.documentElement.style.backgroundColor, THEME_COLORS.night); assert.equal(f.document.chromeColor, THEME_CHROME_COLORS.night);
+  assert.deepEqual(f.controller.snapshot(), { preference: 'day', theme: 'day', saved: true });
+  assert.equal(f.document.documentElement.dataset.theme, 'day'); assert.equal(f.document.documentElement.style.colorScheme, 'light');
+  assert.equal(f.document.documentElement.style.backgroundColor, THEME_COLORS.day); assert.equal(f.document.chromeColor, THEME_CHROME_COLORS.day);
   f.controller.setPreference('day');
   assert.deepEqual(f.writes, [[THEME_STORAGE_KEY, 'day']]); assert.equal(f.document.documentElement.dataset.themePreference, 'day');
   assert.equal(f.document.documentElement.style.colorScheme, 'light');
@@ -62,7 +62,7 @@ test('initial state and manual preferences apply document appearance and persist
 });
 
 test('auto mode switches at the boundary, while unchanged clock checks retain a stable snapshot', () => {
-  const f = fixture({ date: localDate(6, 59, 59, 500) }), stop = f.controller.mount();
+  const f = fixture({ date: localDate(6, 59, 59, 500), preference: 'auto' }), stop = f.controller.mount();
   let notices = 0; const unsubscribe = f.controller.subscribe(() => notices++), initial = f.controller.snapshot();
   assert.equal([...f.timers.values()][0].delay, 500);
   f.advanceTo(localDate(7)); assert.equal(f.controller.snapshot().theme, 'day'); assert.equal(notices, 1);
@@ -73,7 +73,7 @@ test('auto mode switches at the boundary, while unchanged clock checks retain a 
 });
 
 test('visibility and focus recalculate skipped boundaries and changed local clocks', () => {
-  const f = fixture({ date: localDate(12) }), stop = f.controller.mount();
+  const f = fixture({ date: localDate(12), preference: 'auto' }), stop = f.controller.mount();
   f.visible(false); assert.equal(f.timers.size, 0);
   f.setTime(localDate(21)); f.visible(true); assert.equal(f.controller.snapshot().theme, 'night'); assert.equal(f.timers.size, 1);
   f.setTime(localDate(8)); f.focus(); assert.equal(f.controller.snapshot().theme, 'day');
@@ -81,20 +81,20 @@ test('visibility and focus recalculate skipped boundaries and changed local cloc
 });
 
 test('manual mode cancels clock timers and auto mode restores them', () => {
-  const f = fixture(), stop = f.controller.mount(); assert.equal(f.timers.size, 1);
+  const f = fixture({ preference: 'auto' }), stop = f.controller.mount(); assert.equal(f.timers.size, 1);
   f.controller.setPreference('night'); assert.equal(f.timers.size, 0);
   f.setTime(localDate(9)); f.focus(); assert.equal(f.controller.snapshot().theme, 'night');
   f.controller.setPreference('auto'); assert.equal(f.controller.snapshot().theme, 'day'); assert.equal(f.timers.size, 1);
   stop();
 });
 
-test('storage events synchronize same-origin windows, clear returns to auto, and other stores are ignored', () => {
+test('storage events synchronize same-origin windows, clear returns to day, and other stores are ignored', () => {
   const f = fixture({ date: localDate(12) }), stop = f.controller.mount();
   f.storageEvent(THEME_STORAGE_KEY, 'night'); assert.equal(f.controller.snapshot().preference, 'night'); assert.equal(f.timers.size, 0);
   f.storageEvent('unrelated-private-key', 'day'); assert.equal(f.controller.snapshot().preference, 'night');
   f.storageEvent(THEME_STORAGE_KEY, 'day', {}); assert.equal(f.controller.snapshot().preference, 'night');
-  f.storageEvent(THEME_STORAGE_KEY, null); assert.equal(f.controller.snapshot().preference, 'auto'); assert.equal(f.controller.snapshot().theme, 'day');
-  f.storageEvent(THEME_STORAGE_KEY, 'invalid'); assert.equal(f.controller.snapshot().preference, 'auto');
+  f.storageEvent(THEME_STORAGE_KEY, null); assert.equal(f.controller.snapshot().preference, 'day'); assert.equal(f.controller.snapshot().theme, 'day');
+  f.storageEvent(THEME_STORAGE_KEY, 'invalid'); assert.equal(f.controller.snapshot().preference, 'day');
   stop();
 });
 
@@ -110,7 +110,7 @@ test('storage-denied manual choices work in memory and survive focus/visibility 
 });
 
 test('multiple mounts share one lifecycle and StrictMode cleanup is idempotent', () => {
-  const f = fixture(), first = f.controller.mount(), second = f.controller.mount();
+  const f = fixture({ preference: 'auto' }), first = f.controller.mount(), second = f.controller.mount();
   assert.equal(f.timers.size, 1); first(); first(); assert.equal(f.timers.size, 1);
   second(); assert.equal(f.timers.size, 0);
   const third = f.controller.mount(); assert.equal(f.timers.size, 1); third(); assert.equal(f.timers.size, 0);

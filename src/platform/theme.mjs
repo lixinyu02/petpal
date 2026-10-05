@@ -2,7 +2,7 @@ export const THEME_STORAGE_KEY = 'petpal.theme';
 export const THEME_COLORS = Object.freeze({ day: '#fafbf8', night: '#181d1b' });
 export const THEME_CHROME_COLORS = Object.freeze({ day: '#f6f7f2', night: '#181d1b' });
 const preferences = new Set(['auto', 'day', 'night']);
-export const normalizeThemePreference = value => preferences.has(value) ? value : 'auto';
+export const normalizeThemePreference = value => preferences.has(value) ? value : 'day';
 
 export function effectiveTheme(preference, date = new Date()) {
   const selected = normalizeThemePreference(preference);
@@ -34,7 +34,7 @@ export function createThemeController(options = {}) {
     catch { return { available: false }; }
   };
   const initial = read();
-  let state = Object.freeze({ preference: initial.preference ?? 'auto', theme: effectiveTheme(initial.preference, now()), saved: initial.available });
+  let state = Object.freeze({ preference: initial.preference ?? 'day', theme: effectiveTheme(initial.preference, now()), saved: initial.available });
 
   function apply() {
     const root = doc?.documentElement;

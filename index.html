@@ -7,7 +7,7 @@
     <script>
       /* Keep this first-paint policy in sync with src/platform/theme.mjs. */
       (() => {
-        let preference = 'auto';
+        let preference = 'day';
         try { const saved = localStorage.getItem('petpal.theme'); if (saved === 'day' || saved === 'night' || saved === 'auto') preference = saved; } catch {}
         const hour = new Date().getHours(), theme = preference === 'auto' ? (hour >= 7 && hour < 19 ? 'day' : 'night') : preference;
         const root = document.documentElement, query = new URLSearchParams(location.search);
