@@ -266,4 +266,3 @@ test('a result from a deleted automation remains read-only in recent history and
   assert.equal(f.component('AgentQueue'), undefined); f.deleteHistory(orphan.id); assert.equal(f.requests.some(item => item.method === 'DELETE'), false);
   f.click('删除对话'); await f.ready(); assert.equal(f.requests.filter(item => item.method === 'DELETE' && item.path === `/conversations/${orphan.id}`).length, 1); assert.deepEqual(f.history(), []);
 });
-

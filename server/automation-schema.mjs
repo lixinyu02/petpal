@@ -177,4 +177,3 @@ export function validateStoredAutomations(state, { restore = true, clock = Date.
   }
   return changed;
 }
-
