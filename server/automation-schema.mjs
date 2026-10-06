@@ -134,7 +134,7 @@ export function validateStoredAutomations(state, { restore = true, clock = Date.
   const stamp = value => { try { automationInstant(value); return true; } catch { return false; } };
   const storedSpec = value => {
     const normalized = normalizeAutomationSpec(value);
-    if (typeof value.projectDirectory !== 'string' || !fields(value.permissions, ['access', 'approval']) || value.permissions.access !== normalized.permissions.access || value.permissions.approval !== normalized.permissions.approval) invalid();
+    if (typeof value.projectDirectory !== 'string' || !fields(value.permissions, ['access', 'approval', 'reviewProviderId']) || value.permissions.access !== normalized.permissions.access || value.permissions.approval !== normalized.permissions.approval || (value.permissions.reviewProviderId ?? '') !== (normalized.permissions.reviewProviderId ?? '')) invalid();
   };
   for (const account of data.accounts) {
     if (!fields(account, ['userId', 'allowAgentCreate']) || !users.has(account.userId) || accounts.has(account.userId) || typeof account.allowAgentCreate !== 'boolean') invalid();

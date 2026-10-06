@@ -2,7 +2,7 @@
 
 - Date: 2026-10-07
 - Complexity: L2
-- Status: final
+- Status: completed issue-1/2/3; source and local acceptance only
 
 ## Background
 
@@ -12,7 +12,7 @@
 
 ## Goal
 
-在所选执行电脑上读取、调节、静音系统默认输出设备并读回验证；提供有限系统设置入口。让 API 模式的替我审批沿用当前已授权 Agent 模型，显示真实审核结果并避免无期限等待。改善主界面及 Chat+Agent 的批准提交状态。
+在所选执行电脑上读取、调节、静音系统默认输出设备并读回验证；提供有限系统设置入口。让 API 模式的替我审批默认沿用当前已授权 Agent 模型，并允许选择独立的已授权 Responses 连接，显示真实审核结果并避免无期限等待。改善主界面及 Chat+Agent 的批准提交状态，删除权限菜单静态说明小字。
 
 ## Non-goals
 
@@ -26,7 +26,15 @@ API 模式从固定官方 0.143.0 catalog 生成私有启动 catalog，只移除
 
 动态工具与原生命令分开处理：review 下仅固定、参数完整、可逆的系统音量操作可通过明确的本地规则审查；展示规则审查结果，不伪装成模型审查。通用 Computer Use、浏览器、安装、自动化与设置入口继续人工确认。审批有有限有效期，到期拒绝并解除等待；停止、任务完成及账号切换清理定时器和迟到回调。auto 仍只在已授予范围内执行。
 
-上报新版执行器审核能力，旧执行电脑不声称具备新版适配。权限已有折叠区域说明当前审核模型与工具差别；批准提交与后续读取分离，阻止重复提交和跨账号迟到响应，查询失败时准确提示，后台存在批准请求时显示等待确认。
+上报新版执行器审核能力，旧执行电脑不声称具备新版适配。批准提交与后续读取分离，阻止重复提交和跨账号迟到响应，查询失败时准确提示，后台存在批准请求时显示等待确认。
+
+## 用户追加：独立命令审查模型
+
+权限设置增加可选reviewProviderId，空值跟随Agent，独立值仅从当前账号已授权Responses连接选择。前台Agent、Chat+Agent和自动化统一使用同一权限字段；静态权限说明小字删除，保留选项、实际结果与错误。
+
+保留现有启动catalog，不误用代码review_model。0.143 Guardian实际请求继承provider并带可信subagent/parent-thread metadata；私有loopback transport仅对绑定当前run、pending原生审查、headers/body metadata一致的Guardian请求重路由到冻结审查配置。任务Agent请求不变。每个run冻结model/URL/key，只有hash和provider ID可持久化，发出前重新验权，取消时终止中继。同一个原生parent只能使用同一审查fingerprint；切换模型或旧未知thread则新建thread并携带有限近期文本上下文。避免迟到请求与并发会话串用配置。
+
+远程执行器能力v2明确声明independentModel；旧端允许原有跟随审查，但不能接收独立配置。桌面只收到reviewModel和本轮relay token，真实上游key保留中央。review专属中继路由仅接受本轮冻结模型，重新校验账号/模型/任务，严格限制大小、流与取消。原生模型审查失败保持未放行，不退回自动运行。
 
 ## Impact
 

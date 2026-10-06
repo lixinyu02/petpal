@@ -8,12 +8,14 @@ export const defaultAgentPermissions = () => ({ access: 'read-only', approval: '
 export function normalizeAgentPermissions(value) {
   if (value === undefined) return defaultAgentPermissions();
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
-      Object.keys(value).some(key => !['access', 'approval'].includes(key)) ||
+      Object.keys(value).some(key => !['access', 'approval', 'reviewProviderId'].includes(key)) ||
       (value.access !== undefined && !AGENT_ACCESS.includes(value.access)) ||
-      (value.approval !== undefined && !AGENT_APPROVAL.includes(value.approval))) {
+      (value.approval !== undefined && !AGENT_APPROVAL.includes(value.approval)) ||
+      (value.reviewProviderId !== undefined && value.reviewProviderId !== null && value.reviewProviderId !== '' &&
+        (typeof value.reviewProviderId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(value.reviewProviderId)))) {
     throw Object.assign(new Error('Agent 权限设置无效。'), { status: 400 });
   }
-  return { access: value.access ?? 'read-only', approval: value.approval ?? 'ask' };
+  return { access: value.access ?? 'read-only', approval: value.approval ?? 'ask', ...(value.reviewProviderId ? { reviewProviderId: value.reviewProviderId } : {}) };
 }
 
 /** Native app-server 0.143 thread/turn fields. Never infer permission from API auth. */

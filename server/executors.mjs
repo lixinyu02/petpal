@@ -29,7 +29,7 @@ export function validateExecutionHosts(state) {
 }
 
 /** Central coordinator. Sessions are credentials; client type is never authorization. */
-export function createExecutors({ store, authorizeSession, authorizeEntry, readAttachment, getConfig, automationTool, redact = value => value,
+export function createExecutors({ store, authorizeSession, authorizeEntry, readAttachment, getConfig, getReviewConfig, automationTool, redact = value => value,
   fetchImpl = fetch, leaseMs = 30000, pollMs = 20000, commandMs = 20000, stopMs = 10000, clock = Date.now } = {}) {
   const connections = new Map(), current = new Map();
   let closed = false, registration = Promise.resolve();
@@ -59,7 +59,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
     for (const command of run.pending.values()) { clearTimeout(command.timer); command.reject(error ?? failure(409, '任务已结束。')); }
     run.pending.clear(); run.connection.commands = run.connection.commands.filter(command => command.runId !== run.id);
     if (run.connection.run === run) run.connection.run = null;
-    run.tokenHash = ''; run.attachments.clear();
+    run.tokenHash = ''; run.attachments.clear(); delete run.reviewConfig;
     if (error) run.reject(error); else run.resolve(result);
   };
   const offline = connection => {
@@ -83,7 +83,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
   const list = userId => {
     sweep();
     return [localHost, ...store.state.executionHosts.filter(host => host.userId === userId).map(host => ({ id: host.id, name: host.name, platform: host.platform, kind: 'desktop', online: current.has(host.id), lastSeenAt: current.has(host.id) ? connections.get(current.get(host.id)).lastSeenAt : host.lastSeenAt,
-      codex: { available: current.has(host.id), authenticated: current.has(host.id), configured: getConfig().mode === 'api' && Boolean(getConfig().model), supportsSteer: true, approvalReview: approvalReviewCapability(true, current.has(host.id) && connections.get(current.get(host.id)).capabilities.approvalReview === true), projectDirectory: current.has(host.id) && connections.get(current.get(host.id)).capabilities.projectDirectory === true, automations: Boolean(automationTool) && current.has(host.id) && connections.get(current.get(host.id)).capabilities.automations === true, mode: 'api', model: getConfig().model, executionMode: 'remote-cli' } }))];
+      codex: { available: current.has(host.id), authenticated: current.has(host.id), configured: getConfig().mode === 'api' && Boolean(getConfig().model), supportsSteer: true, approvalReview: approvalReviewCapability(true, current.has(host.id) && connections.get(current.get(host.id)).capabilities.approvalReview === true, current.has(host.id) && connections.get(current.get(host.id)).capabilities.independentReviewModel === true), projectDirectory: current.has(host.id) && connections.get(current.get(host.id)).capabilities.projectDirectory === true, automations: Boolean(automationTool) && current.has(host.id) && connections.get(current.get(host.id)).capabilities.automations === true, mode: 'api', model: getConfig().model, executionMode: 'remote-cli' } }))];
   };
   const target = (userId, id = 'central', projectDirectory, permissions) => {
     const host = hostFor(userId, id);
@@ -93,15 +93,16 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
       if (getConfig().mode !== 'api' || !getConfig().model) throw failure(409, '远程电脑执行需要中央配置 Responses API 模型。');
       if (directory && connection.capabilities.projectDirectory !== true) throw failure(409, '这台执行电脑尚不支持项目目录，请升级桌面客户端或使用默认目录。', 'executor_project_directory_unsupported');
       if (permissions?.approval === 'review' && connection.capabilities.approvalReview !== true) throw failure(409, '这台执行电脑尚不支持新版替我审批，请升级客户端或改为需要时询问。', 'executor_approval_review_unsupported');
+      if (permissions?.approval === 'review' && permissions.reviewProviderId && connection.capabilities.independentReviewModel !== true) throw failure(409, '这台执行电脑尚不支持独立命令审查模型，请升级客户端。', 'executor_review_model_unsupported');
     }
     return { hostId: host.id, hostName: host.name };
   };
   const isBusy = (userId, id) => { hostFor(userId, id); if (id === 'central') return false; return Boolean(live(connections.get(current.get(id))).run); };
   async function register(auth, body) {
     if (!fields(body, ['deviceId','name','platform','arch','capabilities']) || !uuid(body.deviceId) || !text(body.name, 120) || !['win32','linux','darwin'].includes(body.platform) || !text(body.arch, 32) ||
-        body.capabilities !== undefined && (!fields(body.capabilities, ['projectDirectory', 'automations', 'approvalReview']) || body.capabilities.projectDirectory !== true || ['automations', 'approvalReview'].some(key => body.capabilities[key] !== undefined && body.capabilities[key] !== true))) throw failure(400, '执行电脑注册字段无效。');
+        body.capabilities !== undefined && (!fields(body.capabilities, ['projectDirectory', 'automations', 'approvalReview', 'independentReviewModel']) || body.capabilities.projectDirectory !== true || ['automations', 'approvalReview', 'independentReviewModel'].some(key => body.capabilities[key] !== undefined && body.capabilities[key] !== true) || body.capabilities.independentReviewModel === true && body.capabilities.approvalReview !== true)) throw failure(400, '执行电脑注册字段无效。');
     const metadata = Object.fromEntries(['deviceId','name','platform','arch'].map(key => [key, body[key]]));
-    const capabilities = { projectDirectory: body.capabilities?.projectDirectory === true, automations: body.capabilities?.automations === true, approvalReview: body.capabilities?.approvalReview === true };
+    const capabilities = { projectDirectory: body.capabilities?.projectDirectory === true, automations: body.capabilities?.automations === true, approvalReview: body.capabilities?.approvalReview === true, independentReviewModel: body.capabilities?.independentReviewModel === true };
     const work = registration.catch(() => {}).then(async () => {
       authorizeSession(auth); if (closed) throw failure(503, '执行服务正在退出。');
       let host = store.state.executionHosts.find(item => item.userId === auth.userId && item.deviceId === body.deviceId);
@@ -115,7 +116,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
       await store.save(); authorizeSession(auth); if (closed) throw failure(503, '执行服务正在退出。');
       const connection = { id: randomUUID(), host, capabilities, auth: { ...auth }, expiresAt: clock()+leaseMs, lastSeenAt: stamp(), commands: [], run: null, recent: new Map(), waiter: null, polling: false };
       connections.set(connection.id, connection); current.set(host.id, connection.id);
-      return { hostId: host.id, connectionId: connection.id, leaseMs, pollMs, ...((capabilities.automations && automationTool || capabilities.approvalReview) ? { capabilities: { ...(capabilities.automations && automationTool ? { automations: true } : {}), ...(capabilities.approvalReview ? { approvalReview: true } : {}) } } : {}) };
+      return { hostId: host.id, connectionId: connection.id, leaseMs, pollMs, ...((capabilities.automations && automationTool || capabilities.approvalReview) ? { capabilities: { ...(capabilities.automations && automationTool ? { automations: true } : {}), ...(capabilities.approvalReview ? { approvalReview: true } : {}), ...(capabilities.independentReviewModel ? { independentReviewModel: true } : {}) } } : {}) };
     }); registration = work; return work;
   }
   const heartbeat = (id, auth) => { const connection = verify(id, auth); connection.expiresAt = clock()+leaseMs; connection.lastSeenAt = stamp(); return { ok: true, leaseMs }; };
@@ -172,9 +173,12 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
         if (args.projectDirectory !== undefined && normalizeProjectDirectory(args.projectDirectory, connection.host.platform) !== projectDirectory ||
             args.projectAccess !== undefined && args.projectAccess !== entry.projectAccess) throw failure(409, '任务项目目录或授权已变化，请重新提交。');
         if (connection.run) throw failure(409, '这台电脑正在执行其他任务，请稍后重试。');
+        const independentReview = entry.permissions?.approval === 'review' && entry.permissions.reviewProviderId;
+        const reviewConfig = independentReview && typeof getReviewConfig === 'function' ? getReviewConfig(entry) : undefined;
+        if (independentReview && (!reviewConfig || !text(reviewConfig.model, 160) || reviewConfig.model !== entry.reviewModel)) throw failure(409, '命令审查模型配置不可用，请重新提交。');
         let resolve, reject; const done = new Promise((yes, no) => { resolve = yes; reject = no; }); done.catch(() => {});
         const token = randomBytes(32).toString('base64url');
-        const run = boundRun = { id: entry.id, connection, entry, args, resolve, reject, done, tokenHash: tokenHash(token), expiresAt: clock()+60*60*1000, attachments: new Map(), relays: new Set(), automationCalls: new Map(), automationApprovalCalls: new Map(), automationApprovals: new Map(), automationGrants: new Map(), pending: new Map(), approvals: new Map(), sequence: 0, eventHash: '', started: false, dispatched: false, stopping: false, settled: false };
+        const run = boundRun = { id: entry.id, connection, entry, args, resolve, reject, done, ...(reviewConfig ? { reviewConfig: Object.freeze({ ...reviewConfig }) } : {}), tokenHash: tokenHash(token), expiresAt: clock()+60*60*1000, attachments: new Map(), relays: new Set(), automationCalls: new Map(), automationApprovalCalls: new Map(), automationApprovals: new Map(), automationGrants: new Map(), pending: new Map(), approvals: new Map(), sequence: 0, eventHash: '', started: false, dispatched: false, stopping: false, settled: false };
         connection.run = run; connection.recent.set(run.id, run); while (connection.recent.size > 32) connection.recent.delete(connection.recent.keys().next().value);
         run.abort = () => {
           if (run.settled || run.stopping) return; run.stopping = true;
@@ -189,7 +193,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
           checkRun(run); args.signal?.throwIfAborted();
           const attachments = await descriptors(run, entry.attachmentIds);
           checkRun(run); args.signal?.throwIfAborted();
-          enqueue(run, { id: randomUUID(), type: 'run', runId: run.id, conversationId: args.conversationId, prompt: args.prompt, ...(args.threadId ? { threadId: args.threadId } : {}), ...(projectDirectory ? { projectDirectory, projectAccess: entry.projectAccess } : {}), ...(connection.capabilities.automations && automationTool ? { automationTools: true } : {}), permissions: args.permissions, model: entry.model, effort: entry.effort, codexRevision: entry.codexRevision, relayToken: token, attachments });
+          enqueue(run, { id: randomUUID(), type: 'run', runId: run.id, conversationId: args.conversationId, prompt: args.prompt, ...(args.threadId ? { threadId: args.threadId } : {}), ...(projectDirectory ? { projectDirectory, projectAccess: entry.projectAccess } : {}), ...(connection.capabilities.automations && automationTool ? { automationTools: true } : {}), permissions: args.permissions, model: entry.model, ...(reviewConfig ? { reviewModel: reviewConfig.model } : {}), effort: entry.effort, codexRevision: entry.codexRevision, relayToken: token, attachments });
           run.ackTimer = setTimeout(() => settle(run, run.dispatched ? unknown() : failure(409, '执行电脑未领取任务；任务未自动重试。')), commandMs);
         } catch (error) { settle(run, error); }
         return done;
@@ -310,17 +314,25 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
     const value = await readAttachment(run.entry.auth.userId,id); checkRun(run);
     if (hash(value.bytes) !== expected.sha256) throw failure(409,'图片已变化。'); return value;
   }
-  async function relay(req,res) {
+  async function relay(req,res,{review = false} = {}) {
     const run = bearerRun(req.params.connectionId,req.params.runId,req.headers.authorization);
     if (!Buffer.isBuffer(req.body) || req.body.length > MODEL_REQUEST_BYTES || req.headers['content-encoding'] && req.headers['content-encoding'] !== 'identity') throw failure(400,'模型请求格式无效。');
     let body; try { body=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(req.body)); } catch { throw failure(400,'模型请求格式无效。'); }
-    if (!object(body) || body.stream !== true || body.model !== run.entry.model || run.relays.size >= 2) throw failure(400,'模型请求不属于当前任务。');
-    const config=getConfig(); if(config.mode!=='api') throw failure(409,'中央 API 模型不可用。');
+    const config=review ? run.reviewConfig : getConfig();
+    if (review && (!config || run.entry.permissions?.approval !== 'review' || !run.entry.permissions.reviewProviderId)) throw failure(403,'此任务没有独立审查模型授权。');
+    if (!object(body) || body.stream !== true || body.model !== (review ? run.entry.reviewModel : run.entry.model) || run.relays.size >= 2) throw failure(400,'模型请求不属于当前任务。');
+    if(!config || !review && config.mode!=='api') throw failure(409,'中央 API 模型不可用。');
+    if (review) {
+      const reasoning = object(body.reasoning) ? { ...body.reasoning } : {};
+      delete reasoning.effort;
+      if (config.reasoningEffort) reasoning.effort = config.reasoningEffort;
+      if (Object.keys(reasoning).length) body.reasoning = reasoning; else delete body.reasoning;
+    }
     const controller=new AbortController(), signal=AbortSignal.any([controller.signal,AbortSignal.timeout(180000)]);run.relays.add(controller);
     const disconnected=()=>{if(!res.writableEnded)controller.abort();};res.once('close',disconnected);
     let idle=setTimeout(()=>controller.abort(),30000), output=0, safeOutput=0;
     const reset=()=>{clearTimeout(idle);idle=setTimeout(()=>controller.abort(),30000);};
-    const redactor=createExecutorRelayRedactor({secret:config.apiKey,model:run.entry.model});
+    const redactor=createExecutorRelayRedactor({secret:config.apiKey,model:review ? run.entry.reviewModel : run.entry.model});
     const write=async frame=>{
       checkRun(run);signal.throwIfAborted();safeOutput+=Buffer.byteLength(frame);if(safeOutput>24*1024*1024)throw failure(502,'模型响应超过限制。');
       if(!res.write(frame))await new Promise((resolve,reject)=>{const cleanup=()=>{res.off('drain',ready);signal.removeEventListener('abort',cancel);};const ready=()=>{cleanup();resolve();};const cancel=()=>{cleanup();reject(new Error('模型请求停止。'));};res.once('drain',ready);signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel();});

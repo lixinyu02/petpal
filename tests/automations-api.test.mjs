@@ -12,7 +12,15 @@ import { listenFixture } from './helpers/loopback.mjs';
 
 const bootstrap = 'isolated-automation-owner';
 const password = 'isolated-password-123';
-async function until(check) { for (let i = 0; i < 200; i++) { const result = await check(); if (result) return result; await delay(5); } assert.fail('Automation fixture did not settle'); }
+async function until(check, { message = 'Automation fixture did not settle', diagnostic = () => '' } = {}) {
+  const deadline = performance.now() + 15000;
+  do {
+    const result = await check(); if (result) return result;
+    if (performance.now() >= deadline) break;
+    await delay(25);
+  } while (performance.now() < deadline);
+  assert.fail(`${message}${diagnostic() ? `: ${diagnostic()}` : ''}`);
+}
 
 async function fixture(t, { seed, autoStart = true } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-automation-api-')), dataDir = path.join(directory, 'data');
@@ -47,9 +55,33 @@ async function fixture(t, { seed, autoStart = true } = {}) {
   const jobs = async token => (await request('/automations', { token })).data.automations;
   const saved = async () => JSON.parse(await readFile(path.join(dataDir, 'state.json'), 'utf8'));
   const completed = async (job, index, token = bootstrap) => {
-    const current = await until(async () => { const visible = (await jobs(token)).find(item => item.id === job.id); return visible?.runs.at(-1)?.conversationId && visible.runs.at(-1); });
-    await until(() => calls.length > index); calls[index].resolve();
-    await until(async () => (await request(`/conversations/${current.conversationId}`, { token })).data.agent?.run?.status === 'completed');
+    let observed;
+    const terminalFailure = new Set(['error', 'cancelled', 'unknown', 'skipped']);
+    const diagnostic = () => {
+      let text = JSON.stringify(observed ?? { stage: 'waiting for automation binding' });
+      for (const key of [store.state.codexConfig.apiKey, provider.apiKey, foreign.apiKey].filter(Boolean)) text = text.replaceAll(key, '[hidden]');
+      return text.slice(0, 1500);
+    };
+    const current = await until(async () => {
+      const response = await request('/automations', { token });
+      observed = { stage: 'waiting for automation binding', httpStatus: response.status };
+      assert.equal(response.status, 200, diagnostic());
+      const visible = response.data.automations.find(item => item.id === job.id), run = visible?.runs.at(-1);
+      observed = { ...observed, automationStatus: run?.status, message: run?.message };
+      assert.ok(visible, diagnostic());
+      assert.ok(!terminalFailure.has(run?.status), `Automation terminated before completion: ${diagnostic()}`);
+      return run?.conversationId && run;
+    }, { message: 'Automation result was not bound', diagnostic });
+    await until(() => calls.length > index, { message: 'Agent fixture did not start', diagnostic }); calls[index].resolve();
+    await until(async () => {
+      const response = await request(`/conversations/${current.conversationId}`, { token }), agent = response.data.agent;
+      const receipt = agent?.submissions.find(item => item.submissionId === current.id);
+      observed = { stage: 'waiting for Agent completion', httpStatus: response.status, agentStatus: agent?.run?.status, paused: agent?.paused, error: agent?.run?.error || receipt?.error, message: agent?.run?.message, receiptStatus: receipt?.status };
+      assert.equal(response.status, 200, diagnostic());
+      assert.ok(!terminalFailure.has(agent?.run?.status), `Agent terminated without completion: ${diagnostic()}`);
+      assert.ok(!['error', 'cancelled', 'uncertain'].includes(receipt?.status), `Agent submission terminated without completion: ${diagnostic()}`);
+      return agent?.run?.status === 'completed';
+    }, { message: 'Agent fixture completion did not settle', diagnostic });
     await app.automations.tick(); return current;
   };
   t.after(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
@@ -71,6 +103,21 @@ test('account APIs require Agent authorization, isolate users and retain exact c
   assert.equal(f.calls[0].args.model, f.provider.model);
   const visible = JSON.stringify((await f.request('/automations', { token: alice.token })).data);
   assert.doesNotMatch(visible, /grantId|snapshot|sessionHash|private-fixture|private-provider|sourceRunId/);
+});
+
+test('scheduled Agent dispatch resolves its fixed independent reviewer without storing review credentials in the run', async t => {
+  const f = await fixture(t), permissions = { access: 'read-only', approval: 'review', reviewProviderId: f.foreign.id };
+  const job = await f.create(bootstrap, { permissions });
+  assert.equal(job.permissions.reviewProviderId, f.foreign.id);
+  const submitted = await f.request(`/automations/${job.id}/run`, { method: 'POST', body: { requestId: randomUUID() } }); assert.equal(submitted.status, 200);
+  await until(() => f.calls.length === 1);
+  const call = f.calls[0]; assert.equal(call.args.reviewConfig.model, f.foreign.model); assert.equal(call.args.reviewConfig.apiKey, f.foreign.apiKey); assert.equal(call.args.authorizeReview(), true);
+  const saved = await f.saved(), stored = saved.automations.jobs.find(item => item.id === job.id);
+  assert.equal(stored.runs[0].snapshot.permissions.reviewProviderId, f.foreign.id);
+  assert.equal(JSON.stringify(stored).includes(f.foreign.apiKey), false);
+  const conversation = saved.conversations.find(item => item.id === stored.runs[0].conversationId);
+  assert.equal(JSON.stringify(conversation).includes(f.foreign.apiKey), false);
+  await f.completed(job, 0);
 });
 
 test('owned offline computers may be saved, while foreign hosts, models and escalated access are rejected', async t => {

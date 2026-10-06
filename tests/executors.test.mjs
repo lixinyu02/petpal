@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
+import { EventEmitter } from 'node:events';
 import { createExecutors, validateExecutionHosts } from '../server/executors.mjs';
 
 const deferred = () => { let resolve; const promise=new Promise(yes=>{resolve=yes;});return {promise,resolve}; };
@@ -69,6 +70,41 @@ test('remote reviewer progress is strict bounded metadata, never execution autho
   const body={runId:run.item.id,sequence:3,event:'status',data:{approvalReview:{...review,approved:true}}};
   assert.throws(()=>f.manager.events(reg.connectionId,f.auth,body),{status:400});
   run.event('complete',{text:'done'}); await run.completion;
+});
+
+test('independent reviewer capability is live, explicit and does not retrofit old review executors',async t=>{
+  const f=fixture(t),deviceId=randomUUID(),permissions={access:'read-only',approval:'review',reviewProviderId:'review-provider'};
+  await assert.rejects(f.registration({capabilities:{projectDirectory:true,independentReviewModel:true}}),{status:400});
+  const modern=await f.registration({deviceId,capabilities:{projectDirectory:true,approvalReview:true,independentReviewModel:true}});
+  const cap=f.manager.list(f.userId).find(host=>host.id===modern.hostId).codex.approvalReview;
+  assert.equal(cap.version,2);assert.equal(cap.independentModel,true);
+  assert.doesNotThrow(()=>f.manager.target(f.userId,modern.hostId,undefined,permissions));
+  const previous=await f.registration({deviceId,capabilities:{projectDirectory:true,approvalReview:true}});
+  assert.equal(f.manager.list(f.userId).find(host=>host.id===previous.hostId).codex.approvalReview.version,1);
+  assert.throws(()=>f.manager.target(f.userId,previous.hostId,undefined,permissions),{code:'executor_review_model_unsupported'});
+  assert.doesNotThrow(()=>f.manager.target(f.userId,previous.hostId,undefined,{access:'read-only',approval:'review'}));
+});
+
+test('per-run review relay freezes a distinct provider, isolates parent requests and expires with the task',async t=>{
+  const upstream=[],reviewConfig={model:'review-only-model',baseUrl:'https://review.example/v1',apiKey:'private-review-key',providerId:'review-provider'};
+  const f=fixture(t,{getReviewConfig:()=>reviewConfig,fetchImpl:async(url,init)=>{upstream.push({url,init});return new Response('event: response.completed\ndata: {"type":"response.completed","response":{"id":"fixture-response","status":"completed","output":[]}}\n\n',{headers:{'Content-Type':'text/event-stream'}});}});
+  const registered=await f.registration({capabilities:{projectDirectory:true,approvalReview:true,independentReviewModel:true}});
+  const entry={...f.entry(registered.hostId),permissions:{access:'read-only',approval:'review',reviewProviderId:'review-provider'},reviewModel:reviewConfig.model};
+  const bridge=f.manager.bind(entry),completion=bridge.run({conversationId:entry.conversationId,prompt:'fixture only',permissions:entry.permissions});completion.catch(()=>{});
+  const command=(await f.manager.poll(registered.connectionId,f.auth)).commands[0];
+  assert.equal(command.reviewModel,reviewConfig.model);assert.doesNotMatch(JSON.stringify(command),/private-review-key|review\.example|never-send-this-key/);
+  f.manager.events(registered.connectionId,f.auth,{runId:entry.id,sequence:1,event:'started',data:{}});
+  const req=model=>({params:{connectionId:registered.connectionId,runId:entry.id},headers:{authorization:`Bearer ${command.relayToken}`},body:Buffer.from(JSON.stringify({stream:true,model}))});
+  const res=()=>Object.assign(new EventEmitter(),{headersSent:false,writableEnded:false,status(){return this;},set(){this.headersSent=true;return this;},json(){return this;},write(){return true;},end(){this.writableEnded=true;},destroy(){this.writableEnded=true;}});
+  await assert.rejects(f.manager.relay(req('review-only-model'),res()),{status:400});
+  await assert.rejects(f.manager.relay(req('model-1'),res(),{review:true}),{status:400});
+  await f.manager.relay(req('review-only-model'),res(),{review:true});
+  await f.manager.relay(req('model-1'),res());
+  assert.equal(upstream[0].url,'https://review.example/v1/responses');assert.equal(upstream[0].init.headers.Authorization,'Bearer private-review-key');
+  assert.equal(upstream[1].url,'https://central-model.example/v1/responses');assert.equal(upstream[1].init.headers.Authorization,'Bearer never-send-this-key');
+  f.valid.delete(f.auth.sessionHash);await assert.rejects(f.manager.relay(req('review-only-model'),res(),{review:true}),{status:401});f.valid.add(f.auth.sessionHash);
+  f.manager.events(registered.connectionId,f.auth,{runId:entry.id,sequence:2,event:'complete',data:{text:''}});await completion;
+  await assert.rejects(f.manager.relay(req('review-only-model'),res(),{review:true}),{status:401});assert.equal(upstream.length,2);
 });
 
 test('project-directory capability belongs to the live connection and never the persisted host',async t=>{

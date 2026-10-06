@@ -10,6 +10,6 @@ export function validApprovalReview(value) {
     (value.rationale === undefined || boundedText(value.rationale, 2000));
 }
 
-export function approvalReviewCapability(apiMode, available = true) {
-  return { available, modelStrategy: apiMode ? 'agent-model' : 'native', dynamicTools: 'bounded-audio-rules-with-manual-fallback', version: 1 };
+export function approvalReviewCapability(apiMode, available = true, independentModel = apiMode) {
+  return { available, modelStrategy: apiMode ? 'agent-model' : 'native', dynamicTools: 'bounded-audio-rules-with-manual-fallback', version: independentModel ? 2 : 1, ...(independentModel ? { independentModel: Boolean(available && apiMode) } : {}) };
 }

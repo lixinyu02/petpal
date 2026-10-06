@@ -4,11 +4,35 @@ import { mkdir, readFile, writeFile, rename, chmod, unlink } from 'node:fs/promi
 import { normalizeBaseUrl, normalizeReasoningEffort } from './providers.mjs';
 
 const failure = (status, message) => Object.assign(new Error(message), { status });
-export const CODEX_TOOL_VERSION = 'system-volume-native-review-v1';
+export const CODEX_TOOL_VERSION = 'system-volume-native-review-v2';
 export const CODEX_KEY_ENV = 'PETPAL_CODEX_API_KEY';
 export const CODEX_CATALOG_SHA256 = 'd5db15d306c4bd5c4bb8a927940e70473c389d65d9e2bf887ec7028fce893d5f';
 export const CODEX_CATALOG_SOURCE_FILES = Object.freeze(['models-0.143.0.json', 'LICENSE', 'PROVENANCE.json', 'SHA256SUMS'].map(file => `server/native/codex-review/${file}`));
 const catalogSource = new URL('./native/codex-review/models-0.143.0.json', import.meta.url);
+
+// Only the authenticated server/executor resolves this object. Requests cannot
+// choose a provider, URL or credential by putting fields in their model body.
+export function normalizeCodexReviewConfig(value) {
+  if (value === undefined || value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['model', 'baseUrl', 'apiKey', 'providerId', 'reasoningEffort'].includes(key))) throw failure(400, '独立审查模型配置无效。');
+  for (const [key, limit] of [['model', 160], ['baseUrl', 2048], ['apiKey', 8192]]) {
+    if (typeof value[key] !== 'string' || value[key].length > limit || /[\x00-\x1f\x7f]/.test(value[key])) throw failure(400, '独立审查模型配置无效。');
+  }
+  if (!value.model.trim() || value.model !== value.model.trim() || /\s/.test(value.baseUrl)) throw failure(400, '独立审查模型配置无效。');
+  let url;
+  try { url = new URL(value.baseUrl); } catch { throw failure(400, '独立审查服务地址无效。'); }
+  if (!url.hostname || url.username || url.password || url.search || url.hash || !['https:', 'http:'].includes(url.protocol)) throw failure(400, '独立审查服务地址须是已授权的 HTTP(S) 地址。');
+  if (value.providerId !== undefined && (typeof value.providerId !== 'string' || !value.providerId || value.providerId.length > 160 || /[\x00-\x20\x7f]/.test(value.providerId))) throw failure(400, '独立审查模型标识无效。');
+  let reasoningEffort;
+  try { reasoningEffort = normalizeReasoningEffort(value.reasoningEffort); } catch { throw failure(400, '独立审查模型推理等级无效。'); }
+  return Object.freeze({ model: value.model, baseUrl: url.href.replace(/\/$/, ''), apiKey: value.apiKey, reasoningEffort,
+    ...(value.providerId === undefined ? {} : { providerId: value.providerId }) });
+}
+
+// Private binding only. Never return this credential-derived digest to clients.
+export function codexReviewFingerprint(value) {
+  return value ? createHash('sha256').update(JSON.stringify([value.model, value.baseUrl, value.apiKey, value.providerId ?? '', value.reasoningEffort ?? ''])).digest('hex') : 'follow-agent';
+}
 
 /** Codex 0.143 auto-review falls back to the active model when its preferred
  * model is absent. Keep all other official metadata intact, including the

@@ -2,19 +2,22 @@ import {projectDirectoryIssue,projectDirectoryValue,readProjectDirectory,savePro
 const prefix = 'petpal.chat-assistant.';
 const hostId = value => typeof value === 'string' && value.length <= 160 ? value : '';
 const providerId = value => typeof value === 'string' && value.length <= 160 ? value : '';
+const reviewerId = value => typeof value==='string'&&/^[a-zA-Z0-9_-]{1,128}$/.test(value)?value:'';
 
-/** Remember the user's target, never permission to run tasks. */
+/** Remember model choices and the target, never permission to run tasks. */
 export function readChatAssistantPreferences(storage, scope) {
   if (!scope) return {hostId:'',providerId:''};
   try {
     const value=JSON.parse(storage?.getItem(prefix+encodeURIComponent(scope))||'null');
     const selectedHost=hostId(value?.hostId),directory=readProjectDirectory(storage,scope,selectedHost);
-    return {hostId:selectedHost,providerId:providerId(value?.providerId),...(directory?{projectDirectory:directory}:{})};
+    const reviewProviderId=reviewerId(value?.reviewProviderId);
+    return {hostId:selectedHost,providerId:providerId(value?.providerId),...(reviewProviderId?{reviewProviderId}:{}),...(directory?{projectDirectory:directory}:{})};
   } catch { return {hostId:'',providerId:''}; }
 }
 export function saveChatAssistantPreferences(storage, scope, value) {
   if (!scope) return;
-  try { storage?.setItem(prefix+encodeURIComponent(scope),JSON.stringify({hostId:hostId(value.hostId),providerId:providerId(value.providerId)})); } catch {}
+  const reviewProviderId=reviewerId(value.permissions?value.permissions.reviewProviderId:value.reviewProviderId);
+  try { storage?.setItem(prefix+encodeURIComponent(scope),JSON.stringify({hostId:hostId(value.hostId),providerId:providerId(value.providerId),...(reviewProviderId?{reviewProviderId}:{})})); } catch {}
   saveProjectDirectory(storage,scope,hostId(value.hostId),value.projectDirectory||'');
 }
 export function restoreChatAssistantPreferences(storage, scope, defaultHostId) {
@@ -41,7 +44,9 @@ export function snapshotChatAssistant(value, allowed, hosts, defaultHostId) {
   const directory=projectDirectoryValue(value.projectDirectory);
   if(value.projectDirectory&&(typeof value.projectDirectory!=='string'||value.projectDirectory.length>4096||/[\x00-\x1f\x7f]/.test(value.projectDirectory)||directory!==value.projectDirectory.trim()))throw new Error('项目目录格式无效，请重新设置。');
   if(directory&&hosts){const issue=projectDirectoryIssue(directory,hosts.find(host=>host.id===value.hostId));if(issue)throw new Error(issue);}
-  return {enabled:true,hostId:hostId(value.hostId),providerId:providerId(value.providerId)||null,permissions:{access:value.permissions.access,approval:value.permissions.approval},...(directory?{projectDirectory:directory}:{})};
+  const reviewProviderId=value.permissions.reviewProviderId===''?null:value.permissions.reviewProviderId;
+  if(reviewProviderId!==undefined&&reviewProviderId!==null&&reviewerId(reviewProviderId)!==reviewProviderId)throw new Error('命令审查模型配置无效，请重新选择。');
+  return {enabled:true,hostId:hostId(value.hostId),providerId:providerId(value.providerId)||null,permissions:{access:value.permissions.access,approval:value.permissions.approval,...(reviewProviderId!==undefined?{reviewProviderId}:{})},...(directory?{projectDirectory:directory}:{})};
 }
 export function chatAssistantForHost(value, selectedHost, storage, scope) {
   return {...value,hostId:hostId(selectedHost),projectDirectory:readProjectDirectory(storage,scope,hostId(selectedHost))};

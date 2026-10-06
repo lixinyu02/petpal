@@ -155,3 +155,14 @@ test('actual Chat + Agent controls bind review support and model copy to their s
   f.refresh({hosts:[{...f.assistant.hosts[0],codex:{available:true,approvalReview:capability,model:'host-default'}}]});
   assert.equal(f.find(f.permissions).props.reviewCapability,capability);assert.equal(f.find(f.permissions).props.reviewModel,'fixture','selected Agent provider overrides the host default');
 });
+
+test('actual Chat + Agent controls pass the independent review catalog separately from Agent eligibility and retain a frozen reviewer while disabled',t=>{
+  const f=fixture();t.after(()=>f.dispose());
+  const reviewer={id:'another-service',name:'独立审核连接',model:'review-model',protocol:'responses'},capability={available:true,modelStrategy:'agent-model',dynamicTools:'bounded-audio-rules-with-manual-fallback',version:2,independentModel:true};
+  f.props.reviewProviders=[reviewer];f.props.disabled=true;
+  f.assistant.value.permissions={access:'workspace-write',approval:'review',reviewProviderId:reviewer.id};
+  f.refresh({hosts:[{...f.assistant.hosts[0],codex:{available:true,approvalReview:capability}}]});f.open();
+  const permission=f.find(f.permissions);assert.deepEqual(permission.props.reviewProviders,[reviewer]);assert.equal(permission.props.value.reviewProviderId,reviewer.id);assert.equal(permission.props.disabled,true);assert.equal(permission.props.reviewCapability,capability);
+  assert.deepEqual(f.props.providers.map(provider=>provider.id),['provider-one'],'a reviewer on another connection does not become an Agent model');
+  assert.deepEqual(f.changes,[]);
+});

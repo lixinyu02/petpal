@@ -106,3 +106,24 @@ test('foreground completion and cancellation stay attached to their own reply wh
   assert.equal(foregroundAssistantMessage(conversation,'missing'),undefined);
   assert.equal(foregroundAssistantMessage(conversation,'result'),undefined);
 });
+
+test('independent review model is remembered by account without persisting authority and can be explicitly cleared',()=>{
+  const local=storage(),alice={...selected,permissions:{...selected.permissions,approval:'review',reviewProviderId:'review-alice'}},bob={...selected,permissions:{...selected.permissions,reviewProviderId:'review-bob'}};
+  saveChatAssistantPreferences(local,'server:alice',alice);saveChatAssistantPreferences(local,'server:bob',bob);
+  assert.equal(readChatAssistantPreferences(local,'server:alice').reviewProviderId,'review-alice');assert.equal(readChatAssistantPreferences(local,'server:bob').reviewProviderId,'review-bob');
+  assert.equal(readChatAssistantPreferences(local,'other-server:alice').reviewProviderId,undefined);
+  const restored=restoreChatAssistantPreferences(local,'server:alice','new-default');assert.equal(restored.hostId,'new-default');assert.equal(restored.reviewProviderId,'review-alice');
+  for(const encoded of local.entries.values()){const saved=JSON.parse(encoded);assert.equal(Object.hasOwn(saved,'enabled'),false);assert.equal(Object.hasOwn(saved,'permissions'),false);}
+  saveChatAssistantPreferences(local,'server:alice',{...restored,permissions:{access:'read-only',approval:'ask',reviewProviderId:null}});
+  assert.equal(readChatAssistantPreferences(local,'server:alice').reviewProviderId,undefined,'clearing nested permissions must override any old top-level restored choice');
+  assert.equal(readChatAssistantPreferences(local,'server:bob').reviewProviderId,'review-bob');
+});
+
+test('a Chat + Agent dispatch freezes the independent review provider and never silently drops invalid selections',()=>{
+  const mutable={...selected,permissions:{access:'workspace-write',approval:'review',reviewProviderId:'separate-responses'}};
+  const turn=snapshotChatAssistant(mutable,true);mutable.permissions.reviewProviderId='next-review';mutable.permissions.approval='auto';
+  assert.deepEqual(turn.permissions,{access:'workspace-write',approval:'review',reviewProviderId:'separate-responses'});
+  assert.equal(snapshotChatAssistant({...mutable,permissions:{...mutable.permissions,reviewProviderId:null}},true).permissions.reviewProviderId,null);
+  assert.equal(snapshotChatAssistant({...mutable,permissions:{...mutable.permissions,reviewProviderId:''}},true).permissions.reviewProviderId,null);
+  for(const reviewProviderId of [[],{},false,' leading','trailing ','bad\nvalue','bad:id','x'.repeat(129)])assert.throws(()=>snapshotChatAssistant({...mutable,permissions:{...mutable.permissions,reviewProviderId}},true),/审查模型配置无效/);
+});

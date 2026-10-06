@@ -30,6 +30,18 @@ test('caller-provided guardian forwarding receives only guardian requests and ke
   assert.ok(!JSON.stringify(result).includes(credential));
 });
 
+for (const [model, reviewerModel, scenario, reviewReasoningEffort] of [['gpt-5.4', 'qwen3.8flash', 'allow', ''], ['qwen3.8flash', 'gpt-5.4', 'allow', 'low'], ['gpt-5.4', 'qwen3.8flash', 'deny', '']]) {
+  test(`native ${model} independently routes guardian to ${reviewerModel} with ${scenario}`, { timeout: 60000 }, async () => {
+    const result = await verifyNativeReview({ model, reviewerModel, scenario, reviewReasoningEffort, reasoningEffort: 'max' });
+    assert.equal(result.passed, true); assert.equal(result.markerExecuted, scenario === 'allow'); assert.equal(result.manualApprovals, 0);
+    const parents = result.requests.filter(request => !request.guardian), reviews = result.requests.filter(request => request.guardian);
+    assert.ok(parents.length >= 2); assert.ok(reviews.length >= 1);
+    assert.ok(parents.every(request => request.model === model && request.route === 'agent' && request.effort === 'max'));
+    assert.ok(reviews.every(request => request.model === reviewerModel && request.route === 'review' && request.effort === (reviewReasoningEffort || null)));
+    assert.doesNotMatch(JSON.stringify(result), /native-independent-review-fixture-key|127\.0\.0\.1|\/review\/responses/);
+  });
+}
+
 test('native guardian 90-second deadline fails closed while SSE remains alive', { timeout: 125000, skip: process.env.PETPAL_TEST_GUARDIAN_TIMEOUT !== '1' }, async () => {
   const result = await verifyNativeReview({ model: 'qwen3.8flash', scenario: 'timeout' });
   assert.equal(result.passed, true); assert.equal(result.markerExecuted, false);

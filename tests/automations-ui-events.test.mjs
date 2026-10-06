@@ -23,7 +23,7 @@ const job = (extra = {}) => ({ id: '00000000-0000-4000-8000-000000000201', title
 
 /** Execute the component's actual effects and event handlers. Only lifecycle,
  * child pickers and HTTP are fixtures; payload and concurrency decisions remain in TSX. */
-function fixture({ initial = [], connectedUser = user, request, availableHosts = hosts, defaultHostId = '00000000-0000-4000-8000-000000000101' } = {}) {
+function fixture({ initial = [], connectedUser = user, request, availableHosts = hosts, defaultHostId = '00000000-0000-4000-8000-000000000101', reviewProviders = [] } = {}) {
   let epoch = 1, identity = { instanceId: 'server-one', userId: connectedUser?.id || 'user-one' }, index = 0, tree, dirty = false, mounted = true, afterUnmountUpdates = 0, sequence = 0;
   let actual = clone(initial), preferences = { allowAgentCreate: true };
   const hooks = [], effects = [], requests = [], editing = [], opened = [], refreshes = [], timers = new Map();
@@ -64,7 +64,7 @@ function fixture({ initial = [], connectedUser = user, request, availableHosts =
     setTimeout(callback) { const id = ++sequence; timers.set(id, callback); return id; }, clearTimeout: id => timers.delete(id),
     require: name => { if (name.endsWith('.css')) return {}; assert.ok(Object.hasOwn(modules, name), `Unexpected dependency ${name}`); return modules[name]; },
   });
-  const props = { user: connectedUser, providers, hosts: availableHosts, defaultHostId, hostsLoading: false, hostsError: '', onRefreshHosts: () => refreshes.push(true),
+  const props = { user: connectedUser, providers, reviewProviders, hosts: availableHosts, defaultHostId, hostsLoading: false, hostsError: '', onRefreshHosts: () => refreshes.push(true),
     onOpenConversation: id => opened.push(id), onEditingChange: value => editing.push(clone(value)) };
   const find = (type, predicate = () => true) => nodes(tree).find(node => node.type === type && predicate(node.props));
   const render = () => { index = 0; dirty = false; effects.length = 0; tree = module.exports.default(props); for (const effect of effects) effect(); return tree; };
@@ -117,6 +117,19 @@ test('edit and pause mutations carry the server revision instead of guessing the
   f.click('暂停自动化：周报'); await f.flush();
   const writes = f.requests.filter(item => item.method === 'PATCH'); assert.equal(writes.length, 2); assert.equal(writes[0].body.revision, revisionOne); assert.equal(writes[1].body.revision, revisionTwo); assert.equal(writes[1].body.enabled, false);
   assert.match(f.text(), /已暂停/);
+});
+
+test('automation editing preserves a cross-connection reviewer in the saved permission snapshot and cannot change it during submission',async t=>{
+  const reviewer={id:'review-other-api',name:'独立审核连接',model:'review-model',protocol:'responses'},capability={available:true,modelStrategy:'agent-model',dynamicTools:'bounded-audio-rules-with-manual-fallback',version:2,independentModel:true};
+  const current=job({permissions:{access:'workspace-write',approval:'review',reviewProviderId:reviewer.id}}),writing=deferred();
+  const f=fixture({initial:[current],reviewProviders:[reviewer],availableHosts:hosts.map(host=>({...host,codex:{...host.codex,approvalReview:capability}})),request:call=>call.method==='PATCH'?writing.promise:undefined});t.after(()=>f.close());await f.flush();
+  f.click('编辑自动化：日报');assert.deepEqual(f.find(f.permissions).props.reviewProviders,[reviewer]);assert.equal(f.find(f.permissions).props.value.reviewProviderId,reviewer.id);assert.equal(f.find(f.permissions).props.reviewCapability,capability);
+  assert.deepEqual(f.find(f.controls.ModelPicker).props.providers.map(provider=>provider.id),['responses-one']);
+  f.type('自动化名称','审查模型验收');f.submit();
+  const request=f.requests.find(call=>call.method==='PATCH');assert.deepEqual(request.body.permissions,current.permissions);assert.equal(request.body.providerId,'responses-one');assert.equal(f.find(f.permissions).props.disabled,true);
+  f.choosePermissions({access:'full-access',approval:'auto',reviewProviderId:'other-choice'});assert.equal(f.find(f.permissions).props.value.reviewProviderId,reviewer.id);
+  const saved={...current,...request.body,revision:revisionTwo};f.setJobs([saved]);writing.resolve({automation:saved});await f.flush();
+  assert.deepEqual(request.body.permissions,current.permissions);assert.equal(f.lastEditing.dirty,false);assert.equal(f.lastEditing.busy,false);
 });
 
 test('duplicate form submission is serialized synchronously before a React rerender', async t => {
@@ -267,6 +280,13 @@ test('unknown PATCH is reconciled by readback and does not repeat an already com
   } }); t.after(() => f.close()); await f.flush(); f.click('编辑自动化：日报'); f.type('任务指令', '此前已保存的新指令'); f.submit(); await f.flush();
   assert.equal(f.lastEditing.busy, true); f.click('确认结果'); await f.flush();
   assert.equal(writes, 1); assert.equal(f.find('form'), undefined); assert.equal(f.lastEditing.busy, false); assert.equal(f.lastEditing.dirty, false); assert.match(f.text(), /已确认此前的修改/);
+});
+
+test('clearing an independent reviewer is reconciled after a lost acknowledgement when the server omits the follow-Agent field',async t=>{
+  const original=job({permissions:{access:'workspace-write',approval:'review',reviewProviderId:'old-review'}});let writes=0;
+  const f=fixture({initial:[original],request:call=>{if(call.method==='PATCH'){writes++;const permissions={...call.body.permissions};delete permissions.reviewProviderId;f.setJobs([{...original,...call.body,permissions,revision:revisionTwo}]);throw new TypeError('saved with canonical follow-Agent permissions before acknowledgement was lost');}}});t.after(()=>f.close());await f.flush();
+  f.click('编辑自动化：日报');f.choosePermissions({access:'workspace-write',approval:'review',reviewProviderId:null});f.submit();await f.flush();assert.equal(f.lastEditing.busy,true);
+  f.click('确认结果');await f.flush();assert.equal(writes,1);assert.equal(f.find('form'),undefined);assert.equal(f.lastEditing.busy,false);assert.match(f.text(),/已确认此前的修改/);
 });
 
 test('unknown PATCH keeps the original revision and payload when readback proves it has not committed', async t => {

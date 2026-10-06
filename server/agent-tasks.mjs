@@ -8,20 +8,22 @@ const failure = (status, message, code) => Object.assign(new Error(message), { s
 const now = () => new Date().toISOString();
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const identifier = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{8,128}$/.test(value);
+const validFingerprint = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const empty = () => ({ revision: 0, paused: false, queue: [], run: null, submissions: [] });
 const content = (value, images = []) => {
   if ((value !== undefined && typeof value !== 'string') || (value?.length ?? 0) > 32000 || (!value?.trim() && !images.length)) throw failure(400, 'Agent 消息需要文字或图片，文字最多 32000 个字符。');
   return value?.trim() ?? '';
 };
 const attachments = normalizeAttachmentIds;
-const publicEntry = entry => ({ id: entry.id, submissionId: entry.submissionId, revision: entry.revision, content: entry.content, attachmentIds: [...entry.attachmentIds], permissions: { ...entry.permissions }, providerId: entry.providerId, model: entry.model, effort: entry.effort, hostId: entry.hostId ?? 'central', hostName: entry.hostName ?? '中央服务器', ...(entry.projectDirectory ? { projectDirectory: entry.projectDirectory } : {}), createdAt: entry.createdAt });
+const publicEntry = entry => ({ id: entry.id, submissionId: entry.submissionId, revision: entry.revision, content: entry.content, attachmentIds: [...entry.attachmentIds], permissions: { ...entry.permissions }, providerId: entry.providerId, model: entry.model, ...(entry.reviewModel ? { reviewModel: entry.reviewModel } : {}), effort: entry.effort, hostId: entry.hostId ?? 'central', hostName: entry.hostName ?? '中央服务器', ...(entry.projectDirectory ? { projectDirectory: entry.projectDirectory } : {}), createdAt: entry.createdAt });
 const receipt = entry => ({ submissionId: entry.submissionId, entryId: entry.entryId, status: entry.status, ...(entry.error ? { error: entry.error } : {}) });
-const publicRun = run => run ? { ...Object.fromEntries(['id', 'submissionId', 'status', 'turnId', 'permissions', 'providerId', 'model', 'effort', 'startedAt', 'finishedAt', 'message', 'error', 'projectDirectory', 'approvalReview'].filter(key => run[key] !== undefined).map(key => [key, structuredClone(run[key])])), hostId: run.hostId ?? 'central', hostName: run.hostName ?? '中央服务器' } : null;
+const publicRun = run => run ? { ...Object.fromEntries(['id', 'submissionId', 'status', 'turnId', 'permissions', 'providerId', 'model', 'reviewModel', 'effort', 'startedAt', 'finishedAt', 'message', 'error', 'projectDirectory', 'approvalReview'].filter(key => run[key] !== undefined).map(key => [key, structuredClone(run[key])])), hostId: run.hostId ?? 'central', hostName: run.hostName ?? '中央服务器' } : null;
 
 /** A restart is an explicit pause boundary, never permission to replay work. */
 export function restoreAgentState(conversation) {
   validateStoredProjectDirectory(conversation.agentProjectDirectory);
   validateStoredProjectDirectory(conversation.threadProjectDirectory);
+  if (conversation.threadReviewFingerprint !== undefined && !validFingerprint(conversation.threadReviewFingerprint)) throw new Error('本地 Agent 审查模型指纹无效。');
   const agent = conversation.agent;
   if (agent === undefined) return false;
   if (conversation.mode !== 'codex' || !object(agent) || !Number.isSafeInteger(agent.revision) || agent.revision < 0 || typeof agent.paused !== 'boolean' || !Array.isArray(agent.queue) || agent.queue.length > 5 || !Array.isArray(agent.submissions) || agent.submissions.length > 500) throw new Error('本地 Agent 队列格式无效，请保留数据并检查备份。');
@@ -30,6 +32,7 @@ export function restoreAgentState(conversation) {
   for (const entry of agent.queue) {
     if (!object(entry) || !identifier(entry.id) || queueIds.has(entry.id) || !identifier(entry.submissionId) || entry.conversationId !== conversation.id || !Number.isSafeInteger(entry.revision) || entry.revision < 1 || !object(entry.auth) || entry.auth.userId !== conversation.userId || typeof entry.auth.sessionHash !== 'string' || typeof entry.auth.bootstrap !== 'boolean' || !Number.isSafeInteger(entry.auth.generation) || entry.auth.generation < 0) throw new Error('本地 Agent 任务归属无效。');
     content(entry.content, attachments(entry.attachmentIds)); normalizeAgentPermissions(entry.permissions);
+    if (entry.reviewModel !== undefined && (typeof entry.reviewModel !== 'string' || !entry.reviewModel || entry.reviewModel.length > 160 || !validFingerprint(entry.reviewFingerprint)) || entry.reviewFingerprint !== undefined && entry.reviewModel === undefined) throw new Error('本地 Agent 审查模型记录无效。');
     validateStoredProjectDirectory(entry.projectDirectory);
     if (entry.projectDirectory && !['workspace', 'full'].includes(entry.projectAccess) || !entry.projectDirectory && entry.projectAccess !== undefined) throw new Error('本地 Agent 项目访问范围无效。');
     queueIds.add(entry.id); if (entry.auth.generation !== 0) { entry.auth.generation = 0; changed = true; }
@@ -56,8 +59,8 @@ export function restoreAgentState(conversation) {
 }
 
 /** Persistent receipts and short per-conversation locks own task lifetime, not HTTP. */
-export function createAgentTasks({ store, active, approvals, getBridge, authorize, authorizeRemoval = authorize, resolveModel, resolveHost = (_userId, hostId) => ({ hostId, hostName: '中央服务器' }), resolveProject = (_userId, _hostId, value) => value ? { projectDirectory: normalizeProjectDirectory(value), projectAccess: 'workspace' } : {}, resolveImages = async () => [], redact = value => value }) {
-  const locks = new Map(), generations = new Map(), removed = new Set();
+export function createAgentTasks({ store, active, approvals, getBridge, authorize, authorizeRemoval = authorize, resolveModel, resolveReview = () => ({}), getReviewConfig = () => undefined, resolveHost = (_userId, hostId) => ({ hostId, hostName: '中央服务器' }), resolveProject = (_userId, _hostId, value) => value ? { projectDirectory: normalizeProjectDirectory(value), projectAccess: 'workspace' } : {}, resolveImages = async () => [], redact = value => value }) {
+  const locks = new Map(), generations = new Map(), removed = new Set(), knownReviewThreads = new Map();
   let closed = false;
   const data = conversation => conversation.agent ??= empty();
   const bump = conversation => { data(conversation).revision++; conversation.updatedAt = now(); };
@@ -106,7 +109,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     const hostId = body.hostId ?? (kind === 'steer' ? running?.hostId ?? 'central' : 'central');
     const projectDirectory = kind === 'steer' && body.projectDirectory === undefined ? running?.projectDirectory : value.projectDirectory;
     const entry = { id: randomUUID(), conversationId: conversation.id, submissionId: body.submissionId, revision: 1, content: value.content, attachmentIds: value.attachmentIds, permissions, providerId, ...resolveHost(auth.userId, hostId),
-      ...resolveProject(auth.userId, hostId, projectDirectory), ...resolveModel(auth.userId, providerId), auth: { ...auth, generation: epoch(auth) }, createdAt: now() };
+      ...resolveProject(auth.userId, hostId, projectDirectory), ...resolveModel(auth.userId, providerId), ...resolveReview(auth.userId, permissions), auth: { ...auth, generation: epoch(auth) }, createdAt: now() };
     check(entry);
     return entry;
   };
@@ -137,7 +140,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     const onEvent = (event, value) => {
       if (task.controller.signal.aborted || active.get(conversation.id) !== task) return;
       const safe = redact(value);
-      if (event === 'thread' && typeof safe.threadId === 'string') { conversation.threadId = safe.threadId; conversation.threadHostId = entry.hostId ?? 'central'; if (entry.projectDirectory) conversation.threadProjectDirectory = entry.projectDirectory; else delete conversation.threadProjectDirectory; persistEvent(); }
+      if (event === 'thread' && typeof safe.threadId === 'string') { conversation.threadId = safe.threadId; conversation.threadHostId = entry.hostId ?? 'central'; if (entry.reviewFingerprint) { conversation.threadReviewFingerprint = entry.reviewFingerprint; knownReviewThreads.set(conversation.id, safe.threadId); } else { delete conversation.threadReviewFingerprint; knownReviewThreads.delete(conversation.id); } if (entry.projectDirectory) conversation.threadProjectDirectory = entry.projectDirectory; else delete conversation.threadProjectDirectory; persistEvent(); }
       if (event === 'turn' && typeof safe.turnId === 'string') { agent.run.turnId = safe.turnId; bump(conversation); persistEvent(); }
       if (event === 'status') { agent.run.message = String(safe.message || safe.text || safe.state || '').slice(0, 500); if (validApprovalReview(safe.approvalReview)) agent.run.approvalReview = structuredClone(safe.approvalReview); bump(conversation); }
       if (event === 'approval' && typeof safe.id === 'string') { approvals.set(safe.id, { userId: entry.auth.userId, conversationId: conversation.id, task, kind: safe.kind, description: safe.description }); task.approvalIds.add(safe.id); bump(conversation); }
@@ -154,14 +157,19 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
       if (Number.isFinite(expiresAt)) expiry = setTimeout(() => { void revoke(value => value.sessionHash === entry.auth.sessionHash).catch(() => {}); }, Math.max(0, expiresAt - Date.now()));
       task.bridge = getBridge(entry);
       const images = entry.hostId && entry.hostId !== 'central' ? [] : await resolveImages(entry.auth.userId, entry.attachmentIds); check(entry); task.controller.signal.throwIfAborted();
-      const switched = Boolean(conversation.threadId && ((conversation.threadHostId ?? 'central') !== (entry.hostId ?? 'central') || (conversation.threadProjectDirectory ?? '') !== (entry.projectDirectory ?? '')));
-      // Messages remain central. A different host starts a fresh native thread;
+      const reviewChanged = (conversation.threadReviewFingerprint ?? '') !== (entry.reviewFingerprint ?? '');
+      // A remote private gateway gets a new token each run; a restored central
+      // thread has no in-memory reviewer binding. Neither can safely resume.
+      const freshReviewThread = entry.reviewFingerprint && ((entry.hostId ?? 'central') !== 'central' || knownReviewThreads.get(conversation.id) !== conversation.threadId);
+      const switched = Boolean(conversation.threadId && ((conversation.threadHostId ?? 'central') !== (entry.hostId ?? 'central') || (conversation.threadProjectDirectory ?? '') !== (entry.projectDirectory ?? '') || reviewChanged || freshReviewThread));
+      // Messages remain central. A changed scope starts a fresh native thread;
       // carry bounded text only, never foreign thread IDs or filesystem paths.
       const history = switched ? conversation.messages.filter(message => message !== userMessage && message !== assistant && (message.role === 'user' || message.status === 'complete')).slice(-8).map(message => `${message.role}: ${String(message.content).slice(-1500)}`).join('\n').slice(-12000) : '';
-      const prompt = history ? `以下是换电脑前的近期聊天记录，仅作为上下文：\n${history}\n\n当前任务：\n${entry.content}`.slice(-32000) : entry.content;
+      const prompt = history ? `以下是先前的近期聊天记录，仅作为上下文：\n${history}\n\n当前任务：\n${entry.content}`.slice(-32000) : entry.content;
       conversation.agentHostId = entry.hostId ?? 'central';
       if (entry.projectDirectory) conversation.agentProjectDirectory = entry.projectDirectory; else delete conversation.agentProjectDirectory;
-      result = await task.bridge.run({ conversationId: conversation.id, prompt, threadId: switched ? undefined : conversation.threadId, permissions: entry.permissions, images, attachmentIds: entry.attachmentIds, ...(entry.projectDirectory ? { projectDirectory: entry.projectDirectory, projectAccess: entry.projectAccess } : {}), ...(entry.model ? { model: entry.model } : {}), ...(entry.effort ? { effort: entry.effort } : {}), signal: task.controller.signal, onEvent });
+      const reviewConfig = (entry.hostId ?? 'central') === 'central' ? getReviewConfig(entry) : undefined;
+      result = await task.bridge.run({ conversationId: conversation.id, prompt, threadId: switched ? undefined : conversation.threadId, permissions: entry.permissions, images, attachmentIds: entry.attachmentIds, ...(reviewConfig ? { reviewConfig, authorizeReview: () => { check(entry); return true; } } : {}), ...(entry.projectDirectory ? { projectDirectory: entry.projectDirectory, projectAccess: entry.projectAccess } : {}), ...(entry.model ? { model: entry.model } : {}), ...(entry.effort ? { effort: entry.effort } : {}), signal: task.controller.signal, onEvent });
       check(entry); task.controller.signal.throwIfAborted();
     } catch (caught) { error = caught; }
     clearTimeout(expiry);
@@ -173,7 +181,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
           assistant.error = persistenceError ? '保存回复失败，队列已暂停。' : String(redact(error.message || 'Agent 任务失败。')).slice(0, 500);
           Object.assign(agent.run, { status: error.code === 'execution_unknown' ? 'unknown' : assistant.status, error: assistant.error }); agent.paused = true;
         } else {
-          if (result?.threadId) { conversation.threadId = result.threadId; conversation.threadHostId = entry.hostId ?? 'central'; if (entry.projectDirectory) conversation.threadProjectDirectory = entry.projectDirectory; else delete conversation.threadProjectDirectory; }
+          if (result?.threadId) { conversation.threadId = result.threadId; conversation.threadHostId = entry.hostId ?? 'central'; if (entry.reviewFingerprint) { conversation.threadReviewFingerprint = entry.reviewFingerprint; knownReviewThreads.set(conversation.id, result.threadId); } else { delete conversation.threadReviewFingerprint; knownReviewThreads.delete(conversation.id); } if (entry.projectDirectory) conversation.threadProjectDirectory = entry.projectDirectory; else delete conversation.threadProjectDirectory; }
           if (!assistant.content && result?.text) assistant.content = String(redact(result.text)).slice(0, 2 * 1024 * 1024);
           assistant.status = 'complete'; agent.run.status = 'completed';
         }
@@ -195,9 +203,9 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
       if (conversation.messages.length > 498) { agent.paused = true; await save(conversation); return; }
       const controller = new AbortController(); let finish;
       const done = new Promise(resolve => { finish = resolve; });
-      const task = { controller, done, finish, mode: 'codex', userId: entry.auth.userId, sessionHash: entry.auth.sessionHash, providerId: entry.providerId, approvalIds: new Set(), agentEntry: entry };
+      const task = { controller, done, finish, mode: 'codex', userId: entry.auth.userId, sessionHash: entry.auth.sessionHash, providerId: entry.providerId, ...(entry.permissions.approval === 'review' && entry.permissions.reviewProviderId ? { reviewProviderId: entry.permissions.reviewProviderId } : {}), approvalIds: new Set(), agentEntry: entry };
       active.set(conversation.id, task); agent.queue.shift(); record.status = 'running';
-      agent.run = { id: entry.id, submissionId: entry.submissionId, status: 'running', turnId: null, permissions: { ...entry.permissions }, providerId: entry.providerId, model: entry.model, effort: entry.effort, hostId: entry.hostId ?? 'central', hostName: entry.hostName ?? '中央服务器', ...(entry.projectDirectory ? { projectDirectory: entry.projectDirectory } : {}), startedAt: now() };
+      agent.run = { id: entry.id, submissionId: entry.submissionId, status: 'running', turnId: null, permissions: { ...entry.permissions }, providerId: entry.providerId, model: entry.model, ...(entry.reviewModel ? { reviewModel: entry.reviewModel } : {}), effort: entry.effort, hostId: entry.hostId ?? 'central', hostName: entry.hostName ?? '中央服务器', ...(entry.projectDirectory ? { projectDirectory: entry.projectDirectory } : {}), startedAt: now() };
       const userMessage = { id: randomUUID(), role: 'user', content: entry.content, ...(entry.attachmentIds.length ? { attachmentIds: [...entry.attachmentIds] } : {}), status: 'complete', createdAt: now(), agentSubmissionId: entry.submissionId };
       const assistant = { id: randomUUID(), role: 'assistant', content: '', status: 'streaming', createdAt: now(), model: entry.model, agentRunId: entry.id };
       if (!conversation.messages.length) conversation.title = entry.content.slice(0, 32) || '图片任务';
@@ -222,7 +230,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
       if (kind === 'steer' && !task && agent.run?.turnId !== body.expectedTurnId) throw failure(409, '当前运行已变化，请刷新后再插入指令。', 'turn_not_active');
       if (kind === 'steer' && task) {
         if (!task.agentEntry || !agent.run?.turnId || agent.run.turnId !== body.expectedTurnId) throw failure(409, '当前运行已变化，请刷新后再插入指令。', 'turn_not_active');
-        if (entry.hostId !== (task.agentEntry.hostId ?? 'central') || JSON.stringify(entry.permissions) !== JSON.stringify(task.agentEntry.permissions) || entry.providerId !== task.agentEntry.providerId || entry.model !== task.agentEntry.model || entry.effort !== task.agentEntry.effort || (entry.projectDirectory ?? '') !== (task.agentEntry.projectDirectory ?? '')) throw failure(409, '运行中不能修改执行电脑、项目目录、模型或权限，请加入下一条任务。');
+        if (entry.hostId !== (task.agentEntry.hostId ?? 'central') || JSON.stringify(entry.permissions) !== JSON.stringify(task.agentEntry.permissions) || entry.providerId !== task.agentEntry.providerId || entry.model !== task.agentEntry.model || entry.effort !== task.agentEntry.effort || entry.reviewFingerprint !== task.agentEntry.reviewFingerprint || (entry.projectDirectory ?? '') !== (task.agentEntry.projectDirectory ?? '')) throw failure(409, '运行中不能修改执行电脑、项目目录、模型或权限，请加入下一条任务。');
         if (conversation.messages.length >= 500) throw failure(409, '会话消息已达上限，请新建会话。');
         const record = reserve(agent, entry, fingerprint); bump(conversation); await save(conversation);
         let images;
@@ -277,7 +285,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     kick(conversation);
   }
   async function stop(conversation, { clear = false } = {}) {
-    if (clear) removed.add(conversation.id);
+    if (clear) { removed.add(conversation.id); knownReviewThreads.delete(conversation.id); }
     const agent = data(conversation); agent.paused = true;
     if (clear) { for (const entry of agent.queue) agent.submissions.find(item => item.entryId === entry.id).status = 'cancelled'; agent.queue = []; }
     const task = active.get(conversation.id);
@@ -288,7 +296,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     const waiting = [];
     for (const conversation of store.state.conversations) {
       if (!conversation.agent) continue;
-      const agent = conversation.agent, entries = agent.queue.filter(entry => predicate({ ...entry.auth, providerId: entry.providerId, mode: 'codex' }));
+      const agent = conversation.agent, entries = agent.queue.filter(entry => predicate({ ...entry.auth, providerId: entry.providerId, ...(entry.permissions.approval === 'review' && entry.permissions.reviewProviderId ? { reviewProviderId: entry.permissions.reviewProviderId } : {}), mode: 'codex' }));
       for (const entry of entries) {
         generations.set(entry.auth.sessionHash, epoch(entry.auth) + 1);
         agent.submissions.find(item => item.entryId === entry.id).status = 'cancelled';

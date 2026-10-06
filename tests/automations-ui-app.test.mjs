@@ -28,11 +28,11 @@ const text=tree=>Array.isArray(tree)?tree.map(text).join(''):tree==null||typeof 
 
 /** Execute App's real effects and navigation handlers. Only child UIs, browser surfaces
  * and network are isolated; notification and history decisions stay in App.tsx. */
-function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],initialProjects=[],organizationResponse,registeredAutomationIds=[],search='?chat=1',failAgentSubmit=false,handleAgentControl=false,globalReviewCapability,hostReviewCapability}={}){
+function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],initialProjects=[],organizationResponse,registeredAutomationIds=[],search='?chat=1',failAgentSubmit=false,handleAgentControl=false,globalReviewCapability,hostReviewCapability,extraProviders=[],approvalReviewProviderIds,assistantSnapshot}={}){
   const permissions={access:'read-only',approval:'ask'},identity={instanceId:'fixture-service',userId:'fixture-user'};
   const state={instanceId:identity.instanceId,user:{id:identity.userId,username:'fixture',displayName:'Fixture',isOwner:false,canUseCodex,agentAccess:canUseCodex?'full':'none'},
     settings:{petName:'Fixture companion',persona:'Fixture',companionKind:'anime',defaultProviderId:'model'},
-    providers:[{id:'model',name:'Fixture model',model:'fixture-model',protocol:'responses',supportsImages:true}],conversations:[],codex:{available:true,eligibleProviderIds:['model'],approvalReview:globalReviewCapability}};
+    providers:[{id:'model',name:'Fixture model',model:'fixture-model',protocol:'responses',supportsImages:true},...extraProviders],conversations:[],codex:{available:true,eligibleProviderIds:['model'],approvalReviewProviderIds,approvalReview:globalReviewCapability}};
   const hosts=[{id:'central',name:'Fixture server',kind:'central',platform:'linux',online:true},
     {id:'pc-one',name:'Fixture PC one',kind:'desktop',platform:'win32',online:true,codex:{available:true,approvalReview:hostReviewCapability}},
     {id:'pc-two',name:'Fixture PC two',kind:'desktop',platform:'linux',online:true,codex:{available:true}}];
@@ -136,7 +136,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     './ProjectDirectory':{...component('ProjectDirectory'),useProjectDirectory:()=>({value:'',change(){}})},
     './project-directory-preferences.mjs':projectPreferences,'./execution-hosts.mjs':executionHosts,'./conversation-organization-sync.mjs':organizationSync,
     './approval-review-ui.mjs':approvalReviewUi,
-    './ChatAssistant':{ChatAssistantControls:Symbol('ChatAssistantControls'),ChatAssistantTasks:Symbol('ChatAssistantTasks'),useChatAssistant:()=>({value:{hostId:'',providerId:'',enabled:false,permissions},snapshot:()=>undefined})},
+    './ChatAssistant':{ChatAssistantControls:Symbol('ChatAssistantControls'),ChatAssistantTasks:Symbol('ChatAssistantTasks'),useChatAssistant:()=>({value:{hostId:'',providerId:'',enabled:false,permissions},snapshot:()=>assistantSnapshot})},
     './chat-assistant-preferences.mjs':{mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMessage},
     './Attachments':{useAttachments:()=>attachments,AttachmentInput:Symbol('AttachmentInput'),AttachmentDrafts:Symbol('AttachmentDrafts'),MessageImages:Symbol('MessageImages')},
     './auth/LoginGate':{ConnectionDialog:Symbol('ConnectionDialog')},'./avatar/preference':{useCompanion:()=>['anime'],hydrateCompanion:async()=>{},readCompanion:()=> 'anime'},
@@ -182,7 +182,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     automationEditing(value,{rerender=true}={}){const node=this.automation();assert.ok(node,'automation view is mounted');node.props.onEditingChange(value);if(rerender)render();},
     automationResult(id){this.automation().props.onOpenConversation(id);render();},
     click(label){const node=find('button',props=>props['aria-label']===label||text(props.children)===label);assert.ok(node,`Missing button ${label}`);const pending=node.props.onClick();render();return pending;},
-    component(name){return find(controls[name]||modules[`./${name}`]?.default);},
+    component(name){return find(controls[name]||modules[`./${name}`]?.default||modules['./ChatAssistant'][name]);},
     deleteHistory(id){find(modules['./ConversationHistory'].default).props.onDelete(id);render();},
     render,
     queueNew(){find(modules['./AgentQueue'].default).props.onNewConversation();render();},
@@ -322,6 +322,41 @@ test('permission UI receives only the actual selected executor review capability
   assert.equal(f.component('AgentPermissions').props.reviewCapability.available,false);
   f.chooseHost('pc-two');assert.equal(f.component('AgentPermissions').props.reviewCapability,undefined);
   assert.equal(f.component('AgentPermissions').props.reviewModel,'fixture-model');
+});
+
+const crossConnectionReviewer={id:'cross-review',name:'独立审查连接',model:'review-model',protocol:'responses',baseUrl:'https://other-api.invalid/v1'};
+const independentReviewCapability={available:true,modelStrategy:'agent-model',dynamicTools:'bounded-audio-rules-with-manual-fallback',version:2,independentModel:true};
+
+test('App supplies the separately authorized Responses reviewer catalog to Agent, Chat + Agent and automation entry points',async t=>{
+  const f=workspaceFixture({canUseCodex:true,extraProviders:[crossConnectionReviewer,{id:'not-assigned',protocol:'responses'},{id:'chat-only',protocol:'chat-completions'}],approvalReviewProviderIds:['model','cross-review','chat-only'],hostReviewCapability:independentReviewCapability});t.after(()=>f.close());await f.ready();
+  assert.deepEqual(f.component('ChatAssistantControls').props.reviewProviders.map(provider=>provider.id),['model','cross-review']);
+  f.enterAgent();f.chooseHost('pc-one');
+  assert.deepEqual(f.component('AgentPermissions').props.reviewProviders.map(provider=>provider.id),['model','cross-review']);
+  assert.deepEqual(f.component('ModelPicker').props.providers.map(provider=>provider.id),['model'],'a cross-connection reviewer must not expand the Agent model grant');
+  f.openView('自动化');await f.ready();
+  assert.deepEqual(f.automation().props.reviewProviders.map(provider=>provider.id),['model','cross-review']);assert.deepEqual(f.automation().props.providers.map(provider=>provider.id),['model']);
+});
+
+test('App sends the selected independent reviewer in an ordinary Agent submission without replacing the Agent provider',async t=>{
+  const f=workspaceFixture({canUseCodex:true,extraProviders:[crossConnectionReviewer],approvalReviewProviderIds:['cross-review'],hostReviewCapability:independentReviewCapability});t.after(()=>f.close());await f.ready();f.enterAgent();f.chooseHost('pc-one');
+  f.component('AgentPermissions').props.onChange({access:'workspace-write',approval:'review',reviewProviderId:'cross-review'});f.render();f.typeDraft('仅执行验收任务');await f.submit();await f.ready();
+  const request=f.requests.find(item=>item.path.endsWith('/agent/submit'));assert.ok(request);
+  assert.equal(request.body.providerId,'model');assert.equal(request.body.hostId,'pc-one');assert.deepEqual(request.body.permissions,{access:'workspace-write',approval:'review',reviewProviderId:'cross-review'});
+});
+
+test('running Agent and queued submissions retain the frozen reviewer and expose disabled permission controls',async t=>{
+  const frozen={access:'workspace-write',approval:'review',reviewProviderId:'cross-review'};
+  const running=idleAgent('review-queue',{agent:{revision:1,paused:false,queue:[],submissions:[],run:{id:'review-run',status:'running',turnId:'review-turn',providerId:'model',model:'fixture-model',hostId:'pc-one',permissions:frozen},approvals:[]}});
+  const f=workspaceFixture({canUseCodex:true,initialConversations:[running],search:'?chat=1&conversation=review-queue',extraProviders:[crossConnectionReviewer],approvalReviewProviderIds:['cross-review'],hostReviewCapability:independentReviewCapability});t.after(()=>f.close());await f.ready();
+  assert.equal(f.component('AgentPermissions').props.disabled,true);assert.equal(f.component('AgentPermissions').props.value.reviewProviderId,'cross-review');
+  f.find('select',props=>props['aria-label']==='Agent 发送方式').props.onChange({target:{value:'submit'}});f.render();f.typeDraft('下一条验收任务');await f.submit();
+  const request=f.requests.find(item=>item.path.endsWith('/agent/submit'));assert.ok(request);assert.deepEqual(request.body.permissions,frozen);assert.equal(request.body.providerId,'model');
+});
+
+test('App carries the Chat + Agent independent reviewer snapshot in the foreground Chat request',async t=>{
+  const assistantSnapshot={enabled:true,hostId:'pc-one',providerId:'model',permissions:{access:'workspace-write',approval:'review',reviewProviderId:'cross-review'}};
+  const f=workspaceFixture({canUseCodex:true,assistantSnapshot,extraProviders:[crossConnectionReviewer],approvalReviewProviderIds:['cross-review']});t.after(()=>f.close());await f.ready();f.typeDraft('帮我安排一个后台任务');await f.submit();
+  assert.equal(f.streams.length,1);assert.deepEqual(f.streams[0].assistant.assistant,assistantSnapshot);assert.ok(f.streams[0].assistant.submissionId);
 });
 
 test('actual App approval events are single-flight and successful decisions stay consumed through stale readback',async t=>{

@@ -35,7 +35,8 @@ export function useChatAssistant({scope,allowed,hostState,defaultHostId,onSettin
         const next=previous.value.hostId===saved?previous.value:chatAssistantForHost(previous.value,saved,storage,scope);
         return {...previous,savedHostId:saved,value:{...next,enabled:previous.value.hostId===saved&&previous.value.enabled}};
       }
-      return {scope,epoch,savedHostId:saved,value:{...restoreChatAssistantPreferences(storage,scope,defaultHostId),enabled:false,permissions:{...defaultAgentPermissions}}};
+      const restored=restoreChatAssistantPreferences(storage,scope,defaultHostId);
+      return {scope,epoch,savedHostId:saved,value:{...restored,enabled:false,permissions:{...defaultAgentPermissions,...(restored.reviewProviderId?{reviewProviderId:restored.reviewProviderId}:{})}}};
     });
   },[scope,epoch,defaultHostId]);
   useEffect(()=>{
@@ -81,7 +82,7 @@ export function useChatAssistant({scope,allowed,hostState,defaultHostId,onSettin
   return {value,change,hosts,savedHostId,saveDefault,savingDefault,loading:hostState?.loading??loading,error:defaultError||(hostState?.error??error),refresh:hostState?.refresh??(()=>setRevision(previous=>previous+1)),snapshot};
 }
 
-export function ChatAssistantControls({assistant,allowed,user,providers,disabled=false,compact=false,localHostId='',onDownload}:{assistant:ReturnType<typeof useChatAssistant>;allowed:boolean;user?:User;providers:Provider[];disabled?:boolean;compact?:boolean;localHostId?:string;onDownload?():void}) {
+export function ChatAssistantControls({assistant,allowed,user,providers,reviewProviders=[],disabled=false,compact=false,localHostId='',onDownload}:{assistant:ReturnType<typeof useChatAssistant>;allowed:boolean;user?:User;providers:Provider[];reviewProviders?:Provider[];disabled?:boolean;compact?:boolean;localHostId?:string;onDownload?():void}) {
   const id=useId(),{value,hosts}=assistant;
   const [open,setOpen]=useState(false),[placement,setPlacement]=useState<{layer:CSSProperties;panel:CSSProperties;sheet:boolean}>(),[ownedPortal,setOwnedPortal]=useState('');
   const layer=useUiEntrance<HTMLDivElement>(`${id}-dialog`,open);
@@ -179,7 +180,7 @@ export function ChatAssistantControls({assistant,allowed,user,providers,disabled
       <label className="chat-assistant-enable"><input type="checkbox" role="switch" aria-label="启用 Chat + Agent" checked={value.enabled} disabled={disabled||!allowed||(!value.enabled&&!!issue)} onChange={event=>assistant.change({...value,enabled:event.target.checked})}/><span>自动派发 Agent 任务<small>按下方权限执行，仅本次登录有效。</small></span></label>
       <ProjectDirectory value={value.projectDirectory||''} onChange={projectDirectory=>assistant.change({...value,projectDirectory})} host={selected} user={user} disabled={disabled||!allowed} lockReason="当前回复结束后，可以调整下一次后台任务的项目目录。"/>
       <ModelPicker providers={providers} value={value.providerId} label="后台 Agent 模型" fallbackLabel={user?.isOwner?'主机默认模型':'选择 Agent 模型'} fallbackOption={user?.isOwner?{label:'主机默认模型',description:'使用执行主机的 Codex 配置'}:undefined} disabled={disabled||!allowed} onChange={providerId=>assistant.change({...value,providerId})}/>
-      <div className="chat-assistant-permissions"><AgentPermissions value={value.permissions} user={user} disabled={disabled||!allowed} onChange={permissions=>assistant.change({...value,permissions})} reviewCapability={selected?.codex?.approvalReview} reviewModel={providers.find(item=>item.id===value.providerId)?.model||selected?.codex?.model}/></div>
+      <div className="chat-assistant-permissions"><AgentPermissions value={value.permissions} user={user} disabled={disabled||!allowed} onChange={permissions=>assistant.change({...value,permissions})} reviewCapability={selected?.codex?.approvalReview} reviewModel={providers.find(item=>item.id===value.providerId)?.model||selected?.codex?.model} reviewProviders={reviewProviders}/></div>
       {!allowed?<p className="chat-assistant-note">请先登录并开通 Agent 权限。</p>:assistant.error?<p className="chat-assistant-note is-error" role="status">{assistant.error}</p>:issue?<p className="chat-assistant-note" role="status">{issue}</p>:disabled?<p className="chat-assistant-note" role="status">当前回复结束后，可以调整下一次任务的设置。</p>:null}
         </div>
       </section>

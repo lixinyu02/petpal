@@ -2,6 +2,7 @@ import http from 'node:http';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
 import {MODEL_REQUEST_BYTES} from './model-request-limits.mjs';
 import {CumulativeMessageAdapter,needsCumulativeMessageMapping} from './response-message-segments.mjs';
+import {normalizeCodexReviewConfig} from './codex-config.mjs';
 
 const DEFAULTS={requestBytes:MODEL_REQUEST_BYTES,frameBytes:2*1024*1024,outputBytes:24*1024*1024,events:100000};
 const invalid=()=>new Error('Responses 流不完整或格式无效，请检查服务兼容性。');
@@ -16,6 +17,34 @@ const signalRace=(promise,signal)=>new Promise((resolve,reject)=>{
   signal.addEventListener('abort',stop,{once:true});
   Promise.resolve(promise).then(resolve,reject).finally(()=>signal.removeEventListener('abort',stop));
 });
+
+/** Native identity is accepted only on the private authenticated listener. It
+ * is never authority on its own: the bridge binds it to an active IPC run. */
+export function codexTransportRequestIdentity(headers,body){
+  const value=name=>typeof headers?.[name]==='string'?headers[name]:undefined;
+  const metadata=value('x-codex-turn-metadata');let canonical;
+  if(!metadata||Buffer.byteLength(metadata)>12000)throw invalid();
+  try{canonical=JSON.parse(metadata);}catch{throw invalid();}
+  if(!object(canonical))throw invalid();
+  const threadId=value('thread-id'),sessionId=value('session-id'),subagent=value('x-openai-subagent'),parentThreadId=value('x-codex-parent-thread-id');
+  const child=subagent!==undefined,guardian=subagent==='guardian';
+  if(!identifier(threadId)||!identifier(sessionId)||value('x-client-request-id')!==threadId||
+      canonical.thread_id!==threadId||canonical.session_id!==sessionId||!identifier(canonical.turn_id)||
+      !['turn','compaction','prewarm'].includes(canonical.request_kind)||
+      child&&(!identifier(subagent)||!identifier(parentThreadId)||canonical.parent_thread_id!==parentThreadId||canonical.subagent_kind!==(subagent==='collab_spawn'?'thread_spawn':subagent)||canonical.thread_source!=='subagent'||threadId===parentThreadId)||
+      guardian&&parentThreadId!==sessionId||
+      !child&&(parentThreadId!==undefined||canonical.parent_thread_id!==undefined||canonical.subagent_kind!==undefined||threadId!==sessionId))throw invalid();
+  const identity=Object.freeze({threadId,sessionId,turnId:canonical.turn_id,guardian,subagent:child?subagent:null,parentThreadId:child?parentThreadId:null});
+  if(body!==undefined){
+    const client=body?.client_metadata;let embedded;
+    if(!object(client)||typeof client['x-codex-turn-metadata']!=='string')throw invalid();
+    try{embedded=JSON.parse(client['x-codex-turn-metadata']);}catch{throw invalid();}
+    if(!object(embedded)||JSON.stringify(embedded)!==JSON.stringify(canonical)||client.thread_id!==threadId||client.session_id!==sessionId||client.turn_id!==identity.turnId||
+        child&&(client['x-openai-subagent']!==subagent||client['x-codex-parent-thread-id']!==parentThreadId)||
+        !child&&(client['x-openai-subagent']!==undefined||client['x-codex-parent-thread-id']!==undefined))throw invalid();
+  }
+  return identity;
+}
 
 /** Reconstruct only facts present in text events or complete final items. No tool identity is guessed. */
 export class ResponsesStreamNormalizer {
@@ -172,9 +201,10 @@ async function relaySse(body,write,signal,resetIdle,limits,model){
 }
 
 /** API-mode-only owned loopback endpoint. Upstream URL and credentials never come from a request. */
-export async function createCodexTransport({config,fetchImpl=fetch,authorizeModel,requestTimeoutMs=180000,idleTimeoutMs=30000,limits:overrides={}}={}){
+export async function createCodexTransport({config,fetchImpl=fetch,authorizeModel,captureRequest,requestTimeoutMs=180000,idleTimeoutMs=30000,limits:overrides={}}={}){
   if(config?.mode!=='api'||typeof config.baseUrl!=='string'||typeof config.model!=='string'||typeof config.apiKey!=='string')throw new Error('Codex API transport 需要已验证的 API 配置。');
   if(authorizeModel!==undefined&&typeof authorizeModel!=='function')throw new Error('Codex transport 模型授权回调无效。');
+  if(captureRequest!==undefined&&typeof captureRequest!=='function')throw new Error('Codex transport 运行绑定回调无效。');
   const upstream=new URL(`${config.baseUrl.replace(/\/$/,'')}/responses`);
   if(!['http:','https:'].includes(upstream.protocol)||upstream.username||upstream.password||upstream.search||upstream.hash)throw new Error('Codex API transport 地址无效。');
   const model=config.model,upstreamKey=config.apiKey,apiKey=randomBytes(32).toString('hex'),expected=Buffer.from(`Bearer ${apiKey}`),limits={...DEFAULTS,...overrides};
@@ -189,12 +219,29 @@ export async function createCodexTransport({config,fetchImpl=fetch,authorizeMode
     if(req.headers.host!==new URL(baseUrl).host||req.headers.origin||supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){sendError(401,'本机 Codex transport 凭据无效。');return;}
     if(!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type']||'')||req.headers['content-encoding']&&!/^identity$/i.test(req.headers['content-encoding'])){sendError(415,'仅支持未压缩的 JSON。');return;}
     if(active.size>=8){sendError(503,'本机 Codex transport 请求过多。');return;}
-    const controller=new AbortController(),signal=controller.signal,state={controller,done:null};active.add(state);
+    // Capture the run before reading an asynchronous body. A canceled old
+    // request cannot be rebound to a new turn which happens to use that thread.
+    let captured;
+    try{
+      if(captureRequest){
+        captured=captureRequest({headers:req.headers});
+        if(!captured||typeof captured.assertAuthorized!=='function'||!captured.scope||!captured.signal||typeof captured.signal.addEventListener!=='function')throw invalid();
+        if(captured.reviewConfig)captured={...captured,reviewConfig:normalizeCodexReviewConfig(captured.reviewConfig)};
+      }
+    }catch{sendError(403,'Codex 请求不属于当前已授权任务。');return;}
+    const controller=new AbortController(),signal=controller.signal,state={controller,done:null,scope:captured?.scope};active.add(state);
     const stop=()=>controller.abort(),disconnected=()=>{if(!res.writableEnded)stop();};req.once('aborted',stop);res.once('close',disconnected);
+    captured?.signal.addEventListener('abort',stop,{once:true});if(captured?.signal.aborted)stop();
+    let requestBody,upstreamResponse;
+    const assertAuthorized=()=>{
+      if(captured&&captured.assertAuthorized(requestBody)!==true)throw invalid();
+      if(requestBody&&requestBody.model!==model&&authorizeModel?.(requestBody.model)!==true)throw invalid();
+    };
     let idle,output=0;const resetIdle=()=>{clearTimeout(idle);idle=setTimeout(stop,idleTimeoutMs);};
     const timer=setTimeout(stop,requestTimeoutMs);resetIdle();
     const incomplete=()=>{if(!req.complete)req.destroy();};signal.addEventListener('abort',incomplete,{once:true});
     const write=async frame=>{
+      assertAuthorized();
       signal.throwIfAborted();output+=Buffer.byteLength(frame);if(output>limits.outputBytes)throw invalid();
       if(!res.write(frame))await signalRace(new Promise(resolve=>res.once('drain',resolve)),signal);
     };
@@ -206,24 +253,36 @@ export async function createCodexTransport({config,fetchImpl=fetch,authorizeMode
       // The configured model remains the default. Other models must be
       // explicitly authorized by an active bridge run, never by the request.
       if(!object(body)||body.stream!==true||typeof body.model!=='string'||(body.model!==model&&authorizeModel?.(body.model)!==true))throw invalid();
+      requestBody=body;if(captured)codexTransportRequestIdentity(req.headers,body);assertAuthorized();
+      const review=captured?.reviewConfig,target=review?new URL(`${review.baseUrl}/responses`):upstream,credential=review?review.apiKey:upstreamKey;
+      const outgoing=review?{...body,model:review.model}:body;
+      if(review){
+        if(body.reasoning!==undefined&&!object(body.reasoning))throw invalid();
+        const reasoning={...(body.reasoning??{})};delete reasoning.effort;
+        if(review.reasoningEffort)reasoning.effort=review.reasoningEffort;
+        if(Object.keys(reasoning).length)outgoing.reasoning=reasoning;else delete outgoing.reasoning;
+      }
       signal.throwIfAborted();resetIdle();
-      const response=await signalRace(fetchImpl(upstream.href,{method:'POST',redirect:'manual',credentials:'omit',signal,headers:{'Content-Type':'application/json',Accept:'text/event-stream','Accept-Encoding':'identity',...(upstreamKey?{Authorization:`Bearer ${upstreamKey}`}:{})},body:JSON.stringify(body)}),signal);
+      assertAuthorized();
+      const response=upstreamResponse=await signalRace(fetchImpl(target.href,{method:'POST',redirect:'manual',credentials:'omit',signal,headers:{'Content-Type':'application/json',Accept:'text/event-stream','Accept-Encoding':'identity',...(credential?{Authorization:`Bearer ${credential}`}:{})},body:JSON.stringify(outgoing)}),signal);
+      assertAuthorized();
       if(response.status!==200||response.redirected||!response.body||!/^text\/event-stream(?:\s*;|$)/i.test(response.headers.get('content-type')||'')){
         await response.body?.cancel();sendError([401,403,429].includes(response.status)?response.status:502,'Responses 上游请求失败，请检查服务配置。');return;
       }
       let headerBytes=0;for(const [key,value] of response.headers)headerBytes+=key.length+value.length;if(headerBytes>16384)throw invalid();
       const length=response.headers.get('content-length');if(length!==null&&(!/^\d+$/.test(length)||Number(length)>limits.outputBytes))throw invalid();
       res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'});
-      await relaySse(response.body,write,signal,resetIdle,limits,body.model);signal.throwIfAborted();res.end();
+      await relaySse(response.body,write,signal,resetIdle,limits,outgoing.model);assertAuthorized();signal.throwIfAborted();res.end();
     })().catch(()=>{
       if(!res.headersSent)sendError(signal.aborted?504:502,'Responses 请求未完成，请重试或检查服务兼容性。');
       else if(!res.destroyed){res.end(encode({type:'error',code:'petpal_transport_error',message:'Responses 请求未完成，请重试或检查服务兼容性。'}));}
-    }).finally(()=>{clearTimeout(timer);clearTimeout(idle);signal.removeEventListener('abort',incomplete);controller.abort();req.removeListener('aborted',stop);res.removeListener('close',disconnected);active.delete(state);});
+    }).finally(async()=>{clearTimeout(timer);clearTimeout(idle);signal.removeEventListener('abort',incomplete);captured?.signal.removeEventListener('abort',stop);controller.abort();await upstreamResponse?.body?.cancel().catch(()=>{});req.removeListener('aborted',stop);res.removeListener('close',disconnected);active.delete(state);});
   });
   server.maxHeadersCount=64;server.headersTimeout=10000;server.requestTimeout=requestTimeoutMs;server.keepAliveTimeout=1000;
   server.on('clientError',(_error,socket)=>socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'));
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   baseUrl=`http://127.0.0.1:${server.address().port}`;
   const cancelAll=async()=>{const requests=[...active];for(const request of requests)request.controller.abort();await Promise.allSettled(requests.map(request=>request.done));};
-  return {baseUrl,apiKey,get activeRequests(){return active.size;},cancelAll,close(){if(closing)return closing;closed=true;closing=(async()=>{const drained=cancelAll();const stopped=new Promise(resolve=>server.close(resolve));server.closeAllConnections();await drained;await stopped;})();return closing;}};
+  const cancelScope=async scope=>{const requests=[...active].filter(request=>request.scope===scope);for(const request of requests)request.controller.abort();await Promise.allSettled(requests.map(request=>request.done));};
+  return {baseUrl,apiKey,get activeRequests(){return active.size;},cancelAll,cancelScope,close(){if(closing)return closing;closed=true;closing=(async()=>{const drained=cancelAll();const stopped=new Promise(resolve=>server.close(resolve));server.closeAllConnections();await drained;await stopped;})();return closing;}};
 }

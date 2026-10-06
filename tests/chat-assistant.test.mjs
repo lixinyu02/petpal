@@ -52,6 +52,14 @@ test('dispatch reuses normal Agent submission with frozen settings and one indep
   assert.deepEqual(body.permissions,{access:'full-access',approval:'auto'});assert.equal(f.store.state.conversations.length,2);
 });
 
+test('Chat collaboration freezes the selected command reviewer and passes it to the child Agent',async t=>{
+  const f=fixture(t),reviewProviderId=randomUUID(),options={...f.options,permissions:{access:'read-only',approval:'review',reviewProviderId}};
+  const {record}=await f.manager.prepare(f.chat,f.auth,options,'检查电脑',[]);options.permissions.reviewProviderId=randomUUID();
+  await f.manager.dispatch(record,'读取系统音量');
+  assert.equal(f.submitted[0].body.permissions.reviewProviderId,reviewProviderId);
+  assert.equal(record.permissions.reviewProviderId,reviewProviderId);
+});
+
 test('receipt save failure prevents a provider decision reservation and any child or Agent action',async t=>{
   const f=fixture(t);f.store.save=async()=>{throw new Error('disk-full');};
   await assert.rejects(f.manager.prepare(f.chat,f.auth,f.options,'播放',[]),/disk-full/);

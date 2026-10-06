@@ -1,7 +1,7 @@
 import type {AgentHost,AgentPermissions,AssistantTask,ChatAssistantConfig,Conversation,Provider,Message} from './api';
-export type ChatAssistantPreferences={hostId:string;providerId:string;projectDirectory?:string};
+export type ChatAssistantPreferences={hostId:string;providerId:string;reviewProviderId?:string|null;projectDirectory?:string};
 export function readChatAssistantPreferences(storage:Pick<Storage,'getItem'>|undefined,scope:string):ChatAssistantPreferences;
-export function saveChatAssistantPreferences(storage:Pick<Storage,'getItem'|'setItem'>|undefined,scope:string,value:ChatAssistantPreferences):void;
+export function saveChatAssistantPreferences(storage:Pick<Storage,'getItem'|'setItem'>|undefined,scope:string,value:ChatAssistantPreferences&{permissions?:Pick<AgentPermissions,'reviewProviderId'>}):void;
 export function restoreChatAssistantPreferences(storage:Pick<Storage,'getItem'>|undefined,scope:string,defaultHostId?:string|null):ChatAssistantPreferences;
 export function chatAssistantDefaultIssue(value:ChatAssistantPreferences,defaultHostId:string):string;
 export function chatAssistantTargetIssue(value:ChatAssistantPreferences,hosts:AgentHost[],providers?:Provider[],owner?:boolean):string;

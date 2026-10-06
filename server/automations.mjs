@@ -111,7 +111,7 @@ export function createAutomationService({ store, authorize, dispatch, observe = 
     if (entry) {
       const content = entry.content ?? entry.prompt, projectDirectory = entry.projectDirectory ?? '';
       const sameAuth = !entry.auth || entry.auth.userId === auth.userId && entry.auth.sessionHash === auth.sessionHash && entry.auth.bootstrap === false && allowed(entry.auth.automation, ['id', 'runId', 'grantId']) && ['id', 'runId', 'grantId'].every(key => entry.auth.automation[key] === auth.automation[key]);
-      const samePermissions = allowed(entry.permissions, ['access', 'approval']) && entry.permissions.access === run.snapshot.permissions.access && entry.permissions.approval === run.snapshot.permissions.approval;
+      const samePermissions = allowed(entry.permissions, ['access', 'approval', 'reviewProviderId']) && entry.permissions.access === run.snapshot.permissions.access && entry.permissions.approval === run.snapshot.permissions.approval && (entry.permissions.reviewProviderId ?? '') === (run.snapshot.permissions.reviewProviderId ?? '');
       if (!sameAuth || content !== run.snapshot.prompt || entry.hostId !== run.snapshot.hostId || entry.providerId !== run.snapshot.providerId || projectDirectory !== run.snapshot.projectDirectory || !samePermissions || !run.conversationId || entry.conversationId !== run.conversationId) throw fail(403, '自动化任务超出持久运行授权范围。');
       const conversation = store.state.conversations.find(item => item.id === run.conversationId);
       if (!conversation || conversation.userId !== job.userId || conversation.automationId !== job.id || conversation.automationRunId !== undefined && conversation.automationRunId !== run.id) throw fail(403, '自动化结果会话归属无效。');

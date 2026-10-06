@@ -344,22 +344,20 @@ export class DesktopExecutor {
   async _register(ctx) {
     const body = { deviceId: ctx.deviceId, ...this.metadata };
     let registration;
-    try { registration = await this._json(ctx, '/api/agent/executors/register', { ...body, capabilities: { projectDirectory: true, automations: true, approvalReview: true } }); }
-    catch (error) {
-      // Older servers reject unknown registration fields before creating a
-      // connection. Only that negotiation boundary may fall back; never runs.
-      this._assert(ctx);
-      if (error.status !== 400 || ctx.connectionId) throw error;
-      try { registration = await this._json(ctx, '/api/agent/executors/register', { ...body, capabilities: { projectDirectory: true, automations: true } }); }
-      catch (legacyError) {
+    // Negotiate before a connection exists. A 400 is the only safe fallback;
+    // authentication failures and uncertain delivery never replay registration.
+    const offers = [
+      { projectDirectory: true, automations: true, approvalReview: true, independentReviewModel: true },
+      { projectDirectory: true, automations: true, approvalReview: true },
+      { projectDirectory: true, automations: true }, { projectDirectory: true }, undefined,
+    ];
+    for (let position = 0; position < offers.length; position++) {
+      try {
+        registration = await this._json(ctx, '/api/agent/executors/register', { ...body, ...(offers[position] ? { capabilities: offers[position] } : {}) });
+        break;
+      } catch (error) {
         this._assert(ctx);
-        if (legacyError.status !== 400 || ctx.connectionId) throw legacyError;
-        try { registration = await this._json(ctx, '/api/agent/executors/register', { ...body, capabilities: { projectDirectory: true } }); }
-        catch (oldestError) {
-          this._assert(ctx);
-          if (oldestError.status !== 400 || ctx.connectionId) throw oldestError;
-          registration = await this._json(ctx, '/api/agent/executors/register', body);
-        }
+        if (error.status !== 400 || ctx.connectionId || position === offers.length - 1) throw error;
       }
     }
     if (!identifier(registration.hostId) || !identifier(registration.connectionId) ||
@@ -368,6 +366,7 @@ export class DesktopExecutor {
     ctx.hostId = registration.hostId; ctx.connectionId = registration.connectionId;
     ctx.automationTools = registration.capabilities?.automations === true;
     ctx.approvalReview = registration.capabilities?.approvalReview === true;
+    ctx.independentReviewModel = ctx.approvalReview && registration.capabilities?.independentReviewModel === true;
     ctx.leaseMs = registration.leaseMs; ctx.pollMs = registration.pollMs;
     ctx.route = `/api/agent/executors/${ctx.connectionId}`;
   }
@@ -407,7 +406,7 @@ export class DesktopExecutor {
   _validateCommand(command) {
     if (!object(command) || !identifier(command.id) || !identifier(command.runId)) throw invalid();
     const allowed = {
-      run: ['id', 'type', 'runId', 'conversationId', 'prompt', 'threadId', 'projectDirectory', 'projectAccess', 'automationTools', 'permissions', 'model', 'effort', 'codexRevision', 'relayToken', 'attachments'],
+      run: ['id', 'type', 'runId', 'conversationId', 'prompt', 'threadId', 'projectDirectory', 'projectAccess', 'automationTools', 'permissions', 'model', 'reviewModel', 'effort', 'codexRevision', 'relayToken', 'attachments'],
       steer: ['id', 'type', 'runId', 'expectedTurnId', 'content', 'attachments'],
       approve: ['id', 'type', 'runId', 'approvalId', 'decision'], stop: ['id', 'type', 'runId'],
     }[command.type];
@@ -418,6 +417,9 @@ export class DesktopExecutor {
           typeof command.model !== 'string' || !command.model.trim() || command.model.length > 160 || /[\x00-\x1f\x7f]/.test(command.model) ||
           typeof command.relayToken !== 'string' || !command.relayToken || command.relayToken.length > 4096 || /[\x00-\x20\x7f]/.test(command.relayToken)) throw invalid();
       normalizeAgentPermissions(command.permissions); normalizeReasoningEffort(command.effort);
+      const independentReview = command.permissions?.approval === 'review' && Boolean(command.permissions.reviewProviderId);
+      if (independentReview !== Object.hasOwn(command, 'reviewModel') || command.reviewModel !== undefined &&
+          (typeof command.reviewModel !== 'string' || !command.reviewModel.trim() || command.reviewModel.length > 160 || /[\x00-\x1f\x7f]/.test(command.reviewModel))) throw invalid();
       if (command.automationTools !== undefined && command.automationTools !== true) throw invalid();
       if (Object.hasOwn(command, 'projectDirectory') !== Object.hasOwn(command, 'projectAccess')) throw invalid();
       if (Object.hasOwn(command, 'projectDirectory')) {
@@ -448,6 +450,7 @@ export class DesktopExecutor {
       }
       if (ctx.run) throw invalid();
       if (command.automationTools && !ctx.automationTools) throw invalid();
+      if (command.reviewModel && !ctx.independentReviewModel) throw invalid();
       const permissions = normalizeAgentPermissions(command.permissions);
       if (permissions.access === 'full-access' && ctx.account.agentAccess !== 'full' && !ctx.account.isOwner) throw invalid();
       const run = { id: command.runId, commandId: command.id, sequence: 0, pendingBytes: 0, outputBytes: 0, files: new Map(),
@@ -540,6 +543,10 @@ export class DesktopExecutor {
       run.bridge = this.bridgeFactory({ dataDir: ctx.directory, workspaceRoot: path.join(ctx.directory, 'workspace'), config, desktopTools });
       this._assert(ctx); run.controller.signal.throwIfAborted();
       result = await run.bridge.run({ conversationId: command.conversationId, prompt: command.prompt, threadId: command.threadId,
+        ...(command.reviewModel ? {
+          reviewConfig: { model: command.reviewModel, baseUrl: `${ctx.connection.url}${ctx.route}/runs/${run.id}/review`, apiKey: run.relayToken, providerId: command.permissions.reviewProviderId },
+          authorizeReview: () => { this._assert(ctx); if (ctx.run !== run || run.stopping || run.controller.signal.aborted || !run.relayToken) throw stopped(); return true; },
+        } : {}),
         ...(command.projectDirectory ? { projectDirectory: command.projectDirectory, projectAccess: command.projectAccess } : {}),
         model: command.model, effort: command.effort || '', permissions: command.permissions, images, signal: run.controller.signal,
         onEvent: (event, data) => {

@@ -41,6 +41,8 @@ test('execution scope requires a model, valid absolute project and strict permis
   const base = { prompt: '  work  ', hostId: 'central', providerId: 'model-id', projectDirectory: '/workspace', permissions: { access: 'read-only', approval: 'ask' } };
   assert.equal(normalizeAutomationSpec(base).prompt, 'work');
   assert.equal(normalizeAutomationSpec({ ...base, providerId: null }).providerId, null);
+  const review = { access: 'read-only', approval: 'review', reviewProviderId: 'independent-review' };
+  assert.deepEqual(normalizeAutomationSpec({ ...base, permissions: review }).permissions, review);
   for (const patch of [{ providerId: '' }, { hostId: 'fallback' }, { projectDirectory: 'relative' }, { projectDirectory: null }, { permissions: { access: 'root' } }, { userId: 'spoof' }]) assert.throws(() => normalizeAutomationSpec({ ...base, ...patch }));
 });
 

@@ -21,7 +21,7 @@ function fixture(t, options = {}) {
     if (!valid.has(entry.auth.sessionHash)) throw Object.assign(new Error('Session expired'), { status: 401 });
     return options.expiresAt;
   };
-  const manager = createAgentTasks({ store, active, approvals, getBridge: () => bridge, redact: options.redact, resolveModel: () => ({ ...model }), authorizeRemoval: authorizeIdentity, authorize: entry => {
+  const manager = createAgentTasks({ store, active, approvals, getBridge: () => bridge, redact: options.redact, resolveModel: () => ({ ...model }), resolveReview: options.resolveReview, getReviewConfig: options.getReviewConfig, authorizeRemoval: authorizeIdentity, authorize: entry => {
     authorizeIdentity(entry);
     if (!online) throw Object.assign(new Error('Executor offline'), { status: 409, code: 'executor_offline' });
     if (entry.model !== model.model || entry.codexRevision !== model.codexRevision) throw Object.assign(new Error('Model changed'), { status: 409 });
@@ -45,6 +45,36 @@ test('concurrent duplicate submissions execute exactly once and receipts survive
   await assert.rejects(f.submit({ ...body, content: 'changed' }), { status: 409 });
   assert.equal(f.conversation.messages.filter(item => item.role === 'user').length, 1);
   assert.equal(f.saved().conversations[0].agent.submissions.length, 1);
+});
+
+test('persisted independent review thread restarts safely and local follow-up resumes only its current runtime binding', async t => {
+  const permissions = { access: 'read-only', approval: 'review', reviewProviderId: 'review-runtime-provider' }, reviewFingerprint = '1'.repeat(64);
+  const conversation = { id: 'conversation-fixture', userId: 'user-fixture', mode: 'codex', threadId: 'restored-native-thread', threadReviewFingerprint: reviewFingerprint, messages: [{ role: 'user', content: 'prior context', status: 'complete' }] };
+  const reviewConfig = { providerId: permissions.reviewProviderId, model: 'review-runtime-model', baseUrl: 'https://review.example/v1', apiKey: 'synthetic-task-review-secret' };
+  const f = fixture(t, { conversation, resolveReview: () => ({ reviewModel: reviewConfig.model, reviewFingerprint }), getReviewConfig: () => reviewConfig });
+  await f.submit({ ...payload('runtime-first'), permissions }); await until(() => f.calls.length === 1);
+  const first = f.calls[0]; assert.equal(first.args.threadId, undefined); assert.match(first.args.prompt, /prior context/); assert.equal(first.args.authorizeReview(), true);
+  first.args.onEvent('thread', { threadId: 'current-native-thread' }); await f.finish();
+  await f.submit({ ...payload('runtime-next'), permissions }); await until(() => f.calls.length === 2); assert.equal(f.calls[1].args.threadId, 'current-native-thread');
+  assert.equal(JSON.stringify(f.saved()).includes(reviewConfig.apiKey), false); assert.equal(JSON.stringify(f.snapshot()).includes(reviewFingerprint), false);
+});
+
+test('each remote independent reviewer task starts a new thread and never receives an upstream credential', async t => {
+  const permissions = { access: 'read-only', approval: 'review', reviewProviderId: 'review-remote-provider' }, reviewFingerprint = '2'.repeat(64), hostId = 'remote-host-fixture';
+  const conversation = { id: 'conversation-fixture', userId: 'user-fixture', mode: 'codex', threadId: 'old-remote-thread', threadHostId: hostId, threadReviewFingerprint: reviewFingerprint, messages: [{ role: 'user', content: 'remote history', status: 'complete' }] };
+  const f = fixture(t, { conversation, resolveReview: (_user, value) => value.approval === 'review' && value.reviewProviderId ? { reviewModel: 'review-model', reviewFingerprint } : {}, getReviewConfig: () => { assert.fail('Remote must not resolve upstream credentials in agent-tasks'); } });
+  await f.submit({ ...payload('remote-first'), hostId, permissions }); await until(() => f.calls.length === 1);
+  f.calls[0].args.onEvent('thread', { threadId: 'remote-review-thread-1' }); assert.equal(f.calls[0].args.threadId, undefined); assert.equal(f.calls[0].args.reviewConfig, undefined); await f.finish();
+  await f.submit({ ...payload('remote-second'), hostId, permissions }); await until(() => f.calls.length === 2); assert.equal(f.calls[1].args.threadId, undefined); assert.match(f.calls[1].args.prompt, /remote history/); await f.finish();
+  await f.submit({ ...payload('remote-default'), hostId, permissions: { approval: 'review' } }); await until(() => f.calls.length === 3); assert.equal(f.calls[2].args.threadId, undefined);
+});
+
+test('review provider revocation matches queued and running reviewer identities', async t => {
+  const permissions = { access: 'read-only', approval: 'review', reviewProviderId: 'review-revoke-provider' };
+  const f = fixture(t, { resolveReview: () => ({ reviewModel: 'review-model', reviewFingerprint: '3'.repeat(64) }) });
+  await f.submit({ ...payload('review-revoke-first'), permissions }); await until(() => f.calls.length === 1); await f.submit({ ...payload('review-revoke-queued'), permissions });
+  await f.manager.revoke(task => task.reviewProviderId === permissions.reviewProviderId);
+  assert.equal(f.calls[0].args.signal.aborted, true); assert.equal(f.snapshot().queue.length, 0); assert.equal(f.snapshot().run.status, 'cancelled'); assert.equal(f.calls.length, 1);
 });
 
 test('aggregated remote text cannot persist a credential reconstructed across events', async t => {

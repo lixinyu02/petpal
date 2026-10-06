@@ -200,19 +200,46 @@ test('a durable run receipt precedes execution; exact replay never starts a seco
 
 test('desktop negotiates review, automation and project-directory support only at the pre-connection 400 boundary', async t => {
   const modern = await protocolFixture(t);
-  assert.deepEqual(JSON.parse(modern.requests.find(item=>item.url.endsWith('/register')).init.body).capabilities,{projectDirectory:true,automations:true,approvalReview:true});
+  assert.deepEqual(JSON.parse(modern.requests.find(item=>item.url.endsWith('/register')).init.body).capabilities,{projectDirectory:true,automations:true,approvalReview:true,independentReviewModel:true});
   const bodies=[];
   const older = await protocolFixture(t,{onRegister:body=>{
     bodies.push(body);
     return body.capabilities ? Response.json({error:'unknown field'},{status:400}) : Response.json({hostId:'host-one',connectionId:'connection-one',leaseMs:30000,pollMs:20000});
   }});
-  assert.equal(older.manager.status().state,'online');assert.equal(bodies.length,4);
-  assert.deepEqual(bodies[0].capabilities,{projectDirectory:true,automations:true,approvalReview:true});assert.deepEqual(bodies[1].capabilities,{projectDirectory:true,automations:true});assert.deepEqual(bodies[2].capabilities,{projectDirectory:true});assert.equal(Object.hasOwn(bodies[3],'capabilities'),false);
-  assert.deepEqual({...bodies[0],capabilities:undefined},{...bodies[3],capabilities:undefined});
+  assert.equal(older.manager.status().state,'online');assert.equal(bodies.length,5);
+  assert.deepEqual(bodies[0].capabilities,{projectDirectory:true,automations:true,approvalReview:true,independentReviewModel:true});assert.deepEqual(bodies[1].capabilities,{projectDirectory:true,automations:true,approvalReview:true});assert.deepEqual(bodies[2].capabilities,{projectDirectory:true,automations:true});assert.deepEqual(bodies[3].capabilities,{projectDirectory:true});assert.equal(Object.hasOwn(bodies[4],'capabilities'),false);
+  assert.deepEqual({...bodies[0],capabilities:undefined},{...bodies[4],capabilities:undefined});
   assert.equal(older.manager.current.approvalReview,false);
+  assert.equal(older.manager.current.independentReviewModel,false);
   let attempts=0;
   older.manager.fetch=async()=>{attempts++;return Response.json({error:'bad request'},{status:400});};
   await assert.rejects(older.manager._register(older.manager.current),{status:400});assert.equal(attempts,1);
+});
+
+test('independent command reviewer only receives a scoped central relay, never an upstream credential', async t => {
+  let received;
+  const f=await protocolFixture(t,{
+    onRegister:()=>Response.json({hostId:'host-one',connectionId:'connection-one',leaseMs:30000,pollMs:20000,capabilities:{approvalReview:true,independentReviewModel:true}}),
+    bridgeFactory:()=>({async run(value){received=value;assert.equal(value.authorizeReview(),true);return {text:'fixture done'};},async close(){}}),
+  });
+  const ctx=f.manager.current;
+  await f.manager._command(ctx,runCommand({permissions:{access:'read-only',approval:'review',reviewProviderId:'review-provider'},reviewModel:'review-model'}));
+  await ctx.run.done;
+  assert.deepEqual(received.reviewConfig,{model:'review-model',baseUrl:'https://central.example/api/agent/executors/connection-one/runs/run-one/review',apiKey:'run-only-secret',providerId:'review-provider'});
+  assert.equal(received.model,'test-model');assert.throws(()=>received.authorizeReview());
+  assert.doesNotMatch(JSON.stringify(f.events),/run-only-secret|central-session-secret/);
+});
+
+test('independent reviewer commands require negotiated support and a matching review permission',async t=>{
+  let constructions=0;
+  const f=await protocolFixture(t,{bridgeFactory:()=>{constructions++;return {};}});
+  for(const extra of [
+    {reviewModel:'unauthorized-model'},
+    {permissions:{access:'read-only',approval:'review',reviewProviderId:'review-provider'}},
+    {permissions:{access:'read-only',approval:'review',reviewProviderId:'review-provider'},reviewModel:'review-model'},
+    {permissions:{access:'read-only',approval:'review',reviewProviderId:'review-provider'},reviewModel:'bad\nmodel'},
+  ])await assert.rejects(f.manager._command(f.manager.current,runCommand(extra)));
+  assert.equal(constructions,0);assert.equal(f.events.length,0);
 });
 
 test('registration does not fall back after authentication rejection or transport uncertainty', async t => {

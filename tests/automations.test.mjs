@@ -197,6 +197,18 @@ test('principal checks reject foreign grants, conversation/scope substitutions a
   assert.doesNotMatch(JSON.stringify(current), /grantId|snapshot|sessionHash|userId/);
 });
 
+test('automation command reviewer is part of the durable grant scope and cannot be substituted', async t => {
+  const f = await fixture(t), reviewProviderId = randomUUID(), permissions = { access: 'read-only', approval: 'review', reviewProviderId };
+  const job = await f.create({ permissions }); await f.service.run(f.ownerId, job.id, { requestId: randomUUID() });
+  await until(() => f.service.list(f.ownerId).automations[0].runs[0].status === 'running');
+  const call = f.calls[0], current = f.service.list(f.ownerId).automations[0];
+  const entry = { content: job.prompt, hostId: job.hostId, providerId: job.providerId, permissions, projectDirectory: job.projectDirectory, conversationId: current.runs[0].conversationId };
+  assert.doesNotThrow(() => f.service.authorizePrincipal(call.auth, entry));
+  for (const replacement of [undefined, randomUUID()]) assert.throws(() => f.service.authorizePrincipal(call.auth, { ...entry, permissions: { ...permissions, reviewProviderId: replacement } }), { status: 403 });
+  const saved = await f.saved(); assert.equal(saved.automations.jobs[0].runs[0].snapshot.permissions.reviewProviderId, reviewProviderId);
+  assert.doesNotThrow(() => validateStoredAutomations(saved, { restore: false }));
+});
+
 test('logout/session removal does not cancel an independent automation principal', async t => {
   const f = await fixture(t), job = await f.create(); await f.service.run(f.ownerId, job.id, { requestId: randomUUID() });
   await until(() => f.service.list(f.ownerId).automations[0].runs[0].status === 'running');

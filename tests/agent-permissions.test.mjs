@@ -25,3 +25,13 @@ test('access and execution strategy produce independent native thread and turn p
   }
   assert.throws(() => codexPermissionParams(undefined, './relative'));
 });
+
+test('independent reviewer selection preserves a provider identifier without accepting credentials or commands', () => {
+  const permissions = { access: 'workspace-write', approval: 'review', reviewProviderId: 'review-provider_1' };
+  assert.deepEqual(normalizeAgentPermissions(permissions), permissions);
+  for (const value of [undefined, null, '']) assert.deepEqual(normalizeAgentPermissions({ approval: 'review', reviewProviderId: value }), { access: 'read-only', approval: 'review' });
+  assert.equal(normalizeAgentPermissions({ approval: 'ask', reviewProviderId: permissions.reviewProviderId }).reviewProviderId, permissions.reviewProviderId);
+  for (const invalid of [true, {}, [], 3, ' ', '../provider', 'provider/key', 'x'.repeat(129)]) assert.throws(() => normalizeAgentPermissions({ reviewProviderId: invalid }), { status: 400 });
+  assert.throws(() => normalizeAgentPermissions({ approval: 'review', reviewConfig: { model: 'anything', apiKey: 'secret' } }), { status: 400 });
+  assert.equal(codexPermissionParams(permissions, path.resolve('review-fixture')).approvalsReviewer, 'auto_review');
+});

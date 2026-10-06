@@ -123,7 +123,7 @@ export function createChatAssistant({ store, agentTasks, authorize, resolveHost,
       const record={id:randomUUID(),submissionId:normalized.submissionId,fingerprint:digest,hostId:normalized.hostId,hostName:short(host.hostName).slice(0,120),providerId:normalized.providerId,permissions:{...normalized.permissions},attachmentIds,codexRevision,status:'deciding',message:'正在判断是否需要后台 Agent。',createdAt:now(),...(normalized.projectDirectory?{projectDirectory:normalized.projectDirectory}:{})};
       chat.assistantTasks ??= []; chat.assistantTasks.push(record); update(chat);
       try { await store.save(); } catch(error) { chat.assistantTasks.splice(chat.assistantTasks.indexOf(record),1);throw error; }
-      const job={...auth,auth:{...auth},options:normalized,record,chat,entry:{conversationId:chat.id,auth:{...auth},hostId:normalized.hostId}};jobs.set(record.id,job);
+      const job={...auth,providerId:normalized.providerId,...(normalized.permissions.approval==='review'&&normalized.permissions.reviewProviderId?{reviewProviderId:normalized.permissions.reviewProviderId}:{}),auth:{...auth},options:normalized,record,chat,entry:{conversationId:chat.id,auth:{...auth},hostId:normalized.hostId}};jobs.set(record.id,job);
       if(Number.isFinite(expiresAt)){job.expiry=setTimeout(()=>{void revoke(value=>value===job).catch(()=>{});},Math.max(0,expiresAt-Date.now()));job.expiry.unref?.();}
       return {record,duplicate:false};
     });
