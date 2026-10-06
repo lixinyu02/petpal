@@ -8,12 +8,13 @@
 
 - Goal: 系统音量固定工具和当前 Agent 模型的替我审批适配，准确的批准与等待状态。
 - Ordering rule: 顺序完成 issue；同一 issue 内独立模块可以并行。
-- Current status: issue-1 done；issue-2 in_progress。
+- Current status: issue-1/2 done；issue-3 pending。
 
 ## Issue List
 
 - [x] issue-1 系统控制、原生审核兼容和批准交互
-- [ ] issue-2 原生与浏览器实测及文档收尾
+- [x] issue-2 原生与浏览器实测及文档收尾
+- [ ] issue-3 独立命令审查模型与精简权限菜单
 
 ## issue-1
 
@@ -33,6 +34,17 @@
 - 范围: Windows音量恢复测试、可用上游真实Agent审查、Chrome权限和批准界面、能力/设备限制及使用说明。
 - 依赖: issue-1
 - 验收标准: 实际效果和失败边界明确、原音量/静音恢复、UI与原始回执一致、源码和已发布包分开报告。
-- 状态: in_progress
-- 验证方式: isolated live harness、Chrome插件截图、证据与文档、自审。
+- 状态: done
+- 验证方式: 真实 Codex 0.143 Guardian：GPT/Qwen approved 并执行临时标记；deny/malformed/503/90秒期限均未执行。当前已授权 GPT/Qwen 上游 HTTP200 且真实 Guardian approved（父命令 fixture）。真实 GPT Agent 调用一次系统只读工具成功。Windows 实际音量 +1% 后在同一端点精确恢复原值12.023513019%，restored/passed=true。Chrome 实测权限、旧端禁用、审批单次提交及最终卡片消失；412x960 CSS 宽度无溢出。Ubuntu 仅 fixtures，未声称真实桌面验收。记录详见对应 validation.md，私有原始回执在 ignored evidence 目录。
+- commit: this issue validation commit
+
+## issue-3
+
+- ID: issue-3
+- 标题: 独立命令审查模型与精简权限菜单
+- 范围: 用户额外要求的审查模型选择、账号授权与任务冻结、原生 Guardian/远程执行器真实路由、删除权限说明小字。
+- 依赖: issue-2
+- 验收标准: 默认跟随Agent；选择不同授权Responses连接时真实审查请求使用所选模型与凭据；并发/撤销/旧端不串用或扩大权限；前台Agent与Chat+Agent均可设置；权限菜单精简；定向回归与Chrome通过。
+- 状态: pending
+- 验证方式: native CLI、授权/队列/远程中继fixtures、真实上游、Chrome与TypeScript。
 - commit: pending
