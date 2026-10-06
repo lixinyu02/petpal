@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { normalizeAgentPermissions } from './agent-permissions.mjs';
 import { normalizeAttachmentIds } from './attachments.mjs';
 import { normalizeProjectDirectory, validateProjectDirectoryText, validateStoredProjectDirectory } from './project-directory.mjs';
+import { validApprovalReview } from './approval-review.mjs';
 
 const failure = (status, message, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 const now = () => new Date().toISOString();
@@ -15,7 +16,7 @@ const content = (value, images = []) => {
 const attachments = normalizeAttachmentIds;
 const publicEntry = entry => ({ id: entry.id, submissionId: entry.submissionId, revision: entry.revision, content: entry.content, attachmentIds: [...entry.attachmentIds], permissions: { ...entry.permissions }, providerId: entry.providerId, model: entry.model, effort: entry.effort, hostId: entry.hostId ?? 'central', hostName: entry.hostName ?? '中央服务器', ...(entry.projectDirectory ? { projectDirectory: entry.projectDirectory } : {}), createdAt: entry.createdAt });
 const receipt = entry => ({ submissionId: entry.submissionId, entryId: entry.entryId, status: entry.status, ...(entry.error ? { error: entry.error } : {}) });
-const publicRun = run => run ? { ...Object.fromEntries(['id', 'submissionId', 'status', 'turnId', 'permissions', 'providerId', 'model', 'effort', 'startedAt', 'finishedAt', 'message', 'error', 'projectDirectory'].filter(key => run[key] !== undefined).map(key => [key, structuredClone(run[key])])), hostId: run.hostId ?? 'central', hostName: run.hostName ?? '中央服务器' } : null;
+const publicRun = run => run ? { ...Object.fromEntries(['id', 'submissionId', 'status', 'turnId', 'permissions', 'providerId', 'model', 'effort', 'startedAt', 'finishedAt', 'message', 'error', 'projectDirectory', 'approvalReview'].filter(key => run[key] !== undefined).map(key => [key, structuredClone(run[key])])), hostId: run.hostId ?? 'central', hostName: run.hostName ?? '中央服务器' } : null;
 
 /** A restart is an explicit pause boundary, never permission to replay work. */
 export function restoreAgentState(conversation) {
@@ -40,7 +41,7 @@ export function restoreAgentState(conversation) {
   for (const entry of agent.queue) if (!agent.submissions.some(item => item.submissionId === entry.submissionId && item.entryId === entry.id && item.status === 'queued')) throw new Error('本地 Agent 队列与提交记录不一致。');
   for (const item of agent.submissions) if (item.status === 'queued' && !agent.queue.some(entry => entry.id === item.entryId && entry.submissionId === item.submissionId)) throw new Error('本地 Agent 提交记录缺少队列任务。');
   if (agent.run !== null && (!object(agent.run) || !identifier(agent.run.id) || !['running', 'stopping', 'completed', 'cancelled', 'error', 'unknown'].includes(agent.run.status) || !agent.submissions.some(item => item.entryId === agent.run.id && item.submissionId === agent.run.submissionId))) throw new Error('本地 Agent 运行记录无效。');
-  if (agent.run) { normalizeAgentPermissions(agent.run.permissions); validateStoredProjectDirectory(agent.run.projectDirectory); }
+  if (agent.run) { normalizeAgentPermissions(agent.run.permissions); validateStoredProjectDirectory(agent.run.projectDirectory); if (agent.run.approvalReview !== undefined && !validApprovalReview(agent.run.approvalReview)) throw new Error('本地 Agent 审查状态无效。'); }
   if (agent.queue.length && !agent.paused) { agent.paused = true; changed = true; }
   if (agent.run && ['running', 'stopping'].includes(agent.run.status)) {
     Object.assign(agent.run, { status: agent.run.hostId && agent.run.hostId !== 'central' ? 'unknown' : 'error', finishedAt: now(), error: '服务已重启，先前任务不会自动重试；远程执行状态需要重新确认。' });
@@ -138,7 +139,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
       const safe = redact(value);
       if (event === 'thread' && typeof safe.threadId === 'string') { conversation.threadId = safe.threadId; conversation.threadHostId = entry.hostId ?? 'central'; if (entry.projectDirectory) conversation.threadProjectDirectory = entry.projectDirectory; else delete conversation.threadProjectDirectory; persistEvent(); }
       if (event === 'turn' && typeof safe.turnId === 'string') { agent.run.turnId = safe.turnId; bump(conversation); persistEvent(); }
-      if (event === 'status') { agent.run.message = String(safe.message || safe.text || safe.state || '').slice(0, 500); bump(conversation); }
+      if (event === 'status') { agent.run.message = String(safe.message || safe.text || safe.state || '').slice(0, 500); if (validApprovalReview(safe.approvalReview)) agent.run.approvalReview = structuredClone(safe.approvalReview); bump(conversation); }
       if (event === 'approval' && typeof safe.id === 'string') { approvals.set(safe.id, { userId: entry.auth.userId, conversationId: conversation.id, task, kind: safe.kind, description: safe.description }); task.approvalIds.add(safe.id); bump(conversation); }
       if (event === 'approval-resolved' && typeof safe.id === 'string' && approvals.get(safe.id)?.task === task) { approvals.delete(safe.id); task.approvalIds.delete(safe.id); bump(conversation); }
       if (event === 'delta' && typeof safe.text === 'string') {

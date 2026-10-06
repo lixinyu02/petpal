@@ -199,6 +199,17 @@ test('approval resolution clears exactly the owned request while task is still r
   f.calls[0].args.onEvent('approval-resolved', { id: 'approval-1' }); assert.equal(f.snapshot().approvals.length, 0);
 });
 
+test('review outcome and rationale reach the public run and survive persistence without granting approval',async t=>{
+  const f=fixture(t); await f.submit(payload('review-state')); await until(()=>f.calls.length===1);
+  const review={status:'denied',source:'native',reviewId:'native-review',rationale:'upstream unavailable'};
+  f.calls[0].args.onEvent('status',{message:'not allowed',approvalReview:review});
+  assert.deepEqual(f.snapshot().run.approvalReview,review); assert.equal(f.snapshot().approvals.length,0);
+  f.calls[0].args.onEvent('status',{message:'bad metadata',approvalReview:{...review,allow:true}});
+  assert.deepEqual(f.snapshot().run.approvalReview,review);
+  await f.finish(); assert.deepEqual(f.saved().conversations[0].agent.run.approvalReview,review);
+  const bad=structuredClone(f.conversation); bad.agent.run.approvalReview.status='allow'; assert.throws(()=>restoreAgentState(bad),/审查状态/);
+});
+
 test('deletion fencing prevents an already-pending submission from reviving removed work', async t => {
   const f = fixture(t), saving = deferred(); f.saveWith(() => saving.promise);
   const submitting = f.submit(payload('pending')); await until(() => f.conversation.agent?.queue.length === 1);

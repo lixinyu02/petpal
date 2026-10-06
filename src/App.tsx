@@ -10,6 +10,7 @@ import {useChatScroll} from './useChatScroll';
 import {useUiEntrance} from './platform/ui-motion.ts';
 import { ModelPicker, ExecutionTarget, AgentOnboarding } from './WorkspaceControls';
 import AgentPermissions, { defaultAgentPermissions } from './AgentPermissions';
+import {approvalReviewLabel} from './approval-review-ui.mjs';
 import AgentQueue from './AgentQueue';
 import ProjectDirectory, {useProjectDirectory} from './ProjectDirectory';
 import {executionProjectDirectory,projectDirectoryIssue} from './project-directory-preferences.mjs';
@@ -58,6 +59,7 @@ const settingsLoading = <div className="loading-view" role="status"><Loader2 cla
 
 const emptyState: State = { settings: { petName: '小伴', companionKind: 'anime', persona: '你是用户温柔、机灵的个人 AI 伙伴。用自然简洁的中文回应，认真倾听；不知道的事情坦诚说明。' }, providers: [], conversations: [], codex: {} };
 type Approval = { id: string; kind: string; description: string };
+type ApprovalDecision = 'pending'|'consumed'|'uncertain';
 type WorkspaceView='chat'|'settings'|'downloads'|'automations';
 type PendingNavigation = {kind:'new';mode:'chat'|'codex'} | {kind:'conversation';id:string;conversation?:Conversation} | {kind:'home'} | {kind:'page';view:WorkspaceView;accounts?:boolean} | {kind:'connection'};
 const dateFormatter=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric'});
@@ -124,6 +126,12 @@ export default function App() {
   const [companionPanelMounted,setCompanionPanelMounted]=useState(()=>companionPanelOpen||window.matchMedia('(max-width: 960px)').matches);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [approvalDecisions,setApprovalDecisions]=useState<Record<string,ApprovalDecision>>({});
+  const [approvalSubmitting,setApprovalSubmitting]=useState(false);
+  const approvalDecisionsRef=useRef<Record<string,ApprovalDecision>>({});
+  const approvalLock=useRef(false),approvalReadLock=useRef(false),approvalAlive=useRef(true);
+  const [approvalRefreshing,setApprovalRefreshing]=useState(false);
+  useEffect(()=>{approvalAlive.current=true;return()=>{approvalAlive.current=false;};},[]);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [deleteBusy,setDeleteBusy]=useState(false);
   const [deleteError,setDeleteError]=useState('');
@@ -172,7 +180,11 @@ export default function App() {
   const activeAgentProvider=state.providers.find(item=>item.id===activeProviderId);
   const agentSupportsImages=activeAgentProvider?.supportsImages!==false;
   const canSendAgent=!!selectedHost?.online&&!!selectedCodex.available&&!hostsError&&!agentUnknown&&!projectIssue;
-  const shownApprovals=currentMode==='codex'?conversation?.agent?.approvals||[]:approvals;
+  const approvalConversationRef=useRef(conversation?.id);approvalConversationRef.current=conversation?.id;
+  const approvalKey=(id:string,conversationId=conversation?.id||'')=>`${conversationId}:${id}`;
+  const shownApprovals=(currentMode==='codex'?conversation?.agent?.approvals||[]:approvals).filter(item=>approvalDecisions[approvalKey(item.id)]!=='consumed');
+  const approvalPending=approvalSubmitting;
+  const agentReviewLabel=conversation?.agent?.run?.approvalReview?.status==='inProgress'?approvalReviewLabel(conversation.agent.run.approvalReview):conversation?.agent?.run?.message||'';
   const chatScroll=useChatScroll({scrollRef,conversationId:conversation?.id||'',active:ready&&view==='chat'&&!petOnly,messages:conversation?.messages,approvalKey:shownApprovals.map(item=>item.id).join(',')});
   const lastReply = useMemo(()=>{
     const messages=conversation?.messages;if(!messages)return;
@@ -472,6 +484,7 @@ export default function App() {
         if (event.type === 'status') { performancePhase('thinking', responseText, assistantId); setStatus(event.data.message || event.data.text || event.data.status || '正在处理中…'); }
         if (event.type === 'task') { setState(s=>({...s,conversations:s.conversations.map(c=>c.id===target!.id?{...c,assistantTasks:mergeAssistantTask(c.assistantTasks||[],event.data.task)}:c)})); }
         if (event.type === 'approval') { performancePhase('thinking', responseText, assistantId); setApprovals(a => [...a.filter(item => item.id !== String(event.data.id)), { id: String(event.data.id), kind: event.data.kind || '操作请求', description: event.data.description || 'Codex 请求执行操作，请检查后决定。' }]); }
+        if (event.type === 'approval-resolved') setApprovals(items=>items.filter(item=>item.id!==String(event.data.id)));
         if (event.type === 'error') { failed = true; performancePhase('error', responseText, assistantId); if (foregroundAssistantMessage(event.data.conversation,event.data.assistantMessageId||serverAssistantId)?.status !== 'cancelled') setError(event.data.message || '回复失败，请检查连接后重试。'); if (event.data.conversation) setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? mergeConversationOrganization(c,event.data.conversation,readRevision!==organizationRevision.current) : c) })); }
         if (event.type === 'done') {
           if (event.data.conversation) {
@@ -509,9 +522,44 @@ export default function App() {
     try { await api(`/conversations/${encodeURIComponent(active)}/stop`, { method: 'POST' }); if(currentMode==='codex')await refreshConversation(active); }
     catch (e) { setError((e as Error).message); }
   }
+  function recordApprovalDecision(key:string,value?:ApprovalDecision){
+    const next={...approvalDecisionsRef.current};if(value)next[key]=value;else delete next[key];
+    approvalDecisionsRef.current=next;setApprovalDecisions(next);
+  }
+  function consumeApproval(conversationId:string,id:string){
+    setApprovals(items=>items.filter(item=>item.id!==id));
+    const remove=(item:Conversation)=>item.id===conversationId&&item.agent?{...item,agent:{...item.agent,approvals:item.agent.approvals.filter(approval=>approval.id!==id)}}:item;
+    setState(previous=>({...previous,conversations:previous.conversations.map(remove)}));
+    if(loadedAutomationConversationRef.current?.id===conversationId)cacheAutomationConversation(remove(loadedAutomationConversationRef.current));
+  }
+  async function refreshApprovalState(){
+    const target=conversation?.id;if(!target||approvalLock.current||approvalReadLock.current||getSessionEpoch()!==accountEpoch)return;
+    approvalReadLock.current=true;setApprovalRefreshing(true);setError('');
+    try{
+      const next=await refreshConversation(target);
+      if(!approvalAlive.current||getSessionEpoch()!==accountEpoch)return;
+      const active=new Set(next.agent?.approvals.map(item=>item.id)||[]);
+      for(const [key,value] of Object.entries(approvalDecisionsRef.current))if(value==='uncertain'&&key.startsWith(`${target}:`))recordApprovalDecision(key,active.has(key.slice(target.length+1))?undefined:'consumed');
+    }catch(cause){if(approvalAlive.current&&getSessionEpoch()===accountEpoch&&!isSessionChanged(cause))setError('暂时无法刷新审批状态；请勿重复提交确认。');}
+    finally{approvalReadLock.current=false;if(approvalAlive.current&&getSessionEpoch()===accountEpoch)setApprovalRefreshing(false);}
+  }
   async function approve(approval: Approval, decision: string) {
-    try { await api(`/codex/approvals/${encodeURIComponent(approval.id)}`, { method: 'POST', body: JSON.stringify({ decision }) }); setApprovals(a => a.filter(item => item.id !== approval.id)); if(currentMode==='codex'&&conversation)await refreshConversation(conversation.id); }
-    catch (e) { setError((e as Error).message); }
+    const target=conversation?.id;if(!target||approvalLock.current||approvalReadLock.current||approvalDecisionsRef.current[approvalKey(approval.id,target)]||getSessionEpoch()!==accountEpoch)return;
+    const key=approvalKey(approval.id,target),current=()=>approvalAlive.current&&getSessionEpoch()===accountEpoch;
+    approvalLock.current=true;setApprovalSubmitting(true);recordApprovalDecision(key,'pending');setError('');
+    try{
+      await api(`/codex/approvals/${encodeURIComponent(approval.id)}`, { method: 'POST', body: JSON.stringify({ decision }) });
+      if(!current())return;
+      // A successful decision cannot become clickable again if a later read fails or is stale.
+      recordApprovalDecision(key,'consumed');consumeApproval(target,approval.id);
+      try{await refreshConversation(target);}
+      catch(cause){if(current()&&!isSessionChanged(cause)&&approvalConversationRef.current===target)setError('确认已提交，任务进度暂时无法刷新；请勿重复提交。');}
+    }catch(cause){
+      if(current()&&!isSessionChanged(cause)){
+        recordApprovalDecision(key,'uncertain');
+        if(approvalConversationRef.current===target)setError('确认结果尚未收到，请先刷新审批状态，再决定是否操作；不会自动重复提交。');
+      }
+    }finally{approvalLock.current=false;if(current())setApprovalSubmitting(false);}
   }
   async function deleteChat(id: string) {
     if(deleteLock.current)return;
@@ -531,7 +579,9 @@ export default function App() {
   async function refreshConversation(id:string,signal?:AbortSignal) {
     const readRevision=organizationRevision.current;
     const updated=await api<Conversation>(`/conversations/${encodeURIComponent(id)}`,{signal});
+    if(!approvalAlive.current||signal?.aborted)throw new DOMException('页面或状态读取已关闭。','AbortError');
     if(getSessionEpoch()!==accountEpoch)throw new SessionChangedError();
+    if(updated.id!==id)throw new Error('对话状态与当前请求不一致，请刷新后再操作。');
     if(deletedConversationIds.current.has(id))throw new DOMException('这段对话已删除。','AbortError');
     if(loadedAutomationConversationRef.current?.id===id){
       const before=loadedAutomationConversationRef.current;
@@ -686,11 +736,11 @@ export default function App() {
           </div>
           <div className="chat-reading-area"><div className="chat-scroll" ref={scrollRef} onScroll={chatScroll.onScroll} tabIndex={0} role="region" aria-label="对话消息" aria-live="polite" aria-busy={working}><div className="chat-scroll-content" ref={chatScroll.contentRef}>
             {!conversation?.messages.length ? conversation?.automationId ? <div className="welcome"><CalendarClock size={28} aria-hidden="true"/><h1>任务正在准备</h1><p>运行内容会在这里更新，也可以返回自动化查看计划。</p></div> : <div ref={welcomeEntrance} className="welcome"><div className="welcome-symbol">{currentMode === 'codex' ? <Terminal size={28} aria-hidden="true"/> : <Sun size={28} aria-hidden="true"/>}</div><h1>{currentMode === 'codex' ? '交给我一个任务' : '今天想聊些什么？'}</h1><p>{currentMode === 'codex' ? '选择执行电脑与权限，再告诉我需要做什么。' : `我是${state.settings.petName}，在这里陪你。`}</p><div className="suggestions">{(currentMode === 'codex' ? [{ icon: Monitor, title: '看看音乐播放器', text: '请检查 QQ 音乐和网易云音乐的安装及媒体会话状态，暂不打开或播放。' }, { icon: Globe2, title: '查询网站信息', text: '请通过内置 OpenCLI 查询网站清单，并查询 V2EX 最新热门话题。' }] : [{ icon: Coffee, title: '聊聊今天', text: '小伴，陪我聊聊今天吧。' }, { icon: Pencil, title: '把想法写下来', text: '我有一个还不成熟的想法，想和你一起梳理。' }]).map(item => <button key={item.title} onClick={() => chooseSuggestion(item.text)}><item.icon size={18} aria-hidden="true"/><span>{item.title}</span><span className="suggestion-arrow"><ArrowRight size={16} aria-hidden="true"/></span></button>)}</div>{!connected && <button className="inline-connect" onClick={() => setConnectionOpen(true)}><Link2 size={14} aria-hidden="true"/>连接个人服务，开始第一段对话</button>}{connected && currentMode === 'chat' && !state.providers.length && <button className="inline-connect" onClick={() => setView('settings')}><Plus size={14} aria-hidden="true"/>{state.user?.isOwner ? '添加模型连接，开始聊天' : '还没有可用模型，请联系管理员分配'}</button>}</div> : <ChatMessages conversationId={conversation.id} messages={conversation.messages} petName={state.settings.petName} mode={currentMode} working={working} busy={busy} sleeping={mood==='sleep'} speechId={speech.utteranceId} speechPlaying={speech.playing} speechPending={speech.pending} speechSupported={speech.supported} speechFeedback={speech.feedback} speechError={speech.error} onRead={readReply} onStop={stopPresentation} onNotice={setNotice}/>}
-            {shownApprovals.map(approval => <div className="approval" key={approval.id} tabIndex={-1}><ShieldCheck size={21} aria-hidden="true"/><div><strong>Codex 请求你的确认</strong><p>{approval.description}</p><div className="button-row"><button className="secondary-button" onClick={() => approve(approval, 'decline')}>拒绝</button><button className="primary-button" onClick={() => approve(approval, 'accept')}>允许本次</button></div></div></div>)}
+            {shownApprovals.map(approval => <div className="approval" key={approval.id} tabIndex={-1}><ShieldCheck size={21} aria-hidden="true"/><div><strong>Codex 请求你的确认</strong><p>{approval.description}</p>{approvalDecisions[approvalKey(approval.id)]==='uncertain'?<><p role="status">确认结果尚未收到，请先刷新审批状态；不会自动重复提交。</p><button type="button" className="secondary-button" disabled={approvalPending||approvalRefreshing} onClick={()=>void refreshApprovalState()}>{approvalRefreshing?'正在刷新…':'刷新审批状态'}</button></>:<div className="button-row"><button className="secondary-button" disabled={approvalPending||approvalRefreshing} onClick={() => approve(approval, 'decline')}>拒绝</button><button className="primary-button" disabled={approvalPending||approvalRefreshing} onClick={() => approve(approval, 'accept')}>{approvalDecisions[approvalKey(approval.id)]==='pending'?'正在提交…':'允许本次'}</button></div>}</div></div>)}
           </div></div>
           {chatScroll.showLatest&&<button type="button" className="chat-latest-button" aria-label="回到最新消息" onClick={chatScroll.latest}><ArrowDown size={14} aria-hidden="true"/><span>回到最新</span></button>}
           </div>
-          {conversation?.automationId?<div className="composer-area"><div className="quiet-note"><CalendarClock size={18} aria-hidden="true"/><p>这是自动化的运行结果，内容只读。需要调整任务时，请返回计划。</p></div>{error&&<p className="error-banner" role="alert">{error}</p>}<div className="button-row"><button type="button" className="secondary-button" onClick={()=>requestNavigation({kind:'page',view:'automations'})}>返回自动化</button>{agentRunning&&<button type="button" className="danger-button" aria-label="停止自动化任务" onClick={()=>void stop()}><Square size={14} aria-hidden="true"/>停止任务</button>}</div></div>:<div className="composer-area">{currentMode==='chat'&&<ChatAssistantTasks conversationId={conversation?.id} tasks={conversation?.assistantTasks} onUpdate={updateChatTasks}/>} {error&&<div className="error-banner" role="alert"><span>{error}</span><button className="icon-button" aria-label="关闭错误提示" onClick={()=>setError('')}><X size={15} aria-hidden="true"/></button></div>}{currentMode==='codex'&&conversation?.agent&&<AgentQueue key={conversation.id} conversationId={conversation.id} state={conversation.agent} hosts={agentHosts} refresh={()=>refreshConversation(conversation.id)} onNewConversation={()=>newChat('codex')}/>}<div className="composer-runtime">{currentMode==='codex'?<AgentPermissions value={activePermissions} onChange={setPermissions} user={state.user} disabled={agentRunning||agentUnknown||agentSubmitting||unconfirmed}/>:null}{working&&<div className="stream-status"><Loader2 size={12} className="spin" aria-hidden="true"/>{currentMode==='codex'?(conversation?.agent?.run?.status==='stopping'?'正在停止…':shownApprovals.length?'等待你的确认':'Agent 正在执行'):status||'正在回复…'}{shownApprovals.length>0&&<button type="button" className="approval-jump" onClick={()=>{const target=scrollRef.current?.querySelector<HTMLElement>('.approval');target?.scrollIntoView({block:'nearest'});target?.focus({preventScroll:true});}}>查看请求 ({shownApprovals.length})</button>}</div>}</div><form className={`composer ${working?'composer-busy':''}`} onSubmit={send}>{unconfirmed&&<div className="unconfirmed-submission" role="status"><span>上次提交正在等待确认</span><button type="button" disabled={agentSubmitting} onClick={()=>void sendAgent()}>确认上次提交</button></div>}<AttachmentDrafts value={attachments}/><textarea ref={inputRef} aria-label="消息" placeholder={currentMode==='codex'?(agentRunning?'补充当前任务，或加入下一条任务…':'例如：帮我打开 QQ 音乐'):`和${state.settings.petName}说点什么…`} value={draft} onChange={e=>setDraft(e.target.value)} onPaste={e=>{const files=Array.from(e.clipboardData.files).filter(file=>file.type.startsWith('image/'));if(files.length){e.preventDefault();if(currentMode==='codex'&&!agentSupportsImages){setError('这个 Agent 模型仅支持文字，请切换模型后再添加图片。');return;}void attachments.upload(files);}}} onKeyDown={e=>{if(composerKeyAction(e.nativeEvent,{touch:touchComposer})==='send'){e.preventDefault();void send();}}} rows={2} maxLength={20000} disabled={busy||agentSubmitting||unconfirmed}/><div className="composer-bottom"><div className="composer-tools"><AttachmentInput value={attachments} disabled={busy||agentSubmitting||unconfirmed||(currentMode==='chat'?provider?.supportsImages===false:!agentSupportsImages)}/>{agentRunning&&<label className="agent-send-choice"><select aria-label="Agent 发送方式" value={sendChoice} onChange={e=>setSendChoice(e.target.value as 'steer'|'submit')}><option value="steer">追加到当前任务</option><option value="submit">排队，稍后执行</option></select></label>}</div><div className="composer-send-actions">{working&&<button className="send-button stop-button" type="button" aria-label="停止生成" onClick={()=>void stop()}><Square size={14} aria-hidden="true"/></button>}{!busy&&<button className="send-button" aria-label={agentRunning?(sendChoice==='steer'?'追加指令':'加入队列'):'发送消息'} type="submit" disabled={(!draft.trim()&&!attachments.items.length)||switchingModel||agentSubmitting||unconfirmed||attachments.uploading||(currentMode==='codex'&&(!canSendAgent||(!state.user?.isOwner&&!agentProviderId)))||!!(agentRunning&&sendChoice==='steer'&&!conversation?.agent?.run?.turnId)}>{agentSubmitting?<Loader2 size={18} className="spin" aria-hidden="true"/>:agentRunning?sendChoice==='steer'?<CornerDownRight size={18} aria-hidden="true"/>:<ListOrdered size={18} aria-hidden="true"/>:<ArrowUp size={21} aria-hidden="true"/>}</button>}</div></div></form>
+          {conversation?.automationId?<div className="composer-area"><div className="quiet-note"><CalendarClock size={18} aria-hidden="true"/><p>这是自动化的运行结果，内容只读。需要调整任务时，请返回计划。</p></div>{error&&<p className="error-banner" role="alert">{error}</p>}<div className="button-row"><button type="button" className="secondary-button" onClick={()=>requestNavigation({kind:'page',view:'automations'})}>返回自动化</button>{agentRunning&&<button type="button" className="danger-button" aria-label="停止自动化任务" onClick={()=>void stop()}><Square size={14} aria-hidden="true"/>停止任务</button>}</div></div>:<div className="composer-area">{currentMode==='chat'&&<ChatAssistantTasks conversationId={conversation?.id} tasks={conversation?.assistantTasks} onUpdate={updateChatTasks}/>} {error&&<div className="error-banner" role="alert"><span>{error}</span><button className="icon-button" aria-label="关闭错误提示" onClick={()=>setError('')}><X size={15} aria-hidden="true"/></button></div>}{currentMode==='codex'&&conversation?.agent&&<AgentQueue key={conversation.id} conversationId={conversation.id} state={conversation.agent} hosts={agentHosts} refresh={()=>refreshConversation(conversation.id)} onNewConversation={()=>newChat('codex')}/>}<div className="composer-runtime">{currentMode==='codex'?<AgentPermissions value={activePermissions} onChange={setPermissions} user={state.user} disabled={agentRunning||agentUnknown||agentSubmitting||unconfirmed} reviewCapability={selectedHost?.codex?.approvalReview} reviewModel={activeAgentProvider?.model||conversation?.agent?.run?.model||selectedHost?.codex?.model} reviewProgress={conversation?.agent?.run?.approvalReview}/>:null}{working&&<div className="stream-status"><Loader2 size={12} className="spin" aria-hidden="true"/>{currentMode==='codex'?(conversation?.agent?.run?.status==='stopping'?'正在停止…':shownApprovals.length?'等待你的确认':agentReviewLabel||'Agent 正在执行'):status||'正在回复…'}{shownApprovals.length>0&&<button type="button" className="approval-jump" onClick={()=>{const target=scrollRef.current?.querySelector<HTMLElement>('.approval');target?.scrollIntoView({block:'nearest'});target?.focus({preventScroll:true});}}>查看请求 ({shownApprovals.length})</button>}</div>}</div><form className={`composer ${working?'composer-busy':''}`} onSubmit={send}>{unconfirmed&&<div className="unconfirmed-submission" role="status"><span>上次提交正在等待确认</span><button type="button" disabled={agentSubmitting} onClick={()=>void sendAgent()}>确认上次提交</button></div>}<AttachmentDrafts value={attachments}/><textarea ref={inputRef} aria-label="消息" placeholder={currentMode==='codex'?(agentRunning?'补充当前任务，或加入下一条任务…':'例如：帮我打开 QQ 音乐'):`和${state.settings.petName}说点什么…`} value={draft} onChange={e=>setDraft(e.target.value)} onPaste={e=>{const files=Array.from(e.clipboardData.files).filter(file=>file.type.startsWith('image/'));if(files.length){e.preventDefault();if(currentMode==='codex'&&!agentSupportsImages){setError('这个 Agent 模型仅支持文字，请切换模型后再添加图片。');return;}void attachments.upload(files);}}} onKeyDown={e=>{if(composerKeyAction(e.nativeEvent,{touch:touchComposer})==='send'){e.preventDefault();void send();}}} rows={2} maxLength={20000} disabled={busy||agentSubmitting||unconfirmed}/><div className="composer-bottom"><div className="composer-tools"><AttachmentInput value={attachments} disabled={busy||agentSubmitting||unconfirmed||(currentMode==='chat'?provider?.supportsImages===false:!agentSupportsImages)}/>{agentRunning&&<label className="agent-send-choice"><select aria-label="Agent 发送方式" value={sendChoice} onChange={e=>setSendChoice(e.target.value as 'steer'|'submit')}><option value="steer">追加到当前任务</option><option value="submit">排队，稍后执行</option></select></label>}</div><div className="composer-send-actions">{working&&<button className="send-button stop-button" type="button" aria-label="停止生成" onClick={()=>void stop()}><Square size={14} aria-hidden="true"/></button>}{!busy&&<button className="send-button" aria-label={agentRunning?(sendChoice==='steer'?'追加指令':'加入队列'):'发送消息'} type="submit" disabled={(!draft.trim()&&!attachments.items.length)||switchingModel||agentSubmitting||unconfirmed||attachments.uploading||(currentMode==='codex'&&(!canSendAgent||(!state.user?.isOwner&&!agentProviderId)))||!!(agentRunning&&sendChoice==='steer'&&!conversation?.agent?.run?.turnId)}>{agentSubmitting?<Loader2 size={18} className="spin" aria-hidden="true"/>:agentRunning?sendChoice==='steer'?<CornerDownRight size={18} aria-hidden="true"/>:<ListOrdered size={18} aria-hidden="true"/>:<ArrowUp size={21} aria-hidden="true"/>}</button>}</div></div></form>
             <div className="composer-footer">
               <div className="speech-controls">
                 <WorkspaceDisclosure className="speech-options" label="语音朗读选项" summary={<><Volume2 size={14} aria-hidden="true"/><span>{speech.enabled ? '语音 · 自动朗读开' : '语音'}</span></>}>

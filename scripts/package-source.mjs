@@ -174,6 +174,8 @@ const requiredFiles = [
   'tests/music.test.mjs', 'tests/desktop-tools.test.mjs', 'tests/opencli.test.mjs', 'NOTICE',
 ];
 requiredFiles.push('desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs');
+requiredFiles.push('server/native/codex-review/models-0.143.0.json', 'server/native/codex-review/LICENSE', 'server/native/codex-review/PROVENANCE.json', 'server/native/codex-review/SHA256SUMS');
+requiredFiles.push('server/approval-review.mjs', 'server/system-controls.mjs', 'server/native/system-windows.ps1');
 for (const required of requiredFiles) if (!selected.has(required)) throw new Error(`Required source entry missing: ${required}`);
 const pendingCompanionRoots = requiredCompanionRoots.filter(directory => ![...selected].some(file => file.startsWith(`${directory}/`)));
 if (!checkOnly && pendingCompanionRoots.length) throw new Error(`Required companion source/assets missing: ${pendingCompanionRoots.join(', ')}`);

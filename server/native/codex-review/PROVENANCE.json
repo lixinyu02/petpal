@@ -1,0 +1,25 @@
+{
+  "package": "openai/codex",
+  "version": "0.143.0",
+  "tag": "rust-v0.143.0",
+  "commit": "c4d748f586a84a3ed5b6aceb82e9a1db4abb1cda",
+  "license": "Apache-2.0",
+  "sources": [
+    {
+      "file": "models-0.143.0.json",
+      "source": "codex-rs/models-manager/models.json",
+      "url": "https://raw.githubusercontent.com/openai/codex/c4d748f586a84a3ed5b6aceb82e9a1db4abb1cda/codex-rs/models-manager/models.json",
+      "bytes": 203351,
+      "sha256": "d5db15d306c4bd5c4bb8a927940e70473c389d65d9e2bf887ec7028fce893d5f"
+    },
+    {
+      "file": "LICENSE",
+      "source": "LICENSE",
+      "url": "https://raw.githubusercontent.com/openai/codex/c4d748f586a84a3ed5b6aceb82e9a1db4abb1cda/LICENSE",
+      "bytes": 10926,
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+    }
+  ],
+  "transformation": "Original files retained byte-for-byte. API runtime removes only the codex-auto-review model from models; every other model field remains unchanged. No unknown model metadata is synthesized.",
+  "purpose": "Keep automatic permission review on the current authorized Agent model using native Codex fallback. review_model is not used."
+}

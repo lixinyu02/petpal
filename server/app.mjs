@@ -81,7 +81,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const task = active.get(call?.conversationId), entry = task?.agentEntry;
     const conversation = state.conversations.find(item => item.id === call?.conversationId);
     if (!entry || task.controller.signal.aborted || entry.hostId !== 'central' || conversation?.agent?.run?.id !== entry.id || conversation.agent.run.status !== 'running') throw failure(401, '自动化工具只允许当前实际 Agent 任务调用，请使用任务入口。');
-    authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId, entry.projectDirectory);
+    authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId, entry.projectDirectory, entry.permissions);
     return entry;
   };
   const localTools = withAutomationTools(desktopTools ?? createDesktopTools({ dataDir,musicMcpScope:`${state.instanceId}:${state.ownerId}`,scopeForConversation:id=>{const conversation=state.conversations.find(item=>item.id===id);return conversation?`${state.instanceId}:${conversation.userId}`:null;} }), {
@@ -302,7 +302,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       const user = state.users.find(item => item.id === userId);
       return { projectDirectory, projectAccess: isOwner(user ?? {}) || user?.agentAccess === 'full' ? 'full' : 'workspace' };
     },
-    authorize: entry => { const expiresAt = authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId ?? 'central', entry.projectDirectory); return expiresAt; },
+    authorize: entry => { const expiresAt = authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId ?? 'central', entry.projectDirectory, entry.permissions); return expiresAt; },
     authorizeRemoval: entry => authorizeAgentIdentity(entry.auth).expiresAt,
   });
   const authorizeAutomation = (userId, spec, { online, dispatch = false }) => {
@@ -313,7 +313,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     resolveAgentModel(userId, spec.providerId);
     const host = executors.hostFor(userId, spec.hostId);
     normalizeProjectDirectory(spec.projectDirectory, host.platform);
-    if (online) executors.target(userId, spec.hostId, spec.projectDirectory);
+    if (online) executors.target(userId, spec.hostId, spec.projectDirectory, spec.permissions);
     if (dispatch && (spec.hostId === 'central' ? [...active.values()].some(task => task.mode === 'codex' && (task.agentEntry?.hostId ?? 'central') === 'central') : executors.isBusy(userId, spec.hostId))) throw failure(409, '固定执行电脑正在运行其他任务，本次计划已跳过。', 'executor_busy');
     return { hostName: host.name, providerName: spec.providerId ? providerById(spec.providerId, user).name : '默认 Agent 模型' };
   };

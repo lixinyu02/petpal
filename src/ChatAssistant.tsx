@@ -4,6 +4,7 @@ import {ArrowUpRight,Check,ChevronDown,Loader2,Monitor,Settings2,ShieldCheck,Squ
 import {api,getSessionEpoch,isSessionChanged,type AgentHost,type AgentPermissions as Permissions,type AssistantTask,type ChatAssistantConfig,type Conversation,type Provider,type State,type User} from './api';
 import {chatAssistantDefaultIssue,chatAssistantForHost,chatAssistantTargetIssue,restoreChatAssistantPreferences,saveChatAssistantPreferences,snapshotChatAssistant,type ChatAssistantPreferences} from './chat-assistant-preferences.mjs';
 import AgentPermissions,{defaultAgentPermissions} from './AgentPermissions';
+import {approvalReviewLabel} from './approval-review-ui.mjs';
 import {ExecutionHostPicker,ModelPicker} from './WorkspaceControls';
 import ProjectDirectory from './ProjectDirectory';
 import {projectDirectoryIssue} from './project-directory-preferences.mjs';
@@ -178,7 +179,7 @@ export function ChatAssistantControls({assistant,allowed,user,providers,disabled
       <label className="chat-assistant-enable"><input type="checkbox" role="switch" aria-label="启用 Chat + Agent" checked={value.enabled} disabled={disabled||!allowed||(!value.enabled&&!!issue)} onChange={event=>assistant.change({...value,enabled:event.target.checked})}/><span>自动派发 Agent 任务<small>按下方权限执行，仅本次登录有效。</small></span></label>
       <ProjectDirectory value={value.projectDirectory||''} onChange={projectDirectory=>assistant.change({...value,projectDirectory})} host={selected} user={user} disabled={disabled||!allowed} lockReason="当前回复结束后，可以调整下一次后台任务的项目目录。"/>
       <ModelPicker providers={providers} value={value.providerId} label="后台 Agent 模型" fallbackLabel={user?.isOwner?'主机默认模型':'选择 Agent 模型'} fallbackOption={user?.isOwner?{label:'主机默认模型',description:'使用执行主机的 Codex 配置'}:undefined} disabled={disabled||!allowed} onChange={providerId=>assistant.change({...value,providerId})}/>
-      <div className="chat-assistant-permissions"><AgentPermissions value={value.permissions} user={user} disabled={disabled||!allowed} onChange={permissions=>assistant.change({...value,permissions})}/></div>
+      <div className="chat-assistant-permissions"><AgentPermissions value={value.permissions} user={user} disabled={disabled||!allowed} onChange={permissions=>assistant.change({...value,permissions})} reviewCapability={selected?.codex?.approvalReview} reviewModel={providers.find(item=>item.id===value.providerId)?.model||selected?.codex?.model}/></div>
       {!allowed?<p className="chat-assistant-note">请先登录并开通 Agent 权限。</p>:assistant.error?<p className="chat-assistant-note is-error" role="status">{assistant.error}</p>:issue?<p className="chat-assistant-note" role="status">{issue}</p>:disabled?<p className="chat-assistant-note" role="status">当前回复结束后，可以调整下一次任务的设置。</p>:null}
         </div>
       </section>
@@ -190,9 +191,14 @@ export function ChatAssistantControls({assistant,allowed,user,providers,disabled
 export function ChatAssistantTasks({conversationId,tasks=[],onUpdate}:{conversationId?:string;tasks?:AssistantTask[];onUpdate(conversation:Conversation):void}) {
   const [cancelling,setCancelling]=useState(''),[error,setError]=useState('');
   const [children,setChildren]=useState<Record<string,Conversation>>({}),[expanded,setExpanded]=useState(false),[approvalPending,setApprovalPending]=useState('');
+  const [approvalReadError,setApprovalReadError]=useState(''),[approvalRefreshing,setApprovalRefreshing]=useState('');
+  const [approvalDecisions,setApprovalDecisions]=useState<Record<string,'pending'|'consumed'|'uncertain'>>({});
+  const approvalDecisionsRef=useRef<Record<string,'pending'|'consumed'|'uncertain'>>({}),approvalLock=useRef(false),approvalReadLock=useRef(false),alive=useRef(true);
+  const context=useRef(conversationId);context.current=conversationId;
+  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const running=tasks.some(task=>['deciding','queued','running'].includes(task.status)),last=tasks.at(-1),epoch=getSessionEpoch();
   const childIds=tasks.slice(-8).filter(task=>expanded||['queued','running'].includes(task.status)).map(task=>task.conversationId).filter((id):id is string=>!!id).join(',');
-  useEffect(()=>{setError('');setCancelling('');setChildren({});setExpanded(false);setApprovalPending('');},[conversationId]);
+  useEffect(()=>{setError('');setApprovalReadError('');setCancelling('');setChildren({});setExpanded(false);setApprovalPending('');setApprovalRefreshing('');approvalDecisionsRef.current={};setApprovalDecisions({});},[conversationId]);
   useEffect(()=>{
     if(!conversationId||!running)return;
     const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
@@ -209,9 +215,10 @@ export function ChatAssistantTasks({conversationId,tasks=[],onUpdate}:{conversat
     if(!childIds)return;
     const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
     const poll=async()=>{
-      const results=await Promise.allSettled(childIds.split(',').map(id=>api<Conversation>(`/conversations/${encodeURIComponent(id)}`,{signal:controller.signal})));
+      const results=await Promise.allSettled(childIds.split(',').map(async id=>{const child=await api<Conversation>(`/conversations/${encodeURIComponent(id)}`,{signal:controller.signal});if(child.id!==id)throw new Error('后台任务回执与当前请求不一致。');return child;}));
       if(controller.signal.aborted||epoch!==getSessionEpoch())return;
       setChildren(previous=>{const next={...previous};for(const result of results)if(result.status==='fulfilled')next[result.value.id]=result.value;return next;});
+      setApprovalReadError(results.some(result=>result.status==='rejected')?'暂时无法读取后台 Agent 的审批状态，请检查连接或刷新审批状态。':'');
       timer=setTimeout(()=>void poll(),3000);
     };
     void poll();return()=>{controller.abort();if(timer)clearTimeout(timer);};
@@ -225,28 +232,61 @@ export function ChatAssistantTasks({conversationId,tasks=[],onUpdate}:{conversat
     }catch(cause){if(!isSessionChanged(cause))setError((cause as Error).message||'未能取消任务。');}
     finally{if(epoch===getSessionEpoch())setCancelling('');}
   }
+  const approvalKey=(childId:string,id:string)=>`${childId}:${id}`;
+  function recordApprovalDecision(key:string,value?:'pending'|'consumed'|'uncertain'){
+    const next={...approvalDecisionsRef.current};if(value)next[key]=value;else delete next[key];approvalDecisionsRef.current=next;setApprovalDecisions(next);
+  }
+  const current=()=>alive.current&&epoch===getSessionEpoch()&&context.current===conversationId;
+  async function readChild(id:string){
+    const next=await api<Conversation>(`/conversations/${encodeURIComponent(id)}`);
+    if(next.id!==id)throw new Error('后台任务回执与当前请求不一致。');
+    if(current())setChildren(previous=>({...previous,[id]:next}));
+    return next;
+  }
+  async function refreshApprovalState(childId?:string){
+    if(approvalLock.current||approvalReadLock.current||!current())return;
+    approvalReadLock.current=true;setApprovalRefreshing(childId||'all');setError('');
+    try{
+      const ids=childId?[childId]:childIds.split(',').filter(Boolean);
+      const results=await Promise.allSettled(ids.map(readChild));
+      if(!current())return;
+      for(const result of results)if(result.status==='fulfilled'){
+        const child=result.value,active=new Set(child.agent?.approvals.map(item=>item.id)||[]);
+        for(const [key,value] of Object.entries(approvalDecisionsRef.current))if(value==='uncertain'&&key.startsWith(`${child.id}:`))recordApprovalDecision(key,active.has(key.slice(child.id.length+1))?undefined:'consumed');
+      }
+      setApprovalReadError(results.some(result=>result.status==='rejected')?'暂时无法读取后台 Agent 的审批状态；请勿重复提交确认。':'');
+    }finally{approvalReadLock.current=false;if(current())setApprovalRefreshing('');}
+  }
   async function approve(child:Conversation,approvalId:string,decision:string){
-    if(approvalPending)return;setApprovalPending(approvalId);setError('');
+    const key=approvalKey(child.id,approvalId);
+    if(approvalLock.current||approvalReadLock.current||approvalDecisionsRef.current[key]||!current())return;
+    approvalLock.current=true;setApprovalPending(approvalId);recordApprovalDecision(key,'pending');setError('');
     try{
       await api(`/codex/approvals/${encodeURIComponent(approvalId)}`,{method:'POST',body:JSON.stringify({decision})});
-      const next=await api<Conversation>(`/conversations/${encodeURIComponent(child.id)}`);
-      if(epoch===getSessionEpoch())setChildren(previous=>({...previous,[next.id]:next}));
-    }catch(cause){if(!isSessionChanged(cause))setError((cause as Error).message||'未能处理确认请求。');}
-    finally{if(epoch===getSessionEpoch())setApprovalPending('');}
+      if(!current())return;
+      recordApprovalDecision(key,'consumed');
+      setChildren(previous=>{const before=previous[child.id];return before?.agent?{...previous,[child.id]:{...before,agent:{...before.agent,approvals:before.agent.approvals.filter(item=>item.id!==approvalId)}}}:previous;});
+      try{await readChild(child.id);}
+      catch(cause){if(current()&&!isSessionChanged(cause))setError('确认已提交，后台任务进度暂时无法刷新；请勿重复提交。');}
+    }catch(cause){if(current()&&!isSessionChanged(cause)){recordApprovalDecision(key,'uncertain');setError('确认结果尚未收到，请先刷新审批状态，再决定是否操作；不会自动重复提交。');}}
+    finally{approvalLock.current=false;if(current())setApprovalPending('');}
   }
   if(!last)return null;
-  const pendingApprovals=tasks.filter(task=>['queued','running'].includes(task.status)).flatMap(task=>task.conversationId?children[task.conversationId]?.agent?.approvals||[]:[]).length;
+  const visibleApprovals=(child?:Conversation)=>child?.agent?.approvals.filter(item=>approvalDecisions[approvalKey(child.id,item.id)]!=='consumed')||[];
+  const pendingApprovals=tasks.filter(task=>['queued','running'].includes(task.status)).flatMap(task=>visibleApprovals(task.conversationId?children[task.conversationId]:undefined)).length;
+  const reviewing=tasks.some(task=>['queued','running'].includes(task.status)&&task.conversationId&&children[task.conversationId]?.agent?.run?.approvalReview?.status==='inProgress');
   const taskIcon=(task:AssistantTask)=>['deciding','queued','running'].includes(task.status)?<Loader2 size={13} className="spin"/>:task.status==='completed'?<Check size={13}/>:<Terminal size={13}/>;
   const canCancel=(task:AssistantTask)=>['deciding','queued','running','unknown'].includes(task.status);
   return <div className="chat-assistant-tasks" aria-label="后台 Agent 任务">
-    <div className="chat-assistant-task-latest" role="status"><span className={`assistant-task-state is-${last.status}`}>{taskIcon(last)}{taskLabels[last.status]}</span><span className="assistant-task-label" title={`${last.hostName} · ${last.message}`}>{last.hostName} · 后台 Agent</span>{pendingApprovals>0&&<button type="button" onClick={()=>setExpanded(true)} className="assistant-task-approval-jump">确认 ({pendingApprovals})</button>}{canCancel(last)&&<button type="button" disabled={!!cancelling} onClick={()=>void cancel(last)} aria-label="取消后台 Agent 任务">{cancelling===last.id?<Loader2 size={12} className="spin"/>:<Square size={11}/>}取消</button>}</div>
+    <div className="chat-assistant-task-latest" role="status"><span className={`assistant-task-state is-${last.status}`}>{pendingApprovals>0?<ShieldCheck size={13}/>:taskIcon(last)}{pendingApprovals>0?'等待确认':reviewing?'自动审查中':taskLabels[last.status]}</span><span className="assistant-task-label" title={`${last.hostName} · ${last.message}`}>{last.hostName} · 后台 Agent</span>{pendingApprovals>0&&<button type="button" onClick={()=>setExpanded(true)} className="assistant-task-approval-jump">确认 ({pendingApprovals})</button>}{canCancel(last)&&<button type="button" disabled={!!cancelling} onClick={()=>void cancel(last)} aria-label="取消后台 Agent 任务">{cancelling===last.id?<Loader2 size={12} className="spin"/>:<Square size={11}/>}取消</button>}</div>
     <details className="chat-assistant-task-details" open={expanded} onToggle={event=>setExpanded(event.currentTarget.open)}><summary>任务详情<ChevronDown size={12}/></summary><div>{tasks.slice(-8).reverse().map(task=>{
       const child=task.conversationId?children[task.conversationId]:undefined;
-      return <section className="chat-assistant-task-entry" key={task.id}><p><strong>{taskLabels[task.status]} · {task.hostName}</strong><span>{task.message||'后台 Agent 正在处理任务。'}</span>{task.projectDirectory&&<span>项目：{task.projectDirectory}</span>}</p>
+      return <section className="chat-assistant-task-entry" key={task.id}><p><strong>{visibleApprovals(child).length?'等待确认':child?.agent?.run?.approvalReview?.status==='inProgress'?'自动审查中':taskLabels[task.status]} · {task.hostName}</strong><span>{task.message||'后台 Agent 正在处理任务。'}</span>{task.projectDirectory&&<span>项目：{task.projectDirectory}</span>}{approvalReviewLabel(child?.agent?.run?.approvalReview)&&<span role="status">{approvalReviewLabel(child?.agent?.run?.approvalReview)}{child?.agent?.run?.approvalReview?.rationale&&<>：{child.agent.run.approvalReview.rationale}</>}</span>}</p>
         <div className="assistant-task-actions">{task.conversationId&&<a href={`/?chat=1&mode=codex&conversation=${encodeURIComponent(task.conversationId)}`}>查看 Agent<ArrowUpRight size={12}/></a>}{canCancel(task)&&task.id!==last.id&&<button type="button" disabled={!!cancelling} onClick={()=>void cancel(task)}>取消任务</button>}</div>
-        {['queued','running'].includes(task.status)&&child?.agent?.approvals.map(approval=><div className="assistant-task-approval" key={approval.id}><strong><ShieldCheck size={13}/>Agent 等待确认</strong><p>{approval.description}</p><div><button type="button" disabled={!!approvalPending} onClick={()=>void approve(child,approval.id,'decline')}>拒绝</button><button type="button" disabled={!!approvalPending} onClick={()=>void approve(child,approval.id,'accept')}>允许本次</button></div></div>)}
+        {['queued','running'].includes(task.status)&&child&&visibleApprovals(child).map(approval=><div className="assistant-task-approval" key={approval.id}><strong><ShieldCheck size={13}/>Agent 等待确认</strong><p>{approval.description}</p>{approvalDecisions[approvalKey(child.id,approval.id)]==='uncertain'?<><p role="status">确认结果尚未收到，请先刷新审批状态；不会自动重复提交。</p><button type="button" disabled={!!approvalPending||!!approvalRefreshing} onClick={()=>void refreshApprovalState(child.id)}>{approvalRefreshing===child.id?'正在刷新…':'刷新审批状态'}</button></>:<div><button type="button" disabled={!!approvalPending||!!approvalRefreshing} onClick={()=>void approve(child,approval.id,'decline')}>拒绝</button><button type="button" disabled={!!approvalPending||!!approvalRefreshing} onClick={()=>void approve(child,approval.id,'accept')}>{approvalPending===approval.id?'正在提交…':'允许本次'}</button></div>}</div>)}
       </section>;
     })}</div></details>
     {error&&<p className="chat-assistant-note is-error" role="alert">{error}</p>}
+    {approvalReadError&&<div className="assistant-task-actions" role="status"><span>{approvalReadError}</span><button type="button" disabled={!!approvalPending||!!approvalRefreshing} onClick={()=>void refreshApprovalState()}>{approvalRefreshing==='all'?'正在刷新…':'刷新审批状态'}</button></div>}
   </div>;
 }

@@ -30,7 +30,7 @@ async function fixture(t, automationTool = async () => ({ ok: true })) {
 test('remote callback binds exact run token and frozen server entry, with one mutation per callId', async t => {
   const gate = deferred(), calls = [];
   const f = await fixture(t, async (...values) => { calls.push(values); await gate.promise; return { ok: true, automation: { id: 'one-result' } }; });
-  const registration = await f.register({ projectDirectory: true, automations: true }), run = await f.start(registration);
+  const registration = await f.register({ projectDirectory: true, automations: true, approvalReview: true }), run = await f.start(registration);
   assert.equal(registration.capabilities.automations, true); assert.equal(run.command.automationTools, true); run.event('started', 1);
   const body = { callId: 'fixture-call', name: 'petpal_automation_create', arguments: args() };
   const first = run.callback(body), second = run.callback(structuredClone(body));
@@ -48,7 +48,7 @@ test('remote callback binds exact run token and frozen server entry, with one mu
 for (const reason of ['stop', 'disconnect', 'expiry', 'revocation']) test(`remote automation callback rejects ${reason} and suppresses late mutation result`, async t => {
   const gate = deferred(), entered = deferred(); let signal, calls = 0;
   const f = await fixture(t, async (_name, _args, context) => { calls++; signal = context.signal; entered.resolve(); await gate.promise; return { ok: true }; });
-  const registration = await f.register({ projectDirectory: true, automations: true }), run = await f.start(registration); run.event('started', 1);
+  const registration = await f.register({ projectDirectory: true, automations: true, approvalReview: true }), run = await f.start(registration); run.event('started', 1);
   const body = { callId: 'once', name: 'petpal_automation_list', arguments: {} }, pending = run.callback(body); const rejected = assert.rejects(pending);
   await entered.promise;
   if (reason === 'stop') run.controller.abort();
@@ -69,7 +69,7 @@ test('old client cannot claim automation tools but still receives the unchanged 
 
 for (const approval of ['ask', 'review']) test(`central ${approval} approval binds complete automation arguments and rejects client self approval`, async t => {
   let mutations = 0; const f = await fixture(t, async () => { mutations++; return { ok: true }; });
-  const registration = await f.register({ projectDirectory: true, automations: true }), run = await f.start(registration, { access: 'read-only', approval }); run.event('started', 1);
+  const registration = await f.register({ projectDirectory: true, automations: true, approvalReview: true }), run = await f.start(registration, { access: 'read-only', approval }); run.event('started', 1);
   const packet = { name: 'petpal_automation_create', arguments: args(), callId: 'approved-call' };
   await assert.rejects(run.callback(packet), { status: 403 });
   assert.throws(() => run.event('approval', 2, { id: 'remote-approval', kind: 'automation', description: 'untrusted summary' }), { status: 400 });
@@ -92,7 +92,7 @@ for (const approval of ['ask', 'review']) test(`central ${approval} approval bin
 
 test('a central decline cannot be overwritten by replayed approval metadata or a client callback', async t => {
   let mutations = 0; const f = await fixture(t, async () => { mutations++; return { ok: true }; });
-  const registration = await f.register({ projectDirectory: true, automations: true }), run = await f.start(registration, { access: 'read-only', approval: 'ask' }); run.event('started', 1);
+  const registration = await f.register({ projectDirectory: true, automations: true, approvalReview: true }), run = await f.start(registration, { access: 'read-only', approval: 'ask' }); run.event('started', 1);
   const packet = { name: 'petpal_automation_create', arguments: args(), callId: 'denied-call' };
   run.event('approval', 2, { id: 'remote-deny', kind: 'automation', description: 'client summary', automation: packet });
   const approval = run.events.find(item => item.event === 'approval').data;

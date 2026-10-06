@@ -73,7 +73,9 @@ foreach ($mutation in @('v2','renderer','model','moc','core','hidden','duplicate
 
 test('real PowerShell smoke rejects missing assistant members and altered module byte receipts', { skip: process.platform !== 'win32' }, async () => {
   const expected = ['server/conversation-organization.mjs', 'server/chat-assistant.mjs',
-    'server/automation-schema.mjs', 'server/automation-tools.mjs', 'server/automations.mjs'];
+    'server/automation-schema.mjs', 'server/automation-tools.mjs', 'server/automations.mjs',
+    'server/codex-config.mjs', 'server/approval-review.mjs', 'server/system-controls.mjs', 'server/native/system-windows.ps1',
+    'server/native/codex-review/models-0.143.0.json', 'server/native/codex-review/LICENSE', 'server/native/codex-review/PROVENANCE.json', 'server/native/codex-review/SHA256SUMS'];
   const result = await powershell(`
 Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility') -Force;
 $requiredGate=@($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.ForEachStatementAst] -and $node.Variable.VariablePath.UserPath -eq 'required' -and $node.Body.Extent.Text.Contains('Missing required desktop assistant runtime member')}, $true));

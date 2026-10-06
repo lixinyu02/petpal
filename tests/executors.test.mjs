@@ -46,6 +46,31 @@ test('registration validates fields, platform and persisted ownership',async t=>
   const corrupt=structuredClone(f.store.state);corrupt.executionHosts[0].userId='foreign';assert.throws(()=>validateExecutionHosts(corrupt));
 });
 
+test('review capability follows the live connection and old clients cannot receive review tasks',async t=>{
+  const f=fixture(t),deviceId=randomUUID();
+  const modern=await f.registration({deviceId,capabilities:{projectDirectory:true,approvalReview:true}});
+  assert.equal(modern.capabilities.approvalReview,true);
+  assert.equal(f.manager.list(f.userId).find(host=>host.id===modern.hostId).codex.approvalReview.available,true);
+  const permissions={access:'full-access',approval:'review'};
+  assert.doesNotThrow(()=>f.manager.target(f.userId,modern.hostId,undefined,permissions));
+  const older=await f.registration({deviceId,capabilities:{projectDirectory:true}});
+  assert.equal(f.manager.list(f.userId).find(host=>host.id===older.hostId).codex.approvalReview.available,false);
+  assert.throws(()=>f.manager.target(f.userId,older.hostId,undefined,permissions),{status:409,code:'executor_approval_review_unsupported'});
+  assert.throws(()=>f.manager.bind({...f.entry(older.hostId),permissions}),{code:'executor_approval_review_unsupported'});
+  assert.doesNotThrow(()=>f.manager.target(f.userId,older.hostId,undefined,{access:'full-access',approval:'ask'}));
+});
+
+test('remote reviewer progress is strict bounded metadata, never execution authorization',async t=>{
+  const f=fixture(t),reg=await f.registration({capabilities:{projectDirectory:true,approvalReview:true}}),run=await f.begin(reg);
+  run.event('started');
+  const review={status:'denied',source:'native',rationale:'upstream unavailable'};
+  run.event('status',{state:'working',message:'not allowed',approvalReview:review});
+  assert.deepEqual(run.events.at(-1).data.approvalReview,review);
+  const body={runId:run.item.id,sequence:3,event:'status',data:{approvalReview:{...review,approved:true}}};
+  assert.throws(()=>f.manager.events(reg.connectionId,f.auth,body),{status:400});
+  run.event('complete',{text:'done'}); await run.completion;
+});
+
 test('project-directory capability belongs to the live connection and never the persisted host',async t=>{
   const f=fixture(t),deviceId=randomUUID();
   for(const capabilities of [{projectDirectory:false},{projectDirectory:true,other:true},'projectDirectory',{}]) await assert.rejects(f.registration({capabilities}),{status:400});

@@ -6,6 +6,7 @@ import ts from 'typescript';
 import * as uiMotion from '../src/platform/ui-motion.mjs';
 import * as assistantPreferences from '../src/chat-assistant-preferences.mjs';
 import * as projectPreferences from '../src/project-directory-preferences.mjs';
+import * as approvalReviewUi from '../src/approval-review-ui.mjs';
 
 const compile=async file=>ts.transpileModule(await readFile(new URL(file,import.meta.url),'utf8'),{
   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true},
@@ -56,6 +57,7 @@ function fixture({reduced=false,hidden=false}={}){
     'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     './api':{getSessionEpoch:()=>1,isSessionChanged:()=>false,api:async path=>{apiCalls.push(path);throw Error('Unexpected API call');}},
     './chat-assistant-preferences.mjs':assistantPreferences,'./project-directory-preferences.mjs':projectPreferences,
+    './approval-review-ui.mjs':approvalReviewUi,
     './AgentPermissions':{__esModule:true,default:Symbol('AgentPermissions'),defaultAgentPermissions:permissions},
     './WorkspaceControls':controls,'./ProjectDirectory':{__esModule:true,default:Symbol('ProjectDirectory')},
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
@@ -87,7 +89,7 @@ function fixture({reduced=false,hidden=false}={}){
     assert.fail('Fixture did not settle');
   };
   render();
-  return{assistant,props,layers,document,window,media,find,changes,apiCalls,
+  return{assistant,props,layers,document,window,media,find,changes,apiCalls,permissions:modules['./AgentPermissions'].default,
     open(){find('button',p=>p.className.startsWith('chat-assistant-trigger')).props.onClick();render();},
     close(){find('button',p=>p['aria-label']==='关闭 Chat + Agent 设置').props.onClick();render();},
     refresh(next={}){Object.assign(assistant,next);render();},
@@ -144,4 +146,12 @@ test('revoking Agent access retains the existing close behavior and cannot alter
   const f=fixture();t.after(()=>f.dispose());f.open();const layer=f.layers[0],before=JSON.stringify(f.assistant.value);
   f.setAllowed(false);assert.equal(f.find('section',p=>p.role==='dialog'),undefined);assert.equal(layer.getAttribute('data-ui-enter'),null);
   assert.equal(JSON.stringify(f.assistant.value),before);assert.deepEqual(f.changes,[]);assert.deepEqual(f.apiCalls,[]);
+});
+
+test('actual Chat + Agent controls bind review support and model copy to their selected executor',t=>{
+  const f=fixture();t.after(()=>f.dispose());f.open();
+  assert.equal(f.find(f.permissions).props.reviewCapability,undefined);
+  const capability={available:true,modelStrategy:'agent-model',dynamicTools:'bounded-audio-rules-with-manual-fallback',version:1};
+  f.refresh({hosts:[{...f.assistant.hosts[0],codex:{available:true,approvalReview:capability,model:'host-default'}}]});
+  assert.equal(f.find(f.permissions).props.reviewCapability,capability);assert.equal(f.find(f.permissions).props.reviewModel,'fixture','selected Agent provider overrides the host default');
 });

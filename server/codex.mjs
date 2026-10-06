@@ -13,6 +13,8 @@ import { normalizeReasoningEffort } from './providers.mjs';
 import { dynamicToolContentItems } from './dynamic-tool-output.mjs';
 import { resolveProjectDirectory } from './project-directory.mjs';
 import { isAutomationTool } from './automation-tools.mjs';
+import { validateSystemAudioCommand } from './system-controls.mjs';
+import { APPROVAL_REVIEW_STATUSES, approvalReviewCapability } from './approval-review.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -152,7 +154,9 @@ export async function resolveCodexCommand(command) {
 
 /** Owns one real Codex app-server process and its bounded dynamic-tool callbacks. */
 export class CodexBridge {
-  constructor({ workspaceRoot, command, config, dataDir, desktopTools } = {}) {
+  constructor({ workspaceRoot, command, config, dataDir, desktopTools, approvalTimeoutMs = 300000 } = {}) {
+    if (!Number.isInteger(approvalTimeoutMs) || approvalTimeoutMs < 1 || approvalTimeoutMs > 300000) throw new Error('审批有效期无效。');
+    this.approvalTimeoutMs = approvalTimeoutMs;
     this.workspaceRoot = path.resolve(workspaceRoot || path.join(homedir(), '.petpal', 'workspace'));
     this.command = command;
     this.config = config ? { ...config } : null;
@@ -191,10 +195,10 @@ export class CodexBridge {
     try {
       await this._ensureStarted();
       const account = await this._readAccount();
-      return { ...base, available: true, running: true, ...account };
+      return { ...base, available: true, running: true, approvalReview: approvalReviewCapability(this.apiMode), ...account };
     } catch (error) {
       return { ...base, available: false, running: Boolean(this.child), authenticated: false,
-        requiresOpenaiAuth: null, authType: null, error: error.message };
+        requiresOpenaiAuth: null, authType: null, approvalReview: approvalReviewCapability(this.apiMode, false), error: error.message };
     }
   }
 
@@ -256,6 +260,7 @@ export class CodexBridge {
       const decoder = new StringDecoder('utf8');
       let buffer = '';
       child.stdout.on('data', (chunk) => {
+        if (child !== this.child) return;
         buffer += decoder.write(chunk);
         if (buffer.length > MAX_LINE) return this._fail(new Error('Codex 返回的数据超过安全长度限制'), child);
         let newline;
@@ -316,10 +321,24 @@ export class CodexBridge {
     if (message.method && 'id' in message) return this._serverRequest(message);
     const params = message.params ?? {};
     const run = this.runs.get(params.threadId);
-    if (!run) return;
+    if (!run || run.settled || run.finishing) return;
     const eventTurn = params.turnId ?? params.turn?.id;
     if (run.turnId && eventTurn && eventTurn !== run.turnId) return;
     switch (message.method) {
+      case 'item/autoApprovalReview/started':
+      case 'item/autoApprovalReview/completed': {
+        if (run.aborted || !run.turnId || params.turnId !== run.turnId || run.permissions.approval !== 'review' || !APPROVAL_REVIEW_STATUSES.includes(params.review?.status)) break;
+        const review = { status: params.review.status, source: 'native' };
+        for (const [key, value] of Object.entries({ reviewId: params.reviewId, targetItemId: params.targetItemId, rationale: params.review.rationale, riskLevel: params.review.riskLevel, userAuthorization: params.review.userAuthorization })) {
+          if (typeof value === 'string' && value.trim()) review[key] = safeText(this._redact(value)).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, key === 'rationale' ? 2000 : 256);
+        }
+        run.approvalReview = review;
+        this._emit(run, 'status', { state: review.status === 'inProgress' ? 'reviewing' : 'working', message: review.status === 'inProgress' ? '正在替你审查操作' : review.status === 'approved' ? '自动审查已允许本次操作' : review.status === 'timedOut' ? '自动审查超时，操作未放行' : review.status === 'aborted' ? '自动审查已取消' : '自动审查未放行，请查看原因', approvalReview: review });
+        break;
+      }
+      case 'guardianWarning':
+        if (!run.aborted && run.permissions.approval === 'review') this._emit(run, 'status', { state: 'reviewing', message: `自动审查提示：${safeText(this._redact(params.message)).slice(0, 800)}` });
+        break;
       case 'turn/started':
         this._recordTurn(run, params.turn.id);
         this._emit(run, 'status', { state: 'working', message: 'Codex 正在处理' });
@@ -346,7 +365,7 @@ export class CodexBridge {
       }
       case 'serverRequest/resolved':
         for (const [id, approval] of this.approvals) {
-          if (approval.rpcId === params.requestId) { this.approvals.delete(id); this._emit(run, 'approval-resolved', { id }); }
+          if (approval.run === run && approval.rpcId === params.requestId) this._removeApproval(id);
         }
         this._emit(run, 'status', { state: 'working', message: '审批请求已处理' });
         break;
@@ -402,8 +421,32 @@ export class CodexBridge {
     }
     const description = safeText(details.filter(Boolean).join('\n') || (kind === 'command' ? 'Codex 请求执行一项操作' : 'Codex 请求修改文件'));
     const id = randomUUID();
-    this.approvals.set(id, { rpcId: message.id, run });
+    this._createApproval(id, { rpcId: message.id, run });
     this._emit(run, 'approval', { id, kind, description });
+    this._emit(run, 'status', { state: 'waiting', message: '等待你确认操作（5 分钟内有效）' });
+  }
+
+  _removeApproval(id) {
+    const approval = this.approvals.get(id);
+    if (!approval) return;
+    clearTimeout(approval.timeout);
+    this.approvals.delete(id);
+    this._emit(approval.run, 'approval-resolved', { id });
+    return approval;
+  }
+
+  _createApproval(id, approval) {
+    approval.timeout = setTimeout(() => {
+      if (this.approvals.get(id) !== approval) return;
+      this._removeApproval(id);
+      const { run } = approval;
+      if (run.settled || run.aborted || run.finishing || run.child !== this.child) return;
+      if (approval.dynamic) this._replyDynamic(approval.dynamic, false, { error: '确认已超时，本次操作未执行；需要时请重新提交任务。' });
+      else { try { this._send({ id: approval.rpcId, result: { decision: 'decline' } }); } catch {} }
+      this._emit(run, 'status', { state: 'working', message: '确认已超时，本次操作已拒绝' });
+    }, this.approvalTimeoutMs);
+    approval.timeout.unref?.();
+    this.approvals.set(id, approval);
   }
 
   _redact(value) {
@@ -450,12 +493,23 @@ export class CodexBridge {
     // A desktop tool cannot lower its full-access guard via its description.
     const automationAccess = isAutomationTool(call.name) && description.accessRequired === 'read-only';
     if (description.approvalRequired && !automationAccess && run.permissions.access !== 'full-access') {
-      this._replyDynamic(call, false, { error: '主机音乐、浏览器与 Computer Use 操作需要完全访问权限；当前只允许查询状态。' }); return;
+      this._replyDynamic(call, false, { error: '主机系统设置、音乐、浏览器与 Computer Use 操作需要完全访问权限；当前只允许查询状态。' }); return;
+    }
+    // Only this fixed tool and its complete validator may receive rule approval.
+    // Model-provided descriptions cannot add tools or widen this allowlist.
+    if (description.approvalRequired && run.permissions.approval === 'review' && call.name === 'petpal_system_audio') {
+      try {
+        const audio = validateSystemAudioCommand(call.arguments);
+        if (audio.action === 'status') throw new Error('音量状态不应请求修改审批。');
+      } catch { this._replyDynamic(call, false, { error: '系统音量规则审查未通过，参数无效。' }); return; }
+      this._emit(run, 'status', { state: 'working', message: '固定音量规则审查已通过', approvalReview: { source: 'local-rule', status: 'approved', targetItemId: call.callId, rationale: '仅调整所选电脑默认输出的音量或静音，参数已校验；不提权、不改变设备或执行任意命令。' } });
+      this._executeDynamic(call); return;
     }
     if (description.approvalRequired && run.permissions.approval !== 'auto') {
       const id = randomUUID();
-      this.approvals.set(id, { rpcId: message.id, run, dynamic: call });
+      this._createApproval(id, { rpcId: message.id, run, dynamic: call });
       this._emit(run, 'approval', { id, kind: automationAccess ? 'automation' : 'desktopTool', description: safeText(this._redact(description.description)).slice(0, 8000), ...(automationAccess ? { automation: { callId: call.callId, name: call.name, arguments: structuredClone(call.arguments) } } : {}) });
+      this._emit(run, 'status', { state: 'waiting', message: run.permissions.approval === 'review' ? '此桌面工具需要人工确认（5 分钟内有效）' : '等待你确认操作（5 分钟内有效）' });
     } else this._executeDynamic(call);
   }
 
@@ -495,8 +549,8 @@ export class CodexBridge {
   approve(id, decision) {
     if (!['accept', 'decline'].includes(decision)) throw new Error('审批结果只能是 accept 或 decline');
     const approval = this.approvals.get(id);
-    if (!approval || approval.run.settled || approval.run.aborted) throw new Error('审批请求不存在或已过期');
-    this.approvals.delete(id);
+    if (!approval || approval.run.settled || approval.run.aborted || approval.run.finishing || approval.run.child !== this.child) throw new Error('审批请求不存在或已过期');
+    this._removeApproval(id);
     if (approval.dynamic) {
       if (decision === 'accept') this._executeDynamic(approval.dynamic);
       else this._replyDynamic(approval.dynamic, false, { error: '用户拒绝了本次操作。' });
@@ -508,8 +562,7 @@ export class CodexBridge {
   _emit(run, type, data) {
     if (run.settled) return;
     try { run.onEvent?.(type, this._redactValue(data)); } catch {
-      run.aborted = true;
-      this._interrupt(run);
+      if (!run.aborted) { run.aborted = true; this._interrupt(run); }
     }
   }
 
@@ -557,7 +610,7 @@ export class CodexBridge {
       const workingDirectory = await resolveProjectDirectory(projectDirectory, { workspaceRoot: this.workspaceRoot, allowExternal: projectAccess === 'full' });
       if (signal?.aborted) throw abortError();
       const { sandboxPolicy, ...threadPermissions } = codexPermissionParams(permissions, workingDirectory);
-      const threadParams = { cwd: workingDirectory, ...threadPermissions, ...(model ? { model } : {}), developerInstructions: '自动化使用 petpal_automation_list/create/pause：只管理当前账号，创建时执行电脑、模型、项目目录与权限继承本轮，不允许自行扩大范围；时间规则明确时才创建，模糊时间先向用户确认。创建 requestId 使用一次 UUID v4，查询结果或确认相同请求时保留原 ID 和全部参数；网络结果未知不能换 ID 重建。每轮最多创建10项，暂停先读取最新 revision；任务关闭网页或退出登录后仍生效，电脑离线或错过时间跳过，不补跑。工具不存在时请更新所选执行电脑客户端，不以 shell/cron 绕过。根据本轮访问范围执行任务。音乐优先使用 PetPal 桌面工具；搜索、队列、音量、歌词先通过 petpal_music_mcp_tools 获取本机真实工具与参数，再用 petpal_music_mcp_call。网易云 MCP 仅支持 Windows；播放/暂停/上一首/下一首使用 petpal_music_command 的指定客户端媒体会话，不使用全局热键。QQ MCP 只提供查询和播放链接，返回 URL 不代表桌面已经播放；排行榜用 detail(type=top)。未启用时提示用户在该电脑的电脑助手设置中准备 MCP，不自行安装或更改配置。网页查询先调用 petpal_opencli_sites 获取选中执行电脑的可调用命令与参数，再调用 petpal_opencli_query；这是包内 OpenCLI，公开查询不需要 Chrome 扩展。用户要求准备浏览器时，先用 petpal_opencli_setup status 检查所选执行电脑。Chrome 缺失才用 install-browser 下载验证官方安装器；prepared 只代表下载就绪，协议、系统安装/提权由用户完成。open-extension 仅打开官方商店页，扩展页面权限由用户确认；之后在该电脑的OpenCLI设置显式连接在线档案。不得用shell或npx回退安装，不修改默认浏览器或自动选档案；旧客户端没有setup工具时提示更新。库存存在不等于可调用或已联网验收，不执行未开放命令，不用 shell/npx/自建HTTP脚本替代。OpenCLI 关闭时提示在该执行电脑的电脑助手设置启用，不自行改配置。音乐网页操作使用 petpal_browser，需要扩展与显式Chrome档案。桌面操作使用 petpal_computer_use_tools 发现当前执行电脑的真实工具与 schema，再调用 petpal_computer_use_call。先发现应用和窗口，再检查 Accessibility；需要视觉信息时获取目标窗口截图，根据最近的 Accessibility/截图执行鼠标键盘或窗口操作，操作后重新读取状态验证结果。过时的窗口、控件和坐标不可复用；截图失败时不得凭猜测点击。Windows 的完全访问和自动运行仍继承执行器的系统身份，不代表管理员权限。打开软件触发 UAC 或安全桌面时，停止启动重试、鼠标键盘和唤醒尝试，明确等待执行电脑上的用户确认；截图全黑不能直接判为休眠或 DRM，应先只读检查权限提示或桌面状态，无法确认时请用户在本机查看。不要禁用 UAC、改兼容性管理员标记、创建提权任务或后台自动同意；管理员确认取消或启动器退出时必须说明游戏或软件主界面未验证。Computer Use 未启用时提示配置，不运行 npx 安装，不修改 MCP 启动参数或环境。受限权限不允许操作主机软件。失败时如实说明，不得声称已完成。', ...(this.apiMode ? { modelProvider: 'petpal' } : {}) };
+      const threadParams = { cwd: workingDirectory, ...threadPermissions, ...(model ? { model } : {}), developerInstructions: '自动化使用 petpal_automation_list/create/pause：只管理当前账号，创建时执行电脑、模型、项目目录与权限继承本轮，不允许自行扩大范围；时间规则明确时才创建，模糊时间先向用户确认。创建 requestId 使用一次 UUID v4，查询结果或确认相同请求时保留原 ID 和全部参数；网络结果未知不能换 ID 重建。每轮最多创建10项，暂停先读取最新 revision；任务关闭网页或退出登录后仍生效，电脑离线或错过时间跳过，不补跑。工具不存在时请更新所选执行电脑客户端，不以 shell/cron 绕过。根据本轮访问范围执行任务。系统总音量或静音优先调用 petpal_system_audio，先status再调整并确认verified读回；它作用于选中执行电脑默认输出，不是播放器音量，不允许选其他设备或提权。petpal_system_settings仅请求打开声音/显示设置，不代表设置已改好。替我审批的原生审查沿用本轮Agent模型；只有固定音量操作有本地规则审查，通用桌面工具仍需人工确认，超时或拒绝不得绕过。音乐优先使用 PetPal 桌面工具；搜索、队列、音量、歌词先通过 petpal_music_mcp_tools 获取本机真实工具与参数，再用 petpal_music_mcp_call。网易云 MCP 仅支持 Windows；播放/暂停/上一首/下一首使用 petpal_music_command 的指定客户端媒体会话，不使用全局热键。QQ MCP 只提供查询和播放链接，返回 URL 不代表桌面已经播放；排行榜用 detail(type=top)。未启用时提示用户在该电脑的电脑助手设置中准备 MCP，不自行安装或更改配置。网页查询先调用 petpal_opencli_sites 获取选中执行电脑的可调用命令与参数，再调用 petpal_opencli_query；这是包内 OpenCLI，公开查询不需要 Chrome 扩展。用户要求准备浏览器时，先用 petpal_opencli_setup status 检查所选执行电脑。Chrome 缺失才用 install-browser 下载验证官方安装器；prepared 只代表下载就绪，协议、系统安装/提权由用户完成。open-extension 仅打开官方商店页，扩展页面权限由用户确认；之后在该电脑的OpenCLI设置显式连接在线档案。不得用shell或npx回退安装，不修改默认浏览器或自动选档案；旧客户端没有setup工具时提示更新。库存存在不等于可调用或已联网验收，不执行未开放命令，不用 shell/npx/自建HTTP脚本替代。OpenCLI 关闭时提示在该执行电脑的电脑助手设置启用，不自行改配置。音乐网页操作使用 petpal_browser，需要扩展与显式Chrome档案。桌面操作使用 petpal_computer_use_tools 发现当前执行电脑的真实工具与 schema，再调用 petpal_computer_use_call。先发现应用和窗口，再检查 Accessibility；需要视觉信息时获取目标窗口截图，根据最近的 Accessibility/截图执行鼠标键盘或窗口操作，操作后重新读取状态验证结果。过时的窗口、控件和坐标不可复用；截图失败时不得凭猜测点击。Windows 的完全访问和自动运行仍继承执行器的系统身份，不代表管理员权限。打开软件触发 UAC 或安全桌面时，停止启动重试、鼠标键盘和唤醒尝试，明确等待执行电脑上的用户确认；截图全黑不能直接判为休眠或 DRM，应先只读检查权限提示或桌面状态，无法确认时请用户在本机查看。不要禁用 UAC、改兼容性管理员标记、创建提权任务或后台自动同意；管理员确认取消或启动器退出时必须说明游戏或软件主界面未验证。Computer Use 未启用时提示配置，不运行 npx 安装，不修改 MCP 启动参数或环境。受限权限不允许操作主机软件。失败时如实说明，不得声称已完成。', ...(this.apiMode ? { modelProvider: 'petpal' } : {}) };
       const result = await this._rpc(threadId ? 'thread/resume' : 'thread/start', { ...threadParams, ...(threadId ? { threadId } : { dynamicTools: this.desktopTools?.specs ?? [] }) });
       const actualId = result.thread?.id;
       if (typeof actualId !== 'string' || !actualId) throw new Error('Codex 未返回有效会话 ID');
@@ -596,13 +649,13 @@ export class CodexBridge {
   }
 
   async _interrupt(run) {
-    if (run.interrupting || run.settled) return;
+    if (run.interrupting || run.settled || run.finishing) return;
     // Resolve pending approval callbacks before interrupting so no modal can strand a turn.
     for (const [id, approval] of this.approvals) {
       if (approval.run !== run) continue;
       if (approval.dynamic) this._replyDynamic(approval.dynamic, false, { error: '操作已停止。' });
       else { try { this._send({ id: approval.rpcId, result: { decision: 'decline' } }); } catch {} }
-      this.approvals.delete(id);
+      this._removeApproval(id);
     }
     for (const call of run.dynamicCalls.values()) {
       call.controller.abort();
@@ -623,10 +676,15 @@ export class CodexBridge {
   _finish(run, error) {
     if (run.settled || run.finishing) return;
     run.finishing = true;
+    if (run.approvalReview?.status === 'inProgress') {
+      run.approvalReview = { ...run.approvalReview, status: 'aborted', rationale: '任务已结束，审查结果未确认，本次操作未自动放行。' };
+      this._emit(run, 'status', { state: 'working', message: '自动审查已结束，结果未确认', approvalReview: run.approvalReview });
+    }
     this._appendText(run, '', true);
     if (!error && !run.aborted && this.apiMode && !run.text.trim()) {
       error = new Error('Codex Responses 服务未返回可显示的回复，请检查服务的流式响应兼容性后重试。');
     }
+    for (const [id, approval] of this.approvals) if (approval.run === run) this._removeApproval(id);
     run.settled = true;
     clearTimeout(run.interruptTimeout);
     run.signal?.removeEventListener('abort', run.onAbort);
@@ -634,7 +692,6 @@ export class CodexBridge {
       call.controller.abort();
       this._replyDynamic(call, false, { error: '任务已结束。' });
     }
-    for (const [id, approval] of this.approvals) if (approval.run === run) this.approvals.delete(id);
     // Stop is complete only after owned tool processes have actually exited.
     Promise.allSettled([...run.toolTasks, ...(run.child !== this.child ? [this.childClosures.get(run.child)] : [])]).then(() => {
       if (this.runs.get(run.threadId) === run) this.runs.delete(run.threadId);

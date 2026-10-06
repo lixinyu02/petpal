@@ -42,6 +42,15 @@ Package: @modelcontextprotocol/sdk 1.31.0
 https://github.com/modelcontextprotocol/typescript-sdk
 License: MIT; the npm package retains its LICENSE.
 
+Codex automatic permission review
+---------------------------------
+The fixed Codex 0.143.0 model catalog is from openai/codex commit
+c4d748f586a84a3ed5b6aceb82e9a1db4abb1cda and is licensed under Apache 2.0.
+Original catalog, LICENSE, PROVENANCE.json and SHA256SUMS are retained in
+server/native/codex-review/. The private API runtime removes only the preferred
+codex-auto-review entry, so native permission review uses the current authorized
+Agent model. All other catalog metadata and unknown-model fallback are preserved.
+
 Computer Use
 ------------
 Package: @zavora-ai/computer-use-mcp 7.4.0

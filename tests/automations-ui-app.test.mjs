@@ -8,12 +8,13 @@ import * as executionHosts from '../src/execution-hosts.mjs';
 import * as projectPreferences from '../src/project-directory-preferences.mjs';
 import {watchCompanionBreakpoint} from '../src/companion-mount.mjs';
 import {createChatDisplay} from '../src/chat-display.mjs';
-import {mergeAssistantTask,mergeChatAssistantConversation} from '../src/chat-assistant-preferences.mjs';
+import {mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMessage} from '../src/chat-assistant-preferences.mjs';
 import {createBrowserSetupDraft} from '../src/browser-setup-draft.mjs';
 import {reasoningEfforts} from '../src/desktop-settings.mjs';
 import * as uiMotion from '../src/platform/ui-motion.mjs';
 import {composerKeyAction} from '../src/composer-keyboard.mjs';
 import * as organizationSync from '../src/conversation-organization-sync.mjs';
+import * as approvalReviewUi from '../src/approval-review-ui.mjs';
 
 const source=ts.transpileModule(await readFile(new URL('../src/App.tsx',import.meta.url),'utf8'),{
   fileName:'App.tsx',compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true},
@@ -27,13 +28,13 @@ const text=tree=>Array.isArray(tree)?tree.map(text).join(''):tree==null||typeof 
 
 /** Execute App's real effects and navigation handlers. Only child UIs, browser surfaces
  * and network are isolated; notification and history decisions stay in App.tsx. */
-function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],initialProjects=[],organizationResponse,registeredAutomationIds=[],search='?chat=1',failAgentSubmit=false,handleAgentControl=false}={}){
+function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],initialProjects=[],organizationResponse,registeredAutomationIds=[],search='?chat=1',failAgentSubmit=false,handleAgentControl=false,globalReviewCapability,hostReviewCapability}={}){
   const permissions={access:'read-only',approval:'ask'},identity={instanceId:'fixture-service',userId:'fixture-user'};
   const state={instanceId:identity.instanceId,user:{id:identity.userId,username:'fixture',displayName:'Fixture',isOwner:false,canUseCodex,agentAccess:canUseCodex?'full':'none'},
     settings:{petName:'Fixture companion',persona:'Fixture',companionKind:'anime',defaultProviderId:'model'},
-    providers:[{id:'model',name:'Fixture model',model:'fixture-model',protocol:'responses',supportsImages:true}],conversations:[],codex:{available:true,eligibleProviderIds:['model']}};
+    providers:[{id:'model',name:'Fixture model',model:'fixture-model',protocol:'responses',supportsImages:true}],conversations:[],codex:{available:true,eligibleProviderIds:['model'],approvalReview:globalReviewCapability}};
   const hosts=[{id:'central',name:'Fixture server',kind:'central',platform:'linux',online:true},
-    {id:'pc-one',name:'Fixture PC one',kind:'desktop',platform:'win32',online:true,codex:{available:true}},
+    {id:'pc-one',name:'Fixture PC one',kind:'desktop',platform:'win32',online:true,codex:{available:true,approvalReview:hostReviewCapability}},
     {id:'pc-two',name:'Fixture PC two',kind:'desktop',platform:'linux',online:true,codex:{available:true}}];
   const hooks=[],effects=[],timers=new Map(),calls=[],requests=[],streams=[],navigations=[],backendConversations=structuredClone(initialConversations),backendProjects=structuredClone(initialProjects),delayedResponses=[],apiFailures=[],window=new EventTarget(),document=new EventTarget();
   let notificationSnapshot={navigation:null},notificationTakes=0;
@@ -134,8 +135,9 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     './AgentPermissions':{...component('AgentPermissions'),defaultAgentPermissions:permissions},
     './ProjectDirectory':{...component('ProjectDirectory'),useProjectDirectory:()=>({value:'',change(){}})},
     './project-directory-preferences.mjs':projectPreferences,'./execution-hosts.mjs':executionHosts,'./conversation-organization-sync.mjs':organizationSync,
+    './approval-review-ui.mjs':approvalReviewUi,
     './ChatAssistant':{ChatAssistantControls:Symbol('ChatAssistantControls'),ChatAssistantTasks:Symbol('ChatAssistantTasks'),useChatAssistant:()=>({value:{hostId:'',providerId:'',enabled:false,permissions},snapshot:()=>undefined})},
-    './chat-assistant-preferences.mjs':{mergeAssistantTask,mergeChatAssistantConversation},
+    './chat-assistant-preferences.mjs':{mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMessage},
     './Attachments':{useAttachments:()=>attachments,AttachmentInput:Symbol('AttachmentInput'),AttachmentDrafts:Symbol('AttachmentDrafts'),MessageImages:Symbol('MessageImages')},
     './auth/LoginGate':{ConnectionDialog:Symbol('ConnectionDialog')},'./avatar/preference':{useCompanion:()=>['anime'],hydrateCompanion:async()=>{},readCompanion:()=> 'anime'},
     './avatar/useSpeech':{useSpeech:()=>speech},'./platform/overlay':{PetOverlay:{},showPet(){}},
@@ -311,6 +313,67 @@ test('a result from a deleted automation remains read-only in recent history and
 
 const project=(id,name=id)=>({id,name,createdAt:'2026-10-06T00:00:00.000Z',updatedAt:'2026-10-06T00:00:00.000Z'});
 const idleAgent=(id,extra={})=>conversation(id,{mode:'codex',agent:{revision:1,paused:false,queue:[],submissions:[],approvals:[]},...extra});
+
+const reviewCapability={available:true,modelStrategy:'agent-model',dynamicTools:'bounded-audio-rules-with-manual-fallback',version:1};
+const approvalConversation=(extra={})=>idleAgent('approval-ui-task',{agent:{revision:1,paused:false,queue:[],submissions:[],run:{id:'active-run',status:'running',turnId:'turn-one',permissions:{access:'full-access',approval:'review'},providerId:'model',model:'fixture-model',hostId:'pc-one'},approvals:[{id:'approval-ui-one',kind:'desktopTool',description:'将所选电脑系统音量调到 45%'}]},...extra});
+
+test('permission UI receives only the actual selected executor review capability, never the global fallback',async t=>{
+  const f=workspaceFixture({canUseCodex:true,globalReviewCapability:reviewCapability,hostReviewCapability:{...reviewCapability,available:false,message:'Fixture old PC'}});t.after(()=>f.close());await f.ready();f.enterAgent();await f.ready();f.chooseHost('pc-one');
+  assert.equal(f.component('AgentPermissions').props.reviewCapability.available,false);
+  f.chooseHost('pc-two');assert.equal(f.component('AgentPermissions').props.reviewCapability,undefined);
+  assert.equal(f.component('AgentPermissions').props.reviewModel,'fixture-model');
+});
+
+test('actual App approval events are single-flight and successful decisions stay consumed through stale readback',async t=>{
+  const original=approvalConversation();
+  const f=workspaceFixture({canUseCodex:true,initialConversations:[original],search:`?chat=1&mode=codex&conversation=${original.id}`,handleAgentControl:true,hostReviewCapability:reviewCapability});t.after(()=>f.close());await f.ready();
+  const post=f.delayNext('/codex/approvals/approval-ui-one','POST');
+  const handler=f.find('button',props=>text(props.children)==='允许本次').props.onClick;
+  const first=handler(),second=handler();await post.started;await second;f.render();
+  assert.equal(f.requests.filter(item=>item.path==='/codex/approvals/approval-ui-one').length,1);
+  assert.equal(f.find('button',props=>text(props.children)==='拒绝').props.disabled,true);
+  assert.match(f.text(),/正在提交/);
+  const refresh=f.delayNext(`/conversations/${original.id}`);post.release();await refresh.started;f.render();
+  assert.equal(f.find('div',props=>props.className==='approval'),undefined,'a positive POST receipt consumes the visible card before GET returns');
+  refresh.release(original);await first;await f.ready();
+  assert.equal(f.find('div',props=>props.className==='approval'),undefined,'stale GET cannot reopen an already consumed approval');
+  await handler();assert.equal(f.requests.filter(item=>item.path==='/codex/approvals/approval-ui-one').length,1,'stale captured click cannot replay a consumed decision');
+});
+
+test('App distinguishes a successful approval from a failed progress read and never replays it',async t=>{
+  const original=approvalConversation(),f=workspaceFixture({canUseCodex:true,initialConversations:[original],search:`?chat=1&mode=codex&conversation=${original.id}`,handleAgentControl:true});t.after(()=>f.close());await f.ready();
+  f.failNext(`/conversations/${original.id}`,'GET');await f.click('允许本次');await f.ready();
+  assert.match(f.text(),/确认已提交.*进度暂时无法刷新.*请勿重复提交/);
+  assert.equal(f.find('div',props=>props.className==='approval'),undefined);
+  assert.equal(f.requests.filter(item=>item.path==='/codex/approvals/approval-ui-one').length,1);
+});
+
+test('an uncertain App approval locks both decisions until an explicit read-only refresh',async t=>{
+  const original=approvalConversation(),f=workspaceFixture({canUseCodex:true,initialConversations:[original],search:`?chat=1&mode=codex&conversation=${original.id}`,handleAgentControl:true});t.after(()=>f.close());await f.ready();
+  const handler=f.find('button',props=>text(props.children)==='允许本次').props.onClick;
+  f.failNext('/codex/approvals/approval-ui-one','POST',new Error('Fixture network lost acknowledgement'));await handler();await f.ready();
+  assert.match(f.text(),/确认结果尚未收到/);assert.equal(f.find('button',props=>text(props.children)==='允许本次'),undefined);
+  await handler();assert.equal(f.requests.filter(item=>item.path==='/codex/approvals/approval-ui-one').length,1);
+  f.click('刷新审批状态');await f.ready();
+  assert.equal(f.find('button',props=>text(props.children)==='允许本次').props.disabled,false);
+  assert.equal(f.requests.filter(item=>item.method==='POST').length,1,'refreshing can only read status');
+});
+
+test('a positive App approval receipt after session change cannot mutate UI or launch a follow-up read',async t=>{
+  const original=approvalConversation(),f=workspaceFixture({canUseCodex:true,initialConversations:[original],search:`?chat=1&mode=codex&conversation=${original.id}`,handleAgentControl:true});t.after(()=>f.close());await f.ready();
+  const post=f.delayNext('/codex/approvals/approval-ui-one','POST');const pending=f.click('允许本次');await post.started;const reads=f.requests.filter(item=>item.method==='GET').length;
+  f.changeSession();post.release();await pending;f.render();
+  assert.equal(f.requests.filter(item=>item.method==='GET').length,reads);
+  assert.ok(f.find('div',props=>props.className==='approval'),'an old-session continuation must not replace the current view');
+});
+
+test('actual App shows native guardian progress without inventing an interactive approval',async t=>{
+  const original=approvalConversation();original.agent.approvals=[];original.agent.run.approvalReview={status:'inProgress',reviewId:'review-one',targetItemId:'command-one'};
+  const f=workspaceFixture({canUseCodex:true,initialConversations:[original],search:`?chat=1&mode=codex&conversation=${original.id}`,handleAgentControl:true});t.after(()=>f.close());await f.ready();
+  assert.match(f.text(),/自动审查中/);assert.equal(f.find('div',props=>props.className==='approval'),undefined);
+  assert.equal(f.component('AgentPermissions').props.reviewProgress.status,'inProgress');
+  assert.ok(f.requests.every(item=>item.method==='GET'));
+});
 
 test('project filter changes preserve the selected conversation, unsent text and image drafts',async t=>{
   const stored=conversation('organized-chat',{projectId:'work',messages:[{id:'prior',role:'assistant',content:'原来记录',status:'complete'}]});

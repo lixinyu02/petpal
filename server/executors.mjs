@@ -4,6 +4,7 @@ import { createExecutorRelayRedactor } from './executor-relay.mjs';
 import { MODEL_REQUEST_BYTES } from './model-request-limits.mjs';
 import { normalizeProjectDirectory } from './project-directory.mjs';
 import { describeAutomationTool, validateAutomationTool } from './automation-tools.mjs';
+import { approvalReviewCapability, validApprovalReview } from './approval-review.mjs';
 
 const failure = (status, message, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 const unknown = () => failure(409, '执行电脑已断开，任务执行状态未知；队列已暂停，不会自动重试。', 'execution_unknown');
@@ -82,24 +83,25 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
   const list = userId => {
     sweep();
     return [localHost, ...store.state.executionHosts.filter(host => host.userId === userId).map(host => ({ id: host.id, name: host.name, platform: host.platform, kind: 'desktop', online: current.has(host.id), lastSeenAt: current.has(host.id) ? connections.get(current.get(host.id)).lastSeenAt : host.lastSeenAt,
-      codex: { available: current.has(host.id), authenticated: current.has(host.id), configured: getConfig().mode === 'api' && Boolean(getConfig().model), supportsSteer: true, projectDirectory: current.has(host.id) && connections.get(current.get(host.id)).capabilities.projectDirectory === true, automations: Boolean(automationTool) && current.has(host.id) && connections.get(current.get(host.id)).capabilities.automations === true, mode: 'api', model: getConfig().model, executionMode: 'remote-cli' } }))];
+      codex: { available: current.has(host.id), authenticated: current.has(host.id), configured: getConfig().mode === 'api' && Boolean(getConfig().model), supportsSteer: true, approvalReview: approvalReviewCapability(true, current.has(host.id) && connections.get(current.get(host.id)).capabilities.approvalReview === true), projectDirectory: current.has(host.id) && connections.get(current.get(host.id)).capabilities.projectDirectory === true, automations: Boolean(automationTool) && current.has(host.id) && connections.get(current.get(host.id)).capabilities.automations === true, mode: 'api', model: getConfig().model, executionMode: 'remote-cli' } }))];
   };
-  const target = (userId, id = 'central', projectDirectory) => {
+  const target = (userId, id = 'central', projectDirectory, permissions) => {
     const host = hostFor(userId, id);
     const directory = normalizeProjectDirectory(projectDirectory, host.platform);
     if (id !== 'central') {
       const connection = live(connections.get(current.get(id)));
       if (getConfig().mode !== 'api' || !getConfig().model) throw failure(409, '远程电脑执行需要中央配置 Responses API 模型。');
       if (directory && connection.capabilities.projectDirectory !== true) throw failure(409, '这台执行电脑尚不支持项目目录，请升级桌面客户端或使用默认目录。', 'executor_project_directory_unsupported');
+      if (permissions?.approval === 'review' && connection.capabilities.approvalReview !== true) throw failure(409, '这台执行电脑尚不支持新版替我审批，请升级客户端或改为需要时询问。', 'executor_approval_review_unsupported');
     }
     return { hostId: host.id, hostName: host.name };
   };
   const isBusy = (userId, id) => { hostFor(userId, id); if (id === 'central') return false; return Boolean(live(connections.get(current.get(id))).run); };
   async function register(auth, body) {
     if (!fields(body, ['deviceId','name','platform','arch','capabilities']) || !uuid(body.deviceId) || !text(body.name, 120) || !['win32','linux','darwin'].includes(body.platform) || !text(body.arch, 32) ||
-        body.capabilities !== undefined && (!fields(body.capabilities, ['projectDirectory', 'automations']) || body.capabilities.projectDirectory !== true || body.capabilities.automations !== undefined && body.capabilities.automations !== true)) throw failure(400, '执行电脑注册字段无效。');
+        body.capabilities !== undefined && (!fields(body.capabilities, ['projectDirectory', 'automations', 'approvalReview']) || body.capabilities.projectDirectory !== true || ['automations', 'approvalReview'].some(key => body.capabilities[key] !== undefined && body.capabilities[key] !== true))) throw failure(400, '执行电脑注册字段无效。');
     const metadata = Object.fromEntries(['deviceId','name','platform','arch'].map(key => [key, body[key]]));
-    const capabilities = { projectDirectory: body.capabilities?.projectDirectory === true, automations: body.capabilities?.automations === true };
+    const capabilities = { projectDirectory: body.capabilities?.projectDirectory === true, automations: body.capabilities?.automations === true, approvalReview: body.capabilities?.approvalReview === true };
     const work = registration.catch(() => {}).then(async () => {
       authorizeSession(auth); if (closed) throw failure(503, '执行服务正在退出。');
       let host = store.state.executionHosts.find(item => item.userId === auth.userId && item.deviceId === body.deviceId);
@@ -113,7 +115,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
       await store.save(); authorizeSession(auth); if (closed) throw failure(503, '执行服务正在退出。');
       const connection = { id: randomUUID(), host, capabilities, auth: { ...auth }, expiresAt: clock()+leaseMs, lastSeenAt: stamp(), commands: [], run: null, recent: new Map(), waiter: null, polling: false };
       connections.set(connection.id, connection); current.set(host.id, connection.id);
-      return { hostId: host.id, connectionId: connection.id, leaseMs, pollMs, ...(capabilities.automations && automationTool ? { capabilities: { automations: true } } : {}) };
+      return { hostId: host.id, connectionId: connection.id, leaseMs, pollMs, ...((capabilities.automations && automationTool || capabilities.approvalReview) ? { capabilities: { ...(capabilities.automations && automationTool ? { automations: true } : {}), ...(capabilities.approvalReview ? { approvalReview: true } : {}) } } : {}) };
     }); registration = work; return work;
   }
   const heartbeat = (id, auth) => { const connection = verify(id, auth); connection.expiresAt = clock()+leaseMs; connection.lastSeenAt = stamp(); return { ok: true, leaseMs }; };
@@ -157,7 +159,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
     });
   };
   function bind(entry) {
-    target(entry.auth.userId, entry.hostId, entry.projectDirectory);
+    target(entry.auth.userId, entry.hostId, entry.projectDirectory, entry.permissions);
     const connection = live(connections.get(current.get(entry.hostId)));
     const projectDirectory = normalizeProjectDirectory(entry.projectDirectory, connection.host.platform);
     if (projectDirectory && !['full', 'workspace'].includes(entry.projectAccess)) throw failure(400, '项目目录授权无效。', 'project_directory_invalid');
@@ -166,7 +168,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
       hostId: entry.hostId, connectionId: connection.id,
       async run(args) {
         live(connection); authorizeEntry(entry);
-        target(entry.auth.userId, entry.hostId, projectDirectory);
+        target(entry.auth.userId, entry.hostId, projectDirectory, args.permissions ?? entry.permissions);
         if (args.projectDirectory !== undefined && normalizeProjectDirectory(args.projectDirectory, connection.host.platform) !== projectDirectory ||
             args.projectAccess !== undefined && args.projectAccess !== entry.projectAccess) throw failure(409, '任务项目目录或授权已变化，请重新提交。');
         if (connection.run) throw failure(409, '这台电脑正在执行其他任务，请稍后重试。');
@@ -230,7 +232,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
     if (event === 'started') { if (run.started || Object.keys(data).length) throw failure(400, '任务领取回执无效。'); }
     else if (event === 'thread' || event === 'turn') { const key = event+'Id'; if (!fields(data,[key]) || !text(data[key],200)) throw failure(400,'执行标识无效。'); }
     else if (event === 'delta') { if (!fields(data,['text']) || typeof data.text !== 'string' || data.text.length > 32000) throw failure(400,'执行文本无效。'); }
-    else if (event === 'status') { if (!fields(data,['message','text','state']) || Object.values(data).some(value => typeof value !== 'string' || value.length > 1000)) throw failure(400,'执行状态无效。'); }
+    else if (event === 'status') { if (!fields(data,['message','text','state','approvalReview']) || ['message','text','state'].some(key => data[key] !== undefined && (typeof data[key] !== 'string' || data[key].length > 1000)) || data.approvalReview !== undefined && (!connection.capabilities.approvalReview || !validApprovalReview(data.approvalReview))) throw failure(400,'执行状态无效。'); }
     else if (event === 'approval') {
       if (!fields(data, ['id','kind','description', ...(data.kind === 'automation' ? ['automation'] : [])]) || !text(data.id,200) || !text(data.kind,80) || !contentText(data.description,8000)) throw failure(400,'执行审批无效。');
       if (data.kind === 'automation') {

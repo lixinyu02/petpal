@@ -344,17 +344,22 @@ export class DesktopExecutor {
   async _register(ctx) {
     const body = { deviceId: ctx.deviceId, ...this.metadata };
     let registration;
-    try { registration = await this._json(ctx, '/api/agent/executors/register', { ...body, capabilities: { projectDirectory: true, automations: true } }); }
+    try { registration = await this._json(ctx, '/api/agent/executors/register', { ...body, capabilities: { projectDirectory: true, automations: true, approvalReview: true } }); }
     catch (error) {
       // Older servers reject unknown registration fields before creating a
       // connection. Only that negotiation boundary may fall back; never runs.
       this._assert(ctx);
       if (error.status !== 400 || ctx.connectionId) throw error;
-      try { registration = await this._json(ctx, '/api/agent/executors/register', { ...body, capabilities: { projectDirectory: true } }); }
+      try { registration = await this._json(ctx, '/api/agent/executors/register', { ...body, capabilities: { projectDirectory: true, automations: true } }); }
       catch (legacyError) {
         this._assert(ctx);
         if (legacyError.status !== 400 || ctx.connectionId) throw legacyError;
-        registration = await this._json(ctx, '/api/agent/executors/register', body);
+        try { registration = await this._json(ctx, '/api/agent/executors/register', { ...body, capabilities: { projectDirectory: true } }); }
+        catch (oldestError) {
+          this._assert(ctx);
+          if (oldestError.status !== 400 || ctx.connectionId) throw oldestError;
+          registration = await this._json(ctx, '/api/agent/executors/register', body);
+        }
       }
     }
     if (!identifier(registration.hostId) || !identifier(registration.connectionId) ||
@@ -362,6 +367,7 @@ export class DesktopExecutor {
         !Number.isSafeInteger(registration.pollMs) || registration.pollMs < 1000 || registration.pollMs > 60000) throw invalid();
     ctx.hostId = registration.hostId; ctx.connectionId = registration.connectionId;
     ctx.automationTools = registration.capabilities?.automations === true;
+    ctx.approvalReview = registration.capabilities?.approvalReview === true;
     ctx.leaseMs = registration.leaseMs; ctx.pollMs = registration.pollMs;
     ctx.route = `/api/agent/executors/${ctx.connectionId}`;
   }
@@ -548,7 +554,10 @@ export class DesktopExecutor {
             if (typeof data?.text !== 'string') throw invalid();
             run.outputBytes += Buffer.byteLength(data.text); if (run.outputBytes > 2 * 1024 * 1024) throw invalid();
             for (let offset = 0; offset < data.text.length; offset += DELTA_CHARS) void this._event(ctx, run, event, { text: data.text.slice(offset, offset + DELTA_CHARS) });
-          } else void this._event(ctx, run, event, data);
+          } else {
+            if (event === 'status' && data.approvalReview && !ctx.approvalReview) { const { approvalReview, ...legacy } = data; data = legacy; }
+            void this._event(ctx, run, event, data);
+          }
         } });
     } catch (error) { failure = error; }
     finally {

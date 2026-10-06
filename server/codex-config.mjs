@@ -1,11 +1,24 @@
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile, rename, chmod, unlink } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile, rename, chmod, unlink } from 'node:fs/promises';
 import { normalizeBaseUrl, normalizeReasoningEffort } from './providers.mjs';
 
 const failure = (status, message) => Object.assign(new Error(message), { status });
-export const CODEX_TOOL_VERSION = 'opencli-browser-setup-automations-v1';
+export const CODEX_TOOL_VERSION = 'system-volume-native-review-v1';
 export const CODEX_KEY_ENV = 'PETPAL_CODEX_API_KEY';
+export const CODEX_CATALOG_SHA256 = 'd5db15d306c4bd5c4bb8a927940e70473c389d65d9e2bf887ec7028fce893d5f';
+export const CODEX_CATALOG_SOURCE_FILES = Object.freeze(['models-0.143.0.json', 'LICENSE', 'PROVENANCE.json', 'SHA256SUMS'].map(file => `server/native/codex-review/${file}`));
+const catalogSource = new URL('./native/codex-review/models-0.143.0.json', import.meta.url);
+
+/** Codex 0.143 auto-review falls back to the active model when its preferred
+ * model is absent. Keep all other official metadata intact, including the
+ * native fallback for unknown models; /review's review_model is unrelated. */
+export function codexApprovalCatalog(bytes) {
+  if (!Buffer.isBuffer(bytes) || createHash('sha256').update(bytes).digest('hex') !== CODEX_CATALOG_SHA256) throw new Error('内置 Codex 模型目录校验失败，请重新安装完整客户端。');
+  const catalog = JSON.parse(bytes.toString('utf8'));
+  if (!Array.isArray(catalog.models) || catalog.models.filter(model => model.slug === 'codex-auto-review').length !== 1) throw new Error('内置 Codex 自动审查模型目录格式无效。');
+  return { ...catalog, models: catalog.models.filter(model => model.slug !== 'codex-auto-review') };
+}
 export const defaultCodexConfig = () => ({ mode: 'host', baseUrl: '', model: '', reasoningEffort: '', apiKey: '', revision: randomUUID(), toolVersion: CODEX_TOOL_VERSION });
 
 // Deployment-only policy. The HTTP API cannot add origins to this set.
@@ -75,12 +88,14 @@ export function validateStoredCodexConfig(value, options = {}) {
 }
 
 // JSON string escaping is also valid for the TOML basic strings used here.
-export function codexToml(config) {
+export function codexToml(config, { modelCatalogPath } = {}) {
   const reasoningEffort = normalizeReasoningEffort(config.reasoningEffort);
+  if (modelCatalogPath !== undefined && (typeof modelCatalogPath !== 'string' || !path.isAbsolute(modelCatalogPath) || /[\x00-\x1f\x7f]/.test(modelCatalogPath))) throw new Error('Codex 模型目录必须是已验证的绝对路径。');
   // Custom-provider models may be absent from the CLI catalog. Without this
   // capability flag, Codex silently omits an explicitly selected effort.
   return [
     `model = ${JSON.stringify(config.model)}`, 'model_provider = "petpal"', 'approval_policy = "on-request"', 'approvals_reviewer = "user"',
+    ...(config.mode === 'api' && modelCatalogPath ? [`model_catalog_json = ${JSON.stringify(modelCatalogPath)}`] : []),
     ...(reasoningEffort ? [`model_reasoning_effort = ${JSON.stringify(reasoningEffort)}`, 'model_supports_reasoning_summaries = true'] : []),
     'sandbox_mode = "read-only"', 'cli_auth_credentials_store = "ephemeral"', 'allow_login_shell = false', 'web_search = "disabled"',
     '[features]', 'shell_tool = true', 'unified_exec = true', 'shell_snapshot = false', 'multi_agent = false', 'apps = false', 'remote_plugin = false', 'hooks = false', 'goals = false', 'tool_suggest = false', 'image_generation = false', 'enable_request_compression = false',
@@ -118,9 +133,19 @@ export async function prepareCodexRuntime(config, dataDir) {
   await chmod(home, 0o700);
   const env = isolatedCodexEnvironment(config, home);
   await Promise.all([env.APPDATA, env.LOCALAPPDATA, env.XDG_CONFIG_HOME, env.XDG_DATA_HOME].map(directory => mkdir(directory, { recursive: true, mode: 0o700 })));
+  let modelCatalogPath;
+  if (config.mode === 'api') {
+    const catalog = codexApprovalCatalog(await readFile(catalogSource));
+    modelCatalogPath = path.join(home, 'approval-models.json');
+    const catalogTemp = `${modelCatalogPath}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(catalogTemp, JSON.stringify(catalog) + '\n', { mode: 0o600, flag: 'wx' });
+      await rename(catalogTemp, modelCatalogPath);
+    } finally { await unlink(catalogTemp).catch(() => {}); }
+  }
   const file = path.join(home, 'config.toml'), temp = `${file}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temp, codexToml(config), { mode: 0o600, flag: 'wx' });
+    await writeFile(temp, codexToml(config, { modelCatalogPath }), { mode: 0o600, flag: 'wx' });
     await rename(temp, file);
   } finally { await unlink(temp).catch(() => {}); }
   return { workspaceRoot, env };

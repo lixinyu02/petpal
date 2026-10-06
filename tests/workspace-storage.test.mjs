@@ -1,4 +1,5 @@
 import test from 'node:test';
+import * as approvalReviewUi from '../src/approval-review-ui.mjs';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
@@ -8,7 +9,8 @@ import * as executionHosts from '../src/execution-hosts.mjs';
 import * as projectPreferences from '../src/project-directory-preferences.mjs';
 import {watchCompanionBreakpoint} from '../src/companion-mount.mjs';
 import {createChatDisplay} from '../src/chat-display.mjs';
-import {mergeAssistantTask,mergeChatAssistantConversation} from '../src/chat-assistant-preferences.mjs';
+import {mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMessage} from '../src/chat-assistant-preferences.mjs';
+import * as organizationSync from '../src/conversation-organization-sync.mjs';
 import {createBrowserSetupDraft} from '../src/browser-setup-draft.mjs';
 import {reasoningEfforts} from '../src/desktop-settings.mjs';
 import * as uiMotion from '../src/platform/ui-motion.mjs';
@@ -88,11 +90,11 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     react,'react/jsx-runtime':{jsx:element,jsxs:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     '@capacitor/core':{Capacitor:{isNativePlatform:()=>native}},'./api':api,'./WorkspaceControls':controls,'./composer-keyboard.mjs':{composerKeyAction},
     './companion-mount.mjs':{watchCompanionBreakpoint},'./chat-display.mjs':{createChatDisplay},'./useChatScroll':{useChatScroll:()=>({contentRef:{current:null},onScroll(){},latest(){},showLatest:false})},
-    './AgentPermissions':{...component('AgentPermissions'),defaultAgentPermissions:permissions},
+    './AgentPermissions':{...component('AgentPermissions'),defaultAgentPermissions:permissions},'./approval-review-ui.mjs':approvalReviewUi,
     './ProjectDirectory':{...component('ProjectDirectory'),useProjectDirectory:()=>({value:'',change(){}})},
-    './project-directory-preferences.mjs':projectPreferences,'./execution-hosts.mjs':executionHosts,
+    './project-directory-preferences.mjs':projectPreferences,'./execution-hosts.mjs':executionHosts,'./conversation-organization-sync.mjs':organizationSync,
     './ChatAssistant':{ChatAssistantControls:Symbol('ChatAssistantControls'),ChatAssistantTasks:Symbol('ChatAssistantTasks'),useChatAssistant:()=>({value:{hostId:'',providerId:'',enabled:false,permissions},snapshot:()=>undefined})},
-    './chat-assistant-preferences.mjs':{mergeAssistantTask,mergeChatAssistantConversation},
+    './chat-assistant-preferences.mjs':{mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMessage},
     './Attachments':{useAttachments:()=>attachments,AttachmentInput:Symbol('AttachmentInput'),AttachmentDrafts:Symbol('AttachmentDrafts'),MessageImages:Symbol('MessageImages')},
     './auth/LoginGate':{ConnectionDialog:Symbol('ConnectionDialog')},'./avatar/preference':{useCompanion:()=>['anime'],hydrateCompanion:async()=>{},readCompanion:()=> 'anime'},
     './avatar/useSpeech':{useSpeech:()=>speech},'./platform/overlay':{PetOverlay:{},showPet(){}},

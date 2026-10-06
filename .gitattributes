@@ -12,3 +12,5 @@ outputs/avatars/akari-cubism-v7/authoring-receipt.json -text whitespace=cr-at-eo
 outputs/avatars/akari-cubism-v7/pack-receipt.json text eol=lf
 public/avatars/akari-cubism-v7/*.json text eol=lf
 server/native/music-mcp/** -text
+# The native reviewer verifies the official catalog's original SHA256 at runtime.
+server/native/codex-review/** -text -whitespace
