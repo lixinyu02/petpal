@@ -1,0 +1,349 @@
+{
+  "repository": "lixinyu02/petpal",
+  "tag": "v0.9.10",
+  "sourceRevision": "d2ded9c66aad81310d8d40baa74761a3a8242242",
+  "contractHash": "3375001b0afe122ca855cdf12b2be4faf438ebcfd9679c5652a95bab1ecf1048",
+  "localPlanHash": "1fc4f7a675308dab3ec3f804d23db98bb56e589e6666c3b2078bd149fb57b63a",
+  "branch": "release-transfer-v0.9.10-continuation",
+  "prerelease": false,
+  "mode": "https-mirror",
+  "releaseId": 404334344,
+  "stableLatest": "v0.9.9",
+  "stableLatestId": 403517961,
+  "assets": [
+    {
+      "name": "PetPal-0.9.10-Windows-x64.exe",
+      "size": 220939191,
+      "sha256": "333945f282daeb02427ef8b722ec6b561f8da3b67e8e5dc051248a09e250a1dc"
+    },
+    {
+      "name": "PetPal-0.9.10-Windows-x64.zip",
+      "size": 373237878,
+      "sha256": "ffed1893d470c47651644fe6897bff41d842a031d96d04268be9078f405e22d1"
+    },
+    {
+      "name": "PetPal-0.9.10-Ubuntu-x64.tar.gz",
+      "size": 343871928,
+      "sha256": "912c50627fcaae105fa59dfbe91f5eb02da1c5843ca7bd8128803d9075afcf69"
+    },
+    {
+      "name": "PetPal-0.9.10-Ubuntu-arm64.tar.gz",
+      "size": 338056406,
+      "sha256": "8b16fd1ff0bc649f1d59a55ee1f55a5ef95e764ed92a7cd8be4cc217c1e7e7d1"
+    },
+    {
+      "name": "PetPal-0.9.10-Android-debug.apk",
+      "size": 60732669,
+      "sha256": "f8ba3c8613a4ff0abea9106e5d38f37ce57dd390c99b20957f8c246bb9513863"
+    },
+    {
+      "name": "PetPal-0.9.10-Web.zip",
+      "size": 55945807,
+      "sha256": "ccb7cb400bbdee2aa734e14e966a1af7cb3cf438c91e01194cb677b21c55714c"
+    },
+    {
+      "name": "release-manifest.json",
+      "size": 2035,
+      "sha256": "a8efcf08e826f4ec03de8f6c09fd716fe9090e5a0079966ee85803b67f736456"
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "size": 576,
+      "sha256": "7a69985ff16b5f9a35b9463b50a6546db07fe850df8f54d927c76c451ddb52f5"
+    },
+    {
+      "name": "petpal-update.json",
+      "size": 3193,
+      "sha256": "cbe98f7cfda17308d347979e3c69a3274215a89daee40f47eeff46e9c4025a7d"
+    },
+    {
+      "name": "petpal-update-public-key.txt",
+      "size": 113,
+      "sha256": "7fd650afe5e5a7e1d35e0f2515e0ee7b604aa3dec7b8253593c485a3fa8febdb"
+    }
+  ],
+  "targets": [
+    "PetPal-0.9.10-Windows-x64.exe",
+    "PetPal-0.9.10-Windows-x64.zip",
+    "PetPal-0.9.10-Ubuntu-x64.tar.gz",
+    "PetPal-0.9.10-Ubuntu-arm64.tar.gz",
+    "PetPal-0.9.10-Android-debug.apk",
+    "PetPal-0.9.10-Web.zip",
+    "release-manifest.json",
+    "SHA256SUMS.txt",
+    "petpal-update.json",
+    "petpal-update-public-key.txt"
+  ],
+  "inlineMetadata": {
+    "release-manifest.json": "ewogICJjcmVhdGVkQXQiOiAiMjAyNi0xMC0wNlQwNTowMjo1My41NDVaIiwKICAidmVyc2lvbiI6ICIwLjkuMTAiLAogICJjaGFubmVsIjogInN0YWJsZSIsCiAgInNvdXJjZVJldmlzaW9uIjogImQyZGVkOWM2NmFhZDgxMzEwZDhkNDBiYWE3NDc2MWEzYTgyNDIyNDIiLAogICJmaWxlcyI6IFsKICAgIHsKICAgICAgIm5hbWUiOiAiUGV0UGFsLTAuOS4xMC1XaW5kb3dzLXg2NC5leGUiLAogICAgICAidGFyZ2V0IjogIndpbmRvd3MteDY0IiwKICAgICAgImJ5dGVzIjogMjIwOTM5MTkxLAogICAgICAic2hhMjU2IjogIjMzMzk0NWYyODJkYWViMDI0MjdlZjhiNzIyZWM2YjU2MWY4ZGEzYjY3ZThlNWRjMDUxMjQ4YTA5ZTI1MGExZGMiCiAgICB9LAogICAgewogICAgICAibmFtZSI6ICJQZXRQYWwtMC45LjEwLVdpbmRvd3MteDY0LnppcCIsCiAgICAgICJ0YXJnZXQiOiAid2luZG93cy14NjQiLAogICAgICAiYnl0ZXMiOiAzNzMyMzc4NzgsCiAgICAgICJzaGEyNTYiOiAiZmZlZDE4OTNkNDcwYzQ3NjUxNjQ0ZmU2ODk3YmZmNDFkODQyYTAzMWQ5NmQwNDI2OGJlOTA3OGY0MDVlMjJkMSIKICAgIH0sCiAgICB7CiAgICAgICJuYW1lIjogIlBldFBhbC0wLjkuMTAtVWJ1bnR1LXg2NC50YXIuZ3oiLAogICAgICAidGFyZ2V0IjogInVidW50dS14NjQiLAogICAgICAiYnl0ZXMiOiAzNDM4NzE5MjgsCiAgICAgICJzaGEyNTYiOiAiOTEyYzUwNjI3ZmNhYWUxMDVmYTU5ZGZiZTkxZjVlYjAyZGExYzU4NDNjYTdiZDgxMjg4MDNkOTA3NWFmY2Y2OSIKICAgIH0sCiAgICB7CiAgICAgICJuYW1lIjogIlBldFBhbC0wLjkuMTAtVWJ1bnR1LWFybTY0LnRhci5neiIsCiAgICAgICJ0YXJnZXQiOiAidWJ1bnR1LWFybTY0IiwKICAgICAgImJ5dGVzIjogMzM4MDU2NDA2LAogICAgICAic2hhMjU2IjogIjhiMTZmZDFmZjBiYzY0OWYxZDU5YTU1ZWUxZjU1YTVlZjk1ZTc2NGVkOTJhN2NkOGJlNGNjMjE3YzFlN2U3ZDEiCiAgICB9LAogICAgewogICAgICAibmFtZSI6ICJQZXRQYWwtMC45LjEwLUFuZHJvaWQtZGVidWcuYXBrIiwKICAgICAgInRhcmdldCI6ICJhbmRyb2lkIiwKICAgICAgImJ5dGVzIjogNjA3MzI2NjksCiAgICAgICJzaGEyNTYiOiAiZjhiYTNjODYxM2E0ZmYwYWJlYTkxMDZlNWQzOGYzN2NlNTdkZDM5MGM5OWIyMDk1N2Y4YzI0NmJiOTUxMzg2MyIKICAgIH0sCiAgICB7CiAgICAgICJuYW1lIjogIlBldFBhbC0wLjkuMTAtV2ViLnppcCIsCiAgICAgICJ0YXJnZXQiOiAid2ViIiwKICAgICAgImJ5dGVzIjogNTU5NDU4MDcsCiAgICAgICJzaGEyNTYiOiAiY2NiN2NiNDAwYmJkZWUyYWE3MzRlMTRlOTY2YTFhZjdjYjNjZjQzOGM5MWUwMTE5NGNiNjc3YjIxYzU1NzE0YyIKICAgIH0KICBdLAogICJjb2RleENsaVZlcnNpb24iOiAiMC4xNDMuMCIsCiAgIm9wZW5jbGlWZXJzaW9uIjogIjEuOC44IiwKICAiZWxlY3Ryb25WZXJzaW9uIjogIjM5LjguMTAiLAogICJhbmRyb2lkVmVyc2lvbkNvZGUiOiAyMCwKICAiYW5kcm9pZFNpZ25hdHVyZSI6ICJzYW1lLWRldmVsb3BtZW50LWNlcnRpZmljYXRlLWFzLTAuOS45IiwKICAiYW5kcm9pZFNpZ25pbmdDZXJ0aWZpY2F0ZSI6ICI4YWU0OWVlNmIwOTkwMGVlZTJlMjk5NmEwYzRlY2Q2NTlmOTQ2MzFmODFiNjRjNWRmN2ZiNTM5MzU4MzU3MTNjIiwKICAid2luZG93c0F1dGhlbnRpY29kZSI6ICJOb3RTaWduZWQiLAogICJhY2NlcHRhbmNlIjogewogICAgIndpbmRvd3NBY3R1YWxTdGFydHVwIjogdHJ1ZSwKICAgICJ3aW5kb3dzWmlwUmVwZWF0ZWRTdGFydHVwIjogdHJ1ZSwKICAgICJ3aW5kb3dzWmlwRnVsbEdlc3R1cmVTbW9rZSI6IGZhbHNlLAogICAgInVidW50dUZ1bGxBcmNoaXZlQnl0ZXNWZXJpZmllZCI6IHRydWUsCiAgICAiYW5kcm9pZEFyY2hpdmVBdWRpdCI6IHRydWUsCiAgICAid2ViRnVsbEFyY2hpdmVCeXRlc1ZlcmlmaWVkIjogdHJ1ZSwKICAgICJwcml2YXRlRGF0YVNjYW4iOiB0cnVlLAogICAgInVidW50dVJ1bnRpbWVWZXJpZmllZCI6IGZhbHNlLAogICAgImFuZHJvaWREZXZpY2VWZXJpZmllZCI6IGZhbHNlCiAgfQp9Cg==",
+    "SHA256SUMS.txt": "MzMzOTQ1ZjI4MmRhZWIwMjQyN2VmOGI3MjJlYzZiNTYxZjhkYTNiNjdlOGU1ZGMwNTEyNDhhMDllMjUwYTFkYyAgUGV0UGFsLTAuOS4xMC1XaW5kb3dzLXg2NC5leGUKZmZlZDE4OTNkNDcwYzQ3NjUxNjQ0ZmU2ODk3YmZmNDFkODQyYTAzMWQ5NmQwNDI2OGJlOTA3OGY0MDVlMjJkMSAgUGV0UGFsLTAuOS4xMC1XaW5kb3dzLXg2NC56aXAKOTEyYzUwNjI3ZmNhYWUxMDVmYTU5ZGZiZTkxZjVlYjAyZGExYzU4NDNjYTdiZDgxMjg4MDNkOTA3NWFmY2Y2OSAgUGV0UGFsLTAuOS4xMC1VYnVudHUteDY0LnRhci5nego4YjE2ZmQxZmYwYmM2NDlmMWQ1OWE1NWVlMWY1NWE1ZWY5NWU3NjRlZDkyYTdjZDhiZTRjYzIxN2MxZTdlN2QxICBQZXRQYWwtMC45LjEwLVVidW50dS1hcm02NC50YXIuZ3oKZjhiYTNjODYxM2E0ZmYwYWJlYTkxMDZlNWQzOGYzN2NlNTdkZDM5MGM5OWIyMDk1N2Y4YzI0NmJiOTUxMzg2MyAgUGV0UGFsLTAuOS4xMC1BbmRyb2lkLWRlYnVnLmFwawpjY2I3Y2I0MDBiYmRlZTJhYTczNGUxNGU5NjZhMWFmN2NiM2NmNDM4YzkxZTAxMTk0Y2I2NzdiMjFjNTU3MTRjICBQZXRQYWwtMC45LjEwLVdlYi56aXAK",
+    "petpal-update.json": "ewogICJzY2hlbWFWZXJzaW9uIjogMSwKICAicGF5bG9hZCI6ICJleUp3Y205a2RXTjBJam9pY0dWMGNHRnNJaXdpWTJoaGJtNWxiQ0k2SW5OMFlXSnNaU0lzSW5ObGNYVmxibU5sSWpveE1pd2lhWE56ZFdWa1FYUWlPaUl5TURJMkxURXdMVEEyVkRBMU9qQXlPalV6TGpVMU4xb2lMQ0psZUhCcGNtVnpRWFFpT2lJeU1ESTNMVEV3TFRBMlZEQXdPakF3T2pBd1dpSXNJbkpsYkdWaGMyVnpJanBiZXlKcFpDSTZJbmRwYm1SdmQzTXRlRFkwTFRBdU9TNHhNQ0lzSW5SaGNtZGxkQ0k2SW5kcGJtUnZkM010ZURZMElpd2lkbVZ5YzJsdmJpSTZJakF1T1M0eE1DSXNJblZ5YkNJNkltaDBkSEJ6T2k4dloybDBhSFZpTG1OdmJTOXNhWGhwYm5sMU1ESXZjR1YwY0dGc0wzSmxiR1ZoYzJWekwyUnZkMjVzYjJGa0wzWXdMamt1TVRBdlVHVjBVR0ZzTFRBdU9TNHhNQzFYYVc1a2IzZHpMWGcyTkM1bGVHVWlMQ0ppZVhSbGN5STZNakl3T1RNNU1Ua3hMQ0p6YUdFeU5UWWlPaUl6TXpNNU5EVm1Namd5WkdGbFlqQXlOREkzWldZNFlqY3lNbVZqTm1JMU5qRm1PR1JoTTJJMk4yVTRaVFZrWXpBMU1USTBPR0V3T1dVeU5UQmhNV1JqSWl3aWJtOTBaWE1pT2lJd0xqa3VNVEFnNXEyajVieVA1NG1JNzd5YTZLLXQ2Wi16NW9tVDVwYXQ0NENCNVpDTzVZLXdJRUZuWlc1MElPaV9tLVc2cHVTNGp1V3VqT2FJa09heGgtYUtwZU9BZ2VXdnVlaXZuZVc5a3VhaG95X21nYUxscEkwdjZZZU41Wkc5NVpDTkwtV0lvT21acE8tOGpPUzdwZVdQaXVpMHB1V1B0LW1odWVlYnJ1V0lodWV4dS1PQWdpSXNJbVp2Y20xaGRDSTZJbkJ2Y25SaFlteGxMV1Y0WlNKOUxIc2lhV1FpT2lKMVluVnVkSFV0ZURZMExUQXVPUzR4TUNJc0luUmhjbWRsZENJNkluVmlkVzUwZFMxNE5qUWlMQ0oyWlhKemFXOXVJam9pTUM0NUxqRXdJaXdpZFhKc0lqb2lhSFIwY0hNNkx5OW5hWFJvZFdJdVkyOXRMMnhwZUdsdWVYVXdNaTl3WlhSd1lXd3ZjbVZzWldGelpYTXZaRzkzYm14dllXUXZkakF1T1M0eE1DOVFaWFJRWVd3dE1DNDVMakV3TFZWaWRXNTBkUzE0TmpRdWRHRnlMbWQ2SWl3aVlubDBaWE1pT2pNME16ZzNNVGt5T0N3aWMyaGhNalUySWpvaU9URXlZelV3TmpJM1ptTmhZV1V4TURWbVlUVTVaR1ppWlRreFpqVmxZakF5WkdFeFl6VTRORE5qWVRkaVpEZ3hNamc0TUROa09UQTNOV0ZtWTJZMk9TSXNJbTV2ZEdWeklqb2lNQzQ1TGpFd0lPYXRvLVc4ai1lSmlPLThtdWl2cmVtZnMtYUprLWFXcmVPQWdlV1FqdVdQc0NCQloyVnVkQ0RvdjV2bHVxYmt1STdscm96bWlKRG1zWWZtaXFYamdJSGxyN25vcjUzbHZaTG1vYU12NW9HaTVhU05MLW1IamVXUnZlV1FqU19saUtEcG1hVHZ2SXprdTZYbGo0cm90S2JsajdmcG9ibm5tNjdsaUlibnNidmpnSUlpTENKbWIzSnRZWFFpT2lKMFlYSXVaM29pZlN4N0ltbGtJam9pZFdKMWJuUjFMV0Z5YlRZMExUQXVPUzR4TUNJc0luUmhjbWRsZENJNkluVmlkVzUwZFMxaGNtMDJOQ0lzSW5abGNuTnBiMjRpT2lJd0xqa3VNVEFpTENKMWNtd2lPaUpvZEhSd2N6b3ZMMmRwZEdoMVlpNWpiMjB2YkdsNGFXNTVkVEF5TDNCbGRIQmhiQzl5Wld4bFlYTmxjeTlrYjNkdWJHOWhaQzkyTUM0NUxqRXdMMUJsZEZCaGJDMHdMamt1TVRBdFZXSjFiblIxTFdGeWJUWTBMblJoY2k1bmVpSXNJbUo1ZEdWeklqb3pNemd3TlRZME1EWXNJbk5vWVRJMU5pSTZJamhpTVRabVpERm1aakJpWXpZME9XWXhaRFU1WVRVMVpXVXhaalUxWVRWbFpqazFaVGMyTkdWa09USmhOMk5rT0dKbE5HTmpNakUzWXpGbE4yVTNaREVpTENKdWIzUmxjeUk2SWpBdU9TNHhNQ0RtcmFQbHZJX25pWWp2dkpyb3I2M3BuN1BtaVpQbWxxM2pnSUhsa0k3bGo3QWdRV2RsYm5RZzZMLWI1YnFtNUxpTzVhNk01b2lRNXJHSDVvcWw0NENCNWEtNTZLLWQ1YjJTNXFHakwtYUJvdVdralNfcGg0M2xrYjNsa0kwdjVZaWc2Wm1rNzd5TTVMdWw1WS1LNkxTbTVZLTM2YUc1NTV1dTVZaUc1N0c3NDRDQ0lpd2labTl5YldGMElqb2lkR0Z5TG1kNkluMHNleUpwWkNJNkltRnVaSEp2YVdRdE1DNDVMakV3SWl3aWRHRnlaMlYwSWpvaVlXNWtjbTlwWkNJc0luWmxjbk5wYjI0aU9pSXdMamt1TVRBaUxDSjJaWEp6YVc5dVEyOWtaU0k2TWpBc0luVnliQ0k2SW1oMGRIQnpPaTh2WjJsMGFIVmlMbU52YlM5c2FYaHBibmwxTURJdmNHVjBjR0ZzTDNKbGJHVmhjMlZ6TDJSdmQyNXNiMkZrTDNZd0xqa3VNVEF2VUdWMFVHRnNMVEF1T1M0eE1DMUJibVJ5YjJsa0xXUmxZblZuTG1Gd2F5SXNJbUo1ZEdWeklqbzJNRGN6TWpZMk9Td2ljMmhoTWpVMklqb2laamhpWVROak9EWXhNMkUwWm1Zd1lXSmxZVGt4TURabE5XUXpPR1l6TjJObE5UZGtaRE01TUdNNU9XSXlNRGsxTjJZNFl6STBObUppT1RVeE16ZzJNeUlzSW01dmRHVnpJam9pTUM0NUxqRXdJT2F0by1XOGotZUppTy04bXVpdnJlbWZzLWFKay1hV3JlT0FnZVdRanVXUHNDQkJaMlZ1ZENEb3Y1dmx1cWJrdUk3bHJvem1pSkRtc1lmbWlxWGpnSUhscjdub3I1M2x2Wkxtb2FNdjVvR2k1YVNOTC1tSGplV1J2ZVdRalNfbGlLRHBtYVR2dkl6a3U2WGxqNHJvdEtibGo3ZnBvYm5ubTY3bGlJYm5zYnZqZ0lJaUxDSm1iM0p0WVhRaU9pSmhjR3NpZlN4N0ltbGtJam9pZDJWaUxUQXVPUzR4TUNJc0luUmhjbWRsZENJNkluZGxZaUlzSW5abGNuTnBiMjRpT2lJd0xqa3VNVEFpTENKMWNtd2lPaUpvZEhSd2N6b3ZMMmRwZEdoMVlpNWpiMjB2YkdsNGFXNTVkVEF5TDNCbGRIQmhiQzl5Wld4bFlYTmxjeTlrYjNkdWJHOWhaQzkyTUM0NUxqRXdMMUJsZEZCaGJDMHdMamt1TVRBdFYyVmlMbnBwY0NJc0ltSjVkR1Z6SWpvMU5UazBOVGd3Tnl3aWMyaGhNalUySWpvaVkyTmlOMk5pTkRBd1ltSmtaV1V5WVdFM016UmxNVFJsT1RZMllURmhaamRqWWpOalpqUXpPR001TVdVd01URTVOR05pTmpjM1lqSXhZelUxTnpFMFl5SXNJbTV2ZEdWeklqb2lNQzQ1TGpFd0lPYXRvLVc4ai1lSmlPLThtdWl2cmVtZnMtYUprLWFXcmVPQWdlV1FqdVdQc0NCQloyVnVkQ0RvdjV2bHVxYmt1STdscm96bWlKRG1zWWZtaXFYamdJSGxyN25vcjUzbHZaTG1vYU12NW9HaTVhU05MLW1IamVXUnZlV1FqU19saUtEcG1hVHZ2SXprdTZYbGo0cm90S2JsajdmcG9ibm5tNjdsaUlibnNidmpnSUlpTENKbWIzSnRZWFFpT2lKM1pXSXRlbWx3SW4xZGZRIiwKICAic2lnbmF0dXJlIjogIjlLbmotSUI3Tzgzcm51alNweWFMVUs4amZzaDBiTVhtci00TnFoOXFjYkN2eVRmVkVJVVNDWG9KTXIwSVQ2Zk8wSFhTSFV4TjlnZ2dpeDNxaDN4NkRBIgp9Cg==",
+    "petpal-update-public-key.txt": "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUNvd0JRWURLMlZ3QXlFQWJhaXZyeWgxVlh2T3ZndmZxOFEzUERmaEFsTVJDQzBadjBjcFNDY2NwNjg9Ci0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo="
+  },
+  "priorUploadReservations": [
+    {
+      "file": "github-upload-PetPal-0.9.10-Windows-x64.exe.attempt.json",
+      "name": "PetPal-0.9.10-Windows-x64.exe",
+      "sha256": "cf39eb9e9cb6a7638871bf7bdaf59dbf32e5b16a9d6a5fc1ce94d3fd29aeb9c5"
+    }
+  ],
+  "reuseOnlyNames": [
+    "PetPal-0.9.10-Windows-x64.exe",
+    "PetPal-0.9.10-Windows-x64.zip"
+  ],
+  "recoveryAuthorizedNames": [],
+  "recoveryAuthorization": null,
+  "fastOriginalCloud": {
+    "originalRunId": 37419799452,
+    "originalHead": "d4ec0b348e5d7c2710394c695adf745202d94763",
+    "originalLogSha256": "6279b9a0dab679ba5f89fb02b16fb1ae8b84d5009542ac07f6f61c74d8b193f5",
+    "originalEvidenceSha256": "6190abb77d247144c75f1e3b60e241ac192e518ffcf7459bba648284d73ad212",
+    "originalCandidateFileSha256": "e6a280f0c4cb7aa3ce8cec87a690a2e46dfbfc1cf2abdcaca47a97b0d6f4eae4",
+    "originalRunnerSha256": "9e0d77f49a796adee18024d36b04b51fff893fde357b110efb37622c4a41db47"
+  },
+  "continuationOriginalCloud": {
+    "stoppedRunId": 37424105405,
+    "stoppedHead": "a1b477a977e9b960397abbf00de752df0323e26c",
+    "stoppedLogSha256": "73e178e302a04f4edc5b8183de3051a349de70932aafaf01f659ce7ab0289dc6",
+    "stoppedEvidenceSha256": "ef27660f2b219c551fc188851f990c47e7cffcc835ff6717ed072661cfd4f6b0",
+    "stoppedCandidateFileSha256": "07d0e5d6840602d1fbe693e2e48f5440726b787a5c879990d555d374c42728db",
+    "stoppedRunnerSha256": "b9ada2206a7260558fdf7c04d269e718cd055307563acb925a6dcc998a9e56d5",
+    "stoppedRangeSha256": "23aa1bcb051285b1b95459df0d28fbd8a526253753ec5288bd8be1cedd34d136",
+    "completedAssets": [
+      {
+        "name": "PetPal-0.9.10-Windows-x64.exe",
+        "id": 614722528,
+        "size": 220939191,
+        "sha256": "333945f282daeb02427ef8b722ec6b561f8da3b67e8e5dc051248a09e250a1dc",
+        "priorMirrorEvent": {
+          "stage": "mirror-bytes-verified",
+          "name": "PetPal-0.9.10-Windows-x64.exe",
+          "bytes": 220939191,
+          "sha256": "333945f282daeb02427ef8b722ec6b561f8da3b67e8e5dc051248a09e250a1dc",
+          "downloadMethod": "verified HTTP ranges",
+          "connections": 8,
+          "installerExecuted": false
+        },
+        "priorAssemblyEvent": {
+          "stage": "mirror-range-assembly-verified",
+          "name": "PetPal-0.9.10-Windows-x64.exe",
+          "bytes": 220939191,
+          "sha256": "333945f282daeb02427ef8b722ec6b561f8da3b67e8e5dc051248a09e250a1dc",
+          "connections": 8,
+          "fragments": [
+            {
+              "index": 0,
+              "start": 0,
+              "end": 27617397,
+              "bytes": 27617398,
+              "sha256": "7298c1f35926414e4fd409d63575a18d2b0c7ea16cb4c8f44df2705a361de42d"
+            },
+            {
+              "index": 1,
+              "start": 27617398,
+              "end": 55234796,
+              "bytes": 27617399,
+              "sha256": "b22b29975d454dce92e14a9f4f1a1facab8966524b39e6c02b9c68cd6cccc98c"
+            },
+            {
+              "index": 2,
+              "start": 55234797,
+              "end": 82852195,
+              "bytes": 27617399,
+              "sha256": "dafbb83730956dbe81449aced4f0c0bb91ddfcb66cf82568822956e89ec09187"
+            },
+            {
+              "index": 3,
+              "start": 82852196,
+              "end": 110469594,
+              "bytes": 27617399,
+              "sha256": "91e2e049be9de46286117406ae70772329de965b11c4db85d018cea669d293a0"
+            },
+            {
+              "index": 4,
+              "start": 110469595,
+              "end": 138086993,
+              "bytes": 27617399,
+              "sha256": "a2c114e4d3097e25af2af43708bfefda3f3fd66d863a525e44fec5b1da35b5e6"
+            },
+            {
+              "index": 5,
+              "start": 138086994,
+              "end": 165704392,
+              "bytes": 27617399,
+              "sha256": "64cb1f4eaeb041405d8d795deefa8e7f4b293dbb8c85a14eadbad8b5c938af81"
+            },
+            {
+              "index": 6,
+              "start": 165704393,
+              "end": 193321791,
+              "bytes": 27617399,
+              "sha256": "8c60ecfb51da7f81f3349e105a559f925d9f61ac615b67d92bfafeb447f31333"
+            },
+            {
+              "index": 7,
+              "start": 193321792,
+              "end": 220939190,
+              "bytes": 27617399,
+              "sha256": "45a01fc896841b19341411841b73beb0e9e6021b0bbb1417d6b1e45bbbf8a72f"
+            }
+          ],
+          "tlsVerification": "enabled",
+          "redirectsAllowed": false,
+          "installerExecuted": false
+        },
+        "priorGithubByteEvent": {
+          "stage": "github-bytes-verified",
+          "name": "PetPal-0.9.10-Windows-x64.exe",
+          "bytes": 220939191,
+          "sha256": "333945f282daeb02427ef8b722ec6b561f8da3b67e8e5dc051248a09e250a1dc",
+          "installerExecuted": false
+        },
+        "priorFinalEvent": {
+          "stage": "final-asset-verified",
+          "id": 614722528,
+          "name": "PetPal-0.9.10-Windows-x64.exe",
+          "size": 220939191,
+          "sha256": "333945f282daeb02427ef8b722ec6b561f8da3b67e8e5dc051248a09e250a1dc",
+          "draft": true,
+          "published": false,
+          "installerExecuted": false
+        },
+        "priorReservationEvent": {
+          "stage": "upload-attempt-reserved",
+          "name": "PetPal-0.9.10-Windows-x64.exe",
+          "bytes": 220939191,
+          "sha256": "333945f282daeb02427ef8b722ec6b561f8da3b67e8e5dc051248a09e250a1dc",
+          "releaseId": 404334344,
+          "contractHash": "3375001b0afe122ca855cdf12b2be4faf438ebcfd9679c5652a95bab1ecf1048",
+          "planHash": "1fc4f7a675308dab3ec3f804d23db98bb56e589e6666c3b2078bd149fb57b63a",
+          "attemptGeneration": 3,
+          "originalAttemptSha256": "cf39eb9e9cb6a7638871bf7bdaf59dbf32e5b16a9d6a5fc1ce94d3fd29aeb9c5",
+          "recoveryAuthorizationSha256": "98b6dce9b4a8e08c8c1f9574ab1858440d1a02a4c6ad9e40c0295f5a044de914",
+          "uploadInvocations": 1,
+          "noAutomaticRetry": true
+        }
+      },
+      {
+        "name": "PetPal-0.9.10-Windows-x64.zip",
+        "id": 614753915,
+        "size": 373237878,
+        "sha256": "ffed1893d470c47651644fe6897bff41d842a031d96d04268be9078f405e22d1",
+        "priorMirrorEvent": {
+          "stage": "mirror-bytes-verified",
+          "name": "PetPal-0.9.10-Windows-x64.zip",
+          "bytes": 373237878,
+          "sha256": "ffed1893d470c47651644fe6897bff41d842a031d96d04268be9078f405e22d1",
+          "downloadMethod": "verified HTTP ranges",
+          "connections": 8,
+          "installerExecuted": false
+        },
+        "priorAssemblyEvent": {
+          "stage": "mirror-range-assembly-verified",
+          "name": "PetPal-0.9.10-Windows-x64.zip",
+          "bytes": 373237878,
+          "sha256": "ffed1893d470c47651644fe6897bff41d842a031d96d04268be9078f405e22d1",
+          "connections": 8,
+          "fragments": [
+            {
+              "index": 0,
+              "start": 0,
+              "end": 46654733,
+              "bytes": 46654734,
+              "sha256": "47abc862263acff9967fccef85b6cacd67a461131a6104752636b92fd8c464f7"
+            },
+            {
+              "index": 1,
+              "start": 46654734,
+              "end": 93309468,
+              "bytes": 46654735,
+              "sha256": "077379f511b69e5b67adcfcdc8e540b10fdfd44bc6230fb4e30c2288be56f451"
+            },
+            {
+              "index": 2,
+              "start": 93309469,
+              "end": 139964203,
+              "bytes": 46654735,
+              "sha256": "ffddb8d00194b73da224d1248a87f4166f7a1974bff06c8f6394f4a75943b780"
+            },
+            {
+              "index": 3,
+              "start": 139964204,
+              "end": 186618938,
+              "bytes": 46654735,
+              "sha256": "11024af79d3029d6a967446e7bd6a243c1fc0fe5ac2b72bb2baea37148f32a15"
+            },
+            {
+              "index": 4,
+              "start": 186618939,
+              "end": 233273672,
+              "bytes": 46654734,
+              "sha256": "087843fe8720dad9baf244ccdcdb49b108c5e631e115a7138a977e1eb647c1f8"
+            },
+            {
+              "index": 5,
+              "start": 233273673,
+              "end": 279928407,
+              "bytes": 46654735,
+              "sha256": "faf0a5dc2d283718309a08fbf23967acba631fe0ff9087666050669ee6dc6c6c"
+            },
+            {
+              "index": 6,
+              "start": 279928408,
+              "end": 326583142,
+              "bytes": 46654735,
+              "sha256": "63ef9e2a7fba3d83caa5c0f2ca485bdec8adefa4b2a5dc128b68c614500e00a5"
+            },
+            {
+              "index": 7,
+              "start": 326583143,
+              "end": 373237877,
+              "bytes": 46654735,
+              "sha256": "2191e86fa41e1249acd9a444dc615d71c8f698d4227170b68dbaa4603de7136b"
+            }
+          ],
+          "tlsVerification": "enabled",
+          "redirectsAllowed": false,
+          "installerExecuted": false
+        },
+        "priorGithubByteEvent": {
+          "stage": "github-bytes-verified",
+          "name": "PetPal-0.9.10-Windows-x64.zip",
+          "bytes": 373237878,
+          "sha256": "ffed1893d470c47651644fe6897bff41d842a031d96d04268be9078f405e22d1",
+          "installerExecuted": false
+        },
+        "priorFinalEvent": {
+          "stage": "final-asset-verified",
+          "id": 614753915,
+          "name": "PetPal-0.9.10-Windows-x64.zip",
+          "size": 373237878,
+          "sha256": "ffed1893d470c47651644fe6897bff41d842a031d96d04268be9078f405e22d1",
+          "draft": true,
+          "published": false,
+          "installerExecuted": false
+        },
+        "priorReservationEvent": {
+          "stage": "upload-attempt-reserved",
+          "name": "PetPal-0.9.10-Windows-x64.zip",
+          "bytes": 373237878,
+          "sha256": "ffed1893d470c47651644fe6897bff41d842a031d96d04268be9078f405e22d1",
+          "releaseId": 404334344,
+          "contractHash": "3375001b0afe122ca855cdf12b2be4faf438ebcfd9679c5652a95bab1ecf1048",
+          "planHash": "1fc4f7a675308dab3ec3f804d23db98bb56e589e6666c3b2078bd149fb57b63a",
+          "attemptGeneration": 1,
+          "originalAttemptSha256": null,
+          "recoveryAuthorizationSha256": "98b6dce9b4a8e08c8c1f9574ab1858440d1a02a4c6ad9e40c0295f5a044de914",
+          "uploadInvocations": 1,
+          "noAutomaticRetry": true
+        }
+      }
+    ]
+  },
+  "continuationAuthorization": {
+    "generation": 4,
+    "authorizedBy": "/root",
+    "authorizationSha256": "dd054d5361f5051c057ca4e0ab443c5d18fe46561e6f233f57ce6e35e5d7200d",
+    "stoppedEvidenceSha256": "ef27660f2b219c551fc188851f990c47e7cffcc835ff6717ed072661cfd4f6b0"
+  }
+}
