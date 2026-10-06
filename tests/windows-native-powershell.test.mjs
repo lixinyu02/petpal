@@ -70,3 +70,39 @@ foreach ($mutation in @('v2','renderer','model','moc','core','hidden','duplicate
   assert.equal(result.accepted, true);
   assert.deepEqual(result.rejected, ['v2', 'renderer', 'model', 'moc', 'core', 'hidden', 'duplicate', 'cat']);
 });
+
+test('real PowerShell smoke rejects missing assistant members and altered module byte receipts', { skip: process.platform !== 'win32' }, async () => {
+  const expected = ['server/conversation-organization.mjs', 'server/chat-assistant.mjs',
+    'server/automation-schema.mjs', 'server/automation-tools.mjs', 'server/automations.mjs'];
+  const result = await powershell(`
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility') -Force;
+$requiredGate=@($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.ForEachStatementAst] -and $node.Variable.VariablePath.UserPath -eq 'required' -and $node.Body.Extent.Text.Contains('Missing required desktop assistant runtime member')}, $true));
+$byteGate=@($ast.FindAll({param($node) $node -is [System.Management.Automation.Language.ForEachStatementAst] -and $node.Variable.VariablePath.UserPath -eq 'file' -and $node.Body.Extent.Text.Contains('Packaged runtime differs from frozen source')}, $true));
+if ($requiredGate.Count -ne 1 -or $byteGate.Count -ne 1) { throw 'Production smoke source gates were not found' }
+$project=${literal(path.resolve(path.dirname(verifier), '..'))};
+$critical=@(${expected.map(literal).join(',')});
+$requiredNames=@(& ([scriptblock]::Create($requiredGate[0].Condition.Extent.Text)));
+$records=@(); foreach ($member in $requiredNames) {
+  if ($critical -contains $member) {
+    $source=Join-Path $project $member;
+    $records+=@{path=$member;bytes=(Get-Item -LiteralPath $source).Length;sha256=(Get-FileHash -LiteralPath $source).Hash};
+  } else { $records+=@{path=$member;bytes=0;sha256=('0' * 64)} }
+}
+foreach ($member in $critical) { if ($requiredNames -notcontains $member) { throw ('Required member omitted: '+$member) } }
+$result=@{bundleFiles=$records}; & ([scriptblock]::Create($requiredGate[0].Extent.Text));
+$exact=@($records | Where-Object { $critical -contains $_.path });
+$result=@{bundleFiles=$exact}; & ([scriptblock]::Create($byteGate[0].Extent.Text));
+$missing=@(); $changed=@();
+foreach ($member in $critical) {
+  $result=@{bundleFiles=@($records | Where-Object { $_.path -ne $member })};
+  try { & ([scriptblock]::Create($requiredGate[0].Extent.Text)) } catch { if ($_.Exception.Message -eq ('Missing required desktop assistant runtime member: '+$member)) { $missing+=$member } else { throw } }
+  $original=@($exact | Where-Object { $_.path -eq $member })[0];
+  $result=@{bundleFiles=@(@{path=$member;bytes=$original.bytes;sha256=('0' * 64)})};
+  try { & ([scriptblock]::Create($byteGate[0].Extent.Text)) } catch { if ($_.Exception.Message -eq ('Packaged runtime differs from frozen source: '+$member)) { $changed+=$member } else { throw } }
+}
+@{accepted=$true;missing=$missing;changed=$changed} | ConvertTo-Json -Compress
+`);
+  assert.equal(result.accepted, true);
+  assert.deepEqual(result.missing, expected);
+  assert.deepEqual(result.changed, expected);
+});

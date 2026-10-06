@@ -81,7 +81,7 @@ export async function finalizeWindowsRelease({ root = projectRoot, argv = [] } =
   assert.equal(runtime.portableSmoke.desktopTools.opencli.version, '1.8.8');
   assert.ok(asar.nativeHelperCompared);
   assert.equal(runtime.portableSmoke.executor?.available, true, 'Executor preload facade was not verified by the final portable');
-  const requiredExecutionSource = ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs'];
+  const requiredExecutionSource = ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs', 'server/conversation-organization.mjs', 'server/chat-assistant.mjs', 'server/automation-schema.mjs', 'server/automation-tools.mjs', 'server/automations.mjs'];
   for (const file of requiredExecutionSource) {
     const frozen = freeze.find(item => item.path === file), packed = asar.files?.find(item => item.path === file), smoke = runtime.portableSmoke.bundleFiles?.find(item => item.path === file);
     assert.ok(frozen && packed && smoke, `Runtime source must be present in frozen inputs, final EXE readback and native smoke: ${file}`);

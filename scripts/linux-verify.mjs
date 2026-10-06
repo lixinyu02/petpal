@@ -14,6 +14,7 @@ const requiredApplicationSource = ['server/app.mjs', 'server/auth.mjs', 'server/
 requiredApplicationSource.push('desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs');
 requiredApplicationSource.push('desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs');
 requiredApplicationSource.push('desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs');
+requiredApplicationSource.push('server/conversation-organization.mjs', 'server/chat-assistant.mjs', 'server/automation-schema.mjs', 'server/automation-tools.mjs', 'server/automations.mjs');
 requiredApplicationSource.push('server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs');
 requiredApplicationSource.push('server/opencli-browser-policies.mjs', 'server/opencli-browser-adapters.mjs', 'server/opencli-browser-setup.mjs');
 requiredApplicationSource.push('desktop/startup-diagnostics.cjs', 'server/music-mcp.mjs', 'server/music-mcp-routes.mjs',
