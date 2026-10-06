@@ -1,10 +1,10 @@
 # 软件内更新
 
-0.9.7 已正式发布 Windows x64、Ubuntu x64 / ARM64、Android 与 Web 五个更新目标；下载中心另保留同版本 Windows ZIP。可选择 GitHub Releases 或可信 HTTPS 服务器源。[GitHub 正式版](https://github.com/lixinyu02/petpal/releases/tag/v0.9.7) 为 latest，服务器源同步上线。
+0.9.10 已正式发布 Windows x64、Ubuntu x64 / ARM64、Android 与 Web 五个更新目标；下载中心另提供同版本 Windows ZIP，共六个客户端交付文件。下载优先使用服务器，GitHub Releases 提供备用下载。[GitHub 正式版](https://github.com/lixinyu02/petpal/releases/tag/v0.9.10) 为 latest，服务器源同步上线。
 
-两份清单均为 stable / sequence 9，各自沿用原发布公钥。已用实际更新服务验证两源五目标从 0.9.6 升级至 0.9.7，当前 Web 0.9.7 返回已最新；版本、完整包 SHA-256 与 Android versionCode 17 一致。十项 GitHub 资产完整字节读回，六个服务器包已通过真实完整字节读取及摘要校验；归档后另外以 HEAD 检查旧路径 404 和新包长度，HEAD 不替代完整读回。Windows 未做 Authenticode 签名；Android 沿用原开发证书。更新清单签名不能替代平台签名。
+两份清单均为 stable / sequence 12，各自沿用既有独立发布公钥，不可交叉使用。两源五目标从 0.9.9 升级至 0.9.10，当前 Web 0.9.10 已最新；完整包 SHA-256 与 Android versionCode 20 由本轮实际交付文件绑定。十项 GitHub 资产和六个服务器包的完整字节读回，以及旧公开路径归档和更新服务验收范围，分别以 [0.9.10 验收](acceptance-0.9.10.md) 的最终回执为准；HEAD 长度或 API digest 不能替代完整包体读取。
 
-网页随后增加的 V12 眨眼修复未写入已冻结的 0.9.7 安装包，详见 [安装包验收](acceptance-0.9.7.md) 与 [网页模型验收](cubism/akari-natural-eyelids-acceptance.md)。
+六个交付包均已纳入真实 Cubism V12、语音插话打断、Agent 进度／结果回报与对话／项目管理。历史 0.9.7 包仍内置 V11，网页更新不会替换旧包资源，历史边界见 [0.9.7 验收](acceptance-0.9.7.md)。Windows 未做 Authenticode 签名；Android 沿用原开发证书，versionCode 严格递增，仍需系统安装确认。更新清单签名不能替代平台签名。Ubuntu 与 Android 本轮仅完成归档／静态验收，没有目标设备运行验收。
 
 ## 历史版本与信任配置
 
