@@ -2,7 +2,7 @@
 
 - Date: 2026-10-07
 - Complexity: L1
-- Status: implementing
+- Status: completed (source and local acceptance)
 - Baseline: 86dfc13，初始工作区干净。
 
 ## Background
@@ -33,4 +33,4 @@
 
 ## Verification Plan
 
-比较相同60/90/120/144Hz合成时间戳的10秒绘制次数；取消、隐藏、恢复、减少动画与各场景集成回归。消息快照未变/末条变化/附件状态变化/重排/删除/任务状态更新覆盖，记录长历史复用数及真实TSX输出。TypeScript、隔离Vite构建、相关与全量回归、自审。优先Chrome插件，当前初始化超时需重试或用本机浏览器测试；桌面、412×960 CSS视口、Markdown/滚动/语音按钮/人物互动验收，明确本机与跨端边界。
+比较相同60/90/120/144Hz合成时间戳的10秒绘制次数；取消、隐藏、恢复、减少动画与各场景集成回归。消息快照未变/末条变化/附件状态变化/重排/删除/任务状态更新覆盖，记录长历史复用数及真实TSX输出。TypeScript、隔离Vite构建、相关与全量回归、自审。Chrome插件初始化两次超时后，使用缓存Playwright CLI的独立Chrome完成桌面、412×960 CSS视口、Markdown/滚动/语音按钮/真实Cubism与人物互动验收。最终全量2303项通过、0失败、1项原有opt-in测试跳过；详细证据与验收边界见同日validation文档。
