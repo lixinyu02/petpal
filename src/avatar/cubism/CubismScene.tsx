@@ -54,7 +54,7 @@ export default function CubismScene(props: CubismSceneProps) {
     const media = matchMedia('(prefers-reduced-motion: reduce)');
     const smallScreen = compact || matchMedia('(pointer: coarse)').matches;
     let localInput: PerformanceInput = { utteranceId: 'idle', text: '', phase: 'idle' };
-    const loop = createVisibleSceneLoop(now => frame(now));
+    const loop = createVisibleSceneLoop(now => frame(now), { maxFps: 30 });
     setMode('loading'); readyCallbackSent.current = false;
     container.dataset.avatarMode = 'loading'; delete container.dataset.cubismFallbackReason;
     surface.dataset.renderer = 'webgl'; surface.dataset.avatarRenderer = 'cubism'; surface.dataset.petCount = '1';
@@ -127,7 +127,6 @@ export default function CubismScene(props: CubismSceneProps) {
     surface.addEventListener('webglcontextlost', lost);
     const frame = (now: number) => {
       if (disposed || !runtime || document.hidden || !inView) return;
-      if (last && now - last < 1000 / 30) return;
       const elapsed = last ? Math.max(0, (now - last) / 1000) : 0; last = now; time += elapsed;
       const sharedAction = actionState.snapshot();
       if (actionRevision !== sharedAction.revision) {

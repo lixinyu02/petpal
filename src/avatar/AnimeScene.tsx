@@ -137,7 +137,7 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
     let renderer: THREE.WebGLRenderer | undefined;
     const initialAction = actionState.snapshot();
     let disposed = false, gpuFailed = false, inView = true, loaded = false, last = 0, time = 0, frames = 0, ready = false, action: PetAction = initialAction.action, actionRevision = initialAction.revision, actionStart = 0;
-    const frameLoop = createVisibleSceneLoop(now => frame(now));
+    const frameLoop = createVisibleSceneLoop(now => frame(now), { maxFps: 30 });
     const abort = new AbortController();
     setFailure(''); setLoading(true); container.dataset.avatarMode = 'loading'; delete container.dataset.optionalEmotionUnavailable;
     const fallback = document.createElement('div'), fallbackModel = document.createElement('div');
@@ -322,7 +322,6 @@ export default function AnimeScene({ command, compact = false, onState, onReady,
       if (!loaded || document.hidden || !inView) {
         performance.setInput(callbacks.current.performanceInput || localInput); performance.step(0,{hidden:true}); last = 0; return;
       }
-      if (last && now-last < 1000/30) return;
       const elapsed = last ? Math.max(0,(now-last)/1000) : 0;
       const dt = Math.min(elapsed,.1); last = now; time += elapsed;
       const sharedAction = actionState.snapshot();
