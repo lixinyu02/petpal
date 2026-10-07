@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile, rename, chmod, unlink } from 'node:fs/promi
 import { normalizeBaseUrl, normalizeReasoningEffort } from './providers.mjs';
 
 const failure = (status, message) => Object.assign(new Error(message), { status });
-export const CODEX_TOOL_VERSION = 'system-volume-native-review-v2';
+export const CODEX_TOOL_VERSION = 'opencli-universal-web-v1';
 export const CODEX_KEY_ENV = 'PETPAL_CODEX_API_KEY';
 export const CODEX_CATALOG_SHA256 = 'd5db15d306c4bd5c4bb8a927940e70473c389d65d9e2bf887ec7028fce893d5f';
 export const CODEX_CATALOG_SOURCE_FILES = Object.freeze(['models-0.143.0.json', 'LICENSE', 'PROVENANCE.json', 'SHA256SUMS'].map(file => `server/native/codex-review/${file}`));

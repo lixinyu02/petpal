@@ -35,13 +35,13 @@ function textContent(tree){
 }
 
 /** Execute the component's real state, effects and event handlers with a deterministic hook host. */
-function fixture({connected=true,user={isOwner:true},native=false,onPrepareBrowser,prepareBrowserDisabled=false,setup}={}){
+function fixture({connected=true,user={isOwner:true},native=false,onPrepareBrowser,prepareBrowserDisabled=false,setup,websiteAccess,browserReady=false}={}){
   let epoch=1,active,props={connected,user,onPrepareBrowser,prepareBrowserDisabled},saved={revision:'saved-one',enabled:true};
   const defaultOrigins={dyyj:['https://bbs.dyyjmax.org','https://bbs.dyyjv.com'],switch520:['https://520switch.com'],gamer520:['https://gamer520.com'],dygang:['https://dygangs.me'],wlgo:['https://wlgooo.com'],'fire-exam':['https://xfhyjd.119.gov.cn']};
   const originsFor=site=>saved.siteOrigins?.[site]||defaultOrigins[site]||['https://example.invalid'];
   const browserSites=['bing','baidu-search','baidu-pan','tieba','bilibili','quark','xunlei-pan'];
   const calls=[],events=new EventTarget(),owner={index:0,hooks:[],effects:[],tree:null};
-  const status=()=>({config:saved,queryReady:true,available:true,ready:false,profiles:[],selectedProfileId:null,daemon:{state:'stopped'},extension:{connected:false},version:'1.8.8',...(setup?{setup}:{})});
+  const status=()=>({config:saved,queryReady:true,available:true,ready:browserReady,profiles:browserReady?[{id:'chrome-a',label:'Chrome',connected:true}]:[],selectedProfileId:browserReady?'chrome-a':null,daemon:{state:'stopped'},extension:{connected:browserReady},version:'1.8.8',...(setup?{setup}:{}),...(websiteAccess?{websiteAccess}:{})});
   const catalog=()=>({version:'1.8.8',summary:{adapterNamespaces:179,totalCommands:1366,readCommands:1009,writeCommands:357,browserCommands:1042,querySites:24,queryCommands:40,publicQueryCommands:27,browserQueryCommands:13,configuredSites:6},
     sites:[...platform.openCliConfiguredSites.map(({site,label})=>({site,label,domains:originsFor(site).map(origin=>new URL(origin).hostname),commands:2,queryCommands:2,browserCommands:1,enabledCommands:['search','read'],needsBrowserBridge:true,local:false,id:site,mode:'configured',websiteStatus:'ready'})),...browserSites.map(site=>({site,domains:['example.invalid'],commands:1,queryCommands:1,browserCommands:1,enabledCommands:['search'],needsBrowserBridge:true,local:false,id:site,mode:'browser'}))],
     notebookSites:[...platform.openCliConfiguredSites.map(({site,label})=>({site,label,origins:originsFor(site),status:'ready',commands:['search','read']})),...browserSites.map(site=>({site,label:site,origins:['https://example.invalid'],status:'ready',commands:['search']}))]});
@@ -49,7 +49,7 @@ function fixture({connected=true,user={isOwner:true},native=false,onPrepareBrows
     status:async()=>{calls.push(['status']);return status();},
     sites:async body=>{calls.push(['sites',body]);return catalog();},
     configure:async body=>{calls.push(['configure',plain(body)]);saved={...plain(body),revision:'saved-two'};return saved;},
-    action:async()=>({}),cancel:async()=>{calls.push(['cancel']);},
+    action:async body=>{calls.push(['action',plain(body)]);return{tab:{url:body.url}};},cancel:async()=>{calls.push(['cancel']);},
   };
   const react={
     useState:initial=>{
@@ -89,6 +89,23 @@ function fixture({connected=true,user={isOwner:true},native=false,onPrepareBrows
     text:()=>textContent(owner.tree),
   };
 }
+
+test('universal website entry follows the actual runtime capability and selected browser',async()=>{
+  const legacy=fixture();await legacy.ready();
+  assert.equal(legacy.find('input',props=>props['aria-label']==='OpenCLI 网站地址'),undefined);
+  legacy.owner.unmount();
+  const offline=fixture({websiteAccess:'all'});await offline.ready();
+  assert.match(offline.text(),/默认支持所有 HTTP/);
+  assert.equal(offline.find('form',props=>props.className==='opencli-web-open').props.children[1].props.disabled,true);
+  offline.owner.unmount();
+  const f=fixture({websiteAccess:'all',browserReady:true});await f.ready();
+  f.find('input',props=>props['aria-label']==='OpenCLI 网站地址').props.onChange({target:{value:'https://soutxt8.com/'}});f.owner.render();
+  f.find('form',props=>props.className==='opencli-web-open').props.onSubmit({preventDefault(){}});
+  await f.ready();
+  assert.deepEqual(f.calls.find(([kind])=>kind==='action'),['action',{action:'open',profileId:'chrome-a',url:'https://soutxt8.com/'}]);
+  f.changeSession();f.setProps({connected:false,user:undefined});
+  assert.equal(f.find('input',props=>props['aria-label']==='OpenCLI 网站地址'),undefined);f.owner.unmount();
+});
 
 test('old two-field configs start with empty origins and clearing a site preserves the CAS revision',()=>{
   const config={revision:'old-revision',enabled:true},draft=platform.openCliOriginDraft(config);

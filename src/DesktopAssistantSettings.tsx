@@ -67,7 +67,7 @@ export default function DesktopAssistantSettings({connected,user,onConfigSaved}:
       if(tool==='petpal_music_command')setActionNotice(result.message||'播放器已确认接收操作，请查看最新媒体状态。');
       else if(args.action==='open')setActionNotice(result.tab?.url?`已打开 ${result.tab.url}`:'已提交网页打开请求，请查看浏览器中的结果。');
       else if(args.action==='close'){setActionNotice('已断开浏览器连接并清除所选档案。小伴使用的页面已关闭；共享浏览器桥保持运行。');}
-      else setActionNotice(result.ready?'浏览器档案已连接，可打开音乐官网。':result.message||'已完成连接检查，请选择在线浏览器档案后连接。');
+      else setActionNotice(result.ready?'浏览器档案已连接，可以打开网站。':result.message||'已完成连接检查，请选择在线浏览器档案后连接。');
       await loadTools();
     }catch(error){if(current(request)&&!isSessionChanged(error))setToolsError((error as Error).message);}
     finally{controllers.current.delete(request);if(activeAction.current===request)activeAction.current=null;operation.current=false;if(current())setActionBusy('');}

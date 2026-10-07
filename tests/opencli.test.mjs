@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { OpenCliRunner, validateBrowserAction, describeBrowserAction, openCliEnvironment, resolveBundledOpenCli } from '../server/opencli.mjs';
+import { OpenCliRunner, browserDocumentExpression, validateBrowserAction, describeBrowserAction, openCliEnvironment, resolveBundledOpenCli } from '../server/opencli.mjs';
 
 async function setup(t, options = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-opencli-'));
@@ -12,6 +12,7 @@ async function setup(t, options = {}) {
   let raw = options.raw || null;
   let pageCount = 0;
   const tabs = new Map();
+  const documents = new Map();
   const profiles = options.profiles ?? [{ contextId: 'chrome-a', extensionConnected: true, extensionVersion: '1.0.24' }, { contextId: 'chrome-b', extensionConnected: true, extensionVersion: '1.0.24' }];
   const runner = new OpenCliRunner({ dataDir: directory, timeoutMs: 1000, shutdownTimeoutMs: options.shutdownTimeoutMs ?? 30,
     checkPort: async () => options.portBusy || false,
@@ -49,14 +50,19 @@ async function setup(t, options = {}) {
         if (body.op === 'new') {
           const page = `page-${++pageCount}`;
           tabs.set(page, { page, url: body.url, title: '音乐', active: true });
+          documents.set(page, {});
           return Response.json({ ok: true, page, data: null });
         }
         if (body.op === 'close') { tabs.delete(body.page); return Response.json({ ok: true, data: { closed: body.page } }); }
       }
       if (body.action === 'exec') {
-        assert.match(body.code, /PetPal origin rejected/);
+        assert.match(body.code, /PetPal webpage rejected/);
         // Verify every actual upstream helper is wrapped as valid JavaScript.
         new Function(`return ${body.code}`);
+        const url = new URL(tabs.get(body.page).url);
+        // Execute the actual finite guard, with a fresh document on reload.
+        const guard = body.code.slice(0, body.code.indexOf(' return (')) + ' return true; })()';
+        new Function('location', 'document', `return ${guard}`)({protocol:url.protocol,href:url.href}, documents.get(body.page));
         if (body.code.includes('ANNOTATE_REFS')) return Response.json({ ok: true, data: options.snapshot || '[1]<button>播放</button>' });
         if (body.code.includes('window.__opencli_prev_hashes')) return Response.json({ ok: true, data: null });
         if (body.code.includes('no_resolved_element') && body.code.includes('expected')) return Response.json({ ok: true, data: { ok: true, actual: 'hello' } });
@@ -66,20 +72,41 @@ async function setup(t, options = {}) {
     },
   });
   t.after(async () => { await runner.close(); await rm(directory, { recursive: true, force: true }); });
-  return { runner, requests, launches, children, tabs, setStatus: (value) => { raw = value; } };
+  return { runner, requests, launches, children, tabs, documents, setStatus: (value) => { raw = value; } };
 }
 
-test('strict browser actions reject arbitrary execution, origins, selectors and injected fields', () => {
+test('universal browser actions allow websites but reject execution, credentials, selectors and injected fields', () => {
   for (const input of [null, [], { action: 'eval', code: 'alert(1)' }, { action: 'tabs', args: ['--help'] },
-    { action: 'open', url: 'https://y.qq.com.evil.test/' }, { action: 'open', url: 'https://x@y.qq.com/' },
-    { action: 'open', url: 'http://music.163.com' }, { action: 'open', url: 'file:///etc/passwd' },
+    { action: 'open', url: 'https://x@y.qq.com/' }, { action: 'open', url: 'https://user:pass@soutxt8.com/' },
+    { action: 'open', url: 'javascript:alert(1)' }, { action: 'open', url: 'data:text/html,hello' }, { action: 'open', url: 'file:///etc/passwd' },
+    { action: 'open', url: 'https://soutxt8.com/\n' }, { action: 'open', url: 'https://' },
     { action: 'click', tabId: 'page-1', target: 'button' }, { action: 'key', tabId: 'page-1', key: 'Ctrl+L' },
     { action: 'fill', tabId: 'page-1', target: 1, text: 'x'.repeat(2001) }, { action: 'connect', profileId: '--help' }]) {
     assert.throws(() => validateBrowserAction(input));
   }
   assert.equal(validateBrowserAction({ action: 'open', url: 'https://y.qq.com' }).url, 'https://y.qq.com/');
+  for (const url of ['https://soutxt8.com/', 'https://pan.quark.cn/', 'https://y.qq.com.evil.test/', 'http://music.163.com/', 'http://192.168.60.230:8317/']) assert.equal(validateBrowserAction({ action: 'open', url }).url, url);
   assert.doesNotMatch(describeBrowserAction({ action: 'fill', tabId: 'p', target: 1, text: 'private-text' }), /private-text/);
   assert.doesNotMatch(describeBrowserAction({ action: 'open', url: 'https://y.qq.com/?token=private-token' }), /private-token/);
+});
+
+test('finite document helpers reject non-web pages and navigation races before executing', () => {
+  const code = browserDocumentExpression('42', 'https://soutxt8.com/');
+  const run = new Function('location', `return ${code}`);
+  assert.equal(run({ protocol: 'https:', href: 'https://soutxt8.com/' }), 42);
+  assert.throws(() => run({ protocol: 'file:', href: 'file:///tmp/code.html' }), /webpage rejected/);
+  assert.throws(() => run({ protocol: 'https:', href: 'https://pan.quark.cn/' }), /页面已跳转/);
+});
+
+test('document guard rejects same-URL reload before running the operation', () => {
+  const location = {protocol:'https:',href:'https://soutxt8.com/'};
+  const document = {};
+  const initial = browserDocumentExpression('42',location.href,{documentId:'snapshot-a',initializeDocument:true});
+  assert.equal(new Function('location','document',`return ${initial}`)(location,document),42);
+  const guarded = browserDocumentExpression('42',location.href,{documentId:'snapshot-a'});
+  const run = new Function('location','document',`return ${guarded}`);
+  assert.equal(run(location,document),42);
+  assert.throws(()=>run(location,{}),/页面已刷新/);
 });
 
 test('child home is isolated and inherits neither host credentials nor arbitrary Node/OpenCLI settings', () => {
@@ -145,7 +172,7 @@ test('connect requires explicit live profile, safely reports absent extension an
   assert.equal(f2.launches[0].config.windowsHide, true);
 });
 
-test('only tabs created by PetPal are returned and acted on; redirects revoke access', async (t) => {
+test('only owned tabs are returned; website redirects work but invalidate the old controls', async (t) => {
   const f = await setup(t);
   await f.runner.execute({ action: 'connect', profileId: 'chrome-a' });
   const opened = await f.runner.execute({ action: 'open', url: 'https://y.qq.com/' });
@@ -154,9 +181,15 @@ test('only tabs created by PetPal are returned and acted on; redirects revoke ac
   await assert.rejects(f.runner.execute({ action: 'snapshot', tabId: 'foreign-tab' }), /小伴创建/);
   await assert.rejects(f.runner.execute({ action: 'tabs', profileId: 'chrome-b' }), /不一致/);
   await assert.rejects(f.runner.execute({ action: 'connect', profileId: 'chrome-b' }), /先关闭/);
-  f.tabs.get('page-1').url = 'https://evil.test/';
-  await assert.rejects(f.runner.execute({ action: 'snapshot', tabId: 'page-1' }), /离开允许/);
-  assert.equal(f.requests.filter((r) => r.body?.action === 'exec').length, 0);
+  await f.runner.execute({ action: 'snapshot', tabId: 'page-1' });
+  f.tabs.get('page-1').url = 'https://pan.quark.cn/';
+  const before = f.requests.filter(request => request.body?.action === 'exec').length;
+  await assert.rejects(f.runner.execute({ action: 'click', tabId: 'page-1', target: 1 }), /页面已跳转/);
+  assert.equal(f.requests.filter(request => request.body?.action === 'exec').length, before);
+  assert.equal((await f.runner.execute({ action: 'snapshot', tabId: 'page-1' })).tab.url, 'https://pan.quark.cn/');
+  await f.runner.execute({ action: 'click', tabId: 'page-1', target: 1 });
+  f.tabs.get('page-1').url = 'file:///tmp/archive.html';
+  await assert.rejects(f.runner.execute({ action: 'snapshot', tabId: 'page-1' }), /离开 HTTP/);
 });
 
 test('real upstream snapshot/click/key helpers use guarded finite scripts, and mutations invalidate refs', async (t) => {
@@ -177,6 +210,44 @@ test('real upstream snapshot/click/key helpers use guarded finite scripts, and m
   const filled = await f.runner.execute({ action: 'fill', tabId: 'page-1', target: 1, text: 'hello' });
   assert.equal(filled.completed, true);
   assert.doesNotMatch(JSON.stringify(filled), /hello/);
+});
+
+test('navigation during a snapshot discards both the new snapshot and the previous refs', async (t) => {
+  let navigate = false;
+  const f = await setup(t, { command: (body, _init, { tabs }) => {
+    if (navigate && body.action === 'exec' && body.code.includes('ANNOTATE_REFS')) {
+      tabs.get('page-1').url = 'https://pan.quark.cn/';
+      return Response.json({ ok: true, data: '[2]<button>下载</button>' });
+    }
+  } });
+  await f.runner.execute({ action: 'connect', profileId: 'chrome-a' });
+  await f.runner.execute({ action: 'open', url: 'https://soutxt8.com/' });
+  await f.runner.execute({ action: 'snapshot', tabId: 'page-1' });
+  navigate = true;
+  await assert.rejects(f.runner.execute({ action: 'snapshot', tabId: 'page-1' }), /读取过程中已跳转/);
+  // Returning to the old URL must not revive the previously valid controls.
+  f.tabs.get('page-1').url = 'https://soutxt8.com/';
+  const before = f.requests.filter(request => request.body?.action === 'exec').length;
+  for (const action of [{action:'click',target:1},{action:'fill',target:2,text:'hello'},{action:'key',key:'Enter'}]) {
+    await assert.rejects(f.runner.execute({ ...action, tabId: 'page-1' }), /先读取/);
+  }
+  assert.equal(f.requests.filter(request => request.body?.action === 'exec').length, before);
+  navigate = false;
+  await f.runner.execute({ action: 'snapshot', tabId: 'page-1' });
+  assert.equal((await f.runner.execute({ action: 'click', tabId: 'page-1', target: 1 })).completed, true);
+});
+
+test('same-URL reload rejects old key and controls; a fresh snapshot restores actions', async (t) => {
+  const f=await setup(t);
+  await f.runner.execute({action:'connect',profileId:'chrome-a'});
+  await f.runner.execute({action:'open',url:'https://soutxt8.com/'});
+  for(const action of [{action:'key',key:'Enter'},{action:'click',target:1},{action:'fill',target:1,text:'hello'}]) {
+    await f.runner.execute({action:'snapshot',tabId:'page-1'});
+    f.documents.set('page-1',{});
+    await assert.rejects(f.runner.execute({...action,tabId:'page-1'}),/页面已刷新/);
+  }
+  await f.runner.execute({action:'snapshot',tabId:'page-1'});
+  assert.equal((await f.runner.execute({action:'key',tabId:'page-1',key:'Enter'})).completed,true);
 });
 
 test('compatible external daemon attaches only on explicit connect, with one random lease per tab', async (t) => {

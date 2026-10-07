@@ -1,5 +1,5 @@
 import { MusicController, musicPlayers, validateMusicCommand } from './music.mjs';
-import { validateBrowserAction } from './opencli.mjs';
+import { validateBrowserAction, describeBrowserAction } from './opencli.mjs';
 import { OpenCliManager } from './opencli-manager.mjs';
 import { validateOpenCliSites, validateOpenCliQuery } from './opencli-sites.mjs';
 import { describeOpenCliQueryArguments } from './opencli-browser-policies.mjs';
@@ -22,7 +22,7 @@ export const desktopToolSpecs = [
   { type: 'function', name: 'petpal_music_mcp_call', description: '按真实MCP工具清单调用音乐服务。先用petpal_music_mcp_tools获取参数。网易云支持搜索/播放/队列/循环模式/音量/桌面歌词；上一首下一首用petpal_music_command。QQ支持search/detail/lyric/url/recommend/mv/similar/producer/hot_comments；排行榜用detail(type=top)。QQ只返回链接，失败或返回链接均不得声称已播放。禁止全局快捷键和未列出的工具。', inputSchema:{type:'object',properties:{player:{type:'string',enum:['netease','qqmusic']},tool:{type:'string'},arguments:{type:'object'}},required:['player','tool','arguments'],additionalProperties:false} },
   { type: 'function', name: 'petpal_music_status', description: '检查本机 QQ 音乐和网易云音乐的安装、媒体会话与可用控制；不会打开或播放音乐。媒体接口不提供歌曲搜索。', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { type: 'function', name: 'petpal_music_command', description: '控制指定的本机音乐客户端。open 打开已安装软件；play/pause/next/previous 只作用于该软件公开的唯一媒体会话。失败时不得声称已完成，也不可用全局媒体键替代。操作由用户确认后执行。', inputSchema: { type: 'object', properties: { player: { type: 'string', enum: ['qqmusic','netease'] }, action: { type: 'string', enum: Object.keys(musicActions) } }, required: ['player','action'], additionalProperties: false } },
-  { type: 'function', name: 'petpal_browser', description: '通过内置 OpenCLI Browser Bridge 操作 PetPal 独立会话租用的 QQ 音乐/网易云音乐网页。需要 Chrome 扩展与显式 profile。先 connect/tabs，再 open 官方HTTPS页面，snapshot获取真实ref，再click/fill/key。只允许音乐官网操作，不接受任意脚本；普通用户标签和其他活跃任务标签不可用，OpenCLI 可能复用自动化组内空闲标签。网页可能需用户登录、会员或点击播放；不是桌面播放器搜索接口。每项操作需确认。', inputSchema: { type: 'object', properties: {
+  { type: 'function', name: 'petpal_browser', description: '通过内置 OpenCLI Browser Bridge 操作任意 HTTP(S) 网站，无域名白名单。需要 Chrome 扩展与显式 profile。先 connect/tabs，再 open 目标网页，snapshot获取真实ref，再click/fill/key；跳转或操作后重新读取快照。只操作本任务租用的页面，不接受任意脚本、CLI参数、file/data/javascript地址或URL登录凭据；普通用户标签和其他活跃任务标签不可用，OpenCLI可能复用自动化组内空闲标签。登录、验证码、协议及付费步骤按用户授权和任务审批处理，遇到需要用户确认的步骤停下说明。点击下载不代表文件已落盘；新弹出页、原生App、文件解压需要对应能力另行验证。操作沿用本轮权限与审批设置。', inputSchema: { type: 'object', properties: {
     action: { type: 'string', enum: ['connect','tabs','open','snapshot','click','fill','key','close'] },
     profileId: { type: 'string' }, tabId: { type: 'string' }, url: { type: 'string' }, target: { type: 'integer' }, text: { type: 'string' }, key: { type: 'string' },
   }, required: ['action'], additionalProperties: false } },
@@ -113,9 +113,7 @@ export function createDesktopTools({ dataDir, music = new MusicController(), sys
       return { description: `${musicPlayers[value.player]}：${musicActions[value.action]}（控制服务主机上的客户端）`, approvalRequired: true };
     }
     if (name === 'petpal_browser') {
-      const value = validateBrowserAction(args);
-      const details = [value.action, value.url, value.profileId && `浏览器配置 ${value.profileId}`, value.tabId && `标签 ${value.tabId}`, value.target !== undefined && `页面控件 ${value.target}`, value.key, value.text !== undefined && `填写文本：${value.text.slice(0, 300)}`].filter(Boolean).join(' · ');
-      return { description: `OpenCLI 音乐网页：${details}`, approvalRequired: true };
+      return { description: `OpenCLI 网页：${describeBrowserAction(args)}`, approvalRequired: true };
     }
     throw new Error('不支持的电脑助手工具。');
   }

@@ -1,5 +1,9 @@
 # 内置 OpenCLI 网站查询
 
+新版通用网页入口默认支持**所有HTTP(S)网站**，没有域名白名单，包括搜TXT吧和夸克等未列在下面的站点。使用`petpal_browser`连接明确选择的Chrome档案，打开目标网址，读取快照，再操作真实控件；跳转或操作后重新读取快照。下列网站是快捷查询适配器，不是访问范围。Windows/Ubuntu客户端需更新自身运行时，Web/Android通过选定执行电脑使用其实际能力。
+
+设置中的「Chrome网页连接 → 打开网站」可输入普通网址。现有账号权限、任务审批和关闭选择继续保留；登录与验证码等需要用户确认的步骤按实际提示处理。来源/页面租约检查不是网络沙箱，不保证下载完成或原生手机App可控。
+
 Windows／Ubuntu 0.9.5 和新版服务增加 `petpal_opencli_sites`、`petpal_opencli_query`。首次配置默认开启；已保存的关闭选择继续保留。公开查询无需 Chrome 扩展。
 
 登录后新建 Agent 对话，选择执行电脑，再提出查询请求。例如：“用内置 OpenCLI 查询 V2EX 热门话题，给我三条链接。”Web／Android 由所选电脑或中央服务器执行；本机入口需要新版桌面客户端。
@@ -47,7 +51,7 @@ Windows／Ubuntu 0.9.5 和新版服务增加 `petpal_opencli_sites`、`petpal_op
 
 浏览器查询需要在**实际执行电脑**安装官方 [Browser Bridge](https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk)，然后在“连接与设置 → 电脑助手 → OpenCLI 网站工具 → Chrome 网页连接”明确选择在线档案并连接。工具不会自动选择档案、登录网站或解决验证码。Web／Android通过所选电脑执行；本机功能需要包含这次源码的新客户端，现有 0.9.6 安装包不会因后端更新而改变本机运行时。
 
-“常用网站”展示所有十三站。六个自建站点可以保存新的 HTTPS 源地址覆盖默认域名，清空覆盖可恢复默认。Agent 不能自行扩大站点范围。`latest` 返回当前可见列表，不能保证网站的时间排序；网盘仅返回可见元数据，不保存或下载文件；消防 `status` 只读当前页面，不提交报名或推断未显示的成绩。已配置入口不等于联网或登录完成。
+“常用网站”展示所有十三站。六个自建站点可以保存新的 HTTPS 源地址覆盖默认域名，清空覆盖可恢复默认。固定查询适配器的源地址由账号管理；任意网站可直接使用通用 petpal_browser 访问，无需添加到这份快捷列表。`latest` 返回当前可见列表，不能保证网站的时间排序；网盘仅返回可见元数据，不保存或下载文件；消防 `status` 只读当前页面，不提交报名或推断未显示的成绩。已配置入口不等于联网或登录完成。
 
 通过 `petpal_opencli_sites` 获取每条命令真实 schema，随后用 `petpal_opencli_query` 调用。例如 `site="bilibili", command="search", arguments={"query":"Live2D","limit":5}`。只读查询仍需要完整 Agent 权限，遵循当前审批；分享地址和提取码不会写进审批描述。来源检查不是网络沙箱，网页自身跳转可能在检查前发生，取消不会撤回已经发出的操作。
 

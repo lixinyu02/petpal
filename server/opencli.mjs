@@ -12,7 +12,6 @@ import { assertBrowserAdapterUrl, browserAdapterOrigins, browserAdapterNetworkRu
 const require = createRequire(import.meta.url);
 const VERSION = '1.8.8';
 const PORT = 19825;
-const ORIGINS = ['https://y.qq.com', 'https://music.163.com'];
 const EXTENSION_URL = 'https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk';
 const POLICY_NOTE = '小伴使用独立网页租约，可能复用 OpenCLI 分组内无活跃租约的空闲页。来源检查不是网络沙箱；网页跳转与已发送操作可能在检查或取消前发生，不会自动重试。';
 const abortError = () => Object.assign(new Error('浏览器操作已取消；已发送操作的结果可能未知'), { name: 'AbortError' });
@@ -28,12 +27,18 @@ const cleanText = (value, limit = 16000) => String(value ?? '')
   .replace(/([?&#](?:token|key|code|session|auth)[^=&#]*=)[^&#\s"']+/gi, '$1[已隐藏]')
   .slice(0, limit);
 
-function officialUrl(value) {
-  if (typeof value !== 'string' || value.length > 2048 || /[\u0000-\u0020\u007f]/.test(value)) throw new Error('需要有效的音乐官网 HTTPS 地址');
+export function browserWebUrl(value) {
+  if (typeof value !== 'string' || value.length > 2048 || /[\u0000-\u0020\u007f]/.test(value)) throw new Error('需要有效的 HTTP(S) 网页地址');
   let url;
-  try { url = new URL(value); } catch { throw new Error('需要有效的音乐官网 HTTPS 地址'); }
-  if (!ORIGINS.includes(url.origin) || url.username || url.password || url.port) throw new Error('仅允许 https://y.qq.com 或 https://music.163.com');
+  try { url = new URL(value); } catch { throw new Error('需要有效的 HTTP(S) 网页地址'); }
+  if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) throw new Error('只支持无 URL 登录凭据的 HTTP(S) 网页地址');
   return url.href;
+}
+
+export function browserDocumentExpression(code, url, { documentId, initializeDocument = false } = {}) {
+  const expected = browserWebUrl(url);
+  const documentGuard = documentId ? `${initializeDocument ? `document.__petpalOpencliSnapshot = ${JSON.stringify(documentId)};` : ''} if (document.__petpalOpencliSnapshot !== ${JSON.stringify(documentId)}) throw new Error('页面已刷新，请重新读取快照');` : '';
+  return `(() => { if (!['http:', 'https:'].includes(location.protocol)) throw new Error('PetPal webpage rejected'); if (location.href !== ${JSON.stringify(expected)}) throw new Error('页面已跳转，请重新读取快照'); ${documentGuard} return (${code}); })()`;
 }
 
 /** Strict public boundary. No arbitrary selector, JavaScript, adapter, path or CLI argument. */
@@ -51,7 +56,7 @@ export function validateBrowserAction(input) {
     if (args[key] !== undefined && (typeof args[key] !== 'string' || !/^[\w][\w.:-]{0,127}$/.test(args[key]))) throw new Error(`${key} 无效`);
   }
   if (['snapshot', 'click', 'fill', 'key'].includes(args.action) && !args.tabId) throw new Error('请选择小伴创建的标签页');
-  if (args.action === 'open') args.url = officialUrl(args.url);
+  if (args.action === 'open') args.url = browserWebUrl(args.url);
   if (['click', 'fill'].includes(args.action) && (!Number.isSafeInteger(args.target) || args.target < 0 || args.target > 100000)) throw new Error('target 必须是最近快照中的数字编号');
   if (args.action === 'fill' && (typeof args.text !== 'string' || args.text.length > 2000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(args.text))) throw new Error('输入内容须为最多 2000 字的文本');
   if (args.action === 'key' && !['Enter', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(args.key)) throw new Error('仅允许回车、退出、方向键和空格');
@@ -60,7 +65,7 @@ export function validateBrowserAction(input) {
 
 export function describeBrowserAction(input) {
   const args = validateBrowserAction(input);
-  const labels = { connect: '连接浏览器扩展', tabs: '查看小伴的音乐标签页', open: '打开音乐官网', snapshot: '读取音乐页面', click: '点击页面控件', fill: '填写页面文本', key: '按页面按键', close: '关闭小伴浏览器连接或标签页' };
+  const labels = { connect: '连接浏览器扩展', tabs: '查看小伴的网页标签页', open: '打开网页', snapshot: '读取网页', click: '点击页面控件', fill: '填写页面文本', key: '按页面按键', close: '关闭小伴浏览器连接或标签页' };
   return `${labels[args.action]}${args.url ? `：${cleanText(args.url, 300)}` : ''}${args.target !== undefined ? `（控件 ${args.target}）` : ''}${args.key ? `（${args.key}）` : ''}${args.profileId ? ` · ${cleanText(args.profileId, 128)}` : ''}`;
 }
 
@@ -177,11 +182,11 @@ export class OpenCliRunner {
     const ready = Boolean(bundle && attached && this.selectedProfileId && profiles.some((p) => p.id === this.selectedProfileId && p.connected));
     return { available: Boolean(bundle), version: bundle?.version || null, runtime: 'bundled',
       daemon: { state, owned, port: PORT, compatible }, extension: { connected, required: true, installUrl: EXTENSION_URL },
-      profiles, selectedProfileId: this.selectedProfileId, ready, allowedOrigins: [...ORIGINS], policyNote: POLICY_NOTE,
+      profiles, selectedProfileId: this.selectedProfileId, ready, websiteAccess: 'all', allowedOrigins: [], policyNote: POLICY_NOTE,
       message: !bundle ? '内置 OpenCLI 不完整' : state === 'external' && compatible ? '发现兼容的 OpenCLI；点击连接将使用独立页面租约，不接管或重启进程'
         : state === 'external' || state === 'unavailable' ? '端口 19825 被不兼容进程占用；请先自行结束其他 OpenCLI，小伴不会接管或重启它'
         : !attached ? '点击连接以启动小伴的 OpenCLI 浏览器桥' : !connected ? '等待兼容的 Chrome OpenCLI 扩展连接（1.0.24 或更新的 1.x 版本）；请安装或更新扩展并打开浏览器'
-          : !ready ? '请选择已连接的 Chrome 配置；不会自动选择' : '浏览器桥已连接，可以打开音乐官网' };
+          : !ready ? '请选择已连接的 Chrome 配置；不会自动选择' : '浏览器桥已连接，可以访问任意 HTTP(S) 网站' };
   }
 
   async #connect(args, signal) {
@@ -251,19 +256,19 @@ export class OpenCliRunner {
     if (!this.tabs.has(tabId)) throw new Error('只能操作小伴创建的标签页');
     const tab = (await this.#list(signal)).find((entry) => entry.page === tabId);
     if (!tab) { this.tabs.delete(tabId); throw new Error('小伴标签页已关闭'); }
-    try { officialUrl(tab.url); } catch { this.tabs.delete(tabId); throw new Error('页面已离开允许的音乐官网，小伴已停止操作此标签页'); }
-    return tab;
+    try { return { ...tab, url: browserWebUrl(tab.url) }; } catch { this.tabs.delete(tabId); throw new Error('页面已离开 HTTP(S) 网页，小伴已停止操作此标签页'); }
   }
   #publicTab(tab) { return { id: tab.page, url: cleanText(tab.url, 2048), title: cleanText(tab.title, 250), active: Boolean(tab.active) }; }
 
-  async #page(tabId, signal) {
+  async #page(tabId, signal, url, documentId, initializeDocument = false) {
     const bundle = await this.#bundle();
     const { BasePage } = await import(pathToFileURL(bundle.basePage).href);
     const page = new BasePage();
-    // Each fixed upstream DOM helper executes only when the *current document*
-    // is on an allowed origin. This still does not sandbox navigation/popups.
+    // Bind finite helpers to the document just checked. Website changes are
+    // allowed, but cannot silently redirect a helper or reuse the old refs.
     page.evaluate = async (code) => {
-      const guarded = `(() => { if (!${JSON.stringify(ORIGINS)}.includes(location.origin)) throw new Error('PetPal origin rejected'); return (${code}); })()`;
+      const guarded = browserDocumentExpression(code, url, { documentId, initializeDocument });
+      initializeDocument = false;
       const result = await this.#command('exec', { page: tabId, code: guarded }, signal, this.tabs.get(tabId)?.session);
       return result.data;
     };
@@ -432,7 +437,7 @@ export class OpenCliRunner {
         return { action: 'close', closed: true };
       }
       if (args.action === 'open') {
-        if (this.tabs.size >= 8) throw new Error('最多保留 8 个小伴音乐标签页，请先关闭不用的页面');
+        if (this.tabs.size >= 8) throw new Error('最多保留 8 个小伴网页标签页，请先关闭不用的页面');
         const session = `petpal-${randomUUID()}`;
         const result = await this.#command('tabs', { op: 'new', url: args.url }, taskSignal, session);
         if (typeof result.page !== 'string' || !/^[\w.:-]{1,128}$/.test(result.page)) throw new Error('浏览器未返回新建标签页身份');
@@ -440,19 +445,31 @@ export class OpenCliRunner {
         const tab = await this.#checkTab(result.page, taskSignal);
         return { action: 'open', tab: this.#publicTab(tab) };
       }
-      await this.#checkTab(args.tabId, taskSignal);
+      const checkedTab = await this.#checkTab(args.tabId, taskSignal);
       if (args.action === 'close') {
         await this.#command('tabs', { op: 'close', page: args.tabId }, taskSignal, this.tabs.get(args.tabId).session);
         this.tabs.delete(args.tabId);
         return { action: 'close', tabId: args.tabId, closed: true };
       }
       const record = this.tabs.get(args.tabId);
+      if (['click', 'fill', 'key'].includes(args.action) && record.snapshotUrl && record.snapshotUrl !== checkedTab.url) {
+        record.snapshotAt = 0; record.refs.clear();
+        throw new Error('页面已跳转，请重新读取快照');
+      }
       if (['click', 'fill', 'key'].includes(args.action) && Date.now() - record.snapshotAt > 60000) throw new Error('请先读取页面快照；控件编号在 60 秒后过期');
-      const page = await this.#page(args.tabId, taskSignal);
+      if (args.action === 'snapshot') {
+        record.snapshotAt = 0; record.refs.clear();
+        record.documentId = randomUUID();
+      }
+      const page = await this.#page(args.tabId, taskSignal, checkedTab.url, record.documentId, args.action === 'snapshot');
       if (args.action === 'snapshot') {
         const text = await page.snapshot({ maxDepth: 20, maxTextLength: 120 });
         const tab = await this.#checkTab(args.tabId, taskSignal);
+        if (tab.url !== checkedTab.url) { record.snapshotAt = 0; record.refs.clear(); throw new Error('页面在读取过程中已跳转，请重新读取快照'); }
+        // A same-URL reload also creates a new document and invalidates refs.
+        await page.evaluate('true');
         record.snapshotAt = Date.now();
+        record.snapshotUrl = tab.url;
         // Upstream snapshots include input values without quotes; remove the
         // remainder of any such tag, rather than risk returning typed secrets.
         const snapshot = cleanText(String(text).replace(/\bvalue=[^>\n]*/g, 'value=[已隐藏]'));

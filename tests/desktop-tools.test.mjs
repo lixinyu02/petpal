@@ -11,6 +11,16 @@ test('registry validates parameters before producing reviewable approvals',()=>{
   assert.throws(()=>tools.describe('petpal_music_command',{player:'qqmusic',action:'open',path:'arbitrary'}));
 });
 
+test('universal website approvals hide typed text and sensitive URL query values',()=>{
+  const tools=fixture();
+  const fill=tools.describe('petpal_browser',{action:'fill',tabId:'page-1',target:7,text:'private-password'});
+  assert.equal(fill.approvalRequired,true);assert.match(fill.description,/填写页面文本.*控件 7/);
+  assert.doesNotMatch(fill.description,/private-password/);
+  const open=tools.describe('petpal_browser',{action:'open',url:'https://soutxt8.com/?token=private-token&code=private-code'});
+  assert.equal(open.approvalRequired,true);assert.match(open.description,/soutxt8.com/);
+  assert.doesNotMatch(open.description,/private-token|private-code/);
+});
+
 test('MCP discovery and calls use the injected local manager and require reviewable full-access actions',async()=>{
   const calls=[], manager={connect:async(...args)=>calls.push(args),status:async()=>({servers:[{id:'qqmusic',connected:true,tools:[{name:'search',inputSchema:{type:'object'}}]}]}),call:async args=>{calls.push(args);return {ok:false,message:'查询失败'};},close:async()=>{}};
   const tools=fixture({},manager);

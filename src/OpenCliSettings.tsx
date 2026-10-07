@@ -26,6 +26,7 @@ export default function OpenCliSettings({connected,user,onPrepareBrowser,prepare
   const [status,setStatus]=useState<OpenCliStatus|null>(null),[catalog,setCatalog]=useState<OpenCliSites|null>(null);
   const [details,setDetails]=useState<Record<string,Command[]>>({});
   const [profileId,setProfileId]=useState(''),[search,setSearch]=useState(''),[filter,setFilter]=useState('callable');
+  const [webUrl,setWebUrl]=useState('');
   const [busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const alive=useRef(false),epoch=useRef(getSessionEpoch()).current,requests=useRef(new Set<AbortController>());
   const operation=useRef<symbol|null>(null),nativeAction=useRef(false);
@@ -70,7 +71,7 @@ export default function OpenCliSettings({connected,user,onPrepareBrowser,prepare
   useEffect(()=>{
     alive.current=true;
     if(allowed)void read(true);
-    else{setConfig(null);setEnabled(true);setOriginDraft(openCliOriginDraft());setStatus(null);setCatalog(null);setDetails({});setProfileId('');setBusy('');setError('');setNotice('');}
+    else{setConfig(null);setEnabled(true);setOriginDraft(openCliOriginDraft());setStatus(null);setCatalog(null);setDetails({});setProfileId('');setWebUrl('');setBusy('');setError('');setNotice('');}
     const cancelRequests=()=>{
       for(const request of requests.current)request.abort();
       if(nativeAction.current&&transport.native&&getSessionEpoch()===epoch)void transport.cancel().catch(()=>{});
@@ -207,9 +208,13 @@ export default function OpenCliSettings({connected,user,onPrepareBrowser,prepare
             <div className="assistant-actions"><button type="button" className="secondary-button" disabled={actionDisabled||!managedStatus?.available||(managedStatus.daemon.state==='external'&&!managedStatus.daemon.compatible)||(!!profileId&&!selectedOnline)} onClick={()=>void browserAction({action:'connect',...(profileId?{profileId}:{})},'检查浏览器连接')}><Globe2 size={14}/>{profileId?'连接所选档案':'检查连接'}</button><button type="button" className="secondary-button" disabled={actionDisabled||!browserAttached} onClick={()=>void browserAction({action:'close'},'断开浏览器')}><Unplug size={14}/>断开</button></div>
           </div></li>
         </ol>
+        {allowed&&managedStatus?.websiteAccess==='all'&&<form className="opencli-web-open" onSubmit={event=>{event.preventDefault();if(!actionDisabled&&browserReady&&managedStatus?.websiteAccess==='all'&&webUrl.trim())void browserAction({action:'open',profileId,url:webUrl.trim()},'打开网页');}}>
+          <label>打开网站<input type="url" aria-label="OpenCLI 网站地址" placeholder="https://…" value={webUrl} maxLength={2048} required disabled={actionDisabled||managedStatus?.websiteAccess!=='all'} onChange={event=>setWebUrl(event.target.value)}/></label>
+          <button type="submit" className="secondary-button" disabled={actionDisabled||!browserReady||managedStatus?.websiteAccess!=='all'||!webUrl.trim()}><ArrowUpRight size={14}/>打开</button>
+        </form>}
         <div className="assistant-actions opencli-browser-sites">{officialSites.map(site=><button type="button" className="secondary-button" key={site.url} disabled={actionDisabled||!browserReady} onClick={()=>void browserAction({action:'open',profileId,url:site.url},`打开${site.name}`)}><ArrowUpRight size={14}/>{site.name}</button>)}</div>
         <div className="assistant-links"><a href="https://github.com/jackwener/opencli" target="_blank" rel="noreferrer">OpenCLI 使用说明 ↗</a></div>
-        <p className="field-help">当前网页动作支持两个音乐官网。兼容的浏览器桥可共享；断开只关闭小伴自己的页面与自有进程。</p>
+        <p className="field-help">{managedStatus?.websiteAccess==='all'?'默认支持所有 HTTP(S) 网站，常用查询列表是快捷入口。':'该执行电脑尚未报告全网站能力，请更新其客户端运行时。'} 网页操作沿用任务权限与审批。断开只关闭小伴自己的页面与自有进程。</p>
       </div>
     </details>
     {notice&&<p className="assistant-message" role="status"><Check size={15}/>{notice}</p>}

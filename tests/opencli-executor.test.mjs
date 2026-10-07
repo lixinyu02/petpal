@@ -56,7 +56,7 @@ test('native OpenCLI rejects query, arbitrary commands, malformed config and inj
     {revision:randomUUID(),enabled:true,siteOrigins:[]},
   ])await assert.rejects(manager.manageOpenCli('configure',body),error=>error.code==='executor_protocol_invalid');
   for(const body of [{url:'https://example.com'},{site:'../../private'},{site:'x',command:'--help'},{site:'x',args:['top']},null])await assert.rejects(manager.manageOpenCli('sites',body));
-  for(const body of [{action:'eval',code:'1+1'},{action:'open',url:'http://music.163.com'},{action:'tabs',command:'shell'},{action:'click',tabId:'owned',target:'selector'}])await assert.rejects(manager.manageOpenCli('action',body));
+  for(const body of [{action:'eval',code:'1+1'},{action:'open',url:'file:///tmp/code.html'},{action:'tabs',command:'shell'},{action:'click',tabId:'owned',target:'selector'}])await assert.rejects(manager.manageOpenCli('action',body));
   await assert.rejects(manager.manageOpenCli('status',{token:'untrusted'}));assert.equal(created,0);
 });
 
