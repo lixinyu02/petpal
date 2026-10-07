@@ -13,7 +13,7 @@ test('pinned inventory keeps 23 public commands separate from reviewed browser a
   assert.equal(catalog.summary.queryCommands, OPENCLI_QUERY_POLICIES.length + OPENCLI_BROWSER_POLICIES.length);
   assert.equal(catalog.summary.totalCommands, catalog.records.length);
   assert.equal(catalog.summary.adapterNamespaces, catalog.sites.length);
-  assert.equal(catalog.notebookSites.length, 13);
+  assert.equal(catalog.notebookSites.length, 20);
   assert.ok(catalog.notebookSites.every(site => site.status === 'ready'));
   assert.ok(catalog.records.filter(command => command.callable).every(command => command.access === 'read'));
   assert.ok(catalog.records.filter(command => command.access === 'write').every(command => !command.callable));

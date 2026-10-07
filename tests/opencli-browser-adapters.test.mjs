@@ -210,7 +210,7 @@ async function runnerFixture(t, options = {}) {
       new Function(`return (${body.code})`);
       const document = { body: {}, querySelectorAll: () => [] };
       // The complete guard and real pinned ranking script run inside the fixture.
-      const result = await vm.runInNewContext(body.code, { ...globals, location: options.foreign ? new URL('https://foreign.example.test/') : tabs.get(body.page), document, fetch: options.fetchImpl || (async () => Response.json({ code: 0, data: { list: [{ title: '真实模块夹具', owner: { name: '作者' }, stat: { view: 12 }, bvid: 'BV1xx411c7mD' }] } })) });
+      const result = await vm.runInNewContext(body.code, { ...globals, location: options.foreign ? new URL(typeof options.foreign === 'string' ? options.foreign : 'https://foreign.example.test/') : tabs.get(body.page), document, fetch: options.fetchImpl || (async () => Response.json({ code: 0, data: { list: [{ title: '真实模块夹具', owner: { name: '作者' }, stat: { view: 12 }, bvid: 'BV1xx411c7mD' }] } })) });
       return Response.json({ ok: true, data: result });
     }
     throw new Error('unexpected fixture command');
@@ -218,6 +218,16 @@ async function runnerFixture(t, options = {}) {
   t.after(async () => { options.command = null; await runner.close(); await rm(directory, { recursive: true, force: true }); });
   return { runner, commands, tabs, setRaw: value => { raw = value; } };
 }
+
+test('known login and challenge redirects are classified without allowing content reads and always release the query lease',async t=>{
+  for(const [site,command,foreign,message] of [['taobao','search','https://login.taobao.com/member/login.jhtml',/登录页/],['douban','book-hot','https://sec.douban.com/b',/手动安全验证/],['jd','search','https://unknown.example.test/',/origin rejected/]]) {
+    let reads=0;
+    const f=await runnerFixture(t,{foreign,fetchImpl:async()=>{reads++;throw new Error('must not read');}});
+    await f.runner.execute({action:'connect',profileId:'fixture-chrome'});
+    await assert.rejects(f.runner.executeAdapter(query(site,command,command==='search'?{query:'猫',limit:1}:{limit:1})),message);
+    assert.equal(reads,0);assert.equal(f.runner.adapterLeases.size,0);assert.equal(f.tabs.size,0);
+  }
+});
 
 test('runner never auto-connects or selects a profile, and ignores supplied module/origin overrides', async t => {
   const f = await runnerFixture(t);

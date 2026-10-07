@@ -20,16 +20,23 @@ const expectedOrigins = {
   bilibili: ['https://www.bilibili.com', 'https://search.bilibili.com'],
   quark: ['https://pan.quark.cn'],
   'xunlei-pan': ['https://pan.xunlei.com'],
+  zhihu:['https://www.zhihu.com'],
+  weibo:['https://weibo.com','https://s.weibo.com'],
+  douban:['https://movie.douban.com','https://book.douban.com'],
+  jd:['https://search.jd.com'],
+  taobao:['https://s.taobao.com'],
+  xiaohongshu:['https://www.xiaohongshu.com'],
+  douyin:['https://www.douyin.com'],
 };
 const configuredSites = ['dygang', 'dyyj', 'fire-exam', 'gamer520', 'switch520', 'wlgo'];
 const shareUrls = { 'baidu-pan': 'https://pan.baidu.com/s/1abcdeFGH', quark: 'https://pan.quark.cn/s/abcdef12', 'xunlei-pan': 'https://pan.xunlei.com/s/abcdef12' };
 const requiredArguments = policy => Object.fromEntries(policy.inputSchema.required.map(key => [key, key === 'url' ? shareUrls[policy.site] || `${policy.origins[0]}/article/1` : key === 'bvid' ? 'BV1xx411c7mD' : key === 'id' ? '1' : '小猫']));
 
-test('notebook catalog contains exactly the 13 supplied sites, default origins and distinct configurable entries', () => {
+test('common website catalog keeps supplied and popular sites separate from six configurable entries', () => {
   assert.deepEqual(Object.fromEntries(NOTEBOOK_WEBSITES.map(site => [site.site, site.origins])), expectedOrigins);
   assert.deepEqual(NOTEBOOK_WEBSITES.filter(site => site.maxOrigins).map(site => site.site).sort(), configuredSites);
   const catalog = notebookWebsiteCatalog({ dyyj: ['https://film.example.com'] });
-  assert.equal(catalog.length, 13);
+  assert.equal(catalog.length, 20);
   assert.ok(catalog.every(site => site.status === 'ready' && site.commands.length));
   assert.deepEqual(catalog.find(site => site.site === 'dyyj').origins, ['https://film.example.com']);
   assert.deepEqual(catalog.find(site => site.site === 'wlgo').origins, expectedOrigins.wlgo);

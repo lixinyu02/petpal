@@ -283,7 +283,7 @@ test('old persisted enabled/revision configurations remain readable and acquire 
   const disabled = await f.manager.configure({ ...await f.manager.config(), enabled: false });
   await writeFile(f.manager.configFile, JSON.stringify({ revision: disabled.revision, enabled: false }));
   assert.deepEqual(await f.manager.config(), disabled);
-  assert.equal((await f.manager.sites()).notebookSites.length, 13);
+  assert.equal((await f.manager.sites()).notebookSites.length, 20);
   await assert.rejects(f.manager.query(browserQuery), error => error.code === 'disabled');
   assert.equal(f.launches.length, 0);
 });

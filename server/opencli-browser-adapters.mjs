@@ -1,6 +1,7 @@
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { popularBrowserAdapter, runPopularBrowserAdapter } from './opencli-popular-adapters.mjs';
 
 const configuredSites = new Set(['dyyj', 'switch520', 'gamer520', 'dygang', 'wlgo', 'fire-exam']);
 const upstreamModules = new Map([
@@ -29,6 +30,8 @@ export function browserAdapterOrigins(policy, siteOrigins = {}) {
 
 /** Limits browser fetch to the reviewed read APIs; no Node cookie/fetch interface is provided. */
 export function browserAdapterNetworkRules(site) {
+  if (site === 'zhihu') return [{origin:'https://www.zhihu.com',methods:['GET'],paths:['/api/v3/feed/topstory/hot-lists/total','/api/v4/search_v3']}];
+  if (site === 'weibo') return [{origin:'https://weibo.com',methods:['GET'],paths:['/ajax/statuses/hot_band']}];
   if (site === 'bilibili') return [{ origin: 'https://api.bilibili.com', methods: ['GET'], paths: ['/x/web-interface/nav', '/x/web-interface/wbi/search/type', '/x/web-interface/view', '/x/web-interface/popular', '/x/web-interface/ranking/v2', '/x/web-interface/history/cursor', '/x/v3/fav/folder/created/list-all', '/x/v3/fav/resource/list', '/x/v2/reply/main', '/x/v2/reply/reply'] }];
   if (site === 'quark') return [
     { origin: 'https://drive-h.quark.cn', methods: ['POST'], paths: ['/1/clouddrive/share/sharepage/token'] },
@@ -310,6 +313,7 @@ export async function runBrowserAdapter({ args, policy, page, bundleRoot, siteOr
   browserAdapterOrigins(policy, siteOrigins);
   let rows;
   if (policy.engine === 'upstream') rows = await runUpstream({ args, policy, page, bundleRoot });
+  else if (policy.engine === 'builtin' && popularBrowserAdapter(key)) rows = await runPopularBrowserAdapter({args,page});
   else if (policy.engine === 'configured' && configuredSites.has(args.site)) {
     const origins = siteOrigins[args.site] || policy.origins;
     if (['read','detail','latest','links','notice','status'].includes(args.command)) rows = await readPage(page, assertBrowserAdapterUrl(options.url || `${origins[0]}/${args.site === 'fire-exam' && args.command === 'notice' ? '#/tzgg' : ''}`, origins), boundedLimit(options.limit ?? 20), ['links','latest'].includes(args.command), args.command === 'links', args.command === 'latest');

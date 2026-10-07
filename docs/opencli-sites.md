@@ -73,3 +73,20 @@ OpenCLI 1.8.8 已内置，公开查询不需要浏览器。浏览器查询需要
 - `open-extension`：在执行电脑打开固定 [官方扩展商店](https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk)。扩展权限由用户确认；不强制安装、不改默认浏览器、不自动连接账号档案。
 
 安装后再次检测，并在这台电脑的 OpenCLI 设置「检查连接」，明确选择在线档案。网页能打开、Chrome 已安装与 Bridge 可查询是三个不同结果。当前 Google 官方 Linux 下载提供 amd64 / arm64；Windows 本轮客户端支持 x64。旧客户端缺少 setup 工具时需更新客户端，不能用任意 shell/npx 替代。此次先上线网页/后端，冻结的 0.9.6 客户端没有重打。
+## 2026-10-08 常用内容、视频与购物网站
+
+新增七站、十一项固定浏览器查询，当前共 80 项开放查询（23 公开、57 浏览器），常用网站目录为 20 站：
+
+| 网站 / site ID | 可调用命令 | 范围 |
+| --- | --- | --- |
+| 知乎 `zhihu` | `hot`、`search(query)` | 热榜及综合搜索首批结果，含话题/回答/文章来源；搜索最多 20 项 |
+| 微博 `weibo` | `hot`、`search(keyword)` | 热搜及当前页博文、作者、时间；可能需登录 |
+| 豆瓣 `douban` | `movie-hot`、`book-hot`、`top250` | 电影/图书榜与电影 Top250 第一页，Top250 最多 25 项 |
+| 京东 `jd` | `search(query)` | 原生首屏商品，当前可见价格和店铺；可能需登录/验证 |
+| 淘宝 `taobao` | `search(query)` | 登录后原生综合搜索首屏，读取商品链接；不下单 |
+| 小红书 `xiaohongshu` | `search(query)` | 登录后原生综合笔记首屏；详情可能需从搜索结果打开 |
+| 抖音 `douyin` | `search(query)` | 登录后原生视频搜索首屏；不播放或下载 |
+
+`limit` 为可选整数，默认 5（微博热榜 10）；除微博热榜最大 50、Top250 最大 25 外，最大 20。不提供这些站点的排序筛选、无限滚动或自动翻页。登录、验证码和站点限流会明确报错；空榜或未加载内容不会伪装成查询成功。实际执行电脑需更新运行时，在其 OpenCLI 设置明确选择已连接 Chrome 档案。Web/Android 通过所选电脑调用。
+
+任意 HTTP(S) 网站仍可用通用 `petpal_browser` 访问；固定快捷查询的范围不限制全站网页能力。清单展示的“可调用”表示已实现查询，并非所有站点在当前档案均已登录或已通过联网测试。本轮验收见 [记录](workflow/2026-10-08-petpal-opencli-popular-acceptance.md)。

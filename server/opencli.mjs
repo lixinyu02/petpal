@@ -331,7 +331,9 @@ export class OpenCliRunner {
         if (expression.length > 100000) throw new Error('固定浏览器脚本过大。');
         const rules = browserAdapterNetworkRules(args.site), remaining = Math.max(1, deadline - Date.now());
         const guarded = `(async () => {
-          if (!${JSON.stringify(origins)}.includes(location.origin)) throw new Error('PetPal origin rejected');
+          if (${JSON.stringify(policy.loginOrigins || [])}.includes(location.origin)) throw new Error('网站已转到登录页；请先在所选 Chrome 档案手动登录，再重新查询。');
+          if (${JSON.stringify(policy.verificationOrigins || [])}.includes(location.origin)) throw new Error('网站要求手动安全验证；请在所选 Chrome 档案完成后重新查询。');
+          if (!${JSON.stringify(origins)}.includes(location.origin)) throw new Error('PetPal origin rejected：页面已跳转到查询范围外，请检查网站登录或验证状态。');
           const networkRules = ${JSON.stringify(rules)}, nativeFetch = globalThis.fetch.bind(globalThis);
           const fetch = async (input, init = {}) => {
             if (!(typeof input === 'string' || input instanceof URL)) throw new Error('PetPal API request rejected');
@@ -342,7 +344,10 @@ export class OpenCliRunner {
             const networkSignal = AbortSignal.timeout(${remaining}); let response;
             try { response = await nativeFetch(url.href,{...init,headers,redirect:'error',signal:networkSignal}); }
             catch { if (networkSignal.aborted) throw new Error('PetPal API deadline exceeded'); throw new Error('网站 API 请求失败，请检查网络与登录。'); }
-            if (!response.ok) { await response.body?.cancel(); throw new Error('网站 API 暂不可用或需要登录。'); }
+            if (!response.ok) {
+              await response.body?.cancel();
+              throw new Error(response.status === 429 ? '网站 API 暂时限流，请稍后重新查询。' : [401,403].includes(response.status) ? '网站 API 拒绝访问，请先在所选 Chrome 档案检查登录或安全验证。' : '网站 API 暂不可用或需要登录。');
+            }
             const reader = response.body?.getReader(); if (!reader) return response;
             const chunks = []; let bytes = 0;
             try { for (;;) { const {value,done} = await reader.read(); if (done) break; bytes += value.byteLength; if (bytes > 2097152) { await reader.cancel(); throw new Error('PetPal API response too large'); } chunks.push(value); } }

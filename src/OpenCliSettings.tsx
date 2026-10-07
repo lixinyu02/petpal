@@ -162,7 +162,7 @@ export default function OpenCliSettings({connected,user,onPrepareBrowser,prepare
     <details className="opencli-notebook">
       <summary><span><strong>常用网站</strong><small>{notebookSites.length?`${notebookSites.length} 个入口${awaitingOrigins?` · ${awaitingOrigins} 个待配置网址`:''}`:'读取状态后查看常用网站'}</small></span><ChevronDown size={16}/></summary>
       <div className="opencli-notebook-body">
-        <p className="field-help">Agent 可查询这些网站。Switch520 使用网站原生搜索，其余自建站点通过必应 site: 搜索；页面读取限于默认或已保存网址。入口已准备不代表所有网站已联网验收。</p>
+        <p className="field-help">常用内容、视频和购物网站使用原生查询；六个自建站点除 Switch520 外使用必应 site: 搜索。查询读取当前可见结果，登录或验证需在执行电脑的 Chrome 中完成。通用网页工具仍可访问任意网站。</p>
         {!!notebookSites.length&&<ul className="opencli-notebook-list">{notebookSites.map(site=>{
           const entry=catalog?.sites.find(item=>item.site===site.site);
           const configured=openCliConfiguredSites.find(item=>item.site===site.site);
