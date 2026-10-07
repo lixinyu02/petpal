@@ -6,6 +6,7 @@ import ts from 'typescript';
 import * as preferences from '../src/chat-assistant-preferences.mjs';
 import * as directories from '../src/project-directory-preferences.mjs';
 import * as reviewUi from '../src/approval-review-ui.mjs';
+import * as messageReuse from '../src/conversation-message-reuse.mjs';
 
 const source=ts.transpileModule(await readFile(new URL('../src/ChatAssistant.tsx',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
 const nodes=tree=>Array.isArray(tree)?tree.flatMap(nodes):!tree||typeof tree!=='object'?[]:[tree,...nodes(tree.props?.children)];
@@ -14,10 +15,10 @@ const clone=value=>structuredClone(value);
 const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return{promise,resolve};};
 
 /** Execute the real background-task effects and approval event handlers, with controllable HTTP delivery. */
-function fixture({hasApproval=true,review,failInitialRead=false}={}){
+function fixture({hasApproval=true,review,failInitialRead=false,messages=[]}={}){
   let index=0,tree,dirty=false,epoch=1,mounted=true,lateUpdates=0,timerId=0;
   const hooks=[],effects=[],timers=new Map(),requests=[],failures=[],delays=[];
-  const child={id:'child-agent',mode:'codex',messages:[],agent:{revision:1,queue:[],paused:false,run:{id:'run-one',status:'running',permissions:{access:'full-access',approval:'review'},approvalReview:review},approvals:hasApproval?[{id:'approval-one',kind:'desktopTool',description:'将 Fixture PC 系统音量调到 45%'}]:[]}};
+  const child={id:'child-agent',mode:'codex',messages:clone(messages),agent:{revision:1,queue:[],paused:false,run:{id:'run-one',status:'running',permissions:{access:'full-access',approval:'review'},approvalReview:review},approvals:hasApproval?[{id:'approval-one',kind:'desktopTool',description:'将 Fixture PC 系统音量调到 45%'}]:[]}};
   const task={id:'task-one',conversationId:child.id,hostId:'fixture-pc',hostName:'Fixture PC',status:'running',message:'处理电脑操作'};
   const props={conversationId:'foreground-chat',tasks:[task],onUpdate(){}};
   const same=(left,right)=>left&&right&&left.length===right.length&&left.every((entry,at)=>Object.is(entry,right[at]));
@@ -45,14 +46,16 @@ function fixture({hasApproval=true,review,failInitialRead=false}={}){
   const modules={react,'react/jsx-runtime':{jsx:element,jsxs:element},'react-dom':{createPortal:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     './api':api,'./AgentPermissions':{__esModule:true,default:Symbol('AgentPermissions'),defaultAgentPermissions:{access:'read-only',approval:'ask'}},
     './WorkspaceControls':{ExecutionHostPicker:Symbol('ExecutionHostPicker'),ModelPicker:Symbol('ModelPicker')},'./ProjectDirectory':{__esModule:true,default:Symbol('ProjectDirectory')},
-    './chat-assistant-preferences.mjs':preferences,'./project-directory-preferences.mjs':directories,'./approval-review-ui.mjs':reviewUi,'./platform/ui-motion.ts':{useUiEntrance:()=>({current:null})}};
-  vm.runInNewContext(source,{module,exports:module.exports,AbortController,setTimeout(callback){const id=++timerId;timers.set(id,callback);return id;},clearTimeout:id=>timers.delete(id),require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);return modules[name];}});
+    './chat-assistant-preferences.mjs':preferences,'./project-directory-preferences.mjs':directories,'./approval-review-ui.mjs':reviewUi,'./conversation-message-reuse.mjs':messageReuse,'./platform/ui-motion.ts':{useUiEntrance:()=>({current:null})}};
+  vm.runInNewContext(source,{module,exports:module.exports,AbortController,setTimeout(callback,delay){const id=++timerId;timers.set(id,{callback,delay});return id;},clearTimeout:id=>timers.delete(id),require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);return modules[name];}});
   const render=()=>{for(let pass=0;pass<8;pass++){index=0;effects.length=0;dirty=false;tree=module.exports.ChatAssistantTasks(props);for(const effect of effects)effect();if(!dirty)return tree;}assert.fail('fixture failed to settle');};
   const find=(type,predicate=()=>true)=>nodes(tree).find(node=>node.type===type&&predicate(node.props));
   const flush=async()=>{for(let tick=0;tick<10;tick++){await new Promise(resolve=>setImmediate(resolve));if(dirty&&mounted)render();}};
   if(failInitialRead)failures.push({path:`/conversations/${child.id}`,method:'GET',error:new Error('Fixture child read unavailable')});
   render();
   return{requests,child,props,find,render,flush,text:()=>text(tree),get lateUpdates(){return lateUpdates;},
+    get snapshot(){return hooks.find(hook=>hook?.value&&Object.hasOwn(hook.value,child.id))?.value[child.id];},
+    tick(delay){const entry=[...timers].find(([,timer])=>timer.delay===delay);assert.ok(entry,`Missing ${delay}ms poll timer`);timers.delete(entry[0]);entry[1].callback();render();},
     click(label){const button=find('button',props=>text(props.children)===label);assert.ok(button,`Missing ${label}`);button.props.onClick();render();},
     failNext(path,method='GET',error=new Error('Fixture lost response')){failures.push({path,method,error});},
     delayNext(path,method='GET'){const entry={path,method,started:deferred(),release:deferred()};delays.push(entry);return{started:entry.started.promise,release(value){entry.value=value;entry.release.resolve();}};},
@@ -105,4 +108,55 @@ for(const boundary of ['session','parent','unmount'])test(`late background appro
 test('guardian progress is reported while manual approvals retain priority over automatic-review feedback',async t=>{
   const reviewing=fixture({hasApproval:false,review:{status:'inProgress',reviewId:'review-one',rationale:'检查本次命令授权'}});t.after(()=>reviewing.close());await reviewing.flush();assert.match(reviewing.text(),/自动审查中/);assert.match(reviewing.text(),/检查本次命令授权/);assert.equal(reviewing.find('div',props=>props.className==='assistant-task-approval'),undefined);
   const waiting=fixture({review:{status:'approved',source:'local-rule'}});t.after(()=>waiting.close());await waiting.flush();assert.match(waiting.text(),/等待确认/);assert.match(waiting.text(),/音量操作已通过本地规则审查/);assert.ok(waiting.requests.every(item=>item.method==='GET'));
+});
+
+const history=()=>[
+  {id:'child-user',role:'user',content:'请检查项目状态'},
+  {id:'child-assistant',role:'assistant',content:'正在检查',status:'running',model:'fixture-model'},
+];
+
+test('real background child polls preserve message references while rendering the latest agent state',async t=>{
+  const f=fixture({hasApproval:false,messages:history()});t.after(()=>f.close());await f.flush();
+  const before=f.snapshot;assert.ok(before);const reads=f.requests.length;
+  f.child.agent.revision=2;f.child.agent.run.approvalReview={status:'inProgress',rationale:'检查项目授权'};
+  f.tick(3000);await f.flush();
+  assert.equal(f.requests.length,reads+1);assert.notStrictEqual(f.snapshot,before);
+  assert.strictEqual(f.snapshot.messages,before.messages);assert.equal(f.snapshot.agent.revision,2);
+  assert.equal(f.snapshot.agent.run.approvalReview.status,'inProgress');assert.match(f.text(),/自动审查中/);assert.match(f.text(),/检查项目授权/);
+  assert.ok(f.requests.every(item=>item.method==='GET'),'polling must remain read-only');
+});
+
+test('real background child polls replace only changed final content and preserve the historical message',async t=>{
+  const f=fixture({hasApproval:false,messages:history()});t.after(()=>f.close());await f.flush();const before=f.snapshot;
+  f.child.messages[1].content='检查完成，项目状态正常';f.child.messages[1].status='completed';f.child.agent.revision=3;f.child.agent.run.status='completed';
+  f.tick(3000);await f.flush();
+  assert.notStrictEqual(f.snapshot.messages,before.messages);assert.strictEqual(f.snapshot.messages[0],before.messages[0]);assert.notStrictEqual(f.snapshot.messages[1],before.messages[1]);
+  assert.equal(f.snapshot.messages[1].content,'检查完成，项目状态正常');assert.equal(f.snapshot.messages[1].status,'completed');assert.equal(f.snapshot.agent.revision,3);
+});
+
+test('manual approval-state refresh uses the real child read and preserves unchanged message references',async t=>{
+  const f=fixture({hasApproval:false,messages:history()});t.after(()=>f.close());await f.flush();const before=f.snapshot;
+  f.failNext(`/conversations/${f.child.id}`);f.tick(3000);await f.flush();assert.match(f.text(),/无法读取后台 Agent 的审批状态/);
+  f.child.agent.revision=4;f.child.agent.run.approvalReview={status:'inProgress',rationale:'刷新后的审批进度'};
+  const reads=f.requests.length;f.click('刷新审批状态');await f.flush();
+  assert.equal(f.requests.length,reads+1);assert.strictEqual(f.snapshot.messages,before.messages);assert.equal(f.snapshot.agent.revision,4);
+  assert.match(f.text(),/刷新后的审批进度/);assert.doesNotMatch(f.text(),/无法读取后台 Agent/);assert.ok(f.requests.every(item=>item.method==='GET'));
+});
+
+for(const boundary of ['session','parent','unmount'])test(`late child snapshots cannot replace messages across the ${boundary} boundary`,async t=>{
+  const f=fixture({hasApproval:false,messages:history()});t.after(()=>f.close());await f.flush();const before=f.snapshot;
+  f.child.messages[1].content='late old-scope response';f.child.agent.revision=99;
+  const read=f.delayNext(`/conversations/${f.child.id}`);f.tick(3000);await read.started;
+  if(boundary==='session')f.changeSession();else if(boundary==='parent')f.changeParent();else await f.close();
+  read.release();await f.flush();
+  if(boundary==='parent')assert.equal(f.snapshot,undefined);else assert.strictEqual(f.snapshot,before);
+  assert.equal(f.lateUpdates,0);assert.doesNotMatch(f.text(),/late old-scope response/);
+});
+
+test('manual child read cannot install a late snapshot after the session epoch changes',async t=>{
+  const f=fixture({hasApproval:false,messages:history()});t.after(()=>f.close());await f.flush();const before=f.snapshot;
+  f.failNext(`/conversations/${f.child.id}`);f.tick(3000);await f.flush();
+  f.child.messages[1].content='late manually refreshed response';f.child.agent.revision=99;
+  const read=f.delayNext(`/conversations/${f.child.id}`);f.click('刷新审批状态');await read.started;f.changeSession();read.release();await f.flush();
+  assert.strictEqual(f.snapshot,before);assert.equal(f.lateUpdates,0);assert.equal(f.snapshot.agent.revision,1);
 });

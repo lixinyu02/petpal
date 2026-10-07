@@ -11,6 +11,7 @@ import {watchCompanionBreakpoint} from '../src/companion-mount.mjs';
 import {createChatDisplay} from '../src/chat-display.mjs';
 import {mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMessage} from '../src/chat-assistant-preferences.mjs';
 import * as organizationSync from '../src/conversation-organization-sync.mjs';
+import {reuseConversationMessages} from '../src/conversation-message-reuse.mjs';
 import {createBrowserSetupDraft} from '../src/browser-setup-draft.mjs';
 import {reasoningEfforts} from '../src/desktop-settings.mjs';
 import * as uiMotion from '../src/platform/ui-motion.mjs';
@@ -92,7 +93,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     './companion-mount.mjs':{watchCompanionBreakpoint},'./chat-display.mjs':{createChatDisplay},'./useChatScroll':{useChatScroll:()=>({contentRef:{current:null},onScroll(){},latest(){},showLatest:false})},
     './AgentPermissions':{...component('AgentPermissions'),defaultAgentPermissions:permissions},'./approval-review-ui.mjs':approvalReviewUi,
     './ProjectDirectory':{...component('ProjectDirectory'),useProjectDirectory:()=>({value:'',change(){}})},
-    './project-directory-preferences.mjs':projectPreferences,'./execution-hosts.mjs':executionHosts,'./conversation-organization-sync.mjs':organizationSync,
+    './project-directory-preferences.mjs':projectPreferences,'./execution-hosts.mjs':executionHosts,'./conversation-organization-sync.mjs':organizationSync,'./conversation-message-reuse.mjs':{reuseConversationMessages},
     './ChatAssistant':{ChatAssistantControls:Symbol('ChatAssistantControls'),ChatAssistantTasks:Symbol('ChatAssistantTasks'),useChatAssistant:()=>({value:{hostId:'',providerId:'',enabled:false,permissions},snapshot:()=>undefined})},
     './chat-assistant-preferences.mjs':{mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMessage},
     './Attachments':{useAttachments:()=>attachments,AttachmentInput:Symbol('AttachmentInput'),AttachmentDrafts:Symbol('AttachmentDrafts'),MessageImages:Symbol('MessageImages')},

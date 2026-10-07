@@ -21,6 +21,14 @@ Date: 2026-10-07。基线86dfc13；源码与本地隔离验收，不部署或重
 
 基线build从86dfc13的tracked src逐文件读取，避免并行编辑影响；当前工作区未回退。构建只写本轮baseline目录，现有dist与安装包保留。
 
+## issue-2：会话快照引用复用
+
+完整JSON数据一致时才复用消息引用，不维护易遗漏的新字段清单。相同顺序/ID走同索引路径；重排时按需建立ID索引，重复ID限制一对一，跨会话不复用。任务/项目/标题等元数据使用权威快照；不丢弃附件、模型、状态、任务报告或新增字段变化。
+
+接入组织/状态合并、Chat+Agent替换、自动化缓存及后台子任务轮询/手动刷新。epoch、revision、controller和迟到响应门禁保持。
+
+211项相关回归、TypeScript、helper语法与diff检查通过。原始日志`message-snapshot-regression.log`。算法计数在`message-snapshot-reuse-counts.mjs/.json`：500条元数据更新复用500条，尾条变化复用499条；1000条压力数据分别1000/999。1000条超出产品500条上限，仅作算法压力检查，不代表产品支持超过500条会话。
+
 ## 后续验收
 
-issue-2消息引用与issue-3浏览器/完整回归正在进行。Chrome插件初始化连续超时，已使用缓存的Playwright CLI启动独立Chrome会话；不操作个人浏览器标签或生产账号。
+issue-3浏览器/完整回归正在进行。Chrome插件初始化连续超时，已使用缓存的Playwright CLI启动独立Chrome会话；不操作个人浏览器标签或生产账号。

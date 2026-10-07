@@ -1,4 +1,5 @@
 import {projectDirectoryIssue,projectDirectoryValue,readProjectDirectory,saveProjectDirectory} from './project-directory-preferences.mjs';
+import {reuseConversationMessages} from './conversation-message-reuse.mjs';
 const prefix = 'petpal.chat-assistant.';
 const hostId = value => typeof value === 'string' && value.length <= 160 ? value : '';
 const providerId = value => typeof value === 'string' && value.length <= 160 ? value : '';
@@ -68,7 +69,7 @@ export function mergeChatAssistantConversation(before,updated,activeId,busy) {
   // Merge only new reports; an older stream snapshot must never replace local text.
   const ids=new Set(before.messages.map(message=>message.id));
   const reports=updated.messages.filter(message=>message.role==='assistant'&&message.assistantTaskId&&message.status==='complete'&&!ids.has(message.id));
-  return {...before,assistantTasks,messages:replacing?updated.messages:reports.length?[...before.messages,...reports]:before.messages};
+  return {...before,assistantTasks,messages:replacing?reuseConversationMessages(before,updated).messages:reports.length?[...before.messages,...reports]:before.messages};
 }
 
 /** Timer-delivered task reports can follow the current Chat reply in the same snapshot. */

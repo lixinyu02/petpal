@@ -7,6 +7,7 @@ import * as uiMotion from '../src/platform/ui-motion.mjs';
 import * as assistantPreferences from '../src/chat-assistant-preferences.mjs';
 import * as projectPreferences from '../src/project-directory-preferences.mjs';
 import * as approvalReviewUi from '../src/approval-review-ui.mjs';
+import * as messageReuse from '../src/conversation-message-reuse.mjs';
 
 const compile=async file=>ts.transpileModule(await readFile(new URL(file,import.meta.url),'utf8'),{
   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true},
@@ -58,6 +59,7 @@ function fixture({reduced=false,hidden=false}={}){
     './api':{getSessionEpoch:()=>1,isSessionChanged:()=>false,api:async path=>{apiCalls.push(path);throw Error('Unexpected API call');}},
     './chat-assistant-preferences.mjs':assistantPreferences,'./project-directory-preferences.mjs':projectPreferences,
     './approval-review-ui.mjs':approvalReviewUi,
+    './conversation-message-reuse.mjs':messageReuse,
     './AgentPermissions':{__esModule:true,default:Symbol('AgentPermissions'),defaultAgentPermissions:permissions},
     './WorkspaceControls':controls,'./ProjectDirectory':{__esModule:true,default:Symbol('ProjectDirectory')},
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},

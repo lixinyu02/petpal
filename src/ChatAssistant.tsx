@@ -3,6 +3,7 @@ import {createPortal} from 'react-dom';
 import {ArrowUpRight,Check,ChevronDown,Loader2,Monitor,Settings2,ShieldCheck,Square,Terminal,X} from 'lucide-react';
 import {api,getSessionEpoch,isSessionChanged,type AgentHost,type AgentPermissions as Permissions,type AssistantTask,type ChatAssistantConfig,type Conversation,type Provider,type State,type User} from './api';
 import {chatAssistantDefaultIssue,chatAssistantForHost,chatAssistantTargetIssue,restoreChatAssistantPreferences,saveChatAssistantPreferences,snapshotChatAssistant,type ChatAssistantPreferences} from './chat-assistant-preferences.mjs';
+import {reuseConversationMessages} from './conversation-message-reuse.mjs';
 import AgentPermissions,{defaultAgentPermissions} from './AgentPermissions';
 import {approvalReviewLabel} from './approval-review-ui.mjs';
 import {ExecutionHostPicker,ModelPicker} from './WorkspaceControls';
@@ -218,7 +219,7 @@ export function ChatAssistantTasks({conversationId,tasks=[],onUpdate}:{conversat
     const poll=async()=>{
       const results=await Promise.allSettled(childIds.split(',').map(async id=>{const child=await api<Conversation>(`/conversations/${encodeURIComponent(id)}`,{signal:controller.signal});if(child.id!==id)throw new Error('后台任务回执与当前请求不一致。');return child;}));
       if(controller.signal.aborted||epoch!==getSessionEpoch())return;
-      setChildren(previous=>{const next={...previous};for(const result of results)if(result.status==='fulfilled')next[result.value.id]=result.value;return next;});
+      setChildren(previous=>{const next={...previous};for(const result of results)if(result.status==='fulfilled')next[result.value.id]=reuseConversationMessages(previous[result.value.id],result.value);return next;});
       setApprovalReadError(results.some(result=>result.status==='rejected')?'暂时无法读取后台 Agent 的审批状态，请检查连接或刷新审批状态。':'');
       timer=setTimeout(()=>void poll(),3000);
     };
@@ -241,7 +242,7 @@ export function ChatAssistantTasks({conversationId,tasks=[],onUpdate}:{conversat
   async function readChild(id:string){
     const next=await api<Conversation>(`/conversations/${encodeURIComponent(id)}`);
     if(next.id!==id)throw new Error('后台任务回执与当前请求不一致。');
-    if(current())setChildren(previous=>({...previous,[id]:next}));
+    if(current())setChildren(previous=>({...previous,[id]:reuseConversationMessages(previous[id],next)}));
     return next;
   }
   async function refreshApprovalState(childId?:string){

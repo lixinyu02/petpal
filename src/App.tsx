@@ -4,6 +4,7 @@ import CompanionOptions from './CompanionOptions';
 import ChatMessages from './ChatMessages';
 import ConversationHistory from './ConversationHistory';
 import {creationProjectId,conversationHistoryScope,mergeConversationOrganization,mergeOrganizationSnapshot} from './conversation-organization-sync.mjs';
+import {reuseConversationMessages} from './conversation-message-reuse.mjs';
 import {watchCompanionBreakpoint} from './companion-mount.mjs';
 import {createChatDisplay,type ChatDisplay} from './chat-display.mjs';
 import {useChatScroll} from './useChatScroll';
@@ -76,7 +77,7 @@ export default function App() {
   const deletedConversationIds=useRef(new Set<string>());
   const [loadedAutomationConversation,setLoadedAutomationConversation]=useState<Conversation|null>(null);
   const loadedAutomationConversationRef=useRef(loadedAutomationConversation);loadedAutomationConversationRef.current=loadedAutomationConversation;
-  function cacheAutomationConversation(value:Conversation|null){loadedAutomationConversationRef.current=value;setLoadedAutomationConversation(value);}
+  function cacheAutomationConversation(value:Conversation|null){const next=value?reuseConversationMessages(loadedAutomationConversationRef.current||undefined,value):null;loadedAutomationConversationRef.current=next;setLoadedAutomationConversation(next);}
   const chatAssistantDefaultRevision = useRef(0);
   const [ready, setReady] = useState(false);
   const [connected, setConnected] = useState(false);

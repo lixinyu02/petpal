@@ -97,6 +97,17 @@ test('new durable task reports merge during a foreground stream without replacin
   assert.equal(mergeChatAssistantConversation(merged,polled,'chat',true).messages,merged.messages);
 });
 
+test('authoritative background snapshots keep stable message rows while task completion and changed text stay fresh',()=>{
+  const before={id:'chat',messages:[{id:'one',role:'user',content:'question'},{id:'two',role:'assistant',content:'answer',status:'complete'}],assistantTasks:[{id:'task',status:'running'}]};
+  const incoming={...structuredClone(before),assistantTasks:[{id:'task',status:'completed'}]};
+  const merged=mergeChatAssistantConversation(before,incoming,null,false);
+  assert.equal(merged.messages,before.messages);assert.equal(merged.assistantTasks[0].status,'completed');
+  const changed=structuredClone(incoming);changed.messages[1].content='updated answer';
+  const fresh=mergeChatAssistantConversation(merged,changed,null,false);
+  assert.equal(fresh.messages[0],before.messages[0]);assert.equal(fresh.messages[1],changed.messages[1]);
+  assert.equal(fresh.messages[1].content,'updated answer');
+});
+
 test('foreground completion and cancellation stay attached to their own reply when background reports finish later',()=>{
   const cancelled={id:'foreground',role:'assistant',status:'cancelled',content:'partial'};
   const report={id:'result',role:'assistant',status:'complete',content:'task done',assistantTaskId:'task',assistantTaskReport:'result'};

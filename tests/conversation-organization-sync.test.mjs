@@ -27,3 +27,17 @@ test('archived deep links and notifications reveal the selected conversation',()
   assert.deepEqual(conversationHistoryScope({projectId:null},'work'),{projectFilter:'unassigned',archived:false});
   assert.deepEqual(conversationHistoryScope({projectId:'work'},'all'),{projectFilter:'all',archived:false});
 });
+
+test('organization and full state snapshots retain unchanged message references while accepting authoritative metadata',()=>{
+  const before={id:'chat',title:'local',projectId:'old',messages:[{id:'one',role:'assistant',content:'stable',status:'complete'}],agent:{revision:1}};
+  const incoming={...structuredClone(before),title:'server',projectId:'new',agent:{revision:2}};
+  for(const preserve of [false,true]){
+    const merged=mergeConversationOrganization(before,incoming,preserve);
+    assert.equal(merged.messages,before.messages);assert.equal(merged.agent,incoming.agent);
+    assert.equal(merged.title,preserve?'local':'server');assert.equal(merged.projectId,preserve?'old':'new');
+    const state=mergeOrganizationSnapshot({conversations:[before]},{conversations:[incoming]},preserve,new Set());
+    assert.equal(state.conversations[0].messages,before.messages);assert.equal(state.conversations[0].agent,incoming.agent);
+  }
+  const unrelated={...incoming,id:'another-conversation'};
+  assert.equal(mergeConversationOrganization(before,unrelated,true),unrelated,'different conversations cannot inherit messages or organization');
+});

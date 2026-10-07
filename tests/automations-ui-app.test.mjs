@@ -14,6 +14,7 @@ import {reasoningEfforts} from '../src/desktop-settings.mjs';
 import * as uiMotion from '../src/platform/ui-motion.mjs';
 import {composerKeyAction} from '../src/composer-keyboard.mjs';
 import * as organizationSync from '../src/conversation-organization-sync.mjs';
+import {reuseConversationMessages} from '../src/conversation-message-reuse.mjs';
 import * as approvalReviewUi from '../src/approval-review-ui.mjs';
 
 const source=ts.transpileModule(await readFile(new URL('../src/App.tsx',import.meta.url),'utf8'),{
@@ -134,7 +135,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     './companion-mount.mjs':{watchCompanionBreakpoint},'./chat-display.mjs':{createChatDisplay},'./useChatScroll':{useChatScroll:()=>({contentRef:{current:null},onScroll(){},latest(){},showLatest:false})},
     './AgentPermissions':{...component('AgentPermissions'),defaultAgentPermissions:permissions},
     './ProjectDirectory':{...component('ProjectDirectory'),useProjectDirectory:()=>({value:'',change(){}})},
-    './project-directory-preferences.mjs':projectPreferences,'./execution-hosts.mjs':executionHosts,'./conversation-organization-sync.mjs':organizationSync,
+    './project-directory-preferences.mjs':projectPreferences,'./execution-hosts.mjs':executionHosts,'./conversation-organization-sync.mjs':organizationSync,'./conversation-message-reuse.mjs':{reuseConversationMessages},
     './approval-review-ui.mjs':approvalReviewUi,
     './ChatAssistant':{ChatAssistantControls:Symbol('ChatAssistantControls'),ChatAssistantTasks:Symbol('ChatAssistantTasks'),useChatAssistant:()=>({value:{hostId:'',providerId:'',enabled:false,permissions},snapshot:()=>assistantSnapshot})},
     './chat-assistant-preferences.mjs':{mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMessage},
@@ -316,6 +317,29 @@ const idleAgent=(id,extra={})=>conversation(id,{mode:'codex',agent:{revision:1,p
 
 const reviewCapability={available:true,modelStrategy:'agent-model',dynamicTools:'bounded-audio-rules-with-manual-fallback',version:1};
 const approvalConversation=(extra={})=>idleAgent('approval-ui-task',{agent:{revision:1,paused:false,queue:[],submissions:[],run:{id:'active-run',status:'running',turnId:'turn-one',permissions:{access:'full-access',approval:'review'},providerId:'model',model:'fixture-model',hostId:'pc-one'},approvals:[{id:'approval-ui-one',kind:'desktopTool',description:'将所选电脑系统音量调到 45%'}]},...extra});
+
+for(const automation of [false,true])test(`real App ${automation?'loaded automation':'selected Agent'} readback keeps messages stable when approval state changes`,async t=>{
+  const saved=approvalConversation({id:`snapshot-${automation?'automation':'agent'}`,messages:[{id:'stable-question',role:'user',content:'question'},{id:'stable-answer',role:'assistant',content:'**answer**',status:'complete'}],...(automation?{automationId:'automation-reuse'}:{})});
+  const f=workspaceFixture({canUseCodex:true,initialConversations:[saved],registeredAutomationIds:automation?['automation-reuse']:[],handleAgentControl:true});t.after(()=>f.close());await f.ready();
+  if(automation){f.openView('自动化');f.automationResult(saved.id);}else f.selectHistory(saved.id);
+  await f.ready();const before=f.component('ChatMessages').props.messages;
+  assert.ok(f.find('button',props=>text(props.children)==='允许本次'));
+  f.click('允许本次');await f.ready();
+  assert.equal(f.component('ChatMessages').props.messages,before,'agent-only readback cannot invalidate stable rows or scroll dependencies');
+  assert.equal(f.find('button',props=>text(props.children)==='允许本次'),undefined,'the authoritative approval state must still update');
+  if(!automation)assert.equal(f.component('AgentQueue').props.state.approvals.length,0);
+});
+
+test('real App background task updates reuse stable rows and replace only changed authoritative text',async t=>{
+  const saved=conversation('background-snapshot',{messages:[{id:'question',role:'user',content:'question'},{id:'answer',role:'assistant',content:'old answer',status:'complete'}],assistantTasks:[{id:'task',status:'running'}]});
+  const f=workspaceFixture({initialConversations:[saved]});t.after(()=>f.close());await f.ready();f.selectHistory(saved.id);await f.ready();
+  const before=f.component('ChatMessages').props.messages,incoming={...structuredClone(saved),assistantTasks:[{id:'task',status:'completed'}]};
+  f.component('ChatAssistantTasks').props.onUpdate(incoming);await f.ready();
+  assert.equal(f.component('ChatMessages').props.messages,before);assert.equal(f.component('ChatAssistantTasks').props.tasks[0].status,'completed');
+  const changed=structuredClone(incoming);changed.messages[1].content='new answer';
+  f.component('ChatAssistantTasks').props.onUpdate(changed);await f.ready();const after=f.component('ChatMessages').props.messages;
+  assert.equal(after[0],before[0]);assert.equal(after[1],changed.messages[1]);assert.equal(after[1].content,'new answer');
+});
 
 test('permission UI receives only the actual selected executor review capability, never the global fallback',async t=>{
   const f=workspaceFixture({canUseCodex:true,globalReviewCapability:reviewCapability,hostReviewCapability:{...reviewCapability,available:false,message:'Fixture old PC'}});t.after(()=>f.close());await f.ready();f.enterAgent();await f.ready();f.chooseHost('pc-one');

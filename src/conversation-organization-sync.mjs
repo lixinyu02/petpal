@@ -1,7 +1,10 @@
+import {reuseConversationMessages} from './conversation-message-reuse.mjs';
+
 /** Keep local durable organization when an older stream/poll completes later. */
 export function mergeConversationOrganization(before, incoming, preserve) {
-  if (!before || !preserve) return incoming;
-  return {...incoming,title:before.title,customTitle:before.customTitle,projectId:before.projectId??null,archivedAt:before.archivedAt??null};
+  const snapshot = reuseConversationMessages(before, incoming);
+  if (!before || before.id !== incoming.id || !preserve) return snapshot;
+  return {...snapshot,title:before.title,customTitle:before.customTitle,projectId:before.projectId??null,archivedAt:before.archivedAt??null};
 }
 
 export function mergeOrganizationSnapshot(before, incoming, preserve, deletedIds) {

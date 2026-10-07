@@ -6,6 +6,7 @@ import ts from 'typescript';
 import * as preferences from '../src/chat-assistant-preferences.mjs';
 import * as projectPreferences from '../src/project-directory-preferences.mjs';
 import * as reviewUi from '../src/approval-review-ui.mjs';
+import * as messageReuse from '../src/conversation-message-reuse.mjs';
 
 const source=ts.transpileModule(await readFile(new URL('../src/ChatAssistant.tsx',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
 const clone=value=>JSON.parse(JSON.stringify(value));
@@ -27,6 +28,7 @@ function fixture(local,scope='service:alice',defaultHostId='alice-pc'){
     react,'react/jsx-runtime':{},'react-dom':{},'lucide-react':{},
     './api':{getSessionEpoch:()=>epoch,isSessionChanged:()=>false,api:async path=>{apiCalls.push(path);throw Error('Review settings must not execute API calls');}},
     './chat-assistant-preferences.mjs':preferences,'./project-directory-preferences.mjs':projectPreferences,'./approval-review-ui.mjs':reviewUi,
+    './conversation-message-reuse.mjs':messageReuse,
     './AgentPermissions':{__esModule:true,default:Symbol('AgentPermissions'),defaultAgentPermissions:{access:'read-only',approval:'ask'}},
     './WorkspaceControls':{},'./ProjectDirectory':{},'./platform/ui-motion.ts':{},
   };
