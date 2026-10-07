@@ -252,10 +252,25 @@ export class OpenCliRunner {
     if (!this.tabs.size) await this.#command('tabs', { op: 'list' }, signal);
     return tabs;
   }
-  async #checkTab(tabId, signal) {
+  async #ownedTab(tabId, signal) {
     if (!this.tabs.has(tabId)) throw new Error('只能操作小伴创建的标签页');
     const tab = (await this.#list(signal)).find((entry) => entry.page === tabId);
     if (!tab) { this.tabs.delete(tabId); throw new Error('小伴标签页已关闭'); }
+    return tab;
+  }
+  async #checkTab(tabId, signal, initialNavigation = false) {
+    const deadline = Date.now() + Math.min(5000, this.timeoutMs);
+    let tab = await this.#ownedTab(tabId, signal);
+    // tabs/new acknowledges the page identity before navigation completes.
+    // The extension may report an empty URL before about:blank/navigation.
+    // Wait only for this new lease's initial page, without replaying new.
+    while (initialNavigation && (tab.url === '' || tab.url === 'about:blank')) {
+      checkAbort(signal);
+      if (Date.now() >= deadline) throw new Error('新网页仍在加载；租约已保留，请查看标签页状态或关闭此页，不要重复打开');
+      await new Promise(resolve => setTimeout(resolve, Math.min(75, deadline - Date.now())));
+      checkAbort(signal);
+      tab = await this.#ownedTab(tabId, signal);
+    }
     try { return { ...tab, url: browserWebUrl(tab.url) }; } catch { this.tabs.delete(tabId); throw new Error('页面已离开 HTTP(S) 网页，小伴已停止操作此标签页'); }
   }
   #publicTab(tab) { return { id: tab.page, url: cleanText(tab.url, 2048), title: cleanText(tab.title, 250), active: Boolean(tab.active) }; }
@@ -442,15 +457,17 @@ export class OpenCliRunner {
         const result = await this.#command('tabs', { op: 'new', url: args.url }, taskSignal, session);
         if (typeof result.page !== 'string' || !/^[\w.:-]{1,128}$/.test(result.page)) throw new Error('浏览器未返回新建标签页身份');
         this.tabs.set(result.page, { snapshotAt: 0, refs: new Set(), session });
-        const tab = await this.#checkTab(result.page, taskSignal);
+        const tab = await this.#checkTab(result.page, taskSignal, true);
         return { action: 'open', tab: this.#publicTab(tab) };
       }
-      const checkedTab = await this.#checkTab(args.tabId, taskSignal);
       if (args.action === 'close') {
+        // Closing an owned lease is also allowed while its first page is blank.
+        await this.#ownedTab(args.tabId, taskSignal);
         await this.#command('tabs', { op: 'close', page: args.tabId }, taskSignal, this.tabs.get(args.tabId).session);
         this.tabs.delete(args.tabId);
         return { action: 'close', tabId: args.tabId, closed: true };
       }
+      const checkedTab = await this.#checkTab(args.tabId, taskSignal);
       const record = this.tabs.get(args.tabId);
       if (['click', 'fill', 'key'].includes(args.action) && record.snapshotUrl && record.snapshotUrl !== checkedTab.url) {
         record.snapshotAt = 0; record.refs.clear();

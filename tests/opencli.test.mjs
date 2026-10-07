@@ -14,7 +14,7 @@ async function setup(t, options = {}) {
   const tabs = new Map();
   const documents = new Map();
   const profiles = options.profiles ?? [{ contextId: 'chrome-a', extensionConnected: true, extensionVersion: '1.0.24' }, { contextId: 'chrome-b', extensionConnected: true, extensionVersion: '1.0.24' }];
-  const runner = new OpenCliRunner({ dataDir: directory, timeoutMs: 1000, shutdownTimeoutMs: options.shutdownTimeoutMs ?? 30,
+  const runner = new OpenCliRunner({ dataDir: directory, timeoutMs: options.timeoutMs ?? 1000, shutdownTimeoutMs: options.shutdownTimeoutMs ?? 30,
     checkPort: async () => options.portBusy || false,
     launch: (file, args, config) => {
       launches.push({ file, args, config });
@@ -190,6 +190,58 @@ test('only owned tabs are returned; website redirects work but invalidate the ol
   await f.runner.execute({ action: 'click', tabId: 'page-1', target: 1 });
   f.tabs.get('page-1').url = 'file:///tmp/archive.html';
   await assert.rejects(f.runner.execute({ action: 'snapshot', tabId: 'page-1' }), /离开 HTTP/);
+});
+
+test('a new page may have an empty URL then be blank; navigation waits without replaying open', async (t) => {
+  let reads=0;
+  const f=await setup(t,{command:(body,_init,{tabs})=>{
+    if(body.op==='list'&&tabs.has('page-1'))tabs.get('page-1').url=++reads===1?'':reads===2?'about:blank':'https://pan.quark.cn/';
+  }});
+  await f.runner.execute({action:'connect',profileId:'chrome-a'});
+  const opened=await f.runner.execute({action:'open',url:'https://pan.quark.cn/'});
+  assert.equal(opened.tab.url,'https://pan.quark.cn/');assert.equal(reads,3);
+  assert.equal(f.requests.filter(r=>r.body?.op==='new').length,1);
+  assert.ok(f.requests.filter(r=>r.body?.op==='list').every(r=>r.body.contextId==='chrome-a'));
+});
+
+test('cancelled initial navigation keeps the exact lease closable, without replaying open',async(t)=>{
+  const controller=new AbortController();let reads=0;
+  const f=await setup(t,{command:(body,_init,{tabs})=>{
+    if(body.op==='list'&&tabs.has('page-1')){tabs.get('page-1').url='about:blank';if(++reads===2)controller.abort();}
+  }});
+  await f.runner.execute({action:'connect',profileId:'chrome-a'});
+  await assert.rejects(f.runner.execute({action:'open',url:'https://pan.quark.cn/'},{signal:controller.signal}),{name:'AbortError'});
+  assert.equal(f.runner.tabs.has('page-1'),true);
+  await f.runner.execute({action:'close',tabId:'page-1'});
+  assert.equal(f.tabs.has('page-1'),false);
+  const opened=f.requests.find(r=>r.body?.op==='new').body;
+  const closed=f.requests.find(r=>r.body?.op==='close').body;
+  assert.equal(closed.session,opened.session);
+  assert.equal(f.requests.filter(r=>r.body?.op==='new').length,1);
+});
+
+test('initial blank navigation is bounded and timeout retains a closable lease',async(t)=>{
+  const f=await setup(t,{timeoutMs:180,command:(body,_init,{tabs})=>{
+    if(body.op==='list'&&tabs.has('page-1'))tabs.get('page-1').url='about:blank';
+  }});
+  await f.runner.execute({action:'connect',profileId:'chrome-a'});
+  await assert.rejects(f.runner.execute({action:'open',url:'https://pan.quark.cn/'}),error=>error.name==='AbortError'||/仍在加载/.test(error.message));
+  assert.equal(f.runner.tabs.has('page-1'),true);
+  await f.runner.execute({action:'close',tabId:'page-1'});
+  assert.equal(f.requests.filter(r=>r.body?.op==='new').length,1);
+});
+
+test('only initial blank gets a grace period; illegal initial and existing blank pages are rejected',async(t)=>{
+  const f=await setup(t,{command:(body,_init,{tabs})=>{
+    if(body.op==='list'&&tabs.has('page-1'))tabs.get('page-1').url='file:///tmp/unsafe.html';
+  }});
+  await f.runner.execute({action:'connect',profileId:'chrome-a'});
+  await assert.rejects(f.runner.execute({action:'open',url:'https://pan.quark.cn/'}),/离开 HTTP/);
+  const g=await setup(t);
+  await g.runner.execute({action:'connect',profileId:'chrome-a'});
+  await g.runner.execute({action:'open',url:'https://soutxt8.com/'});
+  g.tabs.get('page-1').url='about:blank';
+  await assert.rejects(g.runner.execute({action:'snapshot',tabId:'page-1'}),/离开 HTTP/);
 });
 
 test('real upstream snapshot/click/key helpers use guarded finite scripts, and mutations invalidate refs', async (t) => {
