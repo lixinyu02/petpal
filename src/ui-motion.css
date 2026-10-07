@@ -129,12 +129,10 @@ html :is(.welcome,.message,.message-avatar,.modal,.toast,.ui-toast,.chat-assista
   }
 }
 
-/* No hover displacement or replay when reduced, unavailable or hidden. Positioning
-   transforms such as the centered "latest message" button are kept intact. */
+/* No hover displacement or replay when reduced, unavailable or hidden. */
 html:not([data-ui-motion="full"]) :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button),
 html:not([data-ui-motion="full"]) :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button)>svg:not(.spin),
 html:not([data-ui-motion="full"]) .suggestions>button:hover .suggestion-arrow{transform:none!important}
-html:not([data-ui-motion="full"]) .chat-latest-button:active{transform:translateX(-50%)!important}
 html:not([data-ui-motion="full"]) .settings-tabs>button::after,
 html:not([data-ui-motion="full"]) .composer::after{transition:none!important}
 html:not([data-ui-motion="full"]) :is(.workspace-model-popup,.workspace-disclosure-content){animation:none!important}
@@ -143,7 +141,6 @@ html:not([data-ui-motion="full"]) :is(.workspace-model-popup,.workspace-disclosu
   html :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button),
   html :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button)>svg:not(.spin),
   html .suggestions>button:hover .suggestion-arrow{transform:none!important}
-  html .chat-latest-button:active{transform:translateX(-50%)!important}
   html .settings-tabs>button::after,
   html .composer::after{transition:none!important}
   html :is(.workspace-model-popup,.workspace-disclosure-content){animation:none!important}
