@@ -47,3 +47,62 @@
 @media(prefers-reduced-motion:reduce) {
   .app-shell .composer { transition:none; }
 }
+
+/* Phone controls keep their touch targets while giving the conversation more room. */
+@media(max-width:650px) {
+  html .app-shell:has(.workspace) {
+    --workspace-pet-height:48px;
+    --workspace-header-height:calc(58px + env(safe-area-inset-top,0px));
+  }
+  html .app-shell .workspace-controls:is(.is-chat,.is-agent) { padding-block:5px 6px; }
+  html .app-shell .workspace-mode-row .mode-switch { min-height:44px;padding:0;gap:2px;border-radius:11px; }
+  html .app-shell .workspace-mode-row .mode-switch>button { min-height:44px;padding-block:6px;border-radius:9px; }
+  html .app-shell .workspace-context-row { margin-top:4px; }
+  html .app-shell .workspace-controls:is(.is-chat,.is-agent) .workspace-model-trigger,
+  html .app-shell .workspace-controls.is-agent .workspace-context-row .workspace-model-trigger,
+  html .app-shell .workspace-controls.is-agent .workspace-context-row .workspace-host-picker>summary {
+    min-height:44px;padding-block:3px;border-radius:9px;
+  }
+  html .app-shell .workspace-controls.is-agent .workspace-model-current,
+  html .app-shell .workspace-controls.is-agent .workspace-host-current { gap:1px; }
+  html .app-shell .workspace-controls.is-agent .workspace-model-current small,
+  html .app-shell .workspace-controls.is-agent .workspace-host-current>small { font-size:10px;line-height:1.2; }
+  html .app-shell .workspace-controls.is-agent .workspace-model-current strong,
+  html .app-shell .workspace-controls.is-agent .workspace-host-current>strong { line-height:1.35; }
+  html .app-shell .workspace-controls .agent-project-directory { margin-top:2px; }
+  html .app-shell .workspace-controls .agent-project-directory>summary { align-items:center;padding-block:3px; }
+  html .app-shell .workspace-controls .agent-project-summary>strong { white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+  html .app-shell .composer-area { padding-top:4px;padding-bottom:calc(4px + env(safe-area-inset-bottom,0px)); }
+  html .app-shell .composer textarea { height:44px;min-height:44px;max-height:116px;padding-block:9px 5px;line-height:1.5;overflow-y:auto; }
+  html .app-shell .composer-bottom { padding-bottom:4px; }
+  html .app-shell .composer-footer { margin-top:0; }
+  html .app-shell .composer-runtime .agent-permissions { margin-bottom:0; }
+
+  /* Busy and unconfirmed submissions retain their full-width task controls. */
+  html .app-shell .composer:not(.composer-busy):not(:has(.unconfirmed-submission)) {
+    display:grid;grid-template-columns:44px minmax(0,1fr) 44px;gap:0 2px;padding:4px;
+  }
+  html .app-shell .composer:not(.composer-busy):not(:has(.unconfirmed-submission)) .attachment-drafts {
+    grid-column:1/-1;grid-row:1;padding:4px 4px 6px;
+  }
+  html .app-shell .composer:not(.composer-busy):not(:has(.unconfirmed-submission)) .attachment-error {
+    grid-column:1/-1;grid-row:2;min-width:0;margin:4px;overflow-wrap:anywhere;
+  }
+  html .app-shell .composer:not(.composer-busy):not(:has(.unconfirmed-submission)) textarea {
+    grid-column:2;grid-row:3;padding:10px 5px;
+  }
+  html .app-shell .composer:not(.composer-busy):not(:has(.unconfirmed-submission)) .composer-bottom { display:contents; }
+  html .app-shell .composer:not(.composer-busy):not(:has(.unconfirmed-submission)) .composer-tools { grid-column:1;grid-row:3;align-self:end; }
+  html .app-shell .composer:not(.composer-busy):not(:has(.unconfirmed-submission)) .composer-send-actions { grid-column:3;grid-row:3;align-self:end; }
+  html .app-shell .composer .attach-image { width:44px;min-height:44px;justify-content:center;padding:0; }
+  html .app-shell .composer .attach-image span { display:none; }
+  html[data-short-viewport=true] .app-shell .workspace-mode-row .mode-switch,
+  html[data-short-viewport=true] .app-shell .workspace-mode-row .mode-switch>button { min-height:44px; }
+  html[data-short-viewport=true] .app-shell .composer textarea { height:44px;min-height:44px;max-height:92px; }
+}
+@supports(field-sizing:content) {
+  @media(max-width:650px) {
+    html .app-shell .composer textarea { field-sizing:content;height:auto; }
+    html[data-short-viewport=true] .app-shell .composer textarea { height:auto; }
+  }
+}
