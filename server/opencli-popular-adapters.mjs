@@ -2,6 +2,22 @@
 // request URLs, scrolls, login submission or upstream CLI lifecycle are exposed.
 const entries = new Set(['zhihu/hot','zhihu/search','weibo/hot','weibo/search','douban/movie-hot','douban/book-hot','douban/top250','jd/search','taobao/search','xiaohongshu/search','douyin/search']);
 export const popularBrowserAdapter = key => entries.has(key);
+// Only these server-authored messages may cross a daemon's opaque exec-error
+// boundary. Raw page/daemon exceptions may contain private data and stay hidden.
+export const POPULAR_BROWSER_ERRORS = Object.freeze([
+  '网站请求过于频繁，请稍后查询。',
+  '网站 API 拒绝请求，请检查 Chrome 登录或验证状态。',
+  '网站 API 未返回有效 JSON；可能需要登录、验证或接口已变更。',
+  '网站 API 返回格式或状态无效；请检查登录、访问限制与接口版本。',
+  '网站没有返回有效条目；可能无匹配内容、需要登录或接口已变更。',
+  '网站已转到登录页，请先在所选 Chrome 档案登录。',
+  '网站没有停留在查询页面；请检查登录、验证或网页跳转。',
+  '网站要求手动安全验证，请在 Chrome 完成后重新查询。',
+  '网站显示登录窗口，请先在所选 Chrome 档案手动登录。',
+  '该查询需要登录，请先在所选 Chrome 档案登录。',
+  '网站要求手动验证或暂时限流，请在 Chrome 检查后重新查询。',
+  '未读取到有效条目；页面可能尚未加载、需要登录/验证或结构已变更，请在 Chrome 检查。',
+]);
 
 // Serialized into the lease-owned page. Keep all helpers within this function.
 async function readPopularApi(site, command, options) {
@@ -49,7 +65,7 @@ async function readPopularDom(site, command, limit) {
   const value = (node, selector, max = 300) => normalize(node.querySelector(selector)?.textContent).slice(0,max);
   const visible = node => Boolean(node && node.getClientRects().length && !node.closest('[hidden], [aria-hidden="true"]'));
   const link = (node, selector, hosts) => {
-    const element = node.querySelector(selector); if (!element) return null;
+    const element = node.matches?.(selector) ? node : node.querySelector(selector); if (!element) return null;
     let url; try { url = new URL(element.getAttribute('href'),location.href); } catch { return null; }
     if (!['http:','https:'].includes(url.protocol) || url.username || url.password || url.port || !hosts.includes(url.hostname)) return null;
     return {element,url};
@@ -68,7 +84,7 @@ async function readPopularDom(site, command, limit) {
     if (!expected.test(location.pathname)) throw new Error('网站没有停留在查询页面；请检查登录、验证或网页跳转。');
     const challenge = [...document.querySelectorAll('.geetest_panel, #captcha, .nc-container, [class*="captcha-container"]')].some(visible);
     if (challenge || /安全验证|异常请求|访问验证|人机验证|captcha/i.test(document.title || '')) throw new Error('网站要求手动安全验证，请在 Chrome 完成后重新查询。');
-    const loginModal = [...document.querySelectorAll('.login-container, .login-modal, .login-mask, [class*="loginModal"], [class*="login-panel"], [role="dialog"]')].some(node=>visible(node) && /登录|登陆|扫码|sign in/i.test(node.innerText || node.textContent || ''));
+    const loginModal = [...document.querySelectorAll('.login-container, .login-modal, .login-mask, .douyin_login_comp_flat_panel, [class*="loginModal"], [class*="login-panel"], [role="dialog"]')].some(node=>visible(node) && /登录|登陆|扫码|sign in/i.test(node.innerText || node.textContent || ''));
     if (loginModal) throw new Error('网站显示登录窗口，请先在所选 Chrome 档案手动登录。');
     const rows = [], seen = new Set();
     for (const node of document.querySelectorAll(selectors[site])) {
@@ -123,7 +139,7 @@ async function readPopularDom(site, command, limit) {
     }
     if (rows.length) return rows;
     const body = document.body?.innerText || '';
-    if (/登录后(?:查看|浏览|搜索)|请(?:先)?登录(?:后|以|再)|扫码登录后/i.test(body)) throw new Error('该查询需要登录，请先在所选 Chrome 档案登录。');
+    if (/登录后(?:即可)?(?:查看|浏览|搜索)|请(?:先)?登录(?:后|以|再)|扫码登录后/i.test(body)) throw new Error('该查询需要登录，请先在所选 Chrome 档案登录。');
     if (/请完成(?:安全|人机)验证|拖动滑块|访问过于频繁|请求异常|verify you are human/i.test(body)) throw new Error('网站要求手动验证或暂时限流，请在 Chrome 检查后重新查询。');
     if (site !== 'douban' && /(?:^|\n)\s*(?:暂无(?:相关)?(?:搜索)?结果|没有找到(?:相关)?结果|未找到相关(?:内容|商品|视频)|抱歉，没有找到相关的宝贝)\s*[。！!]?\s*(?:$|\n)/.test(body)) return [];
     if (Date.now() >= deadline) throw new Error('未读取到有效条目；页面可能尚未加载、需要登录/验证或结构已变更，请在 Chrome 检查。');

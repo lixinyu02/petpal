@@ -229,6 +229,19 @@ test('known login and challenge redirects are classified without allowing conten
   }
 });
 
+test('safe query failures survive opaque daemon exec errors while raw daemon errors remain hidden',async t=>{
+  const f=await runnerFixture(t,{fetchImpl:async()=>new Response('private page',{status:403})});
+  await f.runner.execute({action:'connect',profileId:'fixture-chrome'});
+  await assert.rejects(f.runner.executeAdapter(query('zhihu','hot',{limit:1})),/拒绝访问.*登录或安全验证/);
+  assert.equal(f.runner.adapterLeases.size,0);assert.equal(f.tabs.size,0);
+  const raw=await runnerFixture(t,{command:async body=>body.action==='exec'?Response.json({ok:false,error:'Bearer privateDaemonToken password=privatePassword'}):null});
+  await raw.runner.execute({action:'connect',profileId:'fixture-chrome'});
+  await assert.rejects(raw.runner.executeAdapter(query('zhihu','hot',{limit:1})),error=>{
+    assert.match(error.message,/浏览器桥操作失败/);assert.doesNotMatch(error.message,/privateDaemonToken|privatePassword/);return true;
+  });
+  assert.equal(raw.runner.adapterLeases.size,0);assert.equal(raw.tabs.size,0);
+});
+
 test('runner never auto-connects or selects a profile, and ignores supplied module/origin overrides', async t => {
   const f = await runnerFixture(t);
   await assert.rejects(f.runner.executeAdapter(query('bilibili', 'ranking', { limit: 1 })), /断开|显式选择/);

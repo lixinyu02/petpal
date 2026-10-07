@@ -7,7 +7,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { browserQueryPolicy, normalizeSiteOrigins, validateBrowserQueryUrl } from './opencli-browser-policies.mjs';
 import { validateOpenCliQuery } from './opencli-sites.mjs';
-import { assertBrowserAdapterUrl, browserAdapterOrigins, browserAdapterNetworkRules, runBrowserAdapter } from './opencli-browser-adapters.mjs';
+import { BROWSER_ADAPTER_ERRORS, assertBrowserAdapterUrl, browserAdapterOrigins, browserAdapterNetworkRules, runBrowserAdapter } from './opencli-browser-adapters.mjs';
 
 const require = createRequire(import.meta.url);
 const VERSION = '1.8.8';
@@ -331,6 +331,8 @@ export class OpenCliRunner {
         if (expression.length > 100000) throw new Error('固定浏览器脚本过大。');
         const rules = browserAdapterNetworkRules(args.site), remaining = Math.max(1, deadline - Date.now());
         const guarded = `(async () => {
+          const safeErrors = ${JSON.stringify(BROWSER_ADAPTER_ERRORS)};
+          try {
           if (${JSON.stringify(policy.loginOrigins || [])}.includes(location.origin)) throw new Error('网站已转到登录页；请先在所选 Chrome 档案手动登录，再重新查询。');
           if (${JSON.stringify(policy.verificationOrigins || [])}.includes(location.origin)) throw new Error('网站要求手动安全验证；请在所选 Chrome 档案完成后重新查询。');
           if (!${JSON.stringify(origins)}.includes(location.origin)) throw new Error('PetPal origin rejected：页面已跳转到查询范围外，请检查网站登录或验证状态。');
@@ -359,9 +361,19 @@ export class OpenCliRunner {
             }
             return new Response(blob,{status:response.status,statusText:response.statusText,headers:response.headers});
           };
-          return (${expression});
+          return await (${expression});
+          } catch (error) {
+            const index = safeErrors.indexOf(error?.message);
+            if (index >= 0) return {__petpalAdapterError:index};
+            throw error;
+          }
         })()`;
         const result = await this.#command('exec', { page: lease.page, code: guarded }, taskSignal, lease.session);
+        if (result.data && !Array.isArray(result.data) && Object.hasOwn(result.data,'__petpalAdapterError')) {
+          const index = result.data.__petpalAdapterError;
+          if (!Number.isInteger(index) || index < 0 || index >= BROWSER_ADAPTER_ERRORS.length) throw new Error('浏览器查询错误响应格式无效。');
+          throw new Error(BROWSER_ADAPTER_ERRORS[index]);
+        }
         return result.data;
       };
       const wait = async seconds => {

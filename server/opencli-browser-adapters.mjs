@@ -1,7 +1,18 @@
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { popularBrowserAdapter, runPopularBrowserAdapter } from './opencli-popular-adapters.mjs';
+import { POPULAR_BROWSER_ERRORS, popularBrowserAdapter, runPopularBrowserAdapter } from './opencli-popular-adapters.mjs';
+
+export const BROWSER_ADAPTER_ERRORS = Object.freeze([...POPULAR_BROWSER_ERRORS,
+  '网站已转到登录页；请先在所选 Chrome 档案手动登录，再重新查询。',
+  '网站要求手动安全验证；请在所选 Chrome 档案完成后重新查询。',
+  'PetPal origin rejected：页面已跳转到查询范围外，请检查网站登录或验证状态。',
+  '网站 API 暂时限流，请稍后重新查询。',
+  '网站 API 拒绝访问，请先在所选 Chrome 档案检查登录或安全验证。',
+  '网站 API 暂不可用或需要登录。',
+  '网站 API 请求失败，请检查网络与登录。',
+  'PetPal API deadline exceeded',
+]);
 
 const configuredSites = new Set(['dyyj', 'switch520', 'gamer520', 'dygang', 'wlgo', 'fire-exam']);
 const upstreamModules = new Map([

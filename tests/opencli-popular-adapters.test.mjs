@@ -104,6 +104,9 @@ test('JD and Taobao use stable product identities and visible price only; tracki
   const taobao=id=>node({attrs:{'data-spm-act-id':'998877'},fields:{'a[href*="item.htm"]':node({href:'https://item.taobao.com/item.htm?id='+id+'&token=private'}),'[class*="title--"]':node({text:'猫粮'})}});
   const products=await query('taobao','search',{query:'猫粮'},fixture({cards:[taobao('not-an-id'),taobao('456')]}));
   assert.equal(products.length,1);assert.equal(products[0].id,'456');assert.equal(products[0].url,'https://item.taobao.com/item.htm?id=456');
+  const rootCard=node({href:'https://item.taobao.com/item.htm?id=789',fields:{'[class*="title--"]':node({text:'猫零食'})}});
+  rootCard.matches=selector=>selector==='a[href*="item.htm"]';
+  assert.equal((await query('taobao','search',{query:'猫'},fixture({cards:[rootCard]})))[0].id,'789');
 });
 
 test('Xiaohongshu and Douyin return validated note/video links without leaking signature or guessing counters',async()=>{
@@ -119,6 +122,7 @@ test('visible login overlays and verification titles stop reads, while hidden ov
   const modal=node({text:'扫码登录'});
   await assert.rejects(query('taobao','search',{query:'猫'},fixture({modal})),/登录窗口/);
   await assert.rejects(query('jd','search',{query:'猫'},fixture({title:'安全验证'})),/手动安全验证/);
+  await assert.rejects(query('douyin','search',{query:'猫'},fixture({body:'登录后即可搜索更多精彩视频'})),/需要登录/);
   const card=node({fields:{'.from a[href]':node({href:'https://weibo.com/detail/123'}),'[node-type="feed_list_content_full"], [node-type="feed_list_content"], .txt':node({text:'如何辨认验证码'})}});
   assert.equal((await query('weibo','search',{keyword:'验证码'},fixture({cards:[card],body:'登录 注册',modal:node({text:'登录',shown:false})}))).length,1);
   assert.equal((await query('jd','search',{query:'no-match'},fixture({body:'暂无相关结果'}))).length,0);
