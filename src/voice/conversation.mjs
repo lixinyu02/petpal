@@ -1,4 +1,5 @@
 import { createVoiceGate } from './audio.mjs';
+import { voiceGateProfile } from './detection-preferences.mjs';
 import { createSentenceSplitter, createSpeechQueue } from './speech-flow.mjs';
 
 export function cleanTranscript(text) {
@@ -162,7 +163,9 @@ export function createVoiceConversation(options) {
   async function start(){
     if(disposed||current)return;
     if(!options.isAllowed()){publish({phase:'error',error:'请先登录并选择可用的聊天模型。'});return;}
-    const job={id:options.id(),providerId:options.getProviderId(),abort:new AbortController(),capture:null,gate:createVoiceGate(),monitor:createVoiceGate({threshold:.04,minSpeechMs:500,noiseRatio:2.4}),utterance:null,turn:null,idleTimer:null,conversationId:'',sequence:0,chatPending:null,chatRelease:null,chatStopFor:null,reports:[],reportIds:new Set()};
+    let profile;
+    try{profile=voiceGateProfile(options.getSensitivity?.());}catch{publish({phase:'error',error:'未能读取麦克风检测设置，请重新开始。'});return;}
+    const job={id:options.id(),providerId:options.getProviderId(),abort:new AbortController(),capture:null,gate:createVoiceGate(profile.listening),monitor:createVoiceGate(profile.interruption),utterance:null,turn:null,idleTimer:null,conversationId:'',sequence:0,chatPending:null,chatRelease:null,chatStopFor:null,reports:[],reportIds:new Set()};
     job.capture=options.createCapture({onFrame:(frame,level)=>feed(job,frame,level),onError:error=>fail(job,error)});current=job;
     publish({...empty(),phase:'starting',active:true});
     try{

@@ -36,8 +36,8 @@ export function createVoiceGate({ threshold = .028, silenceMs = 900, preRollMs =
   if (![threshold,silenceMs,preRollMs,minSpeechMs,maxSeconds,noiseRatio].every(Number.isFinite) || !(threshold > 0 && threshold < 1 && silenceMs >= 250 && silenceMs <= 3000 && preRollMs >= 0 && preRollMs <= 500 && minSpeechMs >= 0 && minSpeechMs <= 1000 && maxSeconds > 0 && maxSeconds <= 45 && noiseRatio >= 1 && noiseRatio <= 4)) throw new Error('Invalid voice gate configuration.');
   let active = false, silence = 0, total = 0, voicedSamples = 0, consecutiveVoiced = 0, candidateSpan = 0, quietGap = 0, history = [], noiseFloor = 0, onsetThreshold = threshold;
   const preLimit = Math.floor(VOICE_RATE * preRollMs / 1000), maxSamples = Math.floor(VOICE_RATE * maxSeconds);
-  const minSpeechSamples = Math.floor(VOICE_RATE * minSpeechMs / 1000), gapLimit = Math.floor(VOICE_RATE * .08), sliceSize = Math.floor(VOICE_RATE * .02);
-  const candidateLimit = Math.max(minSpeechSamples * 1.6, minSpeechSamples + gapLimit);
+  const minSpeechSamples = Math.floor(VOICE_RATE * minSpeechMs / 1000), gapLimit = Math.floor(VOICE_RATE * .12), sliceSize = Math.floor(VOICE_RATE * .02);
+  const candidateLimit = Math.max(minSpeechSamples * 2, minSpeechSamples + gapLimit);
   // Reset per-utterance audio, not the room's learned noise floor.
   const reset = () => { active = false; silence = total = voicedSamples = consecutiveVoiced = candidateSpan = quietGap = 0; history = []; };
   function tail(chunks, limit) {
@@ -74,9 +74,11 @@ export function createVoiceGate({ threshold = .028, silenceMs = 900, preRollMs =
               quietGap += part.length; candidateSpan += part.length;
               if (quietGap > gapLimit || candidateSpan > candidateLimit) voicedSamples = candidateSpan = quietGap = 0;
             }
-            if (!voicedSamples && learnNoise) {
+            if (!voicedSamples && learnNoise && energy < threshold) {
               // Only idle, below-threshold audio can teach the floor. Never
               // train on an utterance or on the assistant's playback microphone.
+              // A raised adaptive threshold must not teach louder signals back
+              // into the floor, or progressively louder speech could be swallowed.
               const seconds = energy > noiseFloor ? .6 : 4;
               noiseFloor += (energy - noiseFloor) * (1 - Math.exp(-part.length / VOICE_RATE / seconds));
             }

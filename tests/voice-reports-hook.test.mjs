@@ -41,13 +41,22 @@ function harness(context){
     speech:{engine:'cosyvoice',streamingEnabled:true,supported:true,unlock:async()=>true,stop(){},speakAsync(text,id,signal){const pending=deferred();plays.push({text,id,signal,...pending});signal.addEventListener('abort',()=>pending.reject(signal.reason),{once:true});return pending.promise;}},
   };
   const document=new EventTarget();document.hidden=false;const window=new EventTarget(),navigator={mediaDevices:new EventTarget()};
+  const preferences=new Map();window.localStorage={getItem:key=>preferences.get(key)||null,setItem:(key,value)=>preferences.set(key,value)};
   const values={__voiceReportsHook:runtime,document,window,navigator},descriptors=new Map(Object.keys(values).map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
   for(const[key,value]of Object.entries(values))Object.defineProperty(globalThis,key,{value,configurable:true});
   context.after(()=>{for(const slot of slots)slot?.cleanup?.();for(const[key,descriptor]of descriptors)if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];});
   function render(options={}){runtime.options={...runtime.options,...options};cursor=0;const voice=useVoiceConversation(runtime.options);while(effects.length)effects.shift()();return voice;}
   const voice=render();
-  return{voice,render,runtime,calls,streams,plays,sessions,baselines,baseline(value){baseline=value;},feed(){captures.at(-1).handlers.onFrame(new Float32Array(6000).fill(.05),.05);},async ask(text='继续聊'){this.feed();this.feed();await flush();const finishing=voice.finishUtterance();sessions.at(-1).final.resolve(text);await flush();return{finishing};}};
+  return{voice,render,runtime,calls,streams,plays,sessions,baselines,window,preferences,baseline(value){baseline=value;},feed(level=.05){captures.at(-1).handlers.onFrame(new Float32Array(6000).fill(level),level);},async ask(text='继续聊'){this.feed();this.feed();await flush();const finishing=voice.finishUtterance();sessions.at(-1).final.resolve(text);await flush();return{finishing};}};
 }
+
+test('real hook reads account-scoped sensitivity and stops then reloads it after settings change',async context=>{
+  const h=harness(context),key=`petpal.voiceDetection:${encodeURIComponent(h.runtime.options.scope)}`;
+  h.preferences.set(key,'sensitive');await h.voice.start();h.feed(.018);await flush();assert.equal(h.sessions.length,1,'saved light-speech setting reaches the real gate');
+  h.preferences.set(key,'noise-reduced');h.window.dispatchEvent(new Event('petpal:voice-settings-change'));assert.equal(h.render().active,false);
+  await h.voice.start();for(let i=0;i<20;i++)h.feed(.018);await flush();assert.equal(h.sessions.length,1,'new anti-noise profile does not open another ASR');
+  h.feed(.065);h.feed(.065);await flush();assert.equal(h.sessions.length,2);h.voice.stop();
+});
 
 test('real hook GET seeds history before POST, truncates only speech, and reseeds reused conversation after stop/start',async context=>{
   const h=harness(context),old=report('old'),full=report('long','**完成结果** '+('详细结果😀'.repeat(2500)));h.baseline(conversation([old]));

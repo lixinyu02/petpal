@@ -3,6 +3,7 @@
 .asr-settings h2 { display:flex;align-items:center;gap:8px; }
 .asr-settings .voice-preview-actions { gap:16px;flex-wrap:wrap; }
 .asr-settings .voice-preview-actions a { color:#42694e;font-size:13px; }
+.voice-detection-controls { max-width:420px; }
 .voice-legacy-asr { margin:20px 0;color:#6e796a;font-size:13px; }
 .voice-legacy-asr>summary { cursor:pointer;min-height:44px;align-content:center; }
 .voice-preparing { color: #66765e; background: #edf0e6; border-radius: 30px; padding: 7px 12px; font-size: 12px; white-space: nowrap; }

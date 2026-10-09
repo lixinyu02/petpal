@@ -5,6 +5,7 @@ export type VoiceConversationState={phase:VoicePhase;active:boolean;transcript:s
 export function cleanTranscript(text:string):string;
 export function createVoiceConversation(options:{
  onState(state:VoiceConversationState):void;id():string;isCurrent():boolean;isAllowed():boolean;getProviderId():string;getDeviceId():string;
+ getSensitivity?():unknown;
  createCapture(callbacks:{onFrame(frame:Float32Array,level:number):void;onError(error:Error):void}):{start(deviceId:string):Promise<void>;pause():void;stop():void};
  unlock():Promise<boolean>;verify(signal:AbortSignal):Promise<unknown>;stopSpeech():void;
  openAsr(signal:AbortSignal,onTranscript:(text:string)=>void):Promise<AsrSession>;

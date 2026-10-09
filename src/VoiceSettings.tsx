@@ -77,7 +77,7 @@ export default function VoiceSettings({connected,scope='guest'}:{connected:boole
   };
   return <section className="settings-section voice-settings" aria-label="语音服务配置">
     <div className="section-title"><div><h2>声音与倾听</h2><p>为当前账号选择声音，在需要时听小伴朗读。</p></div><button type="button" className="secondary-button" disabled={busy||!connected} onClick={()=>void load()}><RefreshCw size={14}/>重新读取</button></div>
-    <div className="voice-runtime-note"><strong>和伙伴说话，也听她回应</strong><p>在伙伴页主动开启语音聊天，即可连续倾听、回复和朗读。CosyVoice 在正常语速下边生成边播放，口型跟随声音起伏；播放期间暂停识别，也可以随时打断继续说。</p></div>
+    <div className="voice-runtime-note"><strong>和伙伴说话，也听她回应</strong><p>在伙伴页主动开启语音聊天，即可连续倾听、回复和朗读。CosyVoice 在正常语速下边生成边播放，口型跟随声音起伏；播放时继续倾听，你可以开口打断。</p></div>
     {error&&<div className="form-error" role="alert">{error}</div>}
     {message&&<p className="voice-saved" role="status"><Check size={16}/>{message}</p>}
     {connected&&!config&&!error&&<p role="status"><Loader2 size={16} className="spin"/>正在读取语音配置…</p>}

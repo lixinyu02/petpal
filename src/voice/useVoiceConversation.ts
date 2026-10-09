@@ -8,6 +8,7 @@ import { openAsrSession } from './api';
 import { createVoiceConversation, type VoiceConversationState } from './conversation.mjs';
 import {mergeAssistantTask} from '../chat-assistant-preferences.mjs';
 import {createVoiceReportTracker} from './reports.mjs';
+import {createVoiceDetectionPreferences} from './detection-preferences.mjs';
 
 export function useVoiceConversation(options:{allowed:boolean;scope:string;providerId:string;enabled?:boolean;assistantSnapshot?:()=>ChatAssistantConfig|undefined}) {
   const speech=useSpeech(options.allowed&&options.enabled!==false,options.scope);
@@ -40,6 +41,7 @@ export function useVoiceConversation(options:{allowed:boolean;scope:string;provi
       isAllowed:()=>refs.current.options.allowed&&refs.current.options.enabled!==false&&Boolean(getConnection().token&&getIdentity()&&refs.current.options.providerId),
       getProviderId:()=>refs.current.options.providerId,
       getDeviceId:()=>{let storage:Storage|undefined;try{storage=localStorage;}catch{}const preferences=createDevicePreferences(storage,options.scope);try{return preferences.read().microphoneId;}finally{preferences.dispose();}},
+      getSensitivity:()=>{let storage:Storage|undefined;try{storage=window.localStorage;}catch{}const preferences=createVoiceDetectionPreferences(storage,options.scope);try{return preferences.read();}finally{preferences.dispose();}},
       createCapture:createVoiceCapture,
       unlock:()=>{const active=refs.current.speech;if(active.engine!=='cosyvoice'||!active.streamingEnabled||!active.supported)throw new Error('请先在“语音与设备”中选择 CosyVoice，并将语速设为 1.0 倍，再开始语音聊天。');return active.unlock();},
       verify:async signal=>{const config=await api<{configured:boolean}>('/voice/asr',{signal});if(!config.configured)throw new Error('尚未连接语音识别服务，请联系管理员在“语音与设备”中配置。');},

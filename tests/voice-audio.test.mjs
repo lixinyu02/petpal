@@ -102,6 +102,24 @@ test('adaptive floor follows rising idle noise but accepts quieter continuation 
   assert.equal(gate.push(tone(.02)).reason,'silence');
 });
 
+test('adaptive rejection cannot progressively train louder speech into the noise floor',()=>{
+  const gate=createVoiceGate();
+  for(let i=0;i<20;i++)gate.push(tone(.027));
+  const floor=gate.noiseFloor;
+  for(let i=0;i<12;i++)assert.equal(gate.push(tone(.04)).started,false);
+  assert.equal(gate.noiseFloor,floor,'above the absolute idle-noise ceiling, rejected audio cannot raise the floor');
+  gate.push(tone(.07));assert.equal(gate.push(tone(.07)).started,true,'louder nearby speech remains admissible');
+});
+
+test('clearly separated syllables remain speech with natural 100ms gaps',()=>{
+  const gate=createVoiceGate();let started=0;
+  for(let frame=0;frame<4;frame++){
+    const samples=Float32Array.from({length:6000},(_,i)=>((frame*6000+i)%5280)<2880 ? .1*Math.sin(2*Math.PI*240*(frame*6000+i)/24000) : 0);
+    started+=Number(gate.push(samples).started);
+  }
+  assert.equal(started,1,'120ms syllables with 100ms pauses must not be reset forever');
+});
+
 test('interrupt monitoring uses learned room noise without learning assistant playback',()=>{
   const gate=createVoiceGate({threshold:.04,minSpeechMs:500,noiseRatio:2.4});
   for(let i=0;i<100;i++)assert.equal(gate.push(tone(.05),{learnNoise:false,noiseFloor:.025}).started,false);
