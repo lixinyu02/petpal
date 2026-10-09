@@ -55,7 +55,7 @@ export function createVoiceConversation(options) {
     if(!valid(job))return;
     if(state.phase==='thinking'||state.phase==='speaking'){
       publish({level:Math.min(1,Math.max(0,level*6))});
-      const detected=job.monitor.push(frame);
+      const detected=job.monitor.push(frame,{learnNoise:false,noiseFloor:job.gate.noiseFloor});
       if(detected.started){cancelTurn(job);job.gate.reset();job.monitor.reset();publish({phase:'listening',level:0,hasUtterance:false});
         // Re-feed the bounded onset and pre-roll, preserving the words that
         // caused the interruption instead of asking the user to repeat them.
@@ -162,7 +162,7 @@ export function createVoiceConversation(options) {
   async function start(){
     if(disposed||current)return;
     if(!options.isAllowed()){publish({phase:'error',error:'请先登录并选择可用的聊天模型。'});return;}
-    const job={id:options.id(),providerId:options.getProviderId(),abort:new AbortController(),capture:null,gate:createVoiceGate(),monitor:createVoiceGate({threshold:.028,minSpeechMs:500}),utterance:null,turn:null,idleTimer:null,conversationId:'',sequence:0,chatPending:null,chatRelease:null,chatStopFor:null,reports:[],reportIds:new Set()};
+    const job={id:options.id(),providerId:options.getProviderId(),abort:new AbortController(),capture:null,gate:createVoiceGate(),monitor:createVoiceGate({threshold:.04,minSpeechMs:500,noiseRatio:2.4}),utterance:null,turn:null,idleTimer:null,conversationId:'',sequence:0,chatPending:null,chatRelease:null,chatStopFor:null,reports:[],reportIds:new Set()};
     job.capture=options.createCapture({onFrame:(frame,level)=>feed(job,frame,level),onError:error=>fail(job,error)});current=job;
     publish({...empty(),phase:'starting',active:true});
     try{

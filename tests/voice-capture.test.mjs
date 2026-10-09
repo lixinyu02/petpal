@@ -37,6 +37,7 @@ test('capture starts on the click stack, uses selected microphone and mutes moni
   const h=install(context),starting=h.capture.start('chosen-mic');
   assert.equal(h.contexts.length,1);assert.equal(h.contexts[0].state,'running');assert.equal(h.acquisitions.length,1);
   assert.deepEqual(h.requests[0].audio.deviceId,{exact:'chosen-mic'});assert.equal(h.requests[0].audio.echoCancellation,true);
+  assert.equal(h.requests[0].audio.noiseSuppression,true);assert.equal(h.requests[0].audio.autoGainControl,false,'background audio must not be automatically amplified');
   const stream=h.stream();h.acquisitions[0].resolve(stream);await starting;
   assert.equal(h.contexts[0].gains[0].gain.value,0);assert.equal(h.contexts[0].modules.length,1);
   h.worklets[0].port.onmessage({data:new Float32Array(6000).fill(.1)});assert.equal(h.frames.length,1);assert.ok(Math.abs(h.frames[0].level-.1)<1e-5);

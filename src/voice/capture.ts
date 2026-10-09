@@ -27,7 +27,7 @@ export function createVoiceCapture(options: { onFrame(samples:Float32Array,level
     let captured:MediaStream|null = null;
     try {
       // Ask during the same gesture; both the microphone and audio output remain explicit.
-      const acquisition = navigator.mediaDevices.getUserMedia({video:false,audio:{...(deviceId?{deviceId:{exact:deviceId}}:{}),echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:{ideal:1}}});
+      const acquisition = navigator.mediaDevices.getUserMedia({video:false,audio:{...(deviceId?{deviceId:{exact:deviceId}}:{}),echoCancellation:true,noiseSuppression:true,autoGainControl:false,channelCount:{ideal:1}}});
       captured = await acquisition;
       if (disposed || token !== revision) throw new DOMException('录音已取消','AbortError');
       stream = captured;

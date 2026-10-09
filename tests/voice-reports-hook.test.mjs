@@ -46,7 +46,7 @@ function harness(context){
   context.after(()=>{for(const slot of slots)slot?.cleanup?.();for(const[key,descriptor]of descriptors)if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];});
   function render(options={}){runtime.options={...runtime.options,...options};cursor=0;const voice=useVoiceConversation(runtime.options);while(effects.length)effects.shift()();return voice;}
   const voice=render();
-  return{voice,render,runtime,calls,streams,plays,sessions,baselines,baseline(value){baseline=value;},feed(){captures.at(-1).handlers.onFrame(new Float32Array(6000).fill(.05),.05);},async ask(text='继续聊'){this.feed();await flush();const finishing=voice.finishUtterance();sessions.at(-1).final.resolve(text);await flush();return{finishing};}};
+  return{voice,render,runtime,calls,streams,plays,sessions,baselines,baseline(value){baseline=value;},feed(){captures.at(-1).handlers.onFrame(new Float32Array(6000).fill(.05),.05);},async ask(text='继续聊'){this.feed();this.feed();await flush();const finishing=voice.finishUtterance();sessions.at(-1).final.resolve(text);await flush();return{finishing};}};
 }
 
 test('real hook GET seeds history before POST, truncates only speech, and reseeds reused conversation after stop/start',async context=>{

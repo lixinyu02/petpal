@@ -19,8 +19,17 @@ function harness(overrides={}){
   return{machine,sessions,streams,plays,states,feed(level=.05){const frame=new Float32Array(6000).fill(level);callbacks.onFrame(frame,level);return frame;},expire(){current=false;},get counts(){return{starts,stops,unlocks,outputStops};}};
 }
 async function asking(h,text='你好'){
-  h.feed();await flush();const finishing=h.machine.finishUtterance();h.sessions.at(-1).final.resolve(text);await flush();return{finishing};
+  h.feed();h.feed();await flush();const finishing=h.machine.finishUtterance();h.sessions.at(-1).final.resolve(text);await flush();return{finishing};
 }
+
+test('ambient audio and repeated short knocks never open ASR during normal listening',async()=>{
+  const h=harness();await h.machine.start();
+  for(let i=0;i<30;i++)h.feed(.022);
+  for(let i=0;i<8;i++)h.feed(i%2?.03:.018);
+  await flush();assert.equal(h.sessions.length,0);assert.equal(h.machine.snapshot().hasUtterance,false);
+  h.feed(.075);h.feed(.075);await flush();assert.equal(h.sessions.length,1);assert.equal(h.machine.snapshot().hasUtterance,true);
+  h.machine.dispose();
+});
 
 test('sustained speech interrupts Chat and TTS immediately and submits the preserved opening words once',async()=>{
   const released=deferred(),stopCalls=[],h=harness({stopChat:(id,signal)=>{stopCalls.push({id,signal});return released.promise;}});
@@ -77,7 +86,7 @@ test('a superseded slow conversation creation cannot replace the conversation us
 });
 
 test('reports deduplicate and defer through user speech and Chat, then play serially without model calls',async()=>{
-  const h=harness();assert.equal(h.machine.notifyReport({id:'idle',text:'完成'}),false);await h.machine.start();h.feed();await flush();
+  const h=harness();assert.equal(h.machine.notifyReport({id:'idle',text:'完成'}),false);await h.machine.start();h.feed();h.feed();await flush();
   assert.equal(h.machine.notifyReport({id:'progress',text:'后台已经开始处理你的任务。'}),true);assert.equal(h.machine.notifyReport({id:'progress',text:'重复'}),false);
   assert.equal(h.machine.notifyReport({id:'result',text:'后台任务已经完成。'}),true);await flush();assert.equal(h.plays.length,0);
   const finishing=h.machine.finishUtterance();h.sessions[0].final.resolve('再聊聊');await flush();assert.equal(h.streams.length,1);assert.equal(h.plays.length,0);
@@ -100,7 +109,7 @@ test('already extracted plain reports preserve literal Markdown and code rather 
 });
 
 test('report backlog and text are bounded, and expired sessions accept or play nothing',async()=>{
-  const h=harness();await h.machine.start();h.feed();await flush();
+  const h=harness();await h.machine.start();h.feed();h.feed();await flush();
   for(let i=0;i<8;i++)assert.equal(h.machine.notifyReport({id:`report-${i}`,text:'状态更新'}),true);
   assert.equal(h.machine.notifyReport({id:'overflow',text:'更新'}),false);assert.equal(h.machine.notifyReport({id:'long',text:'字'.repeat(1001)}),false);
   h.expire();assert.equal(h.machine.notifyReport({id:'expired',text:'更新'}),false);await flush();assert.equal(h.plays.length,0);h.machine.dispose();

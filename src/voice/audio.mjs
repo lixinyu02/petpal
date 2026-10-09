@@ -31,42 +31,74 @@ export function audioLevel(samples) {
   return samples.length ? Math.sqrt(power / samples.length) : 0;
 }
 
-/** Silence only retains a 200 ms pre-roll; an utterance never exceeds 45 seconds. */
-export function createVoiceGate({ threshold = .014, silenceMs = 900, preRollMs = 200, minSpeechMs = 0, maxSeconds = 45 } = {}) {
-  if (!(threshold > 0 && threshold < 1 && silenceMs >= 250 && silenceMs <= 3000 && preRollMs >= 0 && preRollMs <= 500 && minSpeechMs >= 0 && minSpeechMs <= 1000 && maxSeconds > 0 && maxSeconds <= 45)) throw new Error('Invalid voice gate configuration.');
-  let active = false, silence = 0, total = 0, voicedSamples = 0, onset = [], preRoll = new Float32Array(0);
+/** Confirm speech in 20ms slices; retain its opening audio without uploading idle noise. */
+export function createVoiceGate({ threshold = .028, silenceMs = 900, preRollMs = 200, minSpeechMs = 360, maxSeconds = 45, noiseRatio = 2 } = {}) {
+  if (![threshold,silenceMs,preRollMs,minSpeechMs,maxSeconds,noiseRatio].every(Number.isFinite) || !(threshold > 0 && threshold < 1 && silenceMs >= 250 && silenceMs <= 3000 && preRollMs >= 0 && preRollMs <= 500 && minSpeechMs >= 0 && minSpeechMs <= 1000 && maxSeconds > 0 && maxSeconds <= 45 && noiseRatio >= 1 && noiseRatio <= 4)) throw new Error('Invalid voice gate configuration.');
+  let active = false, silence = 0, total = 0, voicedSamples = 0, consecutiveVoiced = 0, candidateSpan = 0, quietGap = 0, history = [], noiseFloor = 0, onsetThreshold = threshold;
   const preLimit = Math.floor(VOICE_RATE * preRollMs / 1000), maxSamples = Math.floor(VOICE_RATE * maxSeconds);
-  const minSpeechSamples = Math.floor(VOICE_RATE * minSpeechMs / 1000);
-  const reset = () => { active = false; silence = total = voicedSamples = 0; onset = []; preRoll = new Float32Array(0); };
+  const minSpeechSamples = Math.floor(VOICE_RATE * minSpeechMs / 1000), gapLimit = Math.floor(VOICE_RATE * .08), sliceSize = Math.floor(VOICE_RATE * .02);
+  const candidateLimit = Math.max(minSpeechSamples * 1.6, minSpeechSamples + gapLimit);
+  // Reset per-utterance audio, not the room's learned noise floor.
+  const reset = () => { active = false; silence = total = voicedSamples = consecutiveVoiced = candidateSpan = quietGap = 0; history = []; };
+  function tail(chunks, limit) {
+    const result = [];
+    for (let i = chunks.length - 1; i >= 0 && limit > 0; i--) {
+      const chunk = chunks[i], size = Math.min(limit, chunk.length);
+      result.unshift(chunk.slice(chunk.length - size)); limit -= size;
+    }
+    return result;
+  }
   return {
-    push(frame) {
-      const level = audioLevel(frame), voiced = level >= threshold;
+    push(frame, { learnNoise = true, noiseFloor: ambient = 0 } = {}) {
+      const level = audioLevel(frame);
       if (!frame.length) return { started: false, ended: false, samples: [], level, reason: '' };
-      if (!active && !voiced) {
-        // A click or brief noise must not satisfy the sustained-speech gate.
-        voicedSamples = 0; onset = [];
-        const previous = preRoll; preRoll = new Float32Array(Math.min(preLimit, previous.length + frame.length));
-        const fromCurrent = Math.min(preRoll.length, frame.length), fromPrevious = preRoll.length - fromCurrent;
-        if (fromPrevious) preRoll.set(previous.subarray(previous.length - fromPrevious));
-        preRoll.set(frame.subarray(frame.length - fromCurrent), fromPrevious);
+      const externalNoise = Number.isFinite(ambient) && ambient >= 0 && ambient <= 1 ? ambient : 0;
+      let started = false, incoming = [];
+      for (let offset = 0; offset < frame.length; offset += sliceSize) {
+        const part = frame.subarray(offset, Math.min(frame.length, offset + sliceSize)), energy = audioLevel(part);
+        const floor = Math.max(noiseFloor, externalNoise), startThreshold = Math.max(threshold, Math.min(.18, floor * noiseRatio));
+        if (!active) {
+          if (energy >= startThreshold) {
+            candidateSpan += part.length; voicedSamples += part.length; consecutiveVoiced += part.length; quietGap = 0;
+            if (candidateSpan > candidateLimit) { candidateSpan = voicedSamples = consecutiveVoiced; }
+            if (voicedSamples >= minSpeechSamples) {
+              started = active = true; onsetThreshold = startThreshold; silence = 0;
+              // CandidateSpan includes this frame's consumed prefix. Only take
+              // the needed earlier samples, then forward the original full frame.
+              incoming = [...tail(history, Math.max(0, preLimit + candidateSpan - offset - part.length)), frame];
+              history = []; voicedSamples = consecutiveVoiced = candidateSpan = quietGap = 0;
+            }
+          } else {
+            consecutiveVoiced = 0;
+            if (voicedSamples) {
+              quietGap += part.length; candidateSpan += part.length;
+              if (quietGap > gapLimit || candidateSpan > candidateLimit) voicedSamples = candidateSpan = quietGap = 0;
+            }
+            if (!voicedSamples && learnNoise) {
+              // Only idle, below-threshold audio can teach the floor. Never
+              // train on an utterance or on the assistant's playback microphone.
+              const seconds = energy > noiseFloor ? .6 : 4;
+              noiseFloor += (energy - noiseFloor) * (1 - Math.exp(-part.length / VOICE_RATE / seconds));
+            }
+          }
+        } else {
+          const releaseThreshold = Math.max(threshold * .75, onsetThreshold * .75, floor * 1.4);
+          silence = energy >= releaseThreshold ? 0 : silence + part.length / VOICE_RATE * 1000;
+        }
+      }
+      if (!active) {
+        history = tail([...history, frame], preLimit + candidateSpan);
         return { started: false, ended: false, samples: [], level, reason: '' };
       }
-      const started = !active, samples = [];
-      let incoming = [frame];
-      if (started) {
-        onset.push(frame.slice()); voicedSamples += frame.length;
-        if (voicedSamples < minSpeechSamples) return { started:false, ended:false, samples:[], level, reason:'' };
-        active = true; if (preRoll.length) samples.push(preRoll); total = preRoll.length; preRoll = new Float32Array(0);
-        incoming = onset; onset = []; voicedSamples = 0;
-      }
-      let take = 0;
-      for (const input of incoming) { const size = Math.min(input.length, maxSamples - total); if(size)samples.push(input.slice(0,size)); total += size; take += size; }
-      silence = voiced ? 0 : silence + take / VOICE_RATE * 1000;
+      if (!started) incoming = [frame];
+      const samples = [];
+      for (const input of incoming) { const size = Math.min(input.length, maxSamples - total); if(size)samples.push(input.slice(0,size)); total += size; }
       const reason = total >= maxSamples ? 'limit' : silence >= silenceMs ? 'silence' : '';
       return { started, ended: Boolean(reason), samples, level, reason };
     },
     reset,
     get active() { return active; },
+    get noiseFloor() { return noiseFloor; },
   };
 }
 
