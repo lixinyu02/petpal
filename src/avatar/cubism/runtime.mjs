@@ -1,4 +1,4 @@
-import { fetchCubismBytes, validateCubismModel } from './resources.mjs';
+import { createCubismResourceLoader, fetchCubismBytes, validateCubismModel } from './resources.mjs';
 import { createCubismParameterBridge, cubismParameterTargets } from './parameters.mjs';
 
 export const CUBISM_RUNTIME_ROOT = '/avatars/cubism-runtime/';
@@ -127,15 +127,14 @@ export async function waitForCubismShaders(shader, { signal, timeoutMs = 8000, n
   if (!Array.isArray(shader._shaderSets) || [...required].some(index => !shader._shaderSets[index]?.shaderProgram)) throw new Error('Cubism shaders could not compile.');
 }
 
-async function loadTexture(gl, url, signal) {
-  const bytes = await fetchCubismBytes(url, { signal, maxBytes: 12 * 1024 * 1024 });
+async function loadTexture(gl, url, bytes, signal) {
   stopped(signal);
   const blob = new Blob([bytes], { type: url.endsWith('.webp') ? 'image/webp' : 'image/png' });
   const objectUrl = URL.createObjectURL(blob), image = new Image();
-  let texture;
+  let texture, cancel;
   try {
     await new Promise((resolve, reject) => {
-      const cancel = () => { image.src = ''; reject(signal.reason || new DOMException('Aborted', 'AbortError')); };
+      cancel = () => { image.src = ''; reject(signal.reason || new DOMException('Aborted', 'AbortError')); };
       image.onload = () => { signal?.removeEventListener('abort', cancel); resolve(); };
       image.onerror = () => { signal?.removeEventListener('abort', cancel); reject(new Error('Cubism texture decoding failed.')); };
       if (signal) signal.addEventListener('abort', cancel, { once: true });
@@ -157,7 +156,7 @@ async function loadTexture(gl, url, signal) {
     gl.bindTexture(gl.TEXTURE_2D, null);
     return texture;
   } catch (error) { if (texture) gl.deleteTexture(texture); throw error; }
-  finally { image.onload = image.onerror = null; URL.revokeObjectURL(objectUrl); }
+  finally { if (cancel) signal?.removeEventListener('abort', cancel); image.onload = image.onerror = null; URL.revokeObjectURL(objectUrl); }
 }
 
 const ANGLES = ['ParamAngleX', 'ParamAngleY', 'ParamAngleZ', 'ParamBodyAngleX', 'ParamBodyAngleY', 'ParamBodyAngleZ'];
@@ -374,6 +373,10 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
   if (!gl) throw new Error('Cubism requires WebGL2.');
   const coreUrl = localRuntimeUrl(CUBISM_CORE_URL, location, '/vendor/live2d/');
   const frameworkUrl = localRuntimeUrl(`${CUBISM_RUNTIME_ROOT}framework.mjs`, location);
+  const downloads = createCubismResourceLoader({ signal });
+  // A failed speculative read also interrupts this canvas's shared dependency
+  // wait, without cancelling the shared Core/Framework for other canvases.
+  signal = downloads.signal;
   let lease, avatar, module, disposed = false, initialized = false;
   const textures = [], motions = new Map(), expressions = new Map();
   const release = () => {
@@ -388,13 +391,23 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
     }
   };
   try {
-    const core = await waitForCubismDependency(loadCubismCore({ document, window, coreUrl }), signal); stopped(signal);
+    const coreReady = waitForCubismDependency(loadCubismCore({ document, window, coreUrl }), signal);
+    const modelReady = downloads.read(modelPath.href, { maxBytes: 256 * 1024 }).then(bytes => {
+      stopped(signal);
+      const manifest = parseJson(bytes), resources = validateCubismModel(manifest, modelPath.href);
+      const mocReady = downloads.read(resources.moc, { maxBytes: 24 * 1024 * 1024 });
+      // Only one decoded-later texture is prefetched (at most 12 MiB). Avoid
+      // retaining all eight possible images and decoding them together on mobile.
+      const textureReady = downloads.read(resources.textures[0], { maxBytes: 12 * 1024 * 1024 });
+      return { bytes, resources, mocReady, textureReady };
+    });
+    const [core, assets] = await Promise.all([coreReady, modelReady]); stopped(signal);
     const framework = await waitForCubismDependency(loadFramework(frameworkUrl), signal); module = framework; stopped(signal);
     lease = acquireCubismFramework(framework, core);
-    const bytes = await fetchCubismBytes(modelPath.href, { signal, maxBytes: 256 * 1024 });
-    const manifest = parseJson(bytes), resources = validateCubismModel(manifest, modelPath.href);
+    const { bytes, resources, mocReady } = assets;
+    let textureReady = assets.textureReady; delete assets.textureReady;
     const setting = new framework.CubismModelSettingJson(bytes, bytes.byteLength);
-    const moc = await fetchCubismBytes(resources.moc, { signal, maxBytes: 24 * 1024 * 1024 });
+    const moc = await mocReady; stopped(signal);
     const mocVersion = core.Version.csmGetMocVersion(moc);
     if (!Number.isInteger(mocVersion) || mocVersion < 1 || mocVersion > core.Version.csmGetLatestMocVersion()) throw new Error('Cubism model MOC version is unsupported.');
     if (!framework.CubismMoc.hasMocConsistency(moc)) throw new Error('Cubism model failed the official MOC consistency check.');
@@ -404,11 +417,11 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
     if (!model || !Number.isFinite(model.getCanvasWidth()) || model.getCanvasWidth() <= 0 || model.getCanvasHeight() <= 0) throw new Error('Cubism model creation failed.');
     const bridge = createCubismParameterBridge(model, framework.CubismFramework.getIdManager());
     if (!bridge.supported.includes('ParamMouthOpenY')) throw new Error('Cubism model has no real mouth parameter.');
-    if (resources.optional.Physics) { const buffer = await fetchCubismBytes(resources.optional.Physics, { signal, maxBytes: 1024 * 1024 }); avatar.loadPhysics(buffer, buffer.byteLength); }
-    if (resources.optional.Pose) { const buffer = await fetchCubismBytes(resources.optional.Pose, { signal, maxBytes: 256 * 1024 }); avatar.loadPose(buffer, buffer.byteLength); }
+    if (resources.optional.Physics) { const buffer = await downloads.read(resources.optional.Physics, { maxBytes: 1024 * 1024 }); avatar.loadPhysics(buffer, buffer.byteLength); }
+    if (resources.optional.Pose) { const buffer = await downloads.read(resources.optional.Pose, { maxBytes: 256 * 1024 }); avatar.loadPose(buffer, buffer.byteLength); }
     // Sequential bounded loading avoids decoding every optional motion at once on mobile.
     for (const item of resources.expressions) {
-      const buffer = await fetchCubismBytes(item.url, { signal, maxBytes: 256 * 1024 });
+      const buffer = await downloads.read(item.url, { maxBytes: 256 * 1024 });
       const motion = avatar.loadExpression(buffer, buffer.byteLength, item.name);
       if (!motion) throw new Error(`Cubism expression could not load: ${item.name}`);
       const json = parseJson(buffer);
@@ -422,7 +435,7 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
       if (!motion) throw new Error('Cubism neutral expression could not load.');
       expressions.set('neutral', { motion, parameters: new Set() });
     }
-    await loadCubismMotionAssets(resources.motions, { signal }, (item, buffer) => {
+    await loadCubismMotionAssets(resources.motions, { signal, fetchBytes: (url, { maxBytes }) => downloads.read(url, { maxBytes }) }, (item, buffer) => {
       const motion = avatar.loadMotion(buffer, buffer.byteLength, `${item.group}_${item.index}`, undefined, undefined, setting, item.group, item.index, true);
       if (!motion) throw new Error(`Cubism motion could not load: ${item.group}`);
       // CubismMotion initializes these arrays to null. Even a motion with no
@@ -437,7 +450,9 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
     const renderer = avatar.getRenderer(); renderer.startUp(gl);
     renderer.setIsPremultipliedAlpha(true);
     for (let index = 0; index < resources.textures.length; index++) {
-      const texture = await loadTexture(gl, resources.textures[index], signal); textures.push(texture); renderer.bindTexture(index, texture);
+      const bytes = index === 0 ? await textureReady : await downloads.read(resources.textures[index], { maxBytes: 12 * 1024 * 1024 });
+      textureReady = undefined;
+      const texture = await loadTexture(gl, resources.textures[index], bytes, signal); textures.push(texture); renderer.bindTexture(index, texture);
     }
     const shaderPath = localRuntimeUrl(`${CUBISM_RUNTIME_ROOT}Shaders/WebGL/`, location);
     renderer.loadShaders(shaderPath);
@@ -487,6 +502,10 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
     };
   } catch (error) {
     if (import.meta.env?.DEV) console.error('PetPal Cubism initialization failed:', error);
+    downloads.cancel(error);
+    await downloads.drain();
     release(); throw error;
+  } finally {
+    downloads.dispose();
   }
 }

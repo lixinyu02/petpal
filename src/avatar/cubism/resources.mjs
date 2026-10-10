@@ -79,3 +79,53 @@ export async function fetchCubismBytes(url, { fetcher = fetch, signal, maxBytes 
   for (const chunk of chunks) { joined.set(chunk, offset); offset += chunk.byteLength; }
   return joined.buffer;
 }
+
+/** Own this canvas's reads; shared Core/Framework downloads live outside it. */
+export function createCubismResourceLoader({ signal, fetchBytes = fetchCubismBytes } = {}) {
+  const controller = new AbortController(), pending = new Set(), queue = [];
+  let active = 0;
+  const reason = () => controller.signal.reason || new DOMException('Aborted', 'AbortError');
+  const cancel = error => { if (!controller.signal.aborted) controller.abort(error); };
+  const parentCancelled = () => cancel(signal.reason);
+  const pump = () => {
+    if (controller.signal.aborted) {
+      for (const entry of queue.splice(0)) entry.reject(reason());
+      return;
+    }
+    while (active < 4 && queue.length) {
+      const entry = queue.shift(); active++;
+      Promise.resolve().then(() => {
+        if (controller.signal.aborted) throw reason();
+        return fetchBytes(entry.url, { signal: controller.signal, maxBytes: entry.maxBytes });
+      }).then(bytes => {
+        if (controller.signal.aborted) throw reason();
+        if (!(bytes instanceof ArrayBuffer) || !bytes.byteLength || bytes.byteLength > entry.maxBytes) throw new Error('Cubism resource size is invalid.');
+        entry.resolve(bytes);
+      }).catch(error => { cancel(error); entry.reject(reason()); }).finally(() => { active--; pump(); });
+    }
+  };
+  controller.signal.addEventListener('abort', pump);
+  if (signal?.aborted) parentCancelled();
+  else signal?.addEventListener('abort', parentCancelled, { once: true });
+  return {
+    signal: controller.signal,
+    read(url, { maxBytes } = {}) {
+      if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 24 * 1024 * 1024) return Promise.reject(new Error('Cubism resource limit is invalid.'));
+      const task = new Promise((resolve, reject) => {
+        if (controller.signal.aborted) { reject(reason()); return; }
+        queue.push({ url, maxBytes, resolve, reject }); pump();
+      });
+      pending.add(task);
+      // Observe early failures even when initialization is still waiting for
+      // the shared Core. Do not detach ownership until the actual read settles.
+      task.then(() => pending.delete(task), () => pending.delete(task));
+      return task;
+    },
+    cancel,
+    async drain() { while (pending.size) await Promise.allSettled([...pending]); },
+    dispose() {
+      signal?.removeEventListener('abort', parentCancelled);
+      controller.signal.removeEventListener('abort', pump);
+    },
+  };
+}

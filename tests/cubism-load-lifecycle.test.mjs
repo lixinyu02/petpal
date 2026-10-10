@@ -11,9 +11,15 @@ const deferred = () => {
 const flush = () => new Promise(resolve => setImmediate(resolve));
 let sequence = 0;
 
-async function fixture() {
+async function fixture(t) {
   const runtime = await import(`../src/avatar/cubism/runtime.mjs?lifecycle-test=${++sequence}`);
-  const scripts = [], contexts = [];
+  const scripts = [], contexts = [], reads = [];
+  // Manifest now overlaps Core. Never let this synthetic host reach DNS/network.
+  t.mock.method(globalThis, 'fetch', (url, { signal }) => new Promise((resolve, reject) => {
+    reads.push(url);
+    const cancel = () => reject(signal.reason || new DOMException('Aborted', 'AbortError'));
+    if (signal.aborted) cancel(); else signal.addEventListener('abort', cancel, { once: true });
+  }));
   const window = { location: { href: 'https://petpal.test/', origin: 'https://petpal.test' } };
   const document = {
     defaultView: window,
@@ -37,15 +43,17 @@ async function fixture() {
       },
     };
   };
-  return { runtime, window, scripts, contexts, canvas };
+  return { runtime, window, scripts, contexts, reads, canvas };
 }
 
-test('an aborted canvas immediately releases its WebGL context while another Core load stays active', async () => {
-  const value = await fixture(), stopped = new AbortController(), survivor = new AbortController();
+test('an aborted canvas releases its owned reads and WebGL while another Core load stays active', async t => {
+  const value = await fixture(t), stopped = new AbortController(), survivor = new AbortController();
   const cancelled = value.runtime.createCubismAvatar({ canvas: value.canvas(), signal: stopped.signal });
   const active = value.runtime.createCubismAvatar({ canvas: value.canvas(), signal: survivor.signal });
   const activeFailure = assert.rejects(active, /Cubism Core is unavailable/u);
   assert.equal(value.scripts.length, 1, 'both canvases share the Core download');
+  await flush();
+  assert.equal(value.reads.length, 2, 'each manifest read overlaps the pending shared Core');
   const reason = new Error('canvas unmounted');
   stopped.abort(reason);
   await assert.rejects(cancelled, error => error === reason);
@@ -59,17 +67,18 @@ test('an aborted canvas immediately releases its WebGL context while another Cor
   assert.equal(value.contexts[1].released, 1);
 });
 
-test('an already aborted load does not allocate a canvas context or initiate shared downloads', async () => {
-  const value = await fixture(), stopped = new AbortController();
+test('an already aborted load does not allocate a canvas context or initiate shared downloads', async t => {
+  const value = await fixture(t), stopped = new AbortController();
   stopped.abort();
   await assert.rejects(value.runtime.createCubismAvatar({ canvas: value.canvas(), signal: stopped.signal }), { name: 'AbortError' });
   assert.equal(value.contexts[0].allocated, 0);
   assert.equal(value.contexts[0].released, 0);
   assert.equal(value.scripts.length, 0);
+  assert.equal(value.reads.length, 0);
 });
 
-test('late Core readiness stays available after its original canvas has been cancelled', async () => {
-  const value = await fixture(), stopped = new AbortController();
+test('late Core readiness stays available after its original canvas has been cancelled', async t => {
+  const value = await fixture(t), stopped = new AbortController();
   const cancelled = value.runtime.createCubismAvatar({ canvas: value.canvas(), signal: stopped.signal });
   stopped.abort();
   await assert.rejects(cancelled, { name: 'AbortError' });

@@ -25,6 +25,8 @@ export default function CompanionWorld() {
   const [kind] = useCompanion();
   const [catEnabled] = useCompanionCatEnabled();
   const [syncNote, setSyncNote] = useState('');
+  const [startupError,setStartupError]=useState('');
+  const [startupAttempt,setStartupAttempt]=useState(0);
   const selectionRevision = useRef(0);
   const [action, setAction] = useState<PetAction>('idle');
   const [readyKind, setReadyKind] = useState<CompanionKind|null>(null);
@@ -73,14 +75,16 @@ export default function CompanionWorld() {
   }
   useEffect(() => {
     let alive = true;
-    import('./api').then(async ({ initConnection, api }) => {
+    const controller=new AbortController(),epoch=getSessionEpoch();setStartupError('');
+    import('./api').then(async ({ initConnection, loadInitialState }) => {
       const connection = await initConnection();
+      if(!alive||controller.signal.aborted||epoch!==getSessionEpoch())return;
       if (!connection.token) return;
-      const state = await api<State>('/state');
-      if (alive) { setName(state.settings.petName); setUser(state.user); setSession(state); setProviderId(state.providers.some(provider => provider.id === state.settings.defaultProviderId) ? state.settings.defaultProviderId! : state.providers[0]?.id || ''); await hydrateCompanion(state.settings.companionKind || 'anime'); }
-    }).catch(() => {});
-    return () => { alive = false; };
-  }, []);
+      const state = await loadInitialState({signal:controller.signal});
+      if (alive && !controller.signal.aborted && epoch===getSessionEpoch()) { setName(state.settings.petName); setUser(state.user); setSession(state); setProviderId(state.providers.some(provider => provider.id === state.settings.defaultProviderId) ? state.settings.defaultProviderId! : state.providers[0]?.id || ''); void hydrateCompanion(state.settings.companionKind || 'anime').catch(() => {}); }
+    }).catch(error => {if(alive&&!controller.signal.aborted&&epoch===getSessionEpoch())setStartupError(error.message||'暂时无法加载个人设置。');});
+    return () => { alive = false;controller.abort(); };
+  }, [startupAttempt]);
   function beginVoice() { setVoiceOpen(true); if (action !== 'sleep') void voice.start(); }
   const introEntrance=useUiEntrance<HTMLDivElement>(`companion-intro:${kind}`,ready);
   const auraEntrance=useUiEntrance<HTMLDivElement>(`companion-aura:${kind}`,ready);
@@ -116,9 +120,9 @@ export default function CompanionWorld() {
           <button onClick={voice.stop}><Square size={13} aria-hidden="true"/>{voice.awaitingWake?'停止收音':'结束对话'}</button>
         </> : <button className="voice-primary" disabled={!user || !providerId || action === 'sleep'} onClick={beginVoice}><Mic size={16} aria-hidden="true"/>{voice.phase === 'error' ? '重新开始' : '开始语音聊天'}</button>}</div>
       </section> : <div ref={replyEntrance} className="companion-reply" role="status" aria-live="polite"><span>{(kind === 'anime' ? animeWords : words)[action]}</span></div>}
-      {(!voiceOpen || syncNote || action === 'sleep') && <p className="companion-hint">{syncNote || (action === 'sleep' ? '轻触唤醒。' : '轻触回应，长按休息。')}</p>}
+      {(!voiceOpen || syncNote || startupError || action === 'sleep') && <p className="companion-hint" role={startupError?'alert':undefined}>{startupError || syncNote || (action === 'sleep' ? '轻触唤醒。' : '轻触回应，长按休息。')}</p>}
       <details className="interaction-help"><summary>相处的小方式</summary><p>双击打个招呼；鼠标按住轻轻划过，像一次抚摸。<br/>也可以按 Tab 选中伙伴，用 Enter 或空格回应，长按休息，连按两次打招呼。</p></details>
     </section>
-    {(!voiceOpen || window.petpal) && <footer className="companion-footer">{!voiceOpen && <button className="companion-voice-entry" disabled={!user || !providerId} onClick={beginVoice}><Mic size={16} aria-hidden="true"/>语音聊天</button>}{window.petpal ? <button onClick={() => window.petpal?.showPet()}><Monitor size={16} aria-hidden="true"/>放到桌面<ArrowUpRight size={13} aria-hidden="true"/></button> : <a href="/?chat=1"><MessageCircle size={15} aria-hidden="true"/>说说今天<ArrowUpRight size={13} aria-hidden="true"/></a>}</footer>}
+    {(!voiceOpen || window.petpal) && <footer className="companion-footer">{startupError&&<button onClick={()=>setStartupAttempt(value=>value+1)}>重试连接</button>}{!voiceOpen && <button className="companion-voice-entry" disabled={!user || !providerId} onClick={beginVoice}><Mic size={16} aria-hidden="true"/>语音聊天</button>}{window.petpal ? <button onClick={() => window.petpal?.showPet()}><Monitor size={16} aria-hidden="true"/>放到桌面<ArrowUpRight size={13} aria-hidden="true"/></button> : <a href="/?chat=1"><MessageCircle size={15} aria-hidden="true"/>说说今天<ArrowUpRight size={13} aria-hidden="true"/></a>}</footer>}
   </main>;
 }

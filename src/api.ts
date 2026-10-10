@@ -168,8 +168,24 @@ export async function api<T = any>(path:string, options:RequestInit = {}):Promis
   try{
     request.assertCurrent();const headers=new Headers(options.headers);if(!headers.has('Content-Type'))headers.set('Content-Type','application/json');headers.set('Authorization',`Bearer ${request.connection.token}`);
     const response=await connectionFetch(`${request.connection.url}/api${path}`,{...options,headers,signal:request.signal});request.assertCurrent();
-    const data=await responseJson(response,request);if(path==='/state'||path==='/auth/me')acceptIdentity(data);request.assertCurrent();return data as T;
+    const data=await responseJson(response,request);const route=path.split('?')[0];if(route==='/state'||route==='/bootstrap'||route==='/auth/me')acceptIdentity(data);request.assertCurrent();return data as T;
   }finally{request.close();}
+}
+/** Bound only page startup; streaming and interactive tasks keep their own lifecycle. */
+export async function loadInitialState({ history = false, signal, timeoutMs = 15000 }: { history?:boolean; signal?:AbortSignal; timeoutMs?:number } = {}):Promise<State> {
+  const controller=new AbortController();
+  const abort=()=>controller.abort(signal?.reason);
+  if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});
+  const timer=setTimeout(()=>controller.abort(new Error('加载个人设置超时，请重试连接。')),timeoutMs);
+  try {
+    try { return await api<State>(history?'/state?runtime=deferred':'/bootstrap',{signal:controller.signal}); }
+    catch(error) {
+      // Only an absent endpoint permits legacy fallback; auth/network failures
+      // must not create a second request or conceal the original failure.
+      if(history||controller.signal.aborted||(error as {status?:number}).status!==404)throw error;
+      return await api<State>('/state',{signal:controller.signal});
+    }
+  } finally { clearTimeout(timer);signal?.removeEventListener('abort',abort); }
 }
 /** Binary responses retain the same immutable credentials and epoch fence as JSON. */
 export async function apiBlob(path:string, options:RequestInit = {}):Promise<Blob> {

@@ -26,6 +26,79 @@ test('real API wrapper account-switch and native restore behavior',async t=>{
   install('window',window);install('location',{hash:'',pathname:'/',search:''});install('history',{replaceState(){}});
   install('sessionStorage',{getItem:key=>disk.get(key)??null,setItem:(key,value)=>disk.set(key,value),removeItem:key=>disk.delete(key)});
   try{
+    await t.test('bootstrap and deferred-history startup accept verified identity with the captured credentials',async()=>{
+      delete window.petpal;disk.clear();
+      for(const history of [false,true]){
+        const api=await freshApi();api.setConnection({url:'https://startup.example',token:'member'},'session');
+        const calls=[],state={instanceId:'startup-host',user:{id:'startup-member'},settings:{companionKind:'anime'},conversations:history?[{id:'chat-one'}]:[]};
+        install('fetch',async(url,options)=>{calls.push({url,options});return json(state);});
+        assert.deepEqual(await api.loadInitialState({history}),state);
+        assert.equal(calls.length,1);assert.equal(calls[0].url,`https://startup.example/api${history?'/state?runtime=deferred':'/bootstrap'}`);
+        assert.equal(calls[0].options.headers.get('Authorization'),'Bearer member');
+        assert.deepEqual(api.getIdentity(),{instanceId:'startup-host',userId:'startup-member'});
+      }
+      disk.clear();
+    });
+    await t.test('only missing bootstrap falls back once to the legacy state route',async()=>{
+      const api=await freshApi();api.setConnection({url:'https://startup.example',token:'member'});
+      const calls=[],state={instanceId:'fallback-host',user:{id:'fallback-member'}};
+      install('fetch',async url=>{calls.push(url);return calls.length===1?json({error:'missing'},404):json(state);});
+      assert.deepEqual(await api.loadInitialState(),state);
+      assert.deepEqual(calls,['https://startup.example/api/bootstrap','https://startup.example/api/state']);
+      assert.deepEqual(api.getIdentity(),{instanceId:'fallback-host',userId:'fallback-member'});
+      install('fetch',async url=>{calls.push(url);return json({error:'state missing'},404);});
+      await assert.rejects(api.loadInitialState({history:true}),error=>error.status===404);
+      assert.deepEqual(calls.slice(2),['https://startup.example/api/state?runtime=deferred']);
+    });
+    await t.test('startup auth, server and network failures do not create a fallback request',async()=>{
+      for(const failure of [401,403,503,'network']){
+        const api=await freshApi();api.setConnection({url:'https://startup.example',token:'member'});const calls=[];
+        const networkError=new TypeError('fixture network unavailable');
+        install('fetch',async url=>{calls.push(url);if(failure==='network')throw networkError;return json({error:`fixture ${failure}`},failure);});
+        await assert.rejects(api.loadInitialState(),error=>failure==='network'?error===networkError:error.status===failure);
+        assert.deepEqual(calls,['https://startup.example/api/bootstrap']);assert.equal(api.getIdentity(),null);
+        assert.equal(api.getConnection().token,failure===401?'':'member');
+      }
+    });
+    await t.test('startup deadline cancels the active transport, reports timeout, and can retry',async()=>{
+      const api=await freshApi();api.setConnection({url:'https://startup.example',token:'member'});const calls=[];
+      install('fetch',async(url,options)=>{calls.push({url,signal:options.signal});return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(options.signal.reason),{once:true}));});
+      await assert.rejects(api.loadInitialState({timeoutMs:15}),/加载个人设置超时/);
+      assert.equal(calls.length,1);assert.equal(calls[0].signal.aborted,true);assert.equal(api.getConnection().token,'member');
+      install('fetch',async url=>{calls.push({url});return json({instanceId:'retry-host',user:{id:'retry-member'}});});
+      await api.loadInitialState();assert.equal(calls.length,2);assert.deepEqual(api.getIdentity(),{instanceId:'retry-host',userId:'retry-member'});
+    });
+    await t.test('the same startup deadline covers a slow legacy fallback',async()=>{
+      const api=await freshApi();api.setConnection({url:'https://startup.example',token:'member'});const calls=[];
+      install('fetch',async(url,options)=>{
+        calls.push({url,signal:options.signal});if(calls.length===1)return json({error:'missing'},404);
+        return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(options.signal.reason),{once:true}));
+      });
+      await assert.rejects(api.loadInitialState({timeoutMs:15}),/加载个人设置超时/);
+      assert.deepEqual(calls.map(item=>item.url),['https://startup.example/api/bootstrap','https://startup.example/api/state']);
+      assert.equal(calls[1].signal.aborted,true);assert.equal(api.getIdentity(),null);
+    });
+    await t.test('parent cancellation propagates its reason and pre-cancelled startup never fetches',async()=>{
+      const api=await freshApi();api.setConnection({url:'https://startup.example',token:'member'});const calls=[],entered=deferred();
+      install('fetch',async(url,options)=>{calls.push({url,signal:options.signal});entered.resolve();return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(options.signal.reason),{once:true}));});
+      const parent=new AbortController(),reason=new Error('fixture page unmounted'),pending=api.loadInitialState({signal:parent.signal});
+      await entered.promise;parent.abort(reason);await assert.rejects(pending,error=>error===reason);
+      assert.equal(calls.length,1);assert.equal(calls[0].signal.aborted,true);
+      const preCancelled=new AbortController();preCancelled.abort(reason);
+      await assert.rejects(api.loadInitialState({signal:preCancelled.signal}),error=>error===reason);assert.equal(calls.length,1);
+    });
+    await t.test('late startup JSON from an old account cannot adopt identity or connect its executor',async()=>{
+      disk.clear();const connections=[];window.petpal={executor:{connect:async input=>{connections.push(input);return{state:'online'};},disconnect:async()=>{}}};
+      const api=await freshApi();api.setConnection({url:'https://startup.example',token:'old'},'session');
+      const body=deferred(),entered=deferred();let signal;
+      install('fetch',async(_url,options)=>{signal=options.signal;entered.resolve();return{ok:true,status:200,json:()=>body.promise};});
+      const pending=api.loadInitialState();await entered.promise;await Promise.resolve();api.setConnection({url:'https://startup.example',token:'new'},'session');
+      body.resolve({instanceId:'old-host',user:{id:'old-user',canUseCodex:true}});
+      await assert.rejects(pending,api.SessionChangedError);assert.equal(signal.aborted,true);assert.equal(api.getIdentity(),null);assert.deepEqual(connections,[]);
+      install('fetch',async()=>json({instanceId:'new-host',user:{id:'new-user',canUseCodex:true}}));
+      await api.loadInitialState();assert.deepEqual(api.getIdentity(),{instanceId:'new-host',userId:'new-user'});assert.equal(connections.length,1);assert.equal(connections[0].userId,'new-user');
+      delete window.petpal;disk.clear();
+    });
     await t.test('notification lifecycle distinguishes initial restoration from real logout, identity and 401 changes',async()=>{
       disk.clear();delete window.petpal;
       const reasons=[],listener=event=>reasons.push(event.detail?.reason);window.addEventListener('petpal:session-change',listener);

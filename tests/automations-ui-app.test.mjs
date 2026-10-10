@@ -29,17 +29,17 @@ const text=tree=>Array.isArray(tree)?tree.map(text).join(''):tree==null||typeof 
 
 /** Execute App's real effects and navigation handlers. Only child UIs, browser surfaces
  * and network are isolated; notification and history decisions stay in App.tsx. */
-function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],initialProjects=[],organizationResponse,registeredAutomationIds=[],search='?chat=1',failAgentSubmit=false,handleAgentControl=false,globalReviewCapability,hostReviewCapability,extraProviders=[],approvalReviewProviderIds,assistantSnapshot}={}){
+function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],initialProjects=[],organizationResponse,registeredAutomationIds=[],search='?chat=1',failAgentSubmit=false,handleAgentControl=false,globalReviewCapability,hostReviewCapability,extraProviders=[],approvalReviewProviderIds,assistantSnapshot,startupGate=null,hydrationGate=null,deferredCodex=false,centralCodex}={}){
   const permissions={access:'read-only',approval:'ask'},identity={instanceId:'fixture-service',userId:'fixture-user'};
   const state={instanceId:identity.instanceId,user:{id:identity.userId,username:'fixture',displayName:'Fixture',isOwner:false,canUseCodex,agentAccess:canUseCodex?'full':'none'},
     settings:{petName:'Fixture companion',persona:'Fixture',companionKind:'anime',defaultProviderId:'model'},
-    providers:[{id:'model',name:'Fixture model',model:'fixture-model',protocol:'responses',supportsImages:true},...extraProviders],conversations:[],codex:{available:true,eligibleProviderIds:['model'],approvalReviewProviderIds,approvalReview:globalReviewCapability}};
-  const hosts=[{id:'central',name:'Fixture server',kind:'central',platform:'linux',online:true},
+    providers:[{id:'model',name:'Fixture model',model:'fixture-model',protocol:'responses',supportsImages:true},...extraProviders],conversations:[],codex:{available:!deferredCodex,pending:deferredCodex,eligibleProviderIds:['model'],approvalReviewProviderIds,approvalReview:globalReviewCapability}};
+  const hosts=[{id:'central',name:'Fixture server',kind:'central',platform:'linux',online:true,...(centralCodex?{codex:centralCodex}:{})},
     {id:'pc-one',name:'Fixture PC one',kind:'desktop',platform:'win32',online:true,codex:{available:true,approvalReview:hostReviewCapability}},
     {id:'pc-two',name:'Fixture PC two',kind:'desktop',platform:'linux',online:true,codex:{available:true}}];
-  const hooks=[],effects=[],timers=new Map(),calls=[],requests=[],streams=[],navigations=[],backendConversations=structuredClone(initialConversations),backendProjects=structuredClone(initialProjects),delayedResponses=[],apiFailures=[],window=new EventTarget(),document=new EventTarget();
+  const hooks=[],effects=[],timers=new Map(),calls=[],requests=[],streams=[],navigations=[],hydrations=[],startupSignals=[],lazyLoads=[],backendConversations=structuredClone(initialConversations),backendProjects=structuredClone(initialProjects),delayedResponses=[],apiFailures=[],window=new EventTarget(),document=new EventTarget();
   let notificationSnapshot={navigation:null},notificationTakes=0;
-  let index=0,tree,timerId=0,getterReads=0,createdConversations=initialConversations.length,createdProjects=initialProjects.length,sessionEpoch=1;
+  let index=0,tree,timerId=0,getterReads=0,createdConversations=initialConversations.length,createdProjects=initialProjects.length,sessionEpoch=1,disposed=false,lateStateWrites=0;
   Object.assign(window,{matchMedia:query=>({matches:query==='(pointer: coarse)'&&touch,addEventListener(){},removeEventListener(){}})});
   if(desktop)window.petpal={};
   const readStorage=()=>{getterReads++;if(deniedGetter)throw new DOMException('Storage is blocked','SecurityError');return storage;};
@@ -47,17 +47,25 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
   document.hidden=false;
   const react={
     ...React,
-    useState(initial){const at=index++;if(!hooks[at])hooks[at]={state:typeof initial==='function'?initial():initial};return[hooks[at].state,value=>{hooks[at].state=typeof value==='function'?value(hooks[at].state):value;}];},
+    useState(initial){const at=index++;if(!hooks[at])hooks[at]={state:typeof initial==='function'?initial():initial};return[hooks[at].state,value=>{if(disposed){lateStateWrites++;return;}hooks[at].state=typeof value==='function'?value(hooks[at].state):value;}];},
     useRef(initial){const at=index++;if(!hooks[at])hooks[at]={ref:{current:initial}};return hooks[at].ref;},
     useEffect(effect,deps){const at=index++,previous=hooks[at];if(!previous||deps.some((value,i)=>!Object.is(value,previous.deps?.[i])))effects.push(()=>{previous?.cleanup?.();hooks[at]={deps,cleanup:effect()};});},
     useLayoutEffect(effect,deps){react.useEffect(effect,deps);},
     useMemo:callback=>callback(),useCallback:callback=>callback,useSyncExternalStore:(_subscribe,snapshot)=>snapshot(),
+    lazy:loader=>({fixtureLazy:true,loader}),
   };
-  const element=(type,props)=>({type,props}),component=name=>({__esModule:true,default:Symbol(name)});
+  const element=(type,props)=>{
+    if(type?.fixtureLazy){
+      if(!type.pending)type.pending=type.loader().then(module=>{type.resolved=module.default;});
+      type=type.resolved||type;
+    }
+    return{type,props};
+  },component=name=>({__esModule:true,default:Symbol(name)});
   const controls=Object.fromEntries(['ModelPicker','ExecutionTarget','AgentOnboarding'].map(name=>[name,Symbol(name)]));
   class SessionChangedError extends Error {constructor(){super('Fixture account changed');this.name='SessionChangedError';}}
   const api={getConnection:()=>({url:'https://fixture.invalid',token:'fixture-token'}),getIdentity:()=>identity,getSessionEpoch:()=>sessionEpoch,
     initConnection:async()=>({url:'https://fixture.invalid',token:'fixture-token'}),isSessionChanged:error=>error instanceof SessionChangedError,SessionChangedError,
+    loadInitialState:async options=>{assert.equal(options.history,true);startupSignals.push(options.signal);return api.api('/state?runtime=deferred',{signal:options.signal});},
     api:async(path,options={})=>{
       const method=options.method||'GET',body=options.body?JSON.parse(options.body):undefined;
       calls.push(path);requests.push({path,method,body});
@@ -68,7 +76,10 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
         const delayed=delayedResponses.splice(at,1)[0];delayed.started.resolve(snapshot);await delayed.release.promise;
         return delayed.value===undefined?snapshot:structuredClone(delayed.value);
       };
-      if(path==='/state')return response({...state,projects:backendProjects,conversations:publicConversations()});
+      if(path==='/state'||path==='/state?runtime=deferred'){
+        if(path==='/state?runtime=deferred'&&startupGate)await startupGate.promise;
+        return response({...state,projects:backendProjects,conversations:publicConversations()});
+      }
       if(path==='/agent/hosts')return{hosts};
       if(path==='/conversations'&&options.method==='POST'){
         const conversation={id:`fixture-chat-${++createdConversations}`,mode:body.mode,providerId:body.providerId,title:'Fixture chat',messages:[],projectId:body.projectId??null,archivedAt:null};
@@ -140,14 +151,15 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     './ChatAssistant':{ChatAssistantControls:Symbol('ChatAssistantControls'),ChatAssistantTasks:Symbol('ChatAssistantTasks'),useChatAssistant:()=>({value:{hostId:'',providerId:'',enabled:false,permissions},snapshot:()=>assistantSnapshot})},
     './chat-assistant-preferences.mjs':{mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMessage},
     './Attachments':{useAttachments:()=>attachments,AttachmentInput:Symbol('AttachmentInput'),AttachmentDrafts:Symbol('AttachmentDrafts'),MessageImages:Symbol('MessageImages')},
-    './auth/LoginGate':{ConnectionDialog:Symbol('ConnectionDialog')},'./avatar/preference':{useCompanion:()=>['anime'],hydrateCompanion:async()=>{},readCompanion:()=> 'anime'},
+    './auth/LoginGate':{ConnectionDialog:Symbol('ConnectionDialog')},'./avatar/preference':{useCompanion:()=>['anime'],hydrateCompanion:async kind=>{hydrations.push(kind);if(hydrationGate)await hydrationGate.promise;},readCompanion:()=> 'anime'},
     './avatar/useSpeech':{useSpeech:()=>speech},'./platform/overlay':{PetOverlay:{},showPet(){}},
     './browser-setup-draft.mjs':{createBrowserSetupDraft},'./platform/computer-use':{nativeComputerUse:()=>undefined},'./platform/music-mcp':{nativeMusicMcp:()=>undefined},
     './platform/task-notification-session':{taskNotificationSession:{subscribe(){},snapshot:()=>notificationSnapshot,takeNavigation(){notificationTakes++;const previous=notificationSnapshot.navigation;notificationSnapshot={navigation:null};return previous;}}},'./desktop-settings.mjs':{reasoningEfforts},
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
   };
-  for(const name of ['AutomationsView','DownloadsView','BrandMark','CompanionOptions','ChatMessages','ConversationHistory','AgentQueue','UpdatesSettings','CatV2','WorkspaceDisclosure','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','ClientBehaviorSettings'])modules[`./${name}`]=component(name);
-  const module={exports:{}},context={module,exports:module.exports,require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);return modules[name];},
+  const deferredChildren=['AutomationsView','DownloadsView','UpdatesSettings','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','ClientBehaviorSettings','CentralServerSettings'];
+  for(const name of [...deferredChildren,'BrandMark','CompanionOptions','ChatMessages','ChatScrollDock','ConversationHistory','AgentQueue','CatV2','WorkspaceDisclosure'])modules[`./${name}`]=component(name);
+  const module={exports:{}},context={module,exports:module.exports,require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);if(deferredChildren.some(child=>name===`./${child}`))lazyLoads.push(name);return modules[name];},
     window,document,location:{search,origin:'https://fixture.invalid',assign:path=>navigations.push(path)},URL,URLSearchParams,AbortController,DOMException,crypto:{randomUUID:()=>`fixture-submission-${requests.length}`},
     setTimeout(callback){const id=++timerId;timers.set(id,callback);return id;},clearTimeout:id=>timers.delete(id)};
   Object.defineProperty(context,'localStorage',{get:readStorage});
@@ -160,7 +172,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
   const find=(type,predicate=()=>true)=>nodes(tree).find(node=>node.type===type&&predicate(node.props));
   render();
   const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return{promise,resolve};};
-  return{find,calls,requests,streams,navigations,attachments,get getterReads(){return getterReads;},text:()=>text(tree),
+  return{find,calls,requests,streams,navigations,attachments,hydrations,startupSignals,lazyLoads,get lateStateWrites(){return lateStateWrites;},get getterReads(){return getterReads;},text:()=>text(tree),
     ready:async()=>{for(let attempt=0;attempt<3;attempt++){await flush();render();}},
     enterAgent(){find('button',props=>props['aria-label']==='Agent 执行任务').props.onClick();render();},
     enterChat(){find('button',props=>props['aria-label']==='Chat 聊天').props.onClick();render();},
@@ -210,11 +222,60 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     },
     openView(label){find('button',props=>text(props.children)===label).props.onClick();render();},
     back(alreadyPrevented=false){const event=new Event('petpal:workspace-back',{cancelable:true});if(alreadyPrevented)event.preventDefault();window.dispatchEvent(event);render();return event.defaultPrevented;},
-    async close(){for(const hook of hooks)hook?.cleanup?.();await flush();assert.equal(timers.size,0,'effect cleanup must release every fixture timer');},
+    async close(){if(disposed)return;disposed=true;for(const hook of hooks)hook?.cleanup?.();await flush();assert.equal(timers.size,0,'effect cleanup must release every fixture timer');},
   };
 }
 
 const conversation = (id, extra = {}) => ({ id, title: id, mode: 'chat', providerId: 'model', messages: [], ...extra });
+
+const deferred=()=>{let resolve,reject;const promise=new Promise((done,fail)=>{resolve=done;reject=fail;});return{promise,resolve,reject};};
+
+test('real App startup becomes connected and ready while companion preference synchronization is still pending',async t=>{
+  const hydration=deferred(),f=workspaceFixture({hydrationGate:hydration});t.after(async()=>{hydration.resolve();await f.close();});
+  assert.ok(f.find('div',props=>props.className==='loading-view'));await f.ready();
+  assert.equal(f.find('div',props=>props.className==='loading-view'),undefined);assert.ok(f.find('span',props=>props.className==='status-light online'));
+  assert.deepEqual(f.hydrations,['anime']);assert.deepEqual(f.calls,['/state?runtime=deferred']);assert.deepEqual(f.lazyLoads,[]);
+  f.typeDraft('保留这个输入');assert.equal(f.find('button',props=>props['aria-label']==='发送消息').props.disabled,false);
+  hydration.reject(new Error('fixture delayed preference save failed'));await f.ready();
+  assert.equal(f.find('div',props=>props.className==='loading-view'),undefined);assert.equal(f.find('div',props=>props.role==='alert'),undefined);
+  assert.equal(f.find('textarea',props=>props['aria-label']==='消息').props.value,'保留这个输入');
+});
+
+test('real App loads optional download and automation modules only when those pages are entered',async t=>{
+  const f=workspaceFixture({canUseCodex:true});t.after(()=>f.close());await f.ready();assert.deepEqual(f.lazyLoads,[]);
+  f.openView('下载客户端');await f.ready();assert.ok(f.component('DownloadsView'));assert.deepEqual(f.lazyLoads,['./DownloadsView']);
+  f.openView('自动化');await f.ready();assert.ok(f.automation());assert.deepEqual(f.lazyLoads,['./DownloadsView','./AutomationsView']);
+  f.openView('对话');await f.ready();f.openView('下载客户端');await f.ready();assert.deepEqual(f.lazyLoads,['./DownloadsView','./AutomationsView']);
+});
+
+test('real App startup failure releases loading and an explicit retry restores the authenticated workspace',async t=>{
+  const f=workspaceFixture();t.after(()=>f.close());f.failNext('/state?runtime=deferred','GET',new Error('fixture startup timeout'));await f.ready();
+  assert.equal(f.find('div',props=>props.className==='loading-view'),undefined);assert.equal(f.find('div',props=>props.role==='alert').props.children[0].props.children,'fixture startup timeout');
+  assert.deepEqual(f.hydrations,[]);const firstSignal=f.startupSignals[0];f.click('重试连接');await f.ready();
+  assert.equal(firstSignal.aborted,true);assert.notEqual(f.startupSignals[1],firstSignal);assert.equal(f.find('div',props=>props.role==='alert'),undefined);
+  assert.ok(f.find('span',props=>props.className==='status-light online'));assert.deepEqual(f.hydrations,['anime']);assert.deepEqual(f.calls,['/state?runtime=deferred','/state?runtime=deferred']);
+});
+
+test('real App unmount or account change fences late startup state before identity UI and companion hydration',async t=>{
+  for(const interruption of ['unmount','account']){
+    const gate=deferred(),f=workspaceFixture({startupGate:gate});t.after(()=>f.close());await f.ready();
+    assert.equal(f.startupSignals.length,1);assert.ok(f.find('div',props=>props.className==='loading-view'));
+    if(interruption==='unmount')await f.close();else f.changeSession();
+    gate.resolve();if(interruption==='unmount')await flush();else await f.ready();
+    assert.deepEqual(f.hydrations,[]);assert.equal(f.lateStateWrites,0);
+    if(interruption==='unmount')assert.equal(f.startupSignals[0].aborted,true);
+    else assert.equal(f.find('span',props=>props.className==='status-light online'),undefined);
+  }
+});
+
+test('real App uses the selected central executor status instead of deferred bootstrap availability',async t=>{
+  for(const available of [true,false]){
+    const f=workspaceFixture({canUseCodex:true,deferredCodex:true,centralCodex:{available,model:'real-central-runtime'}});t.after(()=>f.close());await f.ready();f.enterAgent();await f.ready();f.chooseHost('central');f.typeDraft('fixture central execution');
+    assert.equal(f.find('button',props=>props['aria-label']==='发送消息').props.disabled,!available);
+    if(available){await f.submit();const submitted=f.requests.find(request=>request.path.endsWith('/agent/submit'));assert.ok(submitted);assert.equal(submitted.body.hostId,'central');}
+    else assert.ok(f.requests.every(request=>request.method==='GET'));
+  }
+});
 
 test('automation navigation mounts an account-bound independent view and keeps Chat text and image drafts', async t => {
   const f = workspaceFixture({ canUseCodex: true }); t.after(() => f.close()); await f.ready();

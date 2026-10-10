@@ -10,7 +10,7 @@ const compile=async file=>ts.transpileModule(await readFile(new URL(file,import.
 }).outputText;
 const [source,motionSource]=await Promise.all([compile('../src/CompanionWorld.tsx'),compile('../src/platform/ui-motion.ts')]);
 const nodes=tree=>Array.isArray(tree)?tree.flatMap(nodes):!tree||typeof tree!=='object'?[]:[tree,...nodes(tree.props?.children)];
-const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return{promise,resolve};};
+const deferred=()=>{let resolve,reject;const promise=new Promise((done,fail)=>{resolve=done;reject=fail;});return{promise,resolve,reject};};
 
 class Surface{
   events=new Map();attributes=new Map();isConnected=true;entries=0;scrollHeight=420;scrollTop=0;
@@ -25,10 +25,10 @@ class Surface{
 }
 
 /** Real page, hook bridge and policy; isolate rendering, recording and service access. */
-function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,initialKind='anime',stateKind=initialKind}={}){
+function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,hydrationGate=null,initialKind='anime',stateKind=initialKind}={}){
   const hooks=[],layout=[],passive=[],refs=new Map(),surfaces=new Map(),commits=[],apiReads=[],choices=[],hydrations=[],frames=new Map();let frameId=0;
   const document=new Surface(),window=new Surface(),media=new Surface();
-  let index=0,tree,dirty=false,kind=initialKind,disposed=false,starts=0,stops=0;
+  let index=0,tree,dirty=false,kind=initialKind,disposed=false,starts=0,stops=0,epoch=1,stateReads=0,startupSignal;
   document.documentElement=new Surface();document.visibilityState=hidden?'hidden':'visible';document.hidden=hidden;
   media.matches=reduced;window.document=document;window.matchMedia=()=>media;
   const same=(left,right)=>left&&right&&left.length===right.length&&left.every((value,at)=>Object.is(value,right[at]));
@@ -55,13 +55,13 @@ function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,
     'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     './BrandMark':stub('BrandMark'),'./MessageMarkdown':stub('MessageMarkdown'),
     './avatar/CompanionScene':{__esModule:true,default:scene},
-    './avatar/preference':{useCompanion:()=>[kind],useCompanionCatEnabled:()=>[true],chooseCompanion:async next=>{choices.push(next);kind=next;},hydrateCompanion:async next=>{hydrations.push(next);kind=next;}},
-    './api':{getSessionEpoch:()=>1,initConnection:async()=>{apiReads.push('initConnection');return{token:authenticated};},api:async path=>{apiReads.push(path);assert.equal(path,'/state','Animation must not write to services');return stateGate?await stateGate.promise:state;}},
+    './avatar/preference':{useCompanion:()=>[kind],useCompanionCatEnabled:()=>[true],chooseCompanion:async next=>{choices.push(next);kind=next;},hydrateCompanion:async next=>{hydrations.push(next);if(hydrationGate)await hydrationGate.promise;kind=next;}},
+    './api':{getSessionEpoch:()=>epoch,initConnection:async()=>{apiReads.push('initConnection');return{token:authenticated};},loadInitialState:async options=>{assert.equal(options.history,undefined);startupSignal=options.signal;apiReads.push('/bootstrap');return stateGate&&++stateReads===1?await stateGate.promise:state;}},
     './voice/useVoiceConversation':{useVoiceConversation:()=>voice},
     './ChatAssistant':{useChatAssistant:()=>assistant,ChatAssistantControls:Symbol('ChatAssistantControls'),ChatAssistantTasks:Symbol('ChatAssistantTasks')},
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
   };
-  const context={window,document,location:{assign:()=>assert.fail('Animation cannot navigate')},
+  const context={window,document,AbortController,location:{assign:()=>assert.fail('Animation cannot navigate')},
     requestAnimationFrame:callback=>{const id=++frameId;frames.set(id,callback);return id;},cancelAnimationFrame:id=>frames.delete(id),
     setTimeout:()=>assert.fail('Animation cannot schedule polling'),clearTimeout:()=>{},
     require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);return modules[name];}};
@@ -91,6 +91,7 @@ function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,
   };
   render();
   return{document,window,media,state,voice,assistant,commits,apiReads,choices,hydrations,find,frames,
+    get startupSignal(){return startupSignal;},changeSession(){epoch++;},
     paint(){const pending=[...frames.values()];frames.clear();for(const callback of pending)callback();},
     get starts(){return starts;},get stops(){return stops;},
     history:className=>surfaces.get(className)||[],
@@ -104,7 +105,7 @@ function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,
     close(){find('button',p=>p['aria-label']==='关闭语音聊天').props.onClick();render();},
     reduce(value){media.matches=value;media.fire('change');},
     hide(value){document.hidden=value;document.visibilityState=value?'hidden':'visible';document.fire('visibilitychange');},
-    async flush(){await new Promise(resolve=>setImmediate(resolve));render();},
+    async flush(){await new Promise(resolve=>setImmediate(resolve));if(!disposed)render();},
     dispose(){if(disposed)return;disposed=true;for(const hook of hooks)hook?.cleanup?.();stopPolicy();for(const history of surfaces.values())for(const surface of history){assert.equal(surface.getAttribute('data-ui-enter'),null);assert.equal(surface.count(),0);}assert.equal(document.count()+window.count()+media.count(),0);},
   };
 }
@@ -147,14 +148,14 @@ test('delayed account hydration can change the ready character without a prematu
   await f.flush();f.ready();finish(f);const aura=f.surface('companion-aura'),before=f.commits.length;
   gate.resolve(f.state);await f.flush();
   assert.deepEqual(f.hydrations,['cat']);assert.ok(f.commits.slice(before).every(commit=>!commit.ready));
-  assert.equal(aura.entries,1);f.ready();assert.equal(aura.entries,2);assert.deepEqual(f.apiReads,['initConnection','/state']);
+  assert.equal(aura.entries,1);f.ready();assert.equal(aura.entries,2);assert.deepEqual(f.apiReads,['initConnection','/bootstrap']);
 });
 
 test('explicit character selection retains stop behavior and starts decoration only after scene ready',async t=>{
   const f=fixture({authenticated:true});t.after(()=>f.dispose());await f.flush();f.ready();finish(f);
   const aura=f.surface('companion-aura'),before=f.stops;f.choose('cat');await f.flush();
   assert.deepEqual(f.choices,['cat']);assert.ok(f.stops>before);assert.equal(aura.entries,1);assert.equal(f.find('main').props['data-ready'],false);
-  f.ready();assert.equal(aura.entries,2);assert.deepEqual(f.apiReads,['initConnection','/state']);
+  f.ready();assert.equal(aura.entries,2);assert.deepEqual(f.apiReads,['initConnection','/bootstrap']);
 });
 
 test('sleep and wake cannot replay the aura while the existing voice-stop side effect remains',async t=>{
@@ -195,7 +196,7 @@ test('voice panel enters per opening and never restarts for captions, phase, lev
   panel.fire('animationend');f.refresh({reply:'字幕刷新'});assert.equal(panel.entries,1);assert.equal(panel.getAttribute('data-ui-enter'),null);
   const before=f.stops;f.close();assert.ok(f.stops>before);assert.equal(panel.isConnected,false);assert.equal(panel.count(),0);
   f.open();assert.equal(f.history('companion-voice-panel').length,2);assert.equal(f.surface('companion-voice-panel').entries,1);assert.equal(f.starts,2);
-  assert.deepEqual(f.apiReads,['initConnection','/state']);assert.deepEqual(f.choices,[]);
+  assert.deepEqual(f.apiReads,['initConnection','/bootstrap']);assert.deepEqual(f.choices,[]);
 });
 
 test('voice opened under reduced motion remains static on restoration and cleanup is complete on unmount',async t=>{
@@ -215,4 +216,32 @@ test('caption scroll coalesces before paint and closes without late scroll work'
   f.hide(false);assert.equal(f.frames.size,1);f.paint();assert.equal(captions.scrollTop,captions.scrollHeight);
   captions.scrollTop=0;f.refresh({reply:'关闭前的字幕'});assert.equal(f.frames.size,1);f.close();assert.equal(f.frames.size,0);
   f.paint();assert.equal(captions.scrollTop,0);
+});
+
+test('pending preference synchronization does not block companion scene readiness or authenticated voice entry',async t=>{
+  const hydration=deferred(),f=fixture({authenticated:true,hydrationGate:hydration});t.after(()=>{hydration.resolve();f.dispose();});
+  await f.flush();assert.deepEqual(f.hydrations,['anime']);assert.equal(f.find('button',p=>p.className==='companion-voice-entry').props.disabled,false);
+  f.ready();assert.equal(f.find('main').props['data-ready'],true);f.open();assert.equal(f.starts,1);
+  hydration.reject(new Error('fixture pending preference write failed'));await f.flush();
+  assert.equal(f.find('main').props['data-ready'],true);assert.equal(f.find('p',p=>p.role==='alert'),undefined);
+});
+
+test('unmounted or switched companion startup never hydrates a late personal-state response',async t=>{
+  for(const interruption of ['unmount','account']){
+    const state=deferred(),f=fixture({authenticated:true,stateGate:state,stateKind:'cat'});t.after(()=>f.dispose());await f.flush();
+    assert.equal(f.startupSignal.aborted,false);
+    if(interruption==='unmount')f.dispose();else f.changeSession();
+    state.resolve(f.state);await f.flush();assert.deepEqual(f.hydrations,[]);
+    if(interruption==='unmount')assert.equal(f.startupSignal.aborted,true);
+    else{assert.equal(f.find('button',p=>p.className==='companion-voice-entry').props.disabled,true);assert.equal(f.find('main').props['data-companion-kind'],'anime');}
+  }
+});
+
+test('companion startup failure leaves the character usable and retry replaces the cancelled request',async t=>{
+  const gate=deferred(),f=fixture({authenticated:true,stateGate:gate});t.after(()=>f.dispose());await f.flush();const oldSignal=f.startupSignal;
+  gate.reject(new Error('fixture connection timeout'));await f.flush();f.ready();
+  assert.equal(f.find('main').props['data-ready'],true);assert.equal(f.find('p',p=>p.role==='alert').props.children,'fixture connection timeout');
+  const retry=f.find('button',p=>p.children==='重试连接');assert.ok(retry);retry.props.onClick();f.refresh();await f.flush();
+  assert.equal(oldSignal.aborted,true);assert.notEqual(f.startupSignal,oldSignal);assert.deepEqual(f.apiReads,['initConnection','/bootstrap','initConnection','/bootstrap']);
+  assert.equal(f.find('p',p=>p.role==='alert'),undefined);assert.equal(f.find('button',p=>p.className==='companion-voice-entry').props.disabled,false);assert.deepEqual(f.hydrations,['anime']);
 });

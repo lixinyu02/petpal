@@ -44,7 +44,7 @@ import {nativeComputerUse} from './platform/computer-use';
 import { nativeMusicMcp } from './platform/music-mcp';
 import { taskNotificationSession } from './platform/task-notification-session';
 import { reasoningEfforts } from './desktop-settings.mjs';
-import { api, getConnection, getIdentity, getSessionEpoch, initConnection, connectWithToken, login, isSessionChanged, SessionChangedError, streamMessage, type AgentHost, type AgentPermissions as Permissions, type AgentSubmission, type Connection, type Conversation, type ConversationOrganization, type ConversationProject, type Message, type NativeExecutorStatus, type Provider, type ReasoningEffort, type State } from './api';
+import { api, loadInitialState, getConnection, getIdentity, getSessionEpoch, initConnection, connectWithToken, login, isSessionChanged, SessionChangedError, streamMessage, type AgentHost, type AgentPermissions as Permissions, type AgentSubmission, type Connection, type Conversation, type ConversationOrganization, type ConversationProject, type Message, type NativeExecutorStatus, type Provider, type ReasoningEffort, type State } from './api';
 
 const DownloadsView = lazy(() => import('./DownloadsView'));
 const AutomationsView = lazy(() => import('./AutomationsView'));
@@ -81,6 +81,8 @@ export default function App() {
   function cacheAutomationConversation(value:Conversation|null){const next=value?reuseConversationMessages(loadedAutomationConversationRef.current||undefined,value):null;loadedAutomationConversationRef.current=next;setLoadedAutomationConversation(next);}
   const chatAssistantDefaultRevision = useRef(0);
   const [ready, setReady] = useState(false);
+  const [startupAttempt, setStartupAttempt] = useState(0);
+  const [startupError,setStartupError]=useState('');
   const [connected, setConnected] = useState(false);
   const [view, setView] = useState<WorkspaceView>(new URLSearchParams(location.search).has('automations') ? 'automations' : new URLSearchParams(location.search).has('downloads') ? 'downloads' : new URLSearchParams(location.search).has('settings') ? 'settings' : 'chat');
   const [automationEditing,setAutomationEditing]=useState({dirty:false,busy:false});
@@ -179,7 +181,7 @@ export default function App() {
   const projectDirectory=useProjectDirectory({scope:hostScope,hostId:selectedHostId,conversationId:conversation?.mode==='codex'?conversation.id:'',conversationValue:conversation?.mode==='codex'&&conversationProjectHostId===selectedHostId&&(conversation.messages.length||conversation.agent?.run||conversation.threadHostId)?(conversation.agentProjectDirectory??conversation.threadProjectDirectory??''):undefined});
   const activeProjectDirectory=executionProjectDirectory(conversation?.agent,agentSubmissionRef.current)??projectDirectory.value;
   const projectIssue=projectDirectoryIssue(activeProjectDirectory,selectedHost);
-  const selectedCodex=useMemo(()=>selectedHost?.kind==='desktop'?{...state.codex,...selectedHost.codex}:state.codex,[state.codex,selectedHost?.kind,selectedHost?.codex]);
+  const selectedCodex=useMemo(()=>selectedHost?.codex?{...state.codex,...selectedHost.codex}:state.codex,[state.codex,selectedHost?.codex]);
   const activeAgentProvider=state.providers.find(item=>item.id===activeProviderId);
   const agentSupportsImages=activeAgentProvider?.supportsImages!==false;
   const canSendAgent=!!selectedHost?.online&&!!selectedCodex.available&&!hostsError&&!agentUnknown&&!projectIssue;
@@ -233,23 +235,26 @@ export default function App() {
     if (getSessionEpoch() !== accountEpoch) throw new SessionChangedError();
     // A response requested before the successful write must not undo its target.
     setState(previous=>({...mergeOrganizationSnapshot(previous,next,readRevision!==organizationRevision.current,deletedConversationIds.current),settings:defaultRevision===chatAssistantDefaultRevision.current?next.settings:{...next.settings,chatAssistantHostId:previous.settings.chatAssistantHostId}}));
-    setConnected(true); await hydrateCompanion(next.settings.companionKind || 'anime').catch(() => {});
+    setConnected(true); void hydrateCompanion(next.settings.companionKind || 'anime').catch(() => {});
     setProviderId(previous => next.providers.some(p => p.id === previous) ? previous : next.settings.defaultProviderId || next.providers[0]?.id || '');
     return next;
   }
   useEffect(() => {
     let alive = true;
+    const controller=new AbortController();setReady(false);setStartupError('');
     initConnection().then(async connection => {
+      if(!alive||controller.signal.aborted||getSessionEpoch()!==accountEpoch)return;
       if (!connection.token) { if (alive) setConnected(false); return; }
-      const next = await api<State>('/state');
-      if (alive && getSessionEpoch() === accountEpoch) { setState(next); await hydrateCompanion(next.settings.companionKind || 'anime').catch(() => {}); setProviderId(next.settings.defaultProviderId || next.providers[0]?.id || ''); setConnected(true); if(!next.user?.canUseCodex)setMode('chat'); if(!next.user?.isOwner)setAgentProviderId(next.codex.eligibleProviderIds?.[0]||'');
+      const next = await loadInitialState({history:true,signal:controller.signal});
+      if (alive && !controller.signal.aborted && getSessionEpoch() === accountEpoch) { setState(next); setProviderId(next.settings.defaultProviderId || next.providers[0]?.id || ''); setConnected(true); if(!next.user?.canUseCodex)setMode('chat'); if(!next.user?.isOwner)setAgentProviderId(next.codex.eligibleProviderIds?.[0]||'');
         const linked=next.conversations.find(item=>item.id===new URLSearchParams(location.search).get('conversation'));
         if(linked&&(linked.mode!=='codex'||next.user?.canUseCodex)){setSelected(linked.id);setMode(linked.mode);setHistoryArchived(!!linked.archivedAt);if(linked.mode==='codex'){setAgentHostId(linked.agent?.run?.hostId||linked.agentHostId||linked.threadHostId||'central');setAgentProviderId(linked.agent?.run?.providerId||(next.user?.isOwner?'':next.codex.eligibleProviderIds?.[0]||''));setPermissions(linked.agent?.run?.permissions||{...defaultAgentPermissions});}}
         else setSelected(null);
+        void hydrateCompanion(next.settings.companionKind || 'anime').catch(() => {});
       }
-    }).catch(e => { if (alive) setError(e.message); }).finally(() => { if (alive) setReady(true); });
-    return () => { alive = false; };
-  }, []);
+    }).catch(e => { if (alive&&!controller.signal.aborted&&getSessionEpoch()===accountEpoch&&!isSessionChanged(e)) {setConnected(false);setStartupError(e.message);} }).finally(() => { if (alive&&getSessionEpoch()===accountEpoch) setReady(true); });
+    return () => { alive = false;controller.abort(); };
+  }, [startupAttempt]);
   useEffect(()=>{
     setAgentHostId(conversation?.mode==='codex'?(conversation.agent?.run?.hostId||conversation.agentHostId||conversation.threadHostId||'central'):readExecutionHost(browserStorage(),hostScope));
     setAgentHosts([]);setDefaultHostId('');setNativeExecutor(null);setHostsError('');
@@ -717,6 +722,7 @@ export default function App() {
     </aside>
 
     <main className="main-area">
+      {ready&&startupError&&<div className="error-banner" role="alert"><span>{startupError}</span><button className="secondary-button" onClick={()=>setStartupAttempt(value=>value+1)}>重试连接</button></div>}
       <header className="topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileNav(true)}><Menu size={21} aria-hidden="true"/></button><span className="breadcrumb">我的空间</span><span className="breadcrumb-divider">/</span><strong ref={titleEntrance} className="ui-title-enter">{view === 'settings' ? '连接与设置' : view==='downloads'?'下载客户端':view==='automations'?'自动化':currentMode === 'codex' ? 'Agent · 执行任务' : 'Chat · 聊天'}</strong></div><div className="topbar-actions">{view === 'chat' && <button type="button" className="companion-panel-toggle" aria-label={companionPanelOpen ? '收起伙伴栏' : '展开伙伴栏'} aria-expanded={companionPanelOpen} aria-controls="workspace-companion-panel" onClick={() => setCompanionPanelOpen(value => !value)}><PawPrint size={16} aria-hidden="true"/><span>{companionPanelOpen ? '收起伙伴' : '伙伴'}</span></button>}<span className="today">{todayLabel}</span><button className="avatar account-entry" aria-label="我的账号" onClick={() => requestNavigation({kind:'page',view:'settings',accounts:true})}>{state.user?.displayName?.slice(0,1) || '我'}</button><a className="single-companion-return" href="/" onClick={homeClick} aria-label="回到伙伴身边"><PawPrint size={20} aria-hidden="true"/></a></div></header>
       {!ready ? <div className="loading-view"><Loader2 className="spin" aria-hidden="true"/>正在准备你的小伴…</div> : view==='automations'?<Suspense fallback={<div className="loading-view" role="status"><Loader2 className="spin" aria-hidden="true"/>正在打开自动化…</div>}><AutomationsView user={state.user} providers={agentProviders} reviewProviders={reviewProviders} hosts={agentHosts} localHostId={localHostId} defaultHostId={selectedHostId||defaultHostId} hostsLoading={hostsLoading} hostsError={hostsError} onRefreshHosts={()=>setHostRefresh(value=>value+1)} onOpenConversation={openAutomationConversation} onEditingChange={updateAutomationEditing}/></Suspense>:view==='downloads'?<Suspense fallback={<div className="loading-view" role="status"><Loader2 className="spin" aria-hidden="true"/>正在打开下载页面…</div>}><DownloadsView/></Suspense>:view === 'settings' ? <SettingsView state={state} connected={connected} refresh={refresh} notice={setNotice} connect={() => setConnectionOpen(true)} initialTab={settingsTab} hasDraft={!!draft.trim()||!!attachments.items.length||working} onDownload={()=>setView('downloads')} onPrepareBrowser={prepareBrowser} prepareBrowserDisabled={working||hostBusy||hostsLoading||!state.user?.canUseCodex||!!draft.trim()||!!attachments.items.length||!!unconfirmed}/> : <div className={`workspace${companionPanelOpen ? ' workspace-companion-visible' : ''}`}>
         <section className="chat-area">

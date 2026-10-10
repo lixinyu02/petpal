@@ -27,7 +27,7 @@
 
 ### 前端启动
 
-首页使用bootstrap，404时仅回退旧state接口以兼容旧服务；Chat使用deferred state。账号epoch隔离保持，首次加载可取消且超时后显示可恢复的连接错误。状态先初始化Chat，人物偏好同步独立进行，仍遵循现有dirty与身份门禁。central和desktop均以所选主机的真实Codex探测结果判断Agent可用，不把deferred中的pending误判为离线；普通刷新保留已探测结果，配置变化后只使用新主机探测。
+首页使用bootstrap，404时仅回退旧state接口以兼容旧服务；Chat首次读取使用deferred state。账号epoch隔离保持，首次加载可取消且超时后显示可恢复的连接错误。状态先初始化Chat，人物偏好同步独立进行，仍遵循现有dirty与身份门禁。central和desktop均以所选主机的真实Codex探测结果判断Agent可用，不把deferred中的pending误判为离线；设置修改后的完整刷新继续沿用原state接口。
 
 Cubism在原路径校验后重叠Core与manifest获取；有界贴图原始字节请求与MOC／动作加载重叠，解码／GPU上传及所有动作就绪顺序保持。任何失败先取消并等待关联下载结束，再释放GPU／返回错误；旧加载不能提交给新角色。保留隐藏暂停、减少动画及备用渲染器按需加载。
 
