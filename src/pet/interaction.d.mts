@@ -11,6 +11,7 @@ export function createCompanionGestures(options: {
 }): { down(point: Point): boolean; move(point: Point): boolean; up(point: Point): void; cancel(): void; leave(): void; keyDown(key: string, repeat?: boolean): boolean; keyUp(key: string): void; activate(): void };
 export function bindCompanionGestures(surface: HTMLElement, options: {
   hitTest: (x: number, y: number) => boolean; regionAt?: (x: number, y: number) => CompanionRegion | null;
+  pointAt?: (x: number, y: number) => { hit: boolean; region?: CompanionRegion | null };
   emit: (action: PetInteraction, context?: CompanionGestureContext) => void; getAction: () => PetAction;
   onPointer?: (x: number, y: number) => void; onLeave?: () => void; enabled?: () => boolean;
   onFeedback?: (feedback: CompanionFeedback) => boolean;

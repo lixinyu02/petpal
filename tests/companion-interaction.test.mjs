@@ -225,6 +225,34 @@ function domFixture(t, options = {}) {
   return {surface,win,doc,emitted,feedback,unbind,dispatch,setAvailable:value=>available=value,setEnabled:value=>enabled=value,setHit:value=>hit=value};
 }
 
+test('joint hit sampling is fresh for each operation and stable refreshes do not rewrite the cursor', t => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  let reads=0,writes=0,region='head';
+  const f=domFixture(t,{hitTest:()=>{throw new Error('joint sampling must replace separate hit tests');},regionAt:()=>{throw new Error('joint sampling must replace separate region tests');},pointAt:()=>{reads++;return {hit:true,region};}});
+  f.surface.style=new Proxy(f.surface.style,{set(target,key,value){writes++;target[key]=value;return true;}});
+  f.dispatch('pointermove');assert.equal(reads,1);assert.equal(writes,1);reads=writes=0;
+  for(let frame=0;frame<300;frame++)f.unbind.refresh();
+  assert.equal(reads,300);assert.equal(writes,0);
+  region='body';f.unbind.refresh();assert.equal(f.feedback.at(-1).phase,'cancel');assert.equal(writes,1);
+  t.mock.timers.tick(1000);assert.deepEqual(f.emitted,[]);
+  f.dispatch('contextmenu');assert.equal(reads,302);
+});
+
+test('joint sampling rechecks delayed gestures without a render and normalizes optional regions', t => {
+  t.mock.timers.enable({apis:['setTimeout']});let region='head',hit=true;
+  const f=domFixture(t,{pointAt:()=>({hit,region})});
+  for(const mode of ['hover','hold','tap']){
+    region='head';hit=true;
+    if(mode==='hover')f.dispatch('pointermove');else{f.dispatch('pointerdown');if(mode==='tap')f.dispatch('pointerup',{},f.win);}
+    region='hand';t.mock.timers.tick(1000);
+    assert.deepEqual(f.emitted,[],mode);assert.equal(f.feedback.at(-1).phase,'cancel');
+    f.dispatch('pointercancel',{},f.win);
+  }
+  region=null;f.dispatch('pointerdown');f.dispatch('pointerup',{},f.win);t.mock.timers.tick(300);
+  assert.deepEqual(f.emitted,['pet']);
+  f.dispatch('pointermove');hit=false;f.unbind.refresh();assert.equal(f.feedback.at(-1).phase,'cancel');
+});
+
 test('mouse hover changes the cursor only over the character and only hides it with visible feedback', t => {
   const f = domFixture(t); f.setHit(false); const emptyMove = f.dispatch('pointermove');
   assert.equal(emptyMove.defaultPrevented,false); assert.equal(f.surface.style.cursor,'default'); assert.equal(f.feedback.at(-1).phase,'cancel');

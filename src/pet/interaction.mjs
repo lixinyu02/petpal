@@ -117,22 +117,32 @@ export function createCompanionGestures({ emit, getAction, onFeedback = () => {}
 }
 
 /** Binds gestures without suppressing browser scrolling or synthetic native clicks. */
-export function bindCompanionGestures(surface, { hitTest, regionAt, emit, getAction, onPointer = () => {}, onLeave = () => {}, onFeedback, enabled = () => true }) {
+export function bindCompanionGestures(surface, { hitTest, regionAt, pointAt, emit, getAction, onPointer = () => {}, onLeave = () => {}, onFeedback, enabled = () => true }) {
   const originalCursor = surface.style.cursor;
   let lastPoint = null, disposed = false;
+  // One sample per operation, never across operations: animated geometry and
+  // delayed gestures must still see the current layout.
+  const sample = (x, y) => {
+    const current = pointAt ? pointAt(x, y) : { hit: hitTest(x, y), region: regionAt?.(x, y) };
+    return { hit: current.hit, ...((pointAt || regionAt) ? { region: current.region || undefined } : {}) };
+  };
+  const validPoint = point => {
+    const current = sample(point.x, point.y);
+    return current.hit && (!(pointAt || regionAt) || (current.region || undefined) === point.region);
+  };
   const feedback = value => {
     if (value.phase !== 'cancel' && !enabled()) value = { phase: 'cancel' };
     if (value.phase === 'cancel') lastPoint = null;
     else lastPoint = value;
     const visible = onFeedback?.(value) === true;
-    surface.style.cursor = value.phase !== 'cancel' && value.hit && value.pointerType === 'mouse' ? visible ? 'none' : 'pointer' : 'default';
+    const cursor = value.phase !== 'cancel' && value.hit && value.pointerType === 'mouse' ? visible ? 'none' : 'pointer' : 'default';
+    if (surface.style.cursor !== cursor) surface.style.cursor = cursor;
   };
   const gestures = createCompanionGestures({
     emit: (action, context) => { if (enabled()) emit(action, context); }, getAction, onFeedback: feedback,
-    validatePoint: point => enabled() && (point.pointerType === 'keyboard' ||
-      hitTest(point.x, point.y) && (!regionAt || (regionAt(point.x, point.y) || undefined) === point.region)),
+    validatePoint: point => enabled() && (point.pointerType === 'keyboard' || validPoint(point)),
   });
-  const point = event => ({ id: event.pointerId, x: event.clientX, y: event.clientY, pointerType: event.pointerType, button: event.button, buttons: event.buttons, isPrimary: event.isPrimary, hit: enabled() && hitTest(event.clientX, event.clientY), ...(regionAt ? { region: regionAt(event.clientX, event.clientY) || undefined } : {}) });
+  const point = event => ({ id: event.pointerId, x: event.clientX, y: event.clientY, pointerType: event.pointerType, button: event.button, buttons: event.buttons, isPrimary: event.isPrimary, ...(enabled() ? sample(event.clientX, event.clientY) : { hit: false }) });
   const down = event => { if (enabled()) gestures.down(point(event)); };
   const move = event => {
     if (!enabled()) return;
@@ -155,7 +165,7 @@ export function bindCompanionGestures(surface, { hitTest, regionAt, emit, getAct
   const keyDown = event => { if (enabled() && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); gestures.keyDown(event.key, event.repeat); } };
   const keyUp = event => { if (enabled() && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); gestures.keyUp(event.key); } };
   const click = event => { if (enabled() && event.detail === 0) gestures.activate(); };
-  const contextMenu = event => { if (enabled() && hitTest(event.clientX,event.clientY)) event.preventDefault(); };
+  const contextMenu = event => { if (enabled() && sample(event.clientX,event.clientY).hit) event.preventDefault(); };
   surface.addEventListener('pointerdown', down); surface.addEventListener('pointermove', move); surface.addEventListener('pointerleave', leave);
   surface.addEventListener('keydown', keyDown); surface.addEventListener('keyup', keyUp); surface.addEventListener('click', click); surface.addEventListener('contextmenu', contextMenu); surface.addEventListener('blur', cancel);
   window.addEventListener('pointerdown', outsideDown); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', cancel); window.addEventListener('blur', cancel);
@@ -174,7 +184,7 @@ export function bindCompanionGestures(surface, { hitTest, regionAt, emit, getAct
   // A stationary mouse must not retain an invisible hand over empty stage space.
   unbind.refresh = () => {
     if (disposed || !lastPoint) return;
-    if (!enabled() || !hitTest(lastPoint.x, lastPoint.y) || regionAt && regionAt(lastPoint.x, lastPoint.y) !== lastPoint.region) cancel();
+    if (!enabled() || !validPoint(lastPoint)) cancel();
     else if (lastPoint.pointerType === 'mouse') feedback(lastPoint);
   };
   return unbind;

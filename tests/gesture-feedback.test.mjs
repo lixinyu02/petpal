@@ -100,3 +100,24 @@ test('disposal removes the decorative element, media listener and pending timer 
   f.feedback.dispose(); f.feedback.dispose(); assert.equal(f.listeners.size,0); assert.equal(f.timers.size,0); assert.equal(f.container.children.length,0);
   timer.fn(); assert.equal(f.update(),false); assert.equal(f.element.hidden,true); assert.equal(f.element.isConnected,false);
 });
+
+test('stationary render refreshes avoid all feedback writes but still track current container geometry', t => {
+  const f=fixture(t);let writes=0,reads=0,rect={left:10,top:20,width:240,height:360};
+  for(const name of ['dataset','style'])f.element[name]=new Proxy(f.element[name],{set(target,key,value){writes++;target[key]=value;return true;}});
+  let hidden=f.element.hidden;Object.defineProperty(f.element,'hidden',{get:()=>hidden,set:value=>{writes++;hidden=value;}});
+  f.container.getBoundingClientRect=()=>{reads++;return rect;};
+  f.update({region:'head'});writes=reads=0;
+  for(let frame=0;frame<300;frame++)assert.equal(f.update({region:'head'}),true);
+  assert.equal(writes,0);assert.equal(reads,300);
+  rect={...rect,left:30,top:40};f.update({region:'head'});
+  assert.equal(f.element.style.transform,'translate3d(70px,100px,0)');assert.equal(writes,1);
+  rect={...rect,left:101};assert.equal(f.update({region:'head'}),false);assert.equal(f.element.hidden,true);
+});
+
+test('browser transform serialization cannot turn a stationary refresh into another style write', t => {
+  const f=fixture(t);let writes=0,serialized='';
+  Object.defineProperty(f.element.style,'transform',{get:()=>serialized,set:value=>{writes++;serialized=value.replace(/,/g,', ').replace(', 0)',', 0px)');}});
+  f.update();assert.equal(serialized,'translate3d(90px, 120px, 0px)');
+  for(let frame=0;frame<30;frame++)f.update();assert.equal(writes,1);
+  f.update({x:120});assert.equal(writes,2);
+});

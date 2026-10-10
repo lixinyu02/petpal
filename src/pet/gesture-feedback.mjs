@@ -16,13 +16,14 @@ export function createCompanionFeedback(container, { motionQuery = globalThis.ma
   element.hidden = true;
   element.innerHTML = `<span class="companion-hand-contact"></span>${hand}`;
   container.appendChild(element);
-  let owner = null, previous = null, timer, disposed = false, reduced = Boolean(motionQuery?.matches);
+  let owner = null, previous = null, timer, disposed = false, reduced = Boolean(motionQuery?.matches), renderedTransform = '';
+  const data = (key, value) => { if (element.dataset[key] !== value) element.dataset[key] = value; };
   const clearTimer = () => { unschedule(timer); timer = undefined; };
-  const hide = () => { clearTimer(); element.hidden = true; element.dataset.phase = 'idle'; delete element.dataset.region; owner = null; previous = null; };
+  const hide = () => { clearTimer(); if (!element.hidden) element.hidden = true; data('phase', 'idle'); if (element.dataset.region !== undefined) delete element.dataset.region; owner = null; previous = null; };
   const reduce = () => {
-    reduced = Boolean(motionQuery?.matches); element.dataset.reducedMotion = String(reduced);
+    reduced = Boolean(motionQuery?.matches); data('reducedMotion', String(reduced));
     if (reduced && element.dataset.phase === 'release') hide();
-    else if (reduced && element.dataset.phase === 'stroke') { clearTimer(); element.dataset.phase = 'press'; }
+    else if (reduced && element.dataset.phase === 'stroke') { clearTimer(); data('phase', 'press'); }
   };
   reduce(); motionQuery?.addEventListener?.('change', reduce);
   function update(value, surface) {
@@ -44,17 +45,20 @@ export function createCompanionFeedback(container, { motionQuery = globalThis.ma
     owner = surface; previous = { phase:value.phase, x:value.x, y:value.y, id:value.id, pointerType:value.pointerType, region:value.region };
     // Keep the palm above and beside the contact point instead of covering eyes.
     // Mirror away from the right edge; near the top, extend below the contact.
-    element.dataset.side = x > rect.width - 44 ? 'left' : 'right';
-    element.dataset.vertical = y < 48 ? 'below' : 'above';
-    element.dataset.pointerType = value.pointerType;
-    element.dataset.region = ['head','hand','body'].includes(value.region) ? value.region : 'default';
-    element.style.transform = `translate3d(${x}px,${y}px,0)`;
-    element.hidden = false;
+    data('side', x > rect.width - 44 ? 'left' : 'right');
+    data('vertical', y < 48 ? 'below' : 'above');
+    data('pointerType', value.pointerType);
+    data('region', ['head','hand','body'].includes(value.region) ? value.region : 'default');
+    const transform = `translate3d(${x}px,${y}px,0)`;
+    // CSSStyleDeclaration normalizes spaces/units. Compare our own last value
+    // rather than its serialized output, which can differ without a movement.
+    if (renderedTransform !== transform) { element.style.transform = transform; renderedTransform = transform; }
+    if (element.hidden) element.hidden = false;
     if (changed) {
-      element.dataset.phase = value.phase === 'release' && value.pointerType === 'mouse' ? 'hover' : value.phase;
+      data('phase', value.phase === 'release' && value.pointerType === 'mouse' ? 'hover' : value.phase);
       if (value.phase === 'stroke') {
-        if (reduced) element.dataset.phase = 'press';
-        else timer = schedule(() => { timer = undefined; if (!disposed && !element.hidden) element.dataset.phase = 'press'; }, 220);
+        if (reduced) data('phase', 'press');
+        else timer = schedule(() => { timer = undefined; if (!disposed && !element.hidden) data('phase', 'press'); }, 220);
       }
       if (value.phase === 'release' && value.pointerType !== 'mouse') {
         if (reduced) hide();

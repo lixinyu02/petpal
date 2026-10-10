@@ -117,11 +117,20 @@ export default function CubismScene(props: CubismSceneProps) {
     const unbind = bindCompanionGestures(surface, {
       enabled: () => interactive && Boolean(runtime) && !disposed && !document.hidden && inView && surface.getAttribute('aria-hidden') !== 'true',
       hitTest: (x, y) => portraitContains(hitCoordinates(x, y)),
-      regionAt: referencePortrait ? (x, y) => portraitRegion(hitCoordinates(x, y)) : undefined,
+      pointAt: (x, y) => {
+        const point = hitCoordinates(x, y);
+        if (!referencePortrait) return { hit: portraitContains(point) };
+        const region = portraitRegion(point);
+        return { hit: region !== null, region: region || undefined };
+      },
       getAction: () => actionState.snapshot().action, emit: (next, context) => interact(next, true, context),
       onPointer: (x, y) => { const rect = container.getBoundingClientRect(); pointerX = clamp((x - rect.left) / Math.max(1, rect.width) * 2 - 1); pointerY = clamp(1 - (y - rect.top) / Math.max(1, rect.height) * 2); },
       onLeave: () => { pointerX = pointerY = 0; delete surface.dataset.hoverRegion; },
-      onFeedback: value => { if (value.phase === 'cancel') delete surface.dataset.hoverRegion; else if (value.region) surface.dataset.hoverRegion = value.region; return feedback.update(value, surface); },
+      onFeedback: value => {
+        if (value.phase === 'cancel') { if (surface.dataset.hoverRegion !== undefined) delete surface.dataset.hoverRegion; }
+        else if (value.region && surface.dataset.hoverRegion !== value.region) surface.dataset.hoverRegion = value.region;
+        return feedback.update(value, surface);
+      },
     });
     const lost = (event: Event) => { event.preventDefault(); fail('webgl-context-lost'); };
     surface.addEventListener('webglcontextlost', lost);
