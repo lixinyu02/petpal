@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, AudioLines, Check, Loader2, MessageCircle, Mic, Monitor, Settings2, Square, Terminal, X } from 'lucide-react';
 import BrandMark from './BrandMark';
 import CompanionScene from './avatar/CompanionScene';
@@ -15,6 +15,7 @@ const words: Record<PetAction, string> = { idle: '我就在你旁边。', walk: 
 const animeWords: Record<PetAction, string> = { idle: '今天也一起度过吧。', walk: '我就在这里，听你说。', pet: '嗯，感觉被温柔地照顾着。', eat: '谢谢你的点心。', sleep: '闭上眼睛，陪你安静一会儿。', jump: '嗨，我看到你啦。' };
 
 export default function CompanionWorld() {
+  const captionFrame=useRef<number|null>(null);
   const [name, setName] = useState('小伴');
   const [user, setUser] = useState<User>();
   const [session, setSession] = useState<State|null>(null);
@@ -47,7 +48,21 @@ export default function CompanionWorld() {
   const hasCaptions = Boolean(voice.transcript || voice.reply || voice.listening);
   useEffect(() => { if (action === 'sleep') voice.stop(); }, [action, voice.stop]);
   useEffect(() => { voice.stop();setAction('idle');setReadyKind(null); }, [kind]);
-  useEffect(() => { if (captions.current) captions.current.scrollTop = captions.current.scrollHeight; }, [voice.transcript, voice.reply]);
+  const scrollCaptions=useCallback(()=>{
+    if(document.hidden || captionFrame.current!==null)return;
+    captionFrame.current=requestAnimationFrame(()=>{
+      captionFrame.current=null;
+      if(!document.hidden && captions.current)captions.current.scrollTop=captions.current.scrollHeight;
+    });
+  },[]);
+  useEffect(()=>{if(voiceOpen)scrollCaptions();},[voiceOpen,voice.transcript,voice.reply,scrollCaptions]);
+  useEffect(()=>{
+    if(!voiceOpen)return;
+    const clear=()=>{if(captionFrame.current!==null)cancelAnimationFrame(captionFrame.current);captionFrame.current=null;};
+    const visibility=()=>{if(document.hidden)clear();else scrollCaptions();};
+    document.addEventListener('visibilitychange',visibility);
+    return()=>{clear();document.removeEventListener('visibilitychange',visibility);};
+  },[voiceOpen,scrollCaptions]);
   async function choose(next: CompanionKind) {
     if (kind === next) return;
     voice.stop();

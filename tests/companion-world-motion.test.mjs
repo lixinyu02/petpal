@@ -26,10 +26,10 @@ class Surface{
 
 /** Real page, hook bridge and policy; isolate rendering, recording and service access. */
 function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,initialKind='anime',stateKind=initialKind}={}){
-  const hooks=[],layout=[],passive=[],refs=new Map(),surfaces=new Map(),commits=[],apiReads=[],choices=[],hydrations=[];
+  const hooks=[],layout=[],passive=[],refs=new Map(),surfaces=new Map(),commits=[],apiReads=[],choices=[],hydrations=[],frames=new Map();let frameId=0;
   const document=new Surface(),window=new Surface(),media=new Surface();
   let index=0,tree,dirty=false,kind=initialKind,disposed=false,starts=0,stops=0;
-  document.documentElement=new Surface();document.visibilityState=hidden?'hidden':'visible';
+  document.documentElement=new Surface();document.visibilityState=hidden?'hidden':'visible';document.hidden=hidden;
   media.matches=reduced;window.document=document;window.matchMedia=()=>media;
   const same=(left,right)=>left&&right&&left.length===right.length&&left.every((value,at)=>Object.is(value,right[at]));
   const effect=(queue,callback,deps)=>{
@@ -39,6 +39,7 @@ function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,
   const react={
     useState(initial){const at=index++;hooks[at]||={state:typeof initial==='function'?initial():initial};return[hooks[at].state,next=>{const value=typeof next==='function'?next(hooks[at].state):next;if(!Object.is(value,hooks[at].state)){hooks[at].state=value;dirty=true;}}];},
     useRef(initial){const at=index++;hooks[at]||={ref:{current:initial}};return hooks[at].ref;},
+    useCallback(callback,deps){const at=index++;if(!same(hooks[at]?.deps,deps))hooks[at]={deps,value:callback};return hooks[at].value;},
     useEffect:(callback,deps)=>effect(passive,callback,deps),
     useLayoutEffect:(callback,deps)=>effect(layout,callback,deps),
   };
@@ -61,6 +62,7 @@ function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
   };
   const context={window,document,location:{assign:()=>assert.fail('Animation cannot navigate')},
+    requestAnimationFrame:callback=>{const id=++frameId;frames.set(id,callback);return id;},cancelAnimationFrame:id=>frames.delete(id),
     setTimeout:()=>assert.fail('Animation cannot schedule polling'),clearTimeout:()=>{},
     require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);return modules[name];}};
   const load=code=>{const module={exports:{}};vm.runInNewContext(code,{...context,module,exports:module.exports});return module.exports;};
@@ -88,7 +90,8 @@ function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,
     assert.fail('Companion fixture did not settle');
   };
   render();
-  return{document,window,media,state,voice,assistant,commits,apiReads,choices,hydrations,find,
+  return{document,window,media,state,voice,assistant,commits,apiReads,choices,hydrations,find,frames,
+    paint(){const pending=[...frames.values()];frames.clear();for(const callback of pending)callback();},
     get starts(){return starts;},get stops(){return stops;},
     history:className=>surfaces.get(className)||[],
     surface:className=>(surfaces.get(className)||[]).at(-1),
@@ -100,7 +103,7 @@ function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,
     open(){const button=find('button',p=>p.className==='companion-voice-entry');assert.equal(button.props.disabled,false);button.props.onClick();render();},
     close(){find('button',p=>p['aria-label']==='关闭语音聊天').props.onClick();render();},
     reduce(value){media.matches=value;media.fire('change');},
-    hide(value){document.visibilityState=value?'hidden':'visible';document.fire('visibilitychange');},
+    hide(value){document.hidden=value;document.visibilityState=value?'hidden':'visible';document.fire('visibilitychange');},
     async flush(){await new Promise(resolve=>setImmediate(resolve));render();},
     dispose(){if(disposed)return;disposed=true;for(const hook of hooks)hook?.cleanup?.();stopPolicy();for(const history of surfaces.values())for(const surface of history){assert.equal(surface.getAttribute('data-ui-enter'),null);assert.equal(surface.count(),0);}assert.equal(document.count()+window.count()+media.count(),0);},
   };
@@ -179,7 +182,7 @@ test('voice panel enters per opening and never restarts for captions, phase, lev
   for(const next of[{phase:'listening',listening:true,level:.4},{transcript:'今天怎么样？'},{phase:'speaking',reply:'今天也陪着你。',speaking:true},{assistantTasks:[{id:'fixture-task',status:'completed'}]}]){
     f.refresh(next);assert.equal(panel.entries,1);assert.equal(f.history('companion-voice-panel').length,1);
   }
-  const captions=f.surface('voice-conversation-captions');assert.equal(captions.scrollTop,captions.scrollHeight);
+  const captions=f.surface('voice-conversation-captions');assert.equal(f.frames.size,1);f.paint();assert.equal(captions.scrollTop,captions.scrollHeight);
   panel.fire('animationend');f.refresh({reply:'字幕刷新'});assert.equal(panel.entries,1);assert.equal(panel.getAttribute('data-ui-enter'),null);
   const before=f.stops;f.close();assert.ok(f.stops>before);assert.equal(panel.isConnected,false);assert.equal(panel.count(),0);
   f.open();assert.equal(f.history('companion-voice-panel').length,2);assert.equal(f.surface('companion-voice-panel').entries,1);assert.equal(f.starts,2);
@@ -190,4 +193,17 @@ test('voice opened under reduced motion remains static on restoration and cleanu
   const f=fixture({authenticated:true,reduced:true});t.after(()=>f.dispose());await f.flush();f.ready();f.open();
   const first=f.surface('companion-voice-panel');assert.equal(first.entries,0);f.reduce(false);f.refresh({phase:'listening',transcript:'新的语音'});assert.equal(first.entries,0);
   f.close();f.open();const second=f.surface('companion-voice-panel');assert.equal(second.entries,1);f.dispose();assert.equal(second.getAttribute('data-ui-enter'),null);assert.equal(second.count(),0);
+});
+
+test('caption scroll coalesces before paint and closes without late scroll work',async t=>{
+  const f=fixture({authenticated:true});t.after(()=>f.dispose());await f.flush();f.ready();f.open();
+  const captions=f.surface('voice-conversation-captions');
+  for(let delta=0;delta<20;delta++)f.refresh({reply:`字幕 ${delta}`});
+  assert.equal(f.frames.size,1);assert.equal(captions.scrollTop,0);
+  f.paint();assert.equal(captions.scrollTop,captions.scrollHeight);assert.equal(f.frames.size,0);
+  captions.scrollTop=0;f.refresh({reply:'后台字幕'});f.hide(true);assert.equal(f.frames.size,0);f.paint();assert.equal(captions.scrollTop,0);
+  f.refresh({reply:'隐藏时的末尾字幕'});assert.equal(f.frames.size,0);
+  f.hide(false);assert.equal(f.frames.size,1);f.paint();assert.equal(captions.scrollTop,captions.scrollHeight);
+  captions.scrollTop=0;f.refresh({reply:'关闭前的字幕'});assert.equal(f.frames.size,1);f.close();assert.equal(f.frames.size,0);
+  f.paint();assert.equal(captions.scrollTop,0);
 });

@@ -26,7 +26,9 @@ function fixture({hasApproval=true,review,failInitialRead=false,messages=[]}={})
     useState(initial){const at=index++;hooks[at]||={value:typeof initial==='function'?initial():initial};return[hooks[at].value,next=>{if(!mounted)lateUpdates++;hooks[at].value=typeof next==='function'?next(hooks[at].value):next;dirty=true;}];},
     useRef(initial){const at=index++;hooks[at]||={ref:{current:initial}};return hooks[at].ref;},
     useEffect(effect,deps){const at=index++,before=hooks[at];if(!same(before?.deps,deps))effects.push(()=>{before?.cleanup?.();hooks[at]={deps,cleanup:effect()};});},
-    useCallback:callback=>callback,useId:()=> 'task-fixture',
+    // Approval behavior is exercised directly; browser validation covers the
+    // real React memo boundary around the same hook-bearing component.
+    memo:component=>component,useCallback:callback=>callback,useId:()=> 'task-fixture',
   };react.useLayoutEffect=react.useEffect;
   const element=(type,props)=>({type,props}),module={exports:{}};
   const api={getSessionEpoch:()=>epoch,isSessionChanged:cause=>cause?.name==='SessionChangedError',api:async(path,options={})=>{

@@ -111,3 +111,51 @@ test('confirmed upstream silence markers at transcript edges never become a Chat
   assert.equal(cleanTranscript('[Silence] [Silence]'),'');
   assert.equal(cleanTranscript('文字中的 [Silence] 示例'),'文字中的 [Silence] 示例');
 });
+
+async function beginAnswer(h){
+  await h.machine.start();h.feed();h.feed();await flush();
+  const finishing=h.machine.finishUtterance();h.sessions[0].final.resolve('你好');await flush();return {finishing};
+}
+
+test('voice reply bursts coalesce presentation while first text and done remain immediate',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const h=harness(),{finishing}=await beginAnswer(h);
+  const send=text=>h.streams[0].onEvent({type:'delta',data:{text}});
+  send('首');const before=h.states.length;
+  for(let index=0;index<100;index++)send('续');
+  assert.equal(h.states.length,before);assert.equal(h.machine.snapshot().reply,'首');
+  t.mock.timers.tick(49);assert.equal(h.machine.snapshot().reply,'首');
+  t.mock.timers.tick(1);assert.equal(h.machine.snapshot().reply,'首'+'续'.repeat(100));
+  send('结尾');h.streams[0].onEvent({type:'done',data:{}});
+  assert.equal(h.machine.snapshot().reply,'首'+'续'.repeat(100)+'结尾');
+  h.streams[0].resolve();await flush();h.plays[0].resolve();await finishing;h.machine.dispose();
+});
+
+for(const cause of ['stop','interrupt','eof','network'])test(`voice ${cause} preserves accepted partial text and cannot publish a late display timer`,async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const h=harness(),{finishing}=await beginAnswer(h);
+  h.streams[0].onEvent({type:'delta',data:{text:'首'}});h.streams[0].onEvent({type:'delta',data:{text:'待显示'}});
+  assert.equal(h.machine.snapshot().reply,'首');
+  if(cause==='interrupt')await h.machine.interrupt();else if(cause==='stop')h.machine.stop();
+  if(cause==='network')h.streams[0].reject(new Error('网络中断'));else h.streams[0].resolve();
+  await finishing;assert.equal(h.machine.snapshot().reply,'首待显示');
+  const before=h.machine.snapshot();t.mock.timers.tick(1000);assert.deepEqual(h.machine.snapshot(),before);h.machine.dispose();
+});
+
+test('speech sentence delivery does not wait for the presentation deadline and failed playback flushes pending captions',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const h=harness(),{finishing}=await beginAnswer(h);
+  h.streams[0].onEvent({type:'delta',data:{text:'开头'}});
+  h.streams[0].onEvent({type:'delta',data:{text:'这是马上可以开始朗读的第一句话。'}});await flush();
+  assert.equal(h.plays.length,1);assert.equal(h.machine.snapshot().phase,'speaking');
+  assert.equal(h.plays[0].text,'开头这是马上可以开始朗读的第一句话。');
+  h.streams[0].onEvent({type:'delta',data:{text:'末尾字幕'}});assert.doesNotMatch(h.machine.snapshot().reply,/末尾字幕/);
+  h.plays[0].reject(new Error('播放失败'));await flush();h.streams[0].resolve();await finishing;
+  assert.equal(h.machine.snapshot().phase,'error');assert.match(h.machine.snapshot().reply,/末尾字幕$/);
+  const before=h.machine.snapshot();t.mock.timers.tick(1000);assert.deepEqual(h.machine.snapshot(),before);h.machine.dispose();
+});
+
+test('account invalidation discards pending captions without a late display publication',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const h=harness(),{finishing}=await beginAnswer(h);
+  h.streams[0].onEvent({type:'delta',data:{text:'当前'}});h.streams[0].onEvent({type:'delta',data:{text:'旧账号字幕'}});
+  const before=h.machine.snapshot(),count=h.states.length;h.expire();t.mock.timers.tick(200);
+  h.streams[0].onEvent({type:'delta',data:{text:'迟到字幕'}});h.streams[0].resolve();await finishing;
+  assert.deepEqual(h.machine.snapshot(),before);assert.equal(h.states.length,count);h.machine.dispose();
+});

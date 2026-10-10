@@ -37,3 +37,22 @@ test('a broken stream flushes accepted partial text before reporting failure',()
 test('empty deltas do not consume the immediate first-text update',()=>{
   const f=fixture();f.display.push('');f.display.push('真实首段');assert.deepEqual(f.events,['真实首段']);assert.equal(f.timers.size,0);
 });
+
+test('long replies schedule fewer presentations while explicit delays and immediate flushes remain supported',()=>{
+  const events=[],delays=[],timers=new Map();let sequence=0;
+  const display=createChatDisplay({onText:text=>events.push(text),schedule:(callback,delay)=>{const id=++sequence;delays.push(delay);timers.set(id,callback);return id;},cancel:id=>timers.delete(id)});
+  display.push('首');assert.equal(events.length,1);
+  for(const text of ['短回复','a'.repeat(4000),'b'.repeat(4000)]){display.push(text);display.flush();assert.equal(timers.size,0);}
+  assert.deepEqual(delays,[50,100,120]);assert.equal(events.join(''),'首短回复'+'a'.repeat(4000)+'b'.repeat(4000));
+  display.close();
+  const fixed=createChatDisplay({onText(){},delayMs:25,schedule:(_callback,delay)=>{assert.equal(delay,25);return 1;},cancel(){}});
+  fixed.push('c'.repeat(12000));fixed.push('more');fixed.close();
+});
+
+test('an existing deadline is not extended when new deltas cross the long-reply threshold',()=>{
+  const delays=[],timers=[],events=[];
+  const display=createChatDisplay({onText:text=>events.push(text),schedule:(callback,delay)=>{delays.push(delay);timers.push(callback);return timers.length;},cancel(){}});
+  display.push('首');display.push('a'.repeat(3998));display.push('到达门槛');
+  assert.deepEqual(delays,[50]);timers[0]();assert.equal(events.length,2);
+  display.push('之后');assert.deepEqual(delays,[50,100]);display.flush();display.close();
+});

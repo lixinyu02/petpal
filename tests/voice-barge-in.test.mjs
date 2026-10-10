@@ -31,6 +31,17 @@ test('ambient audio and repeated short knocks never open ASR during normal liste
   h.machine.dispose();
 });
 
+test('automatic speech interruption cannot deliver the old presentation timer into the new reply',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const h=harness();await h.machine.start();const first=await asking(h);
+  h.streams[0].onEvent({type:'delta',data:{text:'旧'}});h.streams[0].onEvent({type:'delta',data:{text:'未展示回复'}});
+  assert.equal(h.machine.snapshot().reply,'旧');h.feed(.06);h.feed(.06);await flush();
+  assert.equal(h.streams[0].signal.aborted,true);assert.equal(h.sessions.length,2);assert.equal(h.machine.snapshot().reply,'');
+  h.streams[0].resolve();await first.finishing;
+  const second=h.machine.finishUtterance();h.sessions[1].final.resolve('新的问题');await flush();
+  h.streams[1].onEvent({type:'delta',data:{text:'新的回复'}});t.mock.timers.tick(200);
+  assert.equal(h.machine.snapshot().reply,'新的回复');h.machine.stop();h.streams[1].resolve();await second;h.machine.dispose();
+});
+
 test('sustained speech interrupts Chat and TTS immediately and submits the preserved opening words once',async()=>{
   const released=deferred(),stopCalls=[],h=harness({stopChat:(id,signal)=>{stopCalls.push({id,signal});return released.promise;}});
   await h.machine.start();const first=await asking(h);

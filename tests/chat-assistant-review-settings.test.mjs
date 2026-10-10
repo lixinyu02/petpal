@@ -22,7 +22,7 @@ function fixture(local,scope='service:alice',defaultHostId='alice-pc'){
     useState(initial){const at=index++;hooks[at]||={state:typeof initial==='function'?initial():initial};return[hooks[at].state,next=>{const value=typeof next==='function'?next(hooks[at].state):next;if(!Object.is(value,hooks[at].state)){hooks[at].state=value;dirty=true;}}];},
     useRef(initial){const at=index++;hooks[at]||={ref:{current:initial}};return hooks[at].ref;},
     useEffect(effect,deps){const at=index++,previous=hooks[at];if(!equal(previous?.deps,deps))effects.push(()=>{previous?.cleanup?.();hooks[at]={deps,cleanup:effect()};});},
-    useCallback:callback=>callback,
+    memo:component=>component,useCallback:callback=>callback,
   };
   const modules={
     react,'react/jsx-runtime':{},'react-dom':{},'lucide-react':{},

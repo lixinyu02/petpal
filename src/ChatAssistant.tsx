@@ -1,4 +1,4 @@
-import {useCallback,useEffect,useId,useLayoutEffect,useRef,useState,type CSSProperties} from 'react';
+import {memo,useCallback,useEffect,useId,useLayoutEffect,useRef,useState,type CSSProperties} from 'react';
 import {createPortal} from 'react-dom';
 import {ArrowUpRight,Check,ChevronDown,Loader2,Monitor,Settings2,ShieldCheck,Square,Terminal,X} from 'lucide-react';
 import {api,getSessionEpoch,isSessionChanged,type AgentHost,type AgentPermissions as Permissions,type AssistantTask,type ChatAssistantConfig,type Conversation,type Provider,type State,type User} from './api';
@@ -190,7 +190,8 @@ export function ChatAssistantControls({assistant,allowed,user,providers,reviewPr
 }
 
 /** Refresh background tasks without making the foreground conversation busy. */
-export function ChatAssistantTasks({conversationId,tasks=[],onUpdate}:{conversationId?:string;tasks?:AssistantTask[];onUpdate(conversation:Conversation):void}) {
+const noAssistantTasks:AssistantTask[]=[];
+export const ChatAssistantTasks=memo(function ChatAssistantTasks({conversationId,tasks=noAssistantTasks,onUpdate}:{conversationId?:string;tasks?:AssistantTask[];onUpdate(conversation:Conversation):void}) {
   const [cancelling,setCancelling]=useState(''),[error,setError]=useState('');
   const [children,setChildren]=useState<Record<string,Conversation>>({}),[expanded,setExpanded]=useState(false),[approvalPending,setApprovalPending]=useState('');
   const [approvalReadError,setApprovalReadError]=useState(''),[approvalRefreshing,setApprovalRefreshing]=useState('');
@@ -291,4 +292,4 @@ export function ChatAssistantTasks({conversationId,tasks=[],onUpdate}:{conversat
     {error&&<p className="chat-assistant-note is-error" role="alert">{error}</p>}
     {approvalReadError&&<div className="assistant-task-actions" role="status"><span>{approvalReadError}</span><button type="button" disabled={!!approvalPending||!!approvalRefreshing} onClick={()=>void refreshApprovalState()}>{approvalRefreshing==='all'?'正在刷新…':'刷新审批状态'}</button></div>}
   </div>;
-}
+});

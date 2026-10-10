@@ -1,6 +1,7 @@
 import { createVoiceGate } from './audio.mjs';
 import { voiceGateProfile } from './detection-preferences.mjs';
 import { createSentenceSplitter, createSpeechQueue } from './speech-flow.mjs';
+import { createChatDisplay } from '../chat-display.mjs';
 
 export function cleanTranscript(text) {
   return String(text).replace(/^\s*Speaker\s+\d+\s*[:：]\s*/gmi,'').trim()
@@ -25,11 +26,11 @@ export function createVoiceConversation(options) {
   const valid=job=>!disposed&&current===job&&!job.abort.signal.aborted&&options.isCurrent();
   const validUtterance=(job,utterance)=>valid(job)&&job.utterance===utterance&&!utterance.abort.signal.aborted;
   function release(job){
-    if(!job)return;clearTimeout(job.idleTimer);job.abort.abort(cancelled());job.turn?.abort(cancelled());
+    if(!job)return;job.display?.close();job.display=null;clearTimeout(job.idleTimer);job.abort.abort(cancelled());job.turn?.abort(cancelled());
     job.utterance?.abort.abort(cancelled());job.utterance?.session?.cancel();job.capture.stop();options.stopSpeech();
   }
-  function stop(){const job=current;current=null;release(job);publish({phase:'idle',active:false,level:0,error:'',hasUtterance:false});}
-  function fail(job,error){if(!valid(job))return;current=null;release(job);publish({phase:'error',active:false,level:0,hasUtterance:false,error:typeof error?.message==='string'?error.message.slice(0,500):'语音对话未能继续，请重试。'});}
+  function stop(){const job=current;job?.display?.flush();current=null;release(job);publish({phase:'idle',active:false,level:0,error:'',hasUtterance:false});}
+  function fail(job,error){if(!valid(job))return;job.display?.flush();current=null;release(job);publish({phase:'error',active:false,level:0,hasUtterance:false,error:typeof error?.message==='string'?error.message.slice(0,500):'语音对话未能继续，请重试。'});}
   function idleTimeout(job){clearTimeout(job.idleTimer);job.idleTimer=setTimeout(()=>{if(valid(job)&&!job.utterance){stop();publish({error:'一段时间没有听到说话，已停止收音。点击即可重新开始。'});}},45000);}
   async function listen(job){
     if(!valid(job))return;job.gate.reset();job.monitor.reset();job.utterance=null;job.turn=null;
@@ -71,6 +72,7 @@ export function createVoiceConversation(options) {
     if(detected.ended)void finishUtterance();
   }
   function cancelTurn(job){
+    job.display?.flush();job.display?.close();job.display=null;
     job.sequence++;clearTimeout(job.idleTimer);job.turn?.abort(cancelled());job.turn=null;
     job.utterance?.abort.abort(cancelled());job.utterance?.session?.cancel();job.utterance=null;options.stopSpeech();
     if(job.chatPending&&job.chatStopFor!==job.chatPending){
@@ -98,12 +100,13 @@ export function createVoiceConversation(options) {
     try{chatRequest=options.getChatRequest?.();}catch(error){if(valid(job))fail(job,error);return;}
     const turn=new AbortController(),sequence=++job.sequence;job.turn=turn;
     const active=()=>valid(job)&&job.sequence===sequence&&!turn.signal.aborted;
-    const splitter=createSentenceSplitter(180);let full='',terminal=false,piece=0;
+    const splitter=createSentenceSplitter(180);let full='',shown='',terminal=false,piece=0;
+    const display=createChatDisplay({isCurrent:active,onText:text=>{shown+=text;publish({reply:shown});}});job.display=display;
     const queue=createSpeechQueue({signal:turn.signal,play:async sentence=>{
-      if(!active())throw cancelled();publish({phase:'speaking'});
+      if(!active())throw cancelled();display.flush();publish({phase:'speaking'});
       await options.play(sentence,`voice-${job.id}-${sequence}-${++piece}`,turn.signal);
-      if(active())publish({phase:'thinking'});
-    },onError:error=>{if(valid(job)&&job.sequence===sequence&&!turn.signal.aborted){turn.abort(error);options.stopSpeech();}}});
+      if(active()){display.flush();publish({phase:'thinking'});}
+    },onError:error=>{if(active()){display.flush();turn.abort(error);options.stopSpeech();}}});
     job.monitor.reset();publish({phase:'thinking',reply:'',hasUtterance:false});
     try{
       if(!job.conversationId){
@@ -113,23 +116,26 @@ export function createVoiceConversation(options) {
       await waitForRelease(job,turn);if(!active())return;
       const pending=Promise.resolve(options.streamChat(job.conversationId,text,turn.signal,event=>{
         if(!active())return;
-        if(event.type==='error')throw new Error(event.data.message||'回复未完成，请重试。');
+        if(event.type==='error'){display.flush();throw new Error(event.data.message||'回复未完成，请重试。');}
         if(event.type==='delta'){
           if(typeof event.data.text!=='string'||full.length+event.data.text.length>12000)throw new Error('本次语音回复过长，请到对话页面继续。');
-          full+=event.data.text;publish({reply:full});for(const sentence of splitter.push(event.data.text))queue.enqueue(sentence);
+          full+=event.data.text;display.push(event.data.text);for(const sentence of splitter.push(event.data.text))queue.enqueue(sentence);
         }
-        if(event.type==='done')terminal=true;
+        if(event.type==='done'){display.flush();terminal=true;}
       },chatRequest));job.chatPending=pending;
       try{await pending;}finally{if(job.chatPending===pending)job.chatPending=null;}
       if(!active())throw turn.signal.reason||cancelled();
       if(!terminal)throw new Error('回复连接提前断开，已停止语音。');
-      for(const sentence of splitter.finish())queue.enqueue(sentence);
+      display.flush();for(const sentence of splitter.finish())queue.enqueue(sentence);
       await queue.finish();if(!active())return;
       await listen(job);
     }catch(error){
+      display.flush();
       const reason=turn.signal.aborted?turn.signal.reason||error:error;
       turn.abort(reason);queue.cancel();if(valid(job)&&job.sequence===sequence)options.stopSpeech();
       if(valid(job)&&job.sequence===sequence)fail(job,reason);
+    }finally{
+      display.close();if(job.display===display)job.display=null;
     }
   }
   async function reportNext(job){

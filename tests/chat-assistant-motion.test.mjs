@@ -47,7 +47,7 @@ function fixture({reduced=false,hidden=false}={}){
     useId(){const at=index++;hooks[at]||={id:`assistant-fixture-${at}`};return hooks[at].id;},
     useEffect(effect,deps){const at=index++,previous=hooks[at];if(!same(previous?.deps,deps))effects.push(()=>{previous?.cleanup?.();hooks[at]={deps,cleanup:effect()};});},
     useLayoutEffect(effect,deps){react.useEffect(effect,deps);},
-    useCallback:callback=>callback,
+    memo:component=>component,useCallback:callback=>callback,
   };
   const element=(type,props)=>({type,props}),controls={ExecutionHostPicker:Symbol('ExecutionHostPicker'),ModelPicker:Symbol('ModelPicker')};
   const permissions={access:'workspace-write',approval:'ask'};
