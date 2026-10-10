@@ -4,10 +4,11 @@ import { api, getSessionEpoch, isSessionChanged, type CosyVoiceConfig, type Voic
 import { useSpeech } from './avatar/useSpeech';
 import MediaDevicesSettings from './MediaDevicesSettings';
 import AsrSettings from './AsrSettings';
+import {defaultWakeSettings,normalizeWakeSettings,type WakeSettings} from '../server/voice-wake.mjs';
 import './voice-settings.css';
 
 type CosyDraft = {baseUrl:string;referenceText:string;apiKey:string;clearApiKey:boolean};
-const clean = (value:VoiceConfig):VoiceConfig => ({...value,tts:{...value.tts,emotion:value.tts.emotion??'auto',emotionIntensity:value.tts.emotionIntensity??'natural',apiKey:'',clearApiKey:false},asr:{...value.asr,apiKey:'',clearApiKey:false}});
+const clean = (value:VoiceConfig):VoiceConfig => ({...value,wake:normalizeWakeSettings(value.wake),tts:{...value.tts,emotion:value.tts.emotion??'auto',emotionIntensity:value.tts.emotionIntensity??'natural',apiKey:'',clearApiKey:false},asr:{...value.asr,apiKey:'',clearApiKey:false}});
 const cosyDraft = (value:CosyVoiceConfig):CosyDraft => ({baseUrl:value.baseUrl,referenceText:value.referenceText,apiKey:'',clearApiKey:false});
 const changed = () => window.dispatchEvent(new Event('petpal:voice-settings-change'));
 const defaultPreviewText='你好，我是小伴。今天也一起慢慢来吧。';
@@ -42,11 +43,15 @@ export default function VoiceSettings({connected,scope='guest'}:{connected:boole
     return()=>{alive.current=false;++revision.current;request.current?.abort();speech.stop();};
   },[connected,scope,epoch]);
   function update(section:'tts'|'asr',patch:Record<string,unknown>){setConfig(previous=>previous?{...previous,[section]:{...previous[section],...patch}}:previous);setVoiceDirty(true);setMessage('');speech.stop();}
+  function updateWake(patch:Partial<WakeSettings>){setConfig(previous=>previous?{...previous,wake:{...(previous.wake??defaultWakeSettings()),...patch}}:previous);setVoiceDirty(true);setMessage('');speech.stop();}
   function updateShared(patch:Partial<CosyDraft>){setShared(previous=>previous?{...previous,...patch}:previous);setCosyDirty(true);setMessage('');speech.stop();}
   async function save(event:FormEvent){
     event.preventDefault();if(!config)return;
+    let wake:WakeSettings;
+    try{wake=normalizeWakeSettings({...config.wake,phrases:(config.wake??defaultWakeSettings()).phrases.map(phrase=>phrase.trim()).filter(Boolean)});}
+    catch(error){setError((error as Error).message);return;}
     const fields=({hasApiKey:_saved,...value}:VoiceConnectionFields)=>value;
-    await run(signal=>api<VoiceConfig>('/voice',{method:'PATCH',body:JSON.stringify({tts:fields(config.tts),asr:fields(config.asr)}),signal}),result=>{
+    await run(signal=>api<VoiceConfig>('/voice',{method:'PATCH',body:JSON.stringify({tts:fields(config.tts),asr:fields(config.asr),wake}),signal}),result=>{
       setConfig(clean(result));setVoiceDirty(false);changed();setMessage(result.tts.mode==='cosyvoice'?'已保存到当前账号。点击试听可调用 CosyVoice；自动朗读仍由你手动开启。':result.tts.mode==='system'?'已保存，使用设备本地语音。':'已保存预备配置；通用远程 TTS 仅保存配置；语音聊天请使用 CosyVoice。');
     });
   }
@@ -84,6 +89,14 @@ export default function VoiceSettings({connected,scope='guest'}:{connected:boole
     <MediaDevicesSettings key={scope} scope={scope}/>
     <AsrSettings key={`asr-${scope}`} connected={connected} scope={scope}/>
     {config&&<form onSubmit={save}>
+      <fieldset disabled={busy||!connected} className="voice-config-block voice-wake-settings"><legend><Mic size={19}/>关键词唤醒</legend>
+        <label className="voice-wake-toggle"><input type="checkbox" aria-label="启用关键词唤醒" checked={config.wake?.enabled??false} onChange={event=>updateWake({enabled:event.target.checked})}/>说出唤醒词，再开始连续聊天</label>
+        <div className="voice-wake-fields">
+          <label>唤醒词<textarea aria-label="唤醒词" aria-describedby="voice-wake-phrase-help" rows={2} maxLength={204} placeholder={'你好小伴\n小伴小伴'} value={(config.wake??defaultWakeSettings()).phrases.join('\n')} onChange={event=>updateWake({phrases:event.target.value.split('\n')})}/><span id="voice-wake-phrase-help" className="field-help">每行一个，最多 5 个；也可以说“唤醒词＋问题”。</span></label>
+          <label>安静多久后回待机<div className="voice-wake-timeout"><input aria-label="回待机秒数" type="number" required min={15} max={300} step={1} value={config.wake?.idleTimeoutSeconds??45} onChange={event=>updateWake({idleTimeoutSeconds:Number(event.target.value)})}/><span>秒</span></div></label>
+        </div>
+        <p className="field-help">开启语音聊天后才监听；唤醒后连续对话，页面隐藏时停止。候选语音由已配置的 ASR 识别。</p>
+      </fieldset>
       <fieldset disabled={busy||!connected} className="voice-config-block"><legend><Volume2 size={19}/>TTS · 让小伴说话</legend>
         <label>朗读引擎<select aria-label="朗读引擎" value={config.tts.mode} onChange={event=>update('tts',{mode:event.target.value,...(event.target.value==='cosyvoice'?{speed:Math.min(2,Math.max(.5,config.tts.speed))}:{})})}><option value="system">设备本地语音</option><option value="cosyvoice">CosyVoice 参考声音</option><option value="remote">通用远程 TTS（预备配置）</option></select></label>
         {config.tts.mode==='system'?<p className="field-help">可用音色由设备提供，使用系统默认扬声器。保存后在首页开启「语音朗读」，或在聊天页开启「自动朗读回复」。</p>:config.tts.mode==='cosyvoice'?<>

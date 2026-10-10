@@ -110,6 +110,15 @@ function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,
 }
 
 const sceneSurfaces=f=>['companion-intro','companion-aura','companion-reply'].map(name=>f.surface(name));
+
+test('waiting wake UI keeps microphone visible and manual entry distinct from submitting a candidate',async t=>{
+  const f=fixture({authenticated:true});t.after(()=>f.dispose());await f.flush();f.ready();f.open();
+  f.refresh({phase:'armed',active:true,awaitingWake:true,wake:{enabled:true,phrases:['你好小伴','小伴小伴'],idleTimeoutSeconds:45}});
+  const primary=f.find('button',p=>p.className==='voice-primary');assert.equal(primary.props.children.at(-1),'直接开始聊天');assert.equal(primary.props.disabled,false);
+  assert.equal(f.find('meter').props['aria-label'],'语音聊天麦克风电平');assert.equal(f.find('div',p=>p.className==='voice-conversation-captions').props.hidden,false);
+  f.refresh({phase:'recognizing',recognizing:true,hasUtterance:true});assert.equal(f.find('button',p=>p.className==='voice-primary').props.children.at(-1),'直接开始聊天');
+  f.refresh({phase:'listening',listening:true,recognizing:false,awaitingWake:false,hasUtterance:false});assert.equal(f.find('button',p=>p.className==='voice-primary').props.children.at(-1),'说完了');assert.equal(f.find('button',p=>p.className==='voice-primary').props.disabled,true);
+});
 const finish=f=>{for(const surface of sceneSurfaces(f))surface?.fire('animationend');};
 
 test('the actual companion waits for scene readiness, enters once and cleans root animation listeners',async t=>{
