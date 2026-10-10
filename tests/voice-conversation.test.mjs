@@ -19,6 +19,95 @@ function harness(options={}){
   return{machine,states,sessions,plays,chats,streams,feed(level=.05){callbacks.onFrame(new Float32Array(6000).fill(level),level);},error(error){callbacks.onError(error);},deny(){allowed=false;},expire(){current=false;},get counts(){return{captureStarts,captureStops,capturePauses,outputStops,unlocks};}};
 }
 
+function wakeHarness(t,extra={}){
+  const h=harness({verify:async()=>({wake:{enabled:true,phrases:['你好小伴','Hey Cat'],idleTimeoutSeconds:45}}),...extra});
+  t.after(()=>h.machine.dispose());return h;
+}
+async function wakeInput(h,text){
+  h.feed(0);h.feed();h.feed();await flush();const session=h.sessions.at(-1),finishing=h.machine.finishUtterance();
+  session.final.resolve(text);await flush();return {session,finishing};
+}
+async function completeWakeReply(h,input,text='好呀。'){
+  const stream=h.streams.at(-1);stream.onEvent({type:'delta',data:{text}});stream.onEvent({type:'done',data:{}});stream.resolve();await flush();
+  h.plays.at(-1).resolve();await input.finishing;await flush();
+}
+
+test('armed silence keeps one microphone but uploads nothing and opens no ASR or Chat',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const h=wakeHarness(t);await h.machine.start();
+  assert.equal(h.machine.snapshot().phase,'armed');assert.equal(h.machine.snapshot().awaitingWake,true);
+  for(let i=0;i<300;i++)h.feed(0);t.mock.timers.tick(60000);await flush();
+  assert.equal(h.machine.snapshot().active,true);assert.equal(h.sessions.length,0);assert.equal(h.chats.length,0);assert.equal(h.plays.length,0);assert.equal(h.counts.captureStarts,1);
+});
+
+test('wake candidates require final sentence-prefix match; partial and unrelated speech stay private',async t=>{
+  const h=wakeHarness(t);await h.machine.start();h.feed();h.feed();await flush();
+  h.sessions[0].transcript('你好小伴，帮我放歌');assert.equal(h.machine.snapshot().transcript,'');assert.equal(h.machine.snapshot().phase,'armed');
+  const first=h.machine.finishUtterance();h.sessions[0].final.resolve('朋友叫你好小伴');await first;
+  assert.equal(h.machine.snapshot().phase,'armed');assert.equal(h.chats.length,0);assert.equal(h.streams.length,0);assert.equal(h.plays.length,0);
+  assert.equal(h.states.some(state=>state.transcript.includes('朋友')),false);
+  const second=await wakeInput(h,'[Silence]');await second.finishing;assert.equal(h.machine.snapshot().phase,'armed');
+  const third=await wakeInput(h,'Speaker 0: 你好小伴！');await third.finishing;assert.equal(h.machine.snapshot().phase,'listening');assert.equal(h.chats.length,0);assert.equal(h.machine.snapshot().awaitingWake,false);
+});
+
+test('wake plus question strips only the phrase; later utterances need no phrase and reuse the chat',async t=>{
+  const h=wakeHarness(t);await h.machine.start();const first=await wakeInput(h,'你好，小伴，播放音乐。');
+  assert.equal(h.streams[0].text,'播放音乐。');assert.equal(h.machine.snapshot().transcript,'播放音乐。');await completeWakeReply(h,first);
+  const second=await wakeInput(h,'调低一点音量');assert.equal(h.streams[1].text,'调低一点音量');await completeWakeReply(h,second);
+  assert.equal(h.chats.length,1);assert.equal(h.counts.captureStarts,1);assert.equal(h.machine.snapshot().phase,'listening');
+});
+
+test('continuous idle goes back to armed with the same microphone, reply and conversation',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const h=wakeHarness(t);await h.machine.start();const first=await wakeInput(h,'Hey Cat: 你好');await completeWakeReply(h,first);
+  t.mock.timers.tick(44999);assert.equal(h.machine.snapshot().phase,'listening');t.mock.timers.tick(1);assert.equal(h.machine.snapshot().phase,'armed');assert.equal(h.machine.snapshot().reply,'好呀。');assert.equal(h.machine.snapshot().conversationId,'conversation');
+  const wrong=await wakeInput(h,'这是路过的环境语音');await wrong.finishing;assert.equal(h.machine.snapshot().reply,'好呀。');assert.equal(h.machine.snapshot().transcript,'你好');
+  const second=await wakeInput(h,'你好小伴，继续');assert.equal(h.streams[1].id,'conversation');await completeWakeReply(h,second);assert.equal(h.chats.length,1);assert.equal(h.counts.captureStarts,1);
+});
+
+test('idle does not rearm while speech recognition or a Chat answer is still pending',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const h=wakeHarness(t);await h.machine.start();const wake=await wakeInput(h,'你好小伴');await wake.finishing;
+  h.feed();h.feed();await flush();t.mock.timers.tick(60000);assert.equal(h.machine.snapshot().phase,'listening');assert.equal(h.machine.snapshot().hasUtterance,true);
+  const finishing=h.machine.finishUtterance();t.mock.timers.tick(60000);assert.equal(h.machine.snapshot().phase,'recognizing');h.sessions.at(-1).final.resolve('问题');await flush();t.mock.timers.tick(60000);assert.equal(h.machine.snapshot().phase,'thinking');
+  await completeWakeReply(h,{finishing});
+});
+
+test('armed reports wait for wake; the question is answered before pending reports',async t=>{
+  const h=wakeHarness(t);await h.machine.start();assert.equal(h.machine.notifyReport({id:'task',text:'后台任务完成。'}),true);await flush();assert.equal(h.plays.length,0);
+  const input=await wakeInput(h,'你好小伴，今天天气如何');assert.equal(h.plays.length,0);await completeWakeReply(h,input);assert.equal(h.plays[1].text,'后台任务完成。');h.plays[1].resolve();await flush();assert.equal(h.machine.snapshot().phase,'listening');
+});
+
+test('a phrase alone allows queued reports to play without creating a Chat',async t=>{
+  const h=wakeHarness(t);await h.machine.start();h.machine.notifyReport({id:'ready',text:'电脑任务已经完成。'});await flush();
+  const input=await wakeInput(h,'你好小伴');await input.finishing;assert.equal(h.plays.length,1);assert.equal(h.chats.length,0);assert.equal(h.machine.snapshot().phase,'speaking');h.plays[0].resolve();await flush();assert.equal(h.machine.snapshot().phase,'listening');
+});
+
+test('failed account config verification releases audio; a late old verify cannot alter a new startup',async t=>{
+  const h=wakeHarness(t,{verify:async()=>{throw new Error('登录已过期');}});await h.machine.start();assert.equal(h.machine.snapshot().phase,'error');assert.equal(h.counts.captureStops,1);
+  const old=deferred();let calls=0;const restarted=wakeHarness(t,{verify:()=>++calls===1?old.promise:Promise.resolve({wake:{enabled:false}})});
+  const first=restarted.machine.start();restarted.machine.stop();await restarted.machine.start();const snapshot=restarted.machine.snapshot();old.resolve({wake:{enabled:true}});await first;assert.deepEqual(restarted.machine.snapshot(),snapshot);
+});
+
+for(const action of ['interrupt','stop','expire'])test(`late wake candidate cannot submit after ${action}`,async t=>{
+  const h=wakeHarness(t);await h.machine.start();h.feed();h.feed();await flush();const finishing=h.machine.finishUtterance(),old=h.sessions[0];
+  if(action==='interrupt')await h.machine.interrupt();else if(action==='stop')h.machine.stop();else h.expire();
+  const snapshot=h.machine.snapshot();old.transcript('你好小伴，迟到');old.final.resolve('你好小伴，迟到');await finishing;
+  assert.equal(h.chats.length,0);assert.equal(h.streams.length,0);assert.deepEqual(h.machine.snapshot(),snapshot);
+  if(action==='interrupt'){assert.equal(snapshot.phase,'listening');assert.equal(old.cancelled,1);}
+});
+
+test('wake config is snapshotted after verify, while audio unlock and capture retain the start gesture',async t=>{
+  const ready=deferred(),events=[],wake={enabled:true,phrases:['你好小伴'],idleTimeoutSeconds:15};
+  const h=wakeHarness(t,{verify:()=>{events.push('verify');return ready.promise;},unlock:()=>{events.push('unlock');return Promise.resolve(true);}});
+  const starting=h.machine.start();assert.deepEqual(events,['unlock','verify']);assert.equal(h.counts.captureStarts,1);await h.machine.interrupt();assert.equal(h.machine.snapshot().phase,'starting');h.feed();h.feed();assert.equal(h.sessions.length,0);
+  ready.resolve({wake});await starting;wake.enabled=false;wake.phrases[0]='另一个词';
+  assert.equal(h.machine.snapshot().phase,'armed');const input=await wakeInput(h,'你好小伴');await input.finishing;assert.equal(h.machine.snapshot().phase,'listening');
+});
+
+test('ASR busy and invalid wake configuration stop once without retries or phantom wake',async t=>{
+  let attempts=0;const h=wakeHarness(t,{openAsr:async()=>{attempts++;throw new Error('识别服务正忙');}});await h.machine.start();h.feed();h.feed();await flush();
+  for(let i=0;i<10;i++)h.feed();assert.equal(attempts,1);assert.equal(h.machine.snapshot().phase,'error');assert.equal(h.counts.captureStops,1);assert.equal(h.chats.length,0);
+  const invalid=wakeHarness(t,{verify:async()=>({wake:{enabled:true,phrases:[]}})});await invalid.machine.start();assert.equal(invalid.machine.snapshot().phase,'error');assert.equal(invalid.counts.captureStops,1);
+});
+
 test('one turn cleans speaker labels, streams ordered sentences and retains one AEC microphone acquisition',async()=>{
   const h=harness();await h.machine.start();assert.equal(h.machine.snapshot().phase,'listening');
   h.feed(0);h.feed();h.feed();await flush();assert.deepEqual(h.sessions[0].frames.map(f=>f.length),[4800,6000,6000]);

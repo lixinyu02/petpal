@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, getConnection, getIdentity, getSessionEpoch, streamMessage, type AssistantTask, type ChatAssistantConfig, type Conversation } from '../api';
+import { api, getConnection, getIdentity, getSessionEpoch, streamMessage, type AssistantTask, type ChatAssistantConfig, type Conversation, type VoiceConfig } from '../api';
 import { useSpeech } from '../avatar/useSpeech';
 import type { PerformanceInput } from '../avatar/performance.mjs';
 import { createDevicePreferences } from '../media/device-preferences.mjs';
@@ -9,12 +9,13 @@ import { createVoiceConversation, type VoiceConversationState } from './conversa
 import {mergeAssistantTask} from '../chat-assistant-preferences.mjs';
 import {createVoiceReportTracker} from './reports.mjs';
 import {createVoiceDetectionPreferences} from './detection-preferences.mjs';
+import {defaultWakeSettings} from '../../server/voice-wake.mjs';
 
 export function useVoiceConversation(options:{allowed:boolean;scope:string;providerId:string;enabled?:boolean;assistantSnapshot?:()=>ChatAssistantConfig|undefined}) {
   const speech=useSpeech(options.allowed&&options.enabled!==false,options.scope);
   const refs=useRef({options,speech});refs.current={options,speech};
   const controller=useRef<ReturnType<typeof createVoiceConversation>|null>(null);
-  const [state,setState]=useState<VoiceConversationState>({phase:'idle',active:false,transcript:'',reply:'',level:0,error:'',conversationId:'',hasUtterance:false});
+  const [state,setState]=useState<VoiceConversationState>({phase:'idle',active:false,transcript:'',reply:'',level:0,error:'',conversationId:'',hasUtterance:false,wake:defaultWakeSettings(),awaitingWake:false});
   const [assistantTasks,setAssistantTasks]=useState<AssistantTask[]>([]);
   const taskConversationId=useRef('');
   const receiveReports=useRef<(conversation:Conversation)=>void>(()=>{});
@@ -44,7 +45,7 @@ export function useVoiceConversation(options:{allowed:boolean;scope:string;provi
       getSensitivity:()=>{let storage:Storage|undefined;try{storage=window.localStorage;}catch{}const preferences=createVoiceDetectionPreferences(storage,options.scope);try{return preferences.read();}finally{preferences.dispose();}},
       createCapture:createVoiceCapture,
       unlock:()=>{const active=refs.current.speech;if(active.engine!=='cosyvoice'||!active.streamingEnabled||!active.supported)throw new Error('请先在“语音与设备”中选择 CosyVoice，并将语速设为 1.0 倍，再开始语音聊天。');return active.unlock();},
-      verify:async signal=>{const config=await api<{configured:boolean}>('/voice/asr',{signal});if(!config.configured)throw new Error('尚未连接语音识别服务，请联系管理员在“语音与设备”中配置。');},
+      verify:async signal=>{const [config,voice]=await Promise.all([api<{configured:boolean}>('/voice/asr',{signal}),api<VoiceConfig>('/voice',{signal})]);if(!config.configured)throw new Error('尚未连接语音识别服务，请联系管理员在“语音与设备”中配置。');return {wake:voice.wake};},
       stopSpeech:()=>refs.current.speech.stop(),openAsr:openAsrSession,
       stopChat:(id,signal)=>api(`/conversations/${encodeURIComponent(id)}/stop`,{method:'POST',signal:AbortSignal.any([signal,AbortSignal.timeout(10000)])}),
       createChat:async(providerId,signal)=>{const conversation=await api<Conversation>('/conversations',{method:'POST',body:JSON.stringify({mode:'chat',providerId}),signal});if(!conversation.id)throw new Error('未能创建语音聊天记录。');return conversation.id;},
@@ -84,6 +85,6 @@ export function useVoiceConversation(options:{allowed:boolean;scope:string;provi
   useEffect(()=>{stop();setAssistantTasks([]);taskConversationId.current='';},[options.providerId,stop]);
   const performanceInput:PerformanceInput=state.phase==='speaking'?{
     utteranceId:speech.utteranceId,text:speech.text,phase:'speaking',speech:{active:speech.active,charIndex:speech.charIndex,ended:speech.ended,audioLevel:speech.audioLevel,emotion:speech.emotion},
-  }:{utteranceId:'voice-conversation',text:state.transcript,phase:state.phase==='thinking'?'thinking':state.phase==='listening'||state.phase==='recognizing'?'listening':state.phase==='error'?'error':'idle'};
+  }:{utteranceId:'voice-conversation',text:state.awaitingWake?'':state.transcript,phase:state.phase==='thinking'?'thinking':state.phase==='listening'||state.phase==='recognizing'?'listening':state.phase==='error'?'error':'idle'};
   return {...state,start,stop,interrupt,finishUtterance,performanceInput,speechState:speech,assistantTasks,updateAssistantTasks,listening:state.phase==='listening',recognizing:state.phase==='recognizing',thinking:state.phase==='thinking',speaking:state.phase==='speaking'};
 }

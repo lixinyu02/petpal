@@ -22,6 +22,14 @@ async function asking(h,text='你好'){
   h.feed();h.feed();await flush();const finishing=h.machine.finishUtterance();h.sessions.at(-1).final.resolve(text);await flush();return{finishing};
 }
 
+test('after keyword wake, automatic interruption retains its opening audio and needs no second wake phrase',async t=>{
+  const h=harness({verify:async()=>({wake:{enabled:true}})});t.after(()=>h.machine.dispose());await h.machine.start();const first=await asking(h,'你好小伴，回答一个问题');
+  assert.equal(h.streams[0].text,'回答一个问题');h.streams[0].onEvent({type:'delta',data:{text:'这是正在播放的第一句话。'}});await flush();
+  h.feed(0);h.feed(.06);h.feed(.06);await flush();assert.equal(h.streams[0].signal.aborted,true);assert.equal(h.plays[0].signal.aborted,true);assert.equal(h.sessions.length,2);assert.equal(h.machine.snapshot().awaitingWake,false);
+  h.streams[0].resolve();h.plays[0].resolve();await first.finishing;const second=h.machine.finishUtterance();h.sessions[1].final.resolve('等一下，换首歌');await flush();assert.equal(h.streams[1].text,'等一下，换首歌');assert.ok(h.sessions[1].frames.length>1);
+  h.streams[1].onEvent({type:'done',data:{}});h.streams[1].resolve();await second;
+});
+
 test('ambient audio and repeated short knocks never open ASR during normal listening',async()=>{
   const h=harness();await h.machine.start();
   for(let i=0;i<30;i++)h.feed(.022);

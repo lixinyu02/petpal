@@ -8,12 +8,12 @@
 
 - Goal: 用户录入关键词，唤醒后连续对话，空闲回待机。
 - Ordering rule: Complete issues in sequence.
-- Current status: issue-2 in_progress
+- Current status: issue-3 in_progress
 
 ## Issue List
 
 - [x] issue-1 账号配置与严格匹配
-- [ ] issue-2 连续语音状态机
+- [x] issue-2 连续语音状态机
 - [ ] issue-3 设置界面与本机验收
 
 ## issue-1
@@ -34,9 +34,9 @@
 - 范围: conversation/hook/type、状态机和边界回归测试
 - 依赖: issue-1
 - 验收标准: 未匹配不创建Chat/Agent/TTS；partial不触发；单词/词+问题/多轮/超时/插话/报告/取消均正确；静音无ASR资源占用
-- 状态: in_progress
-- 验证方式: pending
-- commit: pending
+- 状态: done
+- 验证方式: 67 项配置/语音/插话/真实 hook 回归通过，tsc 通过。自审与只读独立审查未见状态机阻塞项；补修匹配器 Unicode 单字符扩展中途截断并验证分解韩文。验证静音无上传、词+问题、多轮回待机、未命中不提交、任务报告顺序、失败/late verify和事件停止。
+- commit: feat(issue-2): gate continuous voice chat with account wake phrases
 
 ## issue-3
 
@@ -45,6 +45,6 @@
 - 范围: VoiceSettings、CompanionWorld、CSS、Chrome、构建和本机后端
 - 依赖: issue-2
 - 验收标准: 登录用户可保存多词与超时；首页明确等待/手动唤醒；窄屏不溢出；下载包保持；真实上游与模拟边界明确
-- 状态: todo
+- 状态: in_progress
 - 验证方式: pending
 - commit: pending

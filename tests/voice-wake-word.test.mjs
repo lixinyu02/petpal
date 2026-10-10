@@ -38,4 +38,9 @@ test('final phrase matcher uses sentence prefix, longest alias and original ques
   assert.ok(matchWakePhrase('你好小伴'.repeat(3001),['你好小伴'])===null);
   assert.equal(matchWakePhrase('cat play music',['cat']).text,'play music');
   assert.equal(matchWakePhrase('😀小伴',['小伴']),null);
+  assert.equal(matchWakePhrase('㎑，播放音乐',['kh']),null);
+  assert.equal(matchWakePhrase('㍿，播放音乐',['株式']),null);
+  assert.deepEqual(matchWakePhrase('㎑，播放音乐',['khz']),{phrase:'khz',text:'播放音乐'});
+  assert.deepEqual(matchWakePhrase('㍿，播放音乐',['株式会社']),{phrase:'株式会社',text:'播放音乐'});
+  assert.deepEqual(matchWakePhrase('한글，播放音乐',['한글']),{phrase:'한글',text:'播放音乐'});
 });

@@ -44,7 +44,7 @@ export default function CompanionWorld() {
     void poll();return()=>{alive=false;if(timer)clearTimeout(timer);};
   },[voiceScope,user?.canUseCodex]);
   const voice = useVoiceConversation({allowed:!!user,scope:voiceScope,providerId,assistantSnapshot:chatAssistant.snapshot});
-  const voiceLabels = {idle:'语音聊天',starting:'正在连接…',listening:'正在聆听',recognizing:'正在识别…',thinking:'正在思考…',speaking:`${name}在回应`,error:'语音聊天已暂停'};
+  const voiceLabels = {idle:'语音聊天',starting:'正在连接…',armed:'等待唤醒',listening:'正在聆听',recognizing:'正在识别…',thinking:'正在思考…',speaking:`${name}在回应`,error:'语音聊天已暂停'};
   const hasCaptions = Boolean(voice.transcript || voice.reply || voice.listening);
   useEffect(() => { if (action === 'sleep') voice.stop(); }, [action, voice.stop]);
   useEffect(() => { voice.stop();setAction('idle');setReadyKind(null); }, [kind]);

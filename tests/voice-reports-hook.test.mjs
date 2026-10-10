@@ -34,7 +34,7 @@ function harness(context){
     useState(value){const index=cursor++;slots[index]??={value};return[slots[index].value,next=>{slots[index].value=typeof next==='function'?next(slots[index].value):next;}];},
     useCallback(callback,deps){const index=cursor++,previous=slots[index];if(!previous||!same(previous.deps,deps))slots[index]={callback,deps};return slots[index].callback;},
     useEffect(callback,deps){const index=cursor++,previous=slots[index];if(!previous||!same(previous.deps,deps)){const next={deps,cleanup:null};slots[index]=next;effects.push(()=>{previous?.cleanup?.();next.cleanup=callback();});}},
-    api(path,options={}){calls.push({path,options});if(path==='/voice/asr')return Promise.resolve({configured:true});if(path==='/conversations')return Promise.resolve(conversation([]));if(path.endsWith('/stop'))return Promise.resolve({ok:true});return baselines.length?baselines.shift().promise:Promise.resolve(baseline);},
+    api(path,options={}){calls.push({path,options});if(path==='/voice')return Promise.resolve(runtime.voiceConfig||{});if(path==='/voice/asr')return Promise.resolve({configured:true});if(path==='/conversations')return Promise.resolve(conversation([]));if(path.endsWith('/stop'))return Promise.resolve({ok:true});return baselines.length?baselines.shift().promise:Promise.resolve(baseline);},
     streamMessage(id,text,signal,onEvent){calls.push({path:'messages',id,text});const pending=deferred(),entry={id,text,signal,onEvent,...pending};streams.push(entry);signal.addEventListener('abort',()=>pending.reject(signal.reason),{once:true});return pending.promise;},
     createCapture(handlers){const capture={handlers,stopped:false,async start(){},pause(){},stop(){this.stopped=true;}};captures.push(capture);return capture;},
     async openAsr(signal,onTranscript){const final=deferred(),session={signal,onTranscript,final,async send(){},finish:()=>final.promise,cancel(){}};sessions.push(session);return session;},
@@ -47,8 +47,31 @@ function harness(context){
   context.after(()=>{for(const slot of slots)slot?.cleanup?.();for(const[key,descriptor]of descriptors)if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];});
   function render(options={}){runtime.options={...runtime.options,...options};cursor=0;const voice=useVoiceConversation(runtime.options);while(effects.length)effects.shift()();return voice;}
   const voice=render();
-  return{voice,render,runtime,calls,streams,plays,sessions,baselines,window,preferences,baseline(value){baseline=value;},feed(level=.05){captures.at(-1).handlers.onFrame(new Float32Array(6000).fill(level),level);},async ask(text='继续聊'){this.feed();this.feed();await flush();const finishing=voice.finishUtterance();sessions.at(-1).final.resolve(text);await flush();return{finishing};}};
+  return{voice,render,runtime,calls,streams,plays,sessions,baselines,window,document,navigator,captures,preferences,baseline(value){baseline=value;},feed(level=.05){captures.at(-1).handlers.onFrame(new Float32Array(6000).fill(level),level);},async ask(text='继续聊'){this.feed();this.feed();await flush();const finishing=voice.finishUtterance();sessions.at(-1).final.resolve(text);await flush();return{finishing};}};
 }
+
+test('real hook reads account wake settings at each start and settings changes stop the old microphone',async context=>{
+  const h=harness(context);h.runtime.voiceConfig={wake:{enabled:true,phrases:['你好小伴'],idleTimeoutSeconds:30}};
+  await h.voice.start();assert.equal(h.render().phase,'armed');assert.equal(h.calls.filter(call=>call.path==='/voice').length,1);
+  h.runtime.voiceConfig.wake={enabled:true,phrases:['新的小伴'],idleTimeoutSeconds:60};h.window.dispatchEvent(new Event('petpal:voice-settings-change'));
+  assert.equal(h.captures[0].stopped,true);await h.voice.start();assert.deepEqual(h.render().wake.phrases,['新的小伴']);
+  const wrong=await h.ask('你好小伴');await wrong.finishing;assert.equal(h.streams.length,0);const wake=await h.ask('新的小伴');await wake.finishing;assert.equal(h.render().phase,'listening');h.voice.stop();
+});
+
+for(const event of ['hidden','pagehide','petpal:session-change','petpal:voice-settings-change','petpal:audio-output-change','devicechange'])test(`armed microphone releases on ${event}`,async context=>{
+  const h=harness(context);h.runtime.voiceConfig={wake:{enabled:true}};await h.voice.start();
+  if(event==='hidden'){h.document.hidden=true;h.document.dispatchEvent(new Event('visibilitychange'));}
+  else if(event==='devicechange')h.navigator.mediaDevices.dispatchEvent(new Event(event));else h.window.dispatchEvent(new Event(event));
+  assert.equal(h.render().active,false);assert.equal(h.captures[0].stopped,true);h.feed(.1);await flush();assert.equal(h.sessions.length,0);
+});
+
+test('late account settings cannot reactivate a stopped startup; logged-out voice acquires no microphone',async context=>{
+  const h=harness(context),ready=deferred(),original=h.runtime.api;
+  h.runtime.api=(path,options)=>path==='/voice'?ready.promise:original(path,options);
+  const starting=h.voice.start();assert.equal(h.render().phase,'starting');h.voice.stop();ready.resolve({wake:{enabled:true}});await starting;
+  assert.equal(h.render().active,false);assert.equal(h.captures[0].stopped,true);assert.equal(h.sessions.length,0);
+  h.render({allowed:false});await h.voice.start();assert.equal(h.captures.length,1);assert.equal(h.render().phase,'error');
+});
 
 test('real hook reads account-scoped sensitivity and stops then reloads it after settings change',async context=>{
   const h=harness(context),key=`petpal.voiceDetection:${encodeURIComponent(h.runtime.options.scope)}`;

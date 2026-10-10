@@ -2,6 +2,7 @@
 const invalid = message => Object.assign(new Error(message), {status:400});
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const canonical = text => text.normalize('NFKC').toLowerCase().replace(/[\p{P}\s]/gu, '');
+const graphemes = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined,{granularity:'grapheme'}) : null;
 
 export function defaultWakeSettings() {
   return {enabled:false, phrases:['你好小伴'], idleTimeoutSeconds:45};
@@ -34,15 +35,16 @@ export function matchWakePhrase(text, phrases) {
   if (typeof text !== 'string' || text.length > 12000) return null;
   const points = [];
   // Keep a source offset for each normalized code point (including ligatures and accents).
-  for (const part of text.matchAll(/\P{M}\p{M}*|\p{M}+/gu)) {
-    for (const char of canonical(part[0])) points.push({char, end:part.index + part[0].length});
+  const parts = graphemes ? graphemes.segment(text) : [...text.matchAll(/\P{M}\p{M}*|\p{M}+/gu)].map(part=>({segment:part[0],index:part.index}));
+  for (const part of parts) {
+    for (const char of canonical(part.segment)) points.push({char, end:part.index + part.segment.length});
   }
   const normalized = points.map(point=>point.char).join('');
   const candidates = phrases.map(phrase=>({phrase,key:canonical(phrase)})).sort((a,b)=>b.key.length-a.key.length);
   for (const {phrase,key} of candidates) {
     if (!key || !normalized.startsWith(key)) continue;
-    const end = points[[...key].length-1]?.end;
-    if (end === undefined) continue;
+    const count = [...key].length, end = points[count-1]?.end;
+    if (end === undefined || points[count]?.end === end) continue;
     // English aliases must not wake on a longer word, e.g. "cat" in "catch".
     if (/[\p{Script=Latin}\p{N}]$/u.test(key) && /^[\p{Script=Latin}\p{N}\p{M}]/u.test(text.slice(end).normalize('NFKC'))) continue;
     return {phrase, text:text.slice(end).replace(/^[\p{P}\s]+/u,'').trim()};

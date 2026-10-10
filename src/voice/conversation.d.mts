@@ -1,7 +1,8 @@
 import type { AsrSession } from './api';
 import type { ChatAssistantRequest } from '../api';
-export type VoicePhase='idle'|'starting'|'listening'|'recognizing'|'thinking'|'speaking'|'error';
-export type VoiceConversationState={phase:VoicePhase;active:boolean;transcript:string;reply:string;level:number;error:string;conversationId:string;hasUtterance:boolean};
+import type {WakeSettings} from '../../server/voice-wake.mjs';
+export type VoicePhase='idle'|'starting'|'armed'|'listening'|'recognizing'|'thinking'|'speaking'|'error';
+export type VoiceConversationState={phase:VoicePhase;active:boolean;transcript:string;reply:string;level:number;error:string;conversationId:string;hasUtterance:boolean;wake:WakeSettings;awaitingWake:boolean};
 export function cleanTranscript(text:string):string;
 export function createVoiceConversation(options:{
  onState(state:VoiceConversationState):void;id():string;isCurrent():boolean;isAllowed():boolean;getProviderId():string;getDeviceId():string;

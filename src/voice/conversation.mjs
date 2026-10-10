@@ -2,13 +2,14 @@ import { createVoiceGate } from './audio.mjs';
 import { voiceGateProfile } from './detection-preferences.mjs';
 import { createSentenceSplitter, createSpeechQueue } from './speech-flow.mjs';
 import { createChatDisplay } from '../chat-display.mjs';
+import {defaultWakeSettings, normalizeWakeSettings, matchWakePhrase} from '../../server/voice-wake.mjs';
 
 export function cleanTranscript(text) {
   return String(text).replace(/^\s*Speaker\s+\d+\s*[:：]\s*/gmi,'').trim()
     .replace(/^(?:\[Silence\]\s*)+|(?:\s*\[Silence\])+$/gi,'').trim();
 }
 
-const empty=()=>({phase:'idle',active:false,transcript:'',reply:'',level:0,error:'',conversationId:'',hasUtterance:false});
+const empty=()=>({phase:'idle',active:false,transcript:'',reply:'',level:0,error:'',conversationId:'',hasUtterance:false,wake:defaultWakeSettings(),awaitingWake:false});
 const cancelled=()=>Object.assign(new Error('语音对话已取消。'),{name:'AbortError'});
 function plainReportPieces(text){
   const pieces=[];
@@ -29,12 +30,19 @@ export function createVoiceConversation(options) {
     if(!job)return;job.display?.close();job.display=null;clearTimeout(job.idleTimer);job.abort.abort(cancelled());job.turn?.abort(cancelled());
     job.utterance?.abort.abort(cancelled());job.utterance?.session?.cancel();job.capture.stop();options.stopSpeech();
   }
-  function stop(){const job=current;job?.display?.flush();current=null;release(job);publish({phase:'idle',active:false,level:0,error:'',hasUtterance:false});}
-  function fail(job,error){if(!valid(job))return;job.display?.flush();current=null;release(job);publish({phase:'error',active:false,level:0,hasUtterance:false,error:typeof error?.message==='string'?error.message.slice(0,500):'语音对话未能继续，请重试。'});}
-  function idleTimeout(job){clearTimeout(job.idleTimer);job.idleTimer=setTimeout(()=>{if(valid(job)&&!job.utterance){stop();publish({error:'一段时间没有听到说话，已停止收音。点击即可重新开始。'});}},45000);}
+  function stop(){const job=current;job?.display?.flush();current=null;release(job);publish({phase:'idle',active:false,level:0,error:'',hasUtterance:false,awaitingWake:false});}
+  function fail(job,error){if(!valid(job))return;job.display?.flush();current=null;release(job);publish({phase:'error',active:false,level:0,hasUtterance:false,awaitingWake:false,error:typeof error?.message==='string'?error.message.slice(0,500):'语音对话未能继续，请重试。'});}
+  function arm(job){
+    if(!valid(job))return;clearTimeout(job.idleTimer);job.gate.reset();job.monitor.reset();job.utterance=null;job.turn=null;
+    publish({phase:'armed',level:0,hasUtterance:false,awaitingWake:true});
+  }
+  function idleTimeout(job){clearTimeout(job.idleTimer);job.idleTimer=setTimeout(()=>{
+    if(!valid(job)||job.utterance||state.phase!=='listening')return;
+    if(job.wake.enabled)arm(job);else{stop();publish({error:'一段时间没有听到说话，已停止收音。点击即可重新开始。'});}
+  },job.wake.enabled?job.wake.idleTimeoutSeconds*1000:45000);}
   async function listen(job){
     if(!valid(job))return;job.gate.reset();job.monitor.reset();job.utterance=null;job.turn=null;
-    publish({phase:'listening',level:0,hasUtterance:false});idleTimeout(job);
+    publish({phase:'listening',level:0,hasUtterance:false,awaitingWake:false});idleTimeout(job);
     queueMicrotask(()=>{if(valid(job))void reportNext(job);});
   }
   function sendFrames(job,utterance,frames){
@@ -45,9 +53,9 @@ export function createVoiceConversation(options) {
     }
   }
   function beginUtterance(job){
-    const utterance={abort:new AbortController(),pending:[],pendingSamples:0,session:null,ready:null,finishing:false};
-    job.utterance=utterance;clearTimeout(job.idleTimer);publish({transcript:'',reply:'',error:'',hasUtterance:true});
-    utterance.ready=options.openAsr(utterance.abort.signal,text=>{if(validUtterance(job,utterance))publish({transcript:cleanTranscript(text)});}).then(session=>{
+    const utterance={abort:new AbortController(),pending:[],pendingSamples:0,session:null,ready:null,finishing:false,wakeCandidate:state.awaitingWake};
+    job.utterance=utterance;clearTimeout(job.idleTimer);publish({...(utterance.wakeCandidate?{}:{transcript:'',reply:''}),error:'',hasUtterance:true});
+    utterance.ready=options.openAsr(utterance.abort.signal,text=>{if(validUtterance(job,utterance)&&!utterance.wakeCandidate)publish({transcript:cleanTranscript(text)});}).then(session=>{
       if(!validUtterance(job,utterance)){session.cancel();throw cancelled();}
       utterance.session=session;const pending=utterance.pending;utterance.pending=[];utterance.pendingSamples=0;sendFrames(job,utterance,pending);return session;
     });
@@ -65,7 +73,7 @@ export function createVoiceConversation(options) {
       }
       return;
     }
-    if(state.phase!=='listening')return;publish({level:Math.min(1,Math.max(0,level*6))});
+    if(state.phase!=='listening'&&state.phase!=='armed')return;publish({level:Math.min(1,Math.max(0,level*6))});
     const detected=job.gate.push(frame);
     if(detected.started)beginUtterance(job);
     if(job.utterance)sendFrames(job,job.utterance,detected.samples);
@@ -162,7 +170,14 @@ export function createVoiceConversation(options) {
     try{
       const session=await utterance.ready;if(!validUtterance(job,utterance))return false;
       const transcript=cleanTranscript(await session.finish());if(!validUtterance(job,utterance))return false;
-      job.utterance=null;publish({transcript,hasUtterance:false});
+      job.utterance=null;
+      if(utterance.wakeCandidate){
+        const match=matchWakePhrase(transcript,job.wake.phrases);
+        if(!match){arm(job);return true;}
+        publish({transcript:match.text,reply:'',hasUtterance:false,awaitingWake:false});
+        if(match.text)await answer(job,match.text);else await listen(job);return true;
+      }
+      publish({transcript,hasUtterance:false});
       if(transcript)await answer(job,transcript);else await listen(job);return true;
     }catch(error){if(validUtterance(job,utterance))fail(job,error);return false;}
   }
@@ -171,20 +186,21 @@ export function createVoiceConversation(options) {
     if(!options.isAllowed()){publish({phase:'error',error:'请先登录并选择可用的聊天模型。'});return;}
     let profile;
     try{profile=voiceGateProfile(options.getSensitivity?.());}catch{publish({phase:'error',error:'未能读取麦克风检测设置，请重新开始。'});return;}
-    const job={id:options.id(),providerId:options.getProviderId(),abort:new AbortController(),capture:null,gate:createVoiceGate(profile.listening),monitor:createVoiceGate(profile.interruption),utterance:null,turn:null,idleTimer:null,conversationId:'',sequence:0,chatPending:null,chatRelease:null,chatStopFor:null,reports:[],reportIds:new Set()};
+    const job={id:options.id(),providerId:options.getProviderId(),abort:new AbortController(),capture:null,gate:createVoiceGate(profile.listening),monitor:createVoiceGate(profile.interruption),utterance:null,turn:null,idleTimer:null,conversationId:'',sequence:0,chatPending:null,chatRelease:null,chatStopFor:null,reports:[],reportIds:new Set(),wake:defaultWakeSettings()};
     job.capture=options.createCapture({onFrame:(frame,level)=>feed(job,frame,level),onError:error=>fail(job,error)});current=job;
     publish({...empty(),phase:'starting',active:true});
     try{
       // Both calls run before an await, retaining the user's start gesture.
       const unlocked=options.unlock();void Promise.resolve(unlocked).catch(()=>{});
       const capture=job.capture.start(options.getDeviceId());
-      const [ready]=await Promise.all([unlocked,capture,options.verify(job.abort.signal)]);
+      const [ready,,config]=await Promise.all([unlocked,capture,options.verify(job.abort.signal)]);
       if(!valid(job)||job.sequence!==0)return;if(!ready)throw new Error('未能解锁声音播放，请再次点击开始语音。');
-      publish({phase:'listening'});idleTimeout(job);queueMicrotask(()=>{if(valid(job))void reportNext(job);});
+      job.wake=normalizeWakeSettings(config?.wake);publish({wake:normalizeWakeSettings(job.wake)});
+      if(job.wake.enabled)arm(job);else await listen(job);
     }catch(error){if(valid(job)&&job.sequence===0)fail(job,error);}
   }
   async function interrupt(){
-    const job=current;if(!job||!valid(job))return;
+    const job=current;if(!job||!valid(job)||state.phase==='starting')return;
     cancelTurn(job);await listen(job);
   }
   return {start,stop,interrupt,finishUtterance,notifyReport,snapshot:()=>({...state}),dispose(){stop();disposed=true;lastConversation=null;}};
