@@ -90,11 +90,22 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   });
   const createBridge = config => (codexFactory ?? (options => new CodexBridge(options)))({ workspaceRoot, dataDir, config, desktopTools: localTools });
   let bridge = codex ?? createBridge(state.codexConfig);
-  let configChanging = false, configSwap = null, codexReaders = 0;
+  let configChanging = false, configSwap = null, codexReaders = 0, codexStatusProbe = null;
   const readCodexStatus = async () => {
+    if (shuttingDown) throw failure(503, '服务正在退出。');
     if (configChanging) throw failure(409, 'Codex 配置正在切换，请稍后重试。');
     codexReaders++;
-    try { return safeCodexStatus(await bridge.status()); } finally { codexReaders--; }
+    try {
+      // Share only an in-flight read of this bridge, never a user-shaped result
+      // or a completed status that could hide a changed runtime/account.
+      if (!codexStatusProbe || codexStatusProbe.bridge !== bridge) {
+        const probe = { bridge, promise: null };
+        probe.promise = Promise.resolve().then(() => probe.bridge.status()).then(safeCodexStatus)
+          .finally(() => { if (codexStatusProbe === probe) codexStatusProbe = null; });
+        codexStatusProbe = probe;
+      }
+      return await codexStatusProbe.promise;
+    } finally { codexReaders--; }
   };
   const redactCodex = value => {
     if (typeof value === 'string') {
@@ -189,6 +200,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     return permissions;
   };
   const requireCurrentAuth = req => {
+    if (shuttingDown) throw failure(503, '服务正在退出。');
     if (req.user.disabled || !state.users.some(user => user.id === req.user.id && !user.disabled) || (!req.bootstrap && !state.sessions.some(session => session.tokenHash === req.sessionHash && session.userId === req.user.id && session.expiresAt > Date.now()))) throw failure(401, '登录凭据已过期或已撤销。');
   };
   // Only the native final handoff may recheck an existing owner session after
@@ -212,11 +224,21 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const status = redactCodex(await readCodexStatus());
     return { ...(isOwner(user) ? status : { available: status.available, running: status.running, authenticated: status.authenticated, configured: status.configured, error: status.error, message: status.message, ...(status.approvalReview ? { approvalReview: status.approvalReview } : {}) }), ...publicCodexConfig(state.codexConfig), eligibleProviderIds: eligibleProviders(user), approvalReviewProviderIds: reviewProviders(user) };
   };
+  const userCodexMetadata = user => {
+    if (!visibleUser(user).canUseCodex) return { available: false, running: false, disabled: true, eligibleProviderIds: [], approvalReviewProviderIds: [], message: '此账号尚未获管理员授权使用 Agent。' };
+    return { ...publicCodexConfig(state.codexConfig), available: false, running: false, authenticated: false,
+      pending: true, message: 'Agent 运行状态尚未检测，进入 Agent 后检查。',
+      eligibleProviderIds: eligibleProviders(user), approvalReviewProviderIds: reviewProviders(user) };
+  };
   const visibleConversation = conversation => ({ id: conversation.id, title: conversation.customTitle ?? conversation.title, ...(conversation.customTitle !== undefined ? { customTitle: conversation.customTitle } : {}), projectId: conversation.projectId ?? null, archivedAt: conversation.archivedAt ?? null, mode: conversation.mode, providerId: conversation.providerId, ...(conversation.backgroundParentId ? { backgroundParentId: conversation.backgroundParentId } : {}), ...(conversation.automationId ? { automationId: conversation.automationId } : {}), messages: conversation.messages.map(message => ({ ...message, ...(message.attachmentIds?.length ? { attachments: imageAttachments.metadata(conversation.userId, message.attachmentIds) } : {}) })), createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, ...(conversation.assistantTasks?.length ? { assistantTasks: chatAssistant.snapshot(conversation) } : {}), ...(conversation.threadId ? { threadId: conversation.threadId } : {}), ...(conversation.mode === 'codex' ? { codexRevision: conversation.codexRevision, codexConfigChanged: conversation.codexRevision !== state.codexConfig.revision, agentHostId: conversation.agentHostId ?? 'central', threadHostId: conversation.threadHostId ?? 'central', ...(conversation.agentProjectDirectory ? { agentProjectDirectory: conversation.agentProjectDirectory } : {}), ...(conversation.threadProjectDirectory ? { threadProjectDirectory: conversation.threadProjectDirectory } : {}), agent: agentTasks.snapshot(conversation) } : {}) });
-  const publicState = async user => {
-    await Promise.all(state.conversations.filter(item => item.userId === user.id && item.mode === 'chat' && item.assistantTasks?.length).map(item => chatAssistant.refresh(item)));
-    const automationResults = new Set(state.automations.jobs.filter(job => job.userId === user.id).flatMap(job => job.runs.map(run => run.conversationId).filter(Boolean)));
-    return { instanceId: state.instanceId, user: visibleUser(user), settings: settingsFor(user), providers: state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider => visibleProvider(provider, user)), projects: state.projects.filter(project => project.userId === user.id).map(visibleProject), conversations: state.conversations.filter(item => item.userId === user.id && (!item.automationId || !automationResults.has(item.id))).map(visibleConversation), codex: await userCodexStatus(user) };
+  const publicState = async (user, { history = true, runtime = 'probe' } = {}) => {
+    let conversations = [];
+    if (history) {
+      await Promise.all(state.conversations.filter(item => item.userId === user.id && item.mode === 'chat' && item.assistantTasks?.length).map(item => chatAssistant.refresh(item)));
+      const automationResults = new Set(state.automations.jobs.filter(job => job.userId === user.id).flatMap(job => job.runs.map(run => run.conversationId).filter(Boolean)));
+      conversations = state.conversations.filter(item => item.userId === user.id && (!item.automationId || !automationResults.has(item.id))).map(visibleConversation);
+    }
+    return { instanceId: state.instanceId, user: visibleUser(user), settings: settingsFor(user), providers: state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider => visibleProvider(provider, user)), projects: state.projects.filter(project => project.userId === user.id).map(visibleProject), conversations, codex: runtime === 'deferred' ? userCodexMetadata(user) : await userCodexStatus(user) };
   };
   const assertAvailable = id => {
     if (!state.conversations.some(item => item.id === id)) throw failure(404, '会话不存在。');
@@ -436,6 +458,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const user = state.users.find(item => item.username === name);
     const savedPassword = user?.password;
     const verified = await verifyPassword(req.body?.password, savedPassword);
+    if (shuttingDown) throw failure(503, '服务正在退出。');
     if (!verified || !user || user.disabled || user.password !== savedPassword) throw failure(401, '账号或密码无效。');
     const { token: sessionToken, session } = newSession(user.id);
     state.sessions = state.sessions.filter(item => item.expiresAt > Date.now());
@@ -446,6 +469,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     }
     state.sessions.push(session); await store.save();
     if (expired.size) await stopTasks(task => expired.has(task.sessionHash));
+    if (shuttingDown) throw failure(503, '服务正在退出。');
     if (user.disabled || user.password !== savedPassword || !state.sessions.includes(session)) throw failure(401, '登录凭据已撤销，请重新登录。');
     res.json({ token: sessionToken, user: visibleUser(user) });
   });
@@ -749,7 +773,15 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     } finally { probes.delete(probe); finish(); }
   });
 
-  app.get('/api/state', async (req, res) => { const value = await publicState(req.user); requireCurrentAuth(req); res.json(value); });
+  app.get('/api/bootstrap', async (req, res) => {
+    if (Object.keys(req.query).length) throw failure(400, '首页启动不接受查询参数。');
+    const value = await publicState(req.user, { history: false, runtime: 'deferred' });
+    requireCurrentAuth(req); res.json(value);
+  });
+  app.get('/api/state', async (req, res) => {
+    if (Object.keys(req.query).some(key => key !== 'runtime') || req.query.runtime !== undefined && req.query.runtime !== 'deferred') throw failure(400, '状态查询只接受 runtime=deferred。');
+    const value = await publicState(req.user, { runtime: req.query.runtime ?? 'probe' }); requireCurrentAuth(req); res.json(value);
+  });
   app.patch('/api/settings', async (req, res) => {
     const patch = {};
     let defaultHostOperation;
@@ -820,11 +852,13 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   });
   app.post('/api/providers/:id/test', async (req, res) => {
     const provider = providerById(req.params.id, req.user); const controller = new AbortController();
-    const probe = { controller, userId: req.user.id, sessionHash: req.sessionHash, providerId: provider.id }; probes.add(probe);
+    let finish;
+    const done = new Promise(resolve => { finish = resolve; });
+    const probe = { controller, done, userId: req.user.id, sessionHash: req.sessionHash, providerId: provider.id }; probes.add(probe);
     res.on('close', () => { if (!res.writableEnded) controller.abort(); });
-    try { res.json(await testProvider(provider, controller.signal)); }
-    catch (error) { if (!res.destroyed) res.status(502).json({ ok: false, message: error.message }); }
-    finally { probes.delete(probe); }
+    try { const value = await testProvider(provider, controller.signal); requireCurrentAuth(req); controller.signal.throwIfAborted(); res.json(value); }
+    catch (error) { if (!res.destroyed) res.status(error.status ?? 502).json({ ok: false, message: error.message }); }
+    finally { probes.delete(probe); finish(); }
   });
   app.post('/api/projects', async (req, res) => {
     if (Object.keys(req.body).some(key => key !== 'name')) throw failure(400, '项目创建只接受 name 字段。');
@@ -1218,7 +1252,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     for (const probe of probes) probe.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     for (const task of active.values()) task.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     if (configSwap) await configSwap.catch(() => {});
-    const results = await Promise.allSettled([notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
+    const results = await Promise.allSettled([notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), codexStatusProbe?.promise.catch(() => {}), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
     let saveError;
     try { await store.queue; } catch (error) { saveError = error; }
     finally { for (const listener of closingListeners) listener.closeAllConnections(); await httpClosed; }
