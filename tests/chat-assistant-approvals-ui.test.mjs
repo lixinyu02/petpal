@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {createVisiblePoll} from '../src/platform/visible-poll.mjs';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
@@ -45,7 +46,7 @@ function fixture({hasApproval=true,review,failInitialRead=false,messages=[]}={})
     if(delayed>=0){const entry=delays.splice(delayed,1)[0];entry.started.resolve(value);await entry.release.promise;return entry.value===undefined?value:clone(entry.value);}
     return value;
   }};
-  const modules={react,'react/jsx-runtime':{jsx:element,jsxs:element},'react-dom':{createPortal:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
+  const modules={'./platform/visible-poll.mjs':{createVisiblePoll},react,'react/jsx-runtime':{jsx:element,jsxs:element},'react-dom':{createPortal:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     './api':api,'./AgentPermissions':{__esModule:true,default:Symbol('AgentPermissions'),defaultAgentPermissions:{access:'read-only',approval:'ask'}},
     './WorkspaceControls':{ExecutionHostPicker:Symbol('ExecutionHostPicker'),ModelPicker:Symbol('ModelPicker')},'./ProjectDirectory':{__esModule:true,default:Symbol('ProjectDirectory')},
     './chat-assistant-preferences.mjs':preferences,'./project-directory-preferences.mjs':directories,'./approval-review-ui.mjs':reviewUi,'./conversation-message-reuse.mjs':messageReuse,'./platform/ui-motion.ts':{useUiEntrance:()=>({current:null})}};

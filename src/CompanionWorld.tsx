@@ -4,12 +4,13 @@ import BrandMark from './BrandMark';
 import CompanionScene from './avatar/CompanionScene';
 import MessageMarkdown from './MessageMarkdown';
 import { useCompanion, useCompanionCatEnabled, chooseCompanion, hydrateCompanion } from './avatar/preference';
-import { getSessionEpoch, type CompanionKind, type NativeExecutorStatus, type State, type User } from './api';
+import { getIdentity, getSessionEpoch, type CompanionKind, type NativeExecutorStatus, type State, type User } from './api';
 import type { PetAction } from './pet/behavior';
 import { useVoiceConversation } from './voice/useVoiceConversation';
 import './voice-conversation.css';
 import {ChatAssistantControls,ChatAssistantTasks,useChatAssistant} from './ChatAssistant';
 import {useUiEntrance} from './platform/ui-motion.ts';
+import {createVisiblePoll} from './platform/visible-poll.mjs';
 
 const words: Record<PetAction, string> = { idle: '我就在你旁边。', walk: '走两步，再回来陪你。', pet: '呼噜…这样就很舒服。', eat: '啊呜，谢谢你的零食。', sleep: '呼…陪你安静一会儿。', jump: '看到你，就有一点开心。' };
 const animeWords: Record<PetAction, string> = { idle: '今天也一起度过吧。', walk: '我就在这里，听你说。', pet: '嗯，感觉被温柔地照顾着。', eat: '谢谢你的点心。', sleep: '闭上眼睛，陪你安静一会儿。', jump: '嗨，我看到你啦。' };
@@ -32,18 +33,17 @@ export default function CompanionWorld() {
   const [readyKind, setReadyKind] = useState<CompanionKind|null>(null);
   const ready=readyKind===kind;
   const captions = useRef<HTMLDivElement>(null);
-  const voiceScope=session?.instanceId&&user?`${session.instanceId}:${user.id}`:'guest';
+  const voiceIdentity=getIdentity();
+  const voiceScope=session?.instanceId&&user?`${session.instanceId}:${user.id}`:voiceIdentity?`${voiceIdentity.instanceId}:${voiceIdentity.userId}`:'guest';
   const chatAssistant=useChatAssistant({scope:voiceScope,allowed:!!user?.canUseCodex,defaultHostId:session?.settings.chatAssistantHostId,onSettingsChanged:settings=>setSession(previous=>previous?{...previous,settings}:previous)});
   const localHostId=nativeExecutor?.state==='online'?nativeExecutor.hostId||'':'';
   useEffect(()=>{
-    const executor=window.petpal?.executor,epoch=getSessionEpoch();let alive=true,timer:ReturnType<typeof setTimeout>|undefined;
+    const executor=window.petpal?.executor,epoch=getSessionEpoch();
     setNativeExecutor(null);
     if(!executor||!user?.canUseCodex||!session?.instanceId)return;
-    const poll=async()=>{
-      try{const status=await executor.status();if(alive&&epoch===getSessionEpoch())setNativeExecutor(status);}catch{}
-      finally{if(alive&&epoch===getSessionEpoch())timer=setTimeout(()=>void poll(),10000);}
-    };
-    void poll();return()=>{alive=false;if(timer)clearTimeout(timer);};
+    return createVisiblePoll({document,window,intervalMs:10000,isCurrent:()=>epoch===getSessionEpoch(),run:async signal=>{
+      try{const status=await executor.status();if(!signal.aborted&&epoch===getSessionEpoch())setNativeExecutor(previous=>JSON.stringify(previous)===JSON.stringify(status)?previous:status);}catch{}
+    }});
   },[voiceScope,user?.canUseCodex]);
   const voice = useVoiceConversation({allowed:!!user,scope:voiceScope,providerId,assistantSnapshot:chatAssistant.snapshot});
   const voiceLabels = {idle:'语音聊天',starting:'正在连接…',armed:'等待唤醒',listening:'正在聆听',recognizing:'正在识别…',thinking:'正在思考…',speaking:`${name}在回应`,error:'语音聊天已暂停'};

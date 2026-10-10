@@ -10,6 +10,7 @@ import {ExecutionHostPicker,ModelPicker} from './WorkspaceControls';
 import ProjectDirectory from './ProjectDirectory';
 import {projectDirectoryIssue} from './project-directory-preferences.mjs';
 import {useUiEntrance} from './platform/ui-motion.ts';
+import {createVisiblePoll} from './platform/visible-poll.mjs';
 import './chat-assistant.css';
 
 const taskLabels={deciding:'正在安排',queued:'已排队',running:'执行中',completed:'已完成',error:'未完成',cancelled:'已取消',unknown:'状态待确认'};
@@ -46,16 +47,15 @@ export function useChatAssistant({scope,allowed,hostState,defaultHostId,onSettin
   },[]);
   useEffect(()=>{
     if(hostState||!allowed||!scope){setRemoteHosts([]);setError('');setLoading(false);return;}
-    const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
-    const poll=async()=>{
-      setLoading(true);
+    let first=true;
+    return createVisiblePoll({document,window,intervalMs:10000,isCurrent:()=>epoch===getSessionEpoch(),run:async signal=>{
+      if(first){first=false;setLoading(true);}
       try{
-        const next=await api<{hosts:AgentHost[]}>('/agent/hosts',{signal:controller.signal});
-        if(!controller.signal.aborted&&epoch===getSessionEpoch()){setRemoteHosts(next.hosts);setError('');}
-      }catch(cause){if(!controller.signal.aborted&&!isSessionChanged(cause))setError((cause as Error).message||'暂时无法连接执行电脑。');}
-      finally{if(!controller.signal.aborted){setLoading(false);timer=setTimeout(()=>void poll(),10000);}}
-    };
-    void poll();return()=>{controller.abort();if(timer)clearTimeout(timer);};
+        const next=await api<{hosts:AgentHost[]}>('/agent/hosts',{signal});
+        if(!signal.aborted&&epoch===getSessionEpoch()){setRemoteHosts(previous=>JSON.stringify(previous)===JSON.stringify(next.hosts)?previous:next.hosts);setError('');}
+      }catch(cause){if(!signal.aborted&&epoch===getSessionEpoch()&&!isSessionChanged(cause))setError((cause as Error).message||'暂时无法连接执行电脑。');}
+      finally{if(!signal.aborted&&epoch===getSessionEpoch())setLoading(false);}
+    }});
   },[scope,allowed,!!hostState,revision,epoch]);
   const change=useCallback((next:AssistantSelection)=>{
     if(savingDefault||epoch!==getSessionEpoch())return;

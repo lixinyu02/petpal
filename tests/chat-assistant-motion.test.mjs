@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as uiMotion from '../src/platform/ui-motion.mjs';
+import {createVisiblePoll} from '../src/platform/visible-poll.mjs';
 import * as assistantPreferences from '../src/chat-assistant-preferences.mjs';
 import * as projectPreferences from '../src/project-directory-preferences.mjs';
 import * as approvalReviewUi from '../src/approval-review-ui.mjs';
@@ -54,6 +55,7 @@ function fixture({reduced=false,hidden=false}={}){
   const assistant={value:{enabled:false,hostId:'pc-one',providerId:'provider-one',projectDirectory:'',permissions},hosts:[{id:'pc-one',name:'Fixture PC',kind:'desktop',platform:'win32',online:true,codex:{available:true}}],savedHostId:'pc-one',savingDefault:false,loading:false,error:'',change:next=>changes.push(next),saveDefault:()=>{assert.fail('animation must not save account preferences');},refresh(){}};
   const props={assistant,allowed:true,user:{id:'owner',isOwner:true,canUseCodex:true},providers:[{id:'provider-one',name:'Fixture model',model:'fixture',protocol:'responses'}]};
   const modules={
+    './platform/visible-poll.mjs':{createVisiblePoll},
     react,'react/jsx-runtime':{jsx:element,jsxs:element},'react-dom':{createPortal:children=>element('portal',{children})},
     'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     './api':{getSessionEpoch:()=>1,isSessionChanged:()=>false,api:async path=>{apiCalls.push(path);throw Error('Unexpected API call');}},

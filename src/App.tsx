@@ -10,6 +10,7 @@ import {watchCompanionBreakpoint} from './companion-mount.mjs';
 import {createChatDisplay,type ChatDisplay} from './chat-display.mjs';
 import {useChatScroll} from './useChatScroll';
 import {useUiEntrance} from './platform/ui-motion.ts';
+import {createVisiblePoll} from './platform/visible-poll.mjs';
 import { ModelPicker, ExecutionTarget, AgentOnboarding } from './WorkspaceControls';
 import AgentPermissions, { defaultAgentPermissions } from './AgentPermissions';
 import {approvalReviewLabel} from './approval-review-ui.mjs';
@@ -142,7 +143,8 @@ export default function App() {
   const deleteLock=useRef(false);
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const [responsePerformance, setResponsePerformance] = useState<PerformanceInput>({ utteranceId: '', text: '', phase: 'idle' });
-  const voiceScope = state.instanceId && state.user ? `${state.instanceId}:${state.user.id}` : `guest:${getConnection().url || location.origin}`;
+  const voiceIdentity=getIdentity();
+  const voiceScope = state.instanceId && state.user ? `${state.instanceId}:${state.user.id}` : voiceIdentity ? `${voiceIdentity.instanceId}:${voiceIdentity.userId}` : `guest:${getConnection().url || location.origin}`;
   const speech = useSpeech(view === 'chat' && !connectionOpen && mood !== 'sleep', voiceScope);
   const speechRef=useRef(speech);speechRef.current=speech;
   const awakeRef = useRef(mood !== 'sleep');
@@ -265,25 +267,22 @@ export default function App() {
   },[agentHostId,lockedHostId,selectedHostId,agentHosts]);
   useEffect(()=>{
     if(!connected||!state.user?.canUseCodex||!hostScope||petOnly)return;
-    const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined,nativePending=false;
-    const poll=async()=>{
-      setHostsLoading(true);
+    let first=true;
+    return createVisiblePoll({document,window,intervalMs:currentMode==='codex'?5000:15000,isCurrent:()=>getSessionEpoch()===accountEpoch,run:async signal=>{
+      if(first){first=false;setHostsLoading(true);}
+      // Keep native status in this poll's lifetime so hide/show cannot overlap it.
+      const nativeRead=window.petpal?.executor ? Promise.resolve().then(()=>window.petpal!.executor!.status()).then(native=>{
+        if(!signal.aborted&&getSessionEpoch()===accountEpoch)setNativeExecutor(previous=>JSON.stringify(previous)===JSON.stringify(native)?previous:native);
+      }).catch(()=>{}) : Promise.resolve();
       try{
-        if(window.petpal?.executor&&!nativePending){
-          nativePending=true;
-          void window.petpal.executor.status().then(native=>{
-            if(!controller.signal.aborted&&getSessionEpoch()===accountEpoch)setNativeExecutor(native);
-          }).catch(()=>{}).finally(()=>{nativePending=false;});
-        }
-        const result=await api<{hosts:AgentHost[]}>('/agent/hosts',{signal:controller.signal});
-        if(controller.signal.aborted||getSessionEpoch()!==accountEpoch)return;
-        setAgentHosts(result.hosts);
+        const result=await api<{hosts:AgentHost[]}>('/agent/hosts',{signal});
+        if(signal.aborted||getSessionEpoch()!==accountEpoch)return;
+        setAgentHosts(previous=>JSON.stringify(previous)===JSON.stringify(result.hosts)?previous:result.hosts);
         setDefaultHostId(result.hosts.find(host=>host.kind==='central')?.id||'');
         setHostsError('');
-      }catch(error){if(!controller.signal.aborted&&!isSessionChanged(error))setHostsError((error as Error).message||'暂时无法刷新执行电脑。');}
-      finally{if(!controller.signal.aborted&&getSessionEpoch()===accountEpoch){setHostsLoading(false);timer=setTimeout(()=>void poll(),currentMode==='codex'?5000:15000);}}
-    };
-    void poll();return()=>{controller.abort();if(timer)clearTimeout(timer);};
+      }catch(error){if(!signal.aborted&&getSessionEpoch()===accountEpoch&&!isSessionChanged(error))setHostsError((error as Error).message||'暂时无法刷新执行电脑。');}
+      finally{await nativeRead;if(!signal.aborted&&getSessionEpoch()===accountEpoch)setHostsLoading(false);}
+    }});
   },[connected,state.user?.canUseCodex,hostScope,hostRefresh,currentMode]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 3800); return () => clearTimeout(timer); }, [notice]);
   useEffect(()=>{
@@ -777,7 +776,8 @@ export default function App() {
 
 function SettingsView({ state, connected, refresh, notice, connect, initialTab, hasDraft, onDownload, onPrepareBrowser, prepareBrowserDisabled }: { state: State; connected: boolean; refresh(): Promise<State>; notice(message: string): void; connect(): void; hasDraft:boolean; initialTab: 'models'|'pet'|'desktop'|'accounts'|'voice'|'assistant'|'updates'; onDownload():void; onPrepareBrowser():void; prepareBrowserDisabled:boolean }) {
   const canManageMusicMcp = !!state.user?.isOwner || ((!!nativeMusicMcp()||!!nativeComputerUse()) && !!state.user?.canUseCodex && state.user.agentAccess === 'full');
-  const voiceScope=state.instanceId&&state.user?`${state.instanceId}:${state.user.id}`:`guest:${getConnection().url||location.origin}`;
+  const voiceIdentity=getIdentity();
+  const voiceScope=state.instanceId&&state.user?`${state.instanceId}:${state.user.id}`:voiceIdentity?`${voiceIdentity.instanceId}:${voiceIdentity.userId}`:`guest:${getConnection().url||location.origin}`;
   const [tab, setTab] = useState(initialTab);
   useEffect(()=>setTab(initialTab),[initialTab]);
   const [defaultProviderId,setDefaultProviderId]=useState(state.settings.defaultProviderId || '');

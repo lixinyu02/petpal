@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as uiMotion from '../src/platform/ui-motion.mjs';
+import {createVisiblePoll} from '../src/platform/visible-poll.mjs';
 
 const compile=async file=>ts.transpileModule(await readFile(new URL(file,import.meta.url),'utf8'),{
   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true},
@@ -56,10 +57,11 @@ function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,
     './BrandMark':stub('BrandMark'),'./MessageMarkdown':stub('MessageMarkdown'),
     './avatar/CompanionScene':{__esModule:true,default:scene},
     './avatar/preference':{useCompanion:()=>[kind],useCompanionCatEnabled:()=>[true],chooseCompanion:async next=>{choices.push(next);kind=next;},hydrateCompanion:async next=>{hydrations.push(next);if(hydrationGate)await hydrationGate.promise;kind=next;}},
-    './api':{getSessionEpoch:()=>epoch,initConnection:async()=>{apiReads.push('initConnection');return{token:authenticated};},loadInitialState:async options=>{assert.equal(options.history,undefined);startupSignal=options.signal;apiReads.push('/bootstrap');return stateGate&&++stateReads===1?await stateGate.promise:state;}},
+    './api':{getSessionEpoch:()=>epoch,getIdentity:()=>authenticated?{instanceId:'fixture-instance',userId:'fixture-owner'}:null,initConnection:async()=>{apiReads.push('initConnection');return{token:authenticated};},loadInitialState:async options=>{assert.equal(options.history,undefined);startupSignal=options.signal;apiReads.push('/bootstrap');return stateGate&&++stateReads===1?await stateGate.promise:state;}},
     './voice/useVoiceConversation':{useVoiceConversation:()=>voice},
     './ChatAssistant':{useChatAssistant:()=>assistant,ChatAssistantControls:Symbol('ChatAssistantControls'),ChatAssistantTasks:Symbol('ChatAssistantTasks')},
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
+    './platform/visible-poll.mjs':{createVisiblePoll},
   };
   const context={window,document,AbortController,location:{assign:()=>assert.fail('Animation cannot navigate')},
     requestAnimationFrame:callback=>{const id=++frameId;frames.set(id,callback);return id;},cancelAnimationFrame:id=>frames.delete(id),

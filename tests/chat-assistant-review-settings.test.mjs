@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {createVisiblePoll} from '../src/platform/visible-poll.mjs';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
@@ -25,6 +26,7 @@ function fixture(local,scope='service:alice',defaultHostId='alice-pc'){
     memo:component=>component,useCallback:callback=>callback,
   };
   const modules={
+    './platform/visible-poll.mjs':{createVisiblePoll},
     react,'react/jsx-runtime':{},'react-dom':{},'lucide-react':{},
     './api':{getSessionEpoch:()=>epoch,isSessionChanged:()=>false,api:async path=>{apiCalls.push(path);throw Error('Review settings must not execute API calls');}},
     './chat-assistant-preferences.mjs':preferences,'./project-directory-preferences.mjs':projectPreferences,'./approval-review-ui.mjs':reviewUi,

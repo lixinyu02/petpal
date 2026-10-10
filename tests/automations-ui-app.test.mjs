@@ -12,6 +12,7 @@ import {mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMes
 import {createBrowserSetupDraft} from '../src/browser-setup-draft.mjs';
 import {reasoningEfforts} from '../src/desktop-settings.mjs';
 import * as uiMotion from '../src/platform/ui-motion.mjs';
+import {createVisiblePoll} from '../src/platform/visible-poll.mjs';
 import {composerKeyAction} from '../src/composer-keyboard.mjs';
 import * as organizationSync from '../src/conversation-organization-sync.mjs';
 import {reuseConversationMessages} from '../src/conversation-message-reuse.mjs';
@@ -80,7 +81,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
         if(path==='/state?runtime=deferred'&&startupGate)await startupGate.promise;
         return response({...state,projects:backendProjects,conversations:publicConversations()});
       }
-      if(path==='/agent/hosts')return{hosts};
+      if(path==='/agent/hosts')return response({hosts});
       if(path==='/conversations'&&options.method==='POST'){
         const conversation={id:`fixture-chat-${++createdConversations}`,mode:body.mode,providerId:body.providerId,title:'Fixture chat',messages:[],projectId:body.projectId??null,archivedAt:null};
         backendConversations.push(conversation);return response(conversation);
@@ -141,6 +142,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
   const attachments={items:[...attachmentItems],uploading:attachmentUploading,error:'',clearCount:0,clear(){attachments.items=[];attachments.uploading=false;attachments.clearCount++;},inputRef:{current:null}};
   const speech={enabled:false,playing:false,active:false,pending:false,supported:false,stop(){},prepare(){},speak(){},speakIfEnabled(){}};
   const modules={
+    './platform/visible-poll.mjs':{createVisiblePoll:options=>createVisiblePoll({...options,setTimeoutFn:callback=>{const id=++timerId;timers.set(id,callback);return id;},clearTimeoutFn:id=>timers.delete(id)})},
     react,'react/jsx-runtime':{jsx:element,jsxs:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     '@capacitor/core':{Capacitor:{isNativePlatform:()=>native}},'./api':api,'./WorkspaceControls':controls,'./composer-keyboard.mjs':{composerKeyAction},
     './companion-mount.mjs':{watchCompanionBreakpoint},'./chat-display.mjs':{createChatDisplay},'./useChatScroll':{useChatScroll:()=>({contentRef:{current:null},onScroll(){},latest(){},showLatest:false})},
@@ -173,6 +175,9 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
   render();
   const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return{promise,resolve};};
   return{find,calls,requests,streams,navigations,attachments,hydrations,startupSignals,lazyLoads,get lateStateWrites(){return lateStateWrites;},get getterReads(){return getterReads;},text:()=>text(tree),
+    setHidden(hidden){document.hidden=hidden;document.dispatchEvent(new Event('visibilitychange'));},
+    fireTimers(){const pending=[...timers.values()];timers.clear();for(const callback of pending)callback();},
+    get timerCount(){return timers.size;},
     ready:async()=>{for(let attempt=0;attempt<3;attempt++){await flush();render();}},
     enterAgent(){find('button',props=>props['aria-label']==='Agent 执行任务').props.onClick();render();},
     enterChat(){find('button',props=>props['aria-label']==='Chat 聊天').props.onClick();render();},
@@ -229,6 +234,32 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
 const conversation = (id, extra = {}) => ({ id, title: id, mode: 'chat', providerId: 'model', messages: [], ...extra });
 
 const deferred=()=>{let resolve,reject;const promise=new Promise((done,fail)=>{resolve=done;reject=fail;});return{promise,resolve,reject};};
+
+test('real App stops hidden host probes, resumes once and keeps notification navigation active',async t=>{
+  const f=workspaceFixture({canUseCodex:true});t.after(()=>f.close());await f.ready();
+  const reads=()=>f.calls.filter(path=>path==='/agent/hosts').length;
+  assert.equal(reads(),1);f.setHidden(true);f.fireTimers();await f.ready();assert.equal(reads(),1);
+  const result=conversation('hidden-task-result');f.notify(result);await f.ready();
+  assert.equal(f.selectedId,result.id);assert.equal(f.notificationTakes,1,'task delivery remains independent of UI polling');
+  f.setHidden(false);await f.ready();assert.equal(reads(),2);
+  f.enterAgent();await f.ready();
+  const target=f.component('ExecutionTarget');assert.equal(target.props.loading,false);const hosts=target.props.hosts;
+  f.fireTimers();await f.ready();
+  assert.equal(f.component('ExecutionTarget').props.hosts,hosts,'unchanged hosts retain their snapshot');
+  assert.equal(f.component('ExecutionTarget').props.loading,false,'periodic refresh cannot flash the loading state');
+});
+
+test('real App drains an abort-ignoring hidden host response before resuming without applying its stale hosts',async t=>{
+  const f=workspaceFixture({canUseCodex:true});t.after(()=>f.close());await f.ready();f.enterAgent();await f.ready();
+  const original=f.component('ExecutionTarget').props.hosts;
+  const late=f.delayNext('/agent/hosts');f.fireTimers();await late.started;
+  const count=f.calls.filter(path=>path==='/agent/hosts').length;
+  f.setHidden(true);f.setHidden(false);await f.ready();
+  assert.equal(f.calls.filter(path=>path==='/agent/hosts').length,count,'resume waits for the owned read');
+  late.release({hosts:[{id:'stale-host',online:true}]});await f.ready();
+  assert.equal(f.calls.filter(path=>path==='/agent/hosts').length,count+1);
+  assert.equal(f.component('ExecutionTarget').props.hosts,original,'aborted result never replaces the current list');
+});
 
 test('real App startup becomes connected and ready while companion preference synchronization is still pending',async t=>{
   const hydration=deferred(),f=workspaceFixture({hydrationGate:hydration});t.after(async()=>{hydration.resolve();await f.close();});
