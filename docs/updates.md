@@ -1,10 +1,10 @@
 # 软件内更新
 
-0.9.10 已正式发布 Windows x64、Ubuntu x64 / ARM64、Android 与 Web 五个更新目标；下载中心另提供同版本 Windows ZIP，共六个客户端交付文件。下载优先使用服务器，GitHub Releases 提供备用下载。[GitHub 正式版](https://github.com/lixinyu02/petpal/releases/tag/v0.9.10) 为 latest，服务器源同步上线。
+0.9.11 已正式发布 Windows x64、Ubuntu x64 / ARM64、Android 与 Web 五个更新目标；下载中心另提供同版本 Windows ZIP，共六个交付文件。下载优先使用服务器，GitHub Releases 提供备用下载。[GitHub 正式版](https://github.com/lixinyu02/petpal/releases/tag/v0.9.11) 为 latest，服务器源同步上线。
 
-两份清单均为 stable / sequence 12，各自沿用既有独立发布公钥，不可交叉使用。两源五目标从 0.9.9 升级至 0.9.10，当前 Web 0.9.10 已最新；完整包 SHA-256 与 Android versionCode 20 由本轮实际交付文件绑定。十项 GitHub 资产和六个服务器包的完整字节读回，以及旧公开路径归档和更新服务验收范围，分别以 [0.9.10 验收](acceptance-0.9.10.md) 的最终回执为准；HEAD 长度或 API digest 不能替代完整包体读取。
+两份清单均为 stable / sequence 13，各自沿用既有独立发布公钥，不可交叉使用。两源五目标从 0.9.10 升级至 0.9.11，当前 Web 0.9.11 已最新；完整包 SHA-256 与 Android versionCode 21 由实际交付文件绑定。十项 GitHub 资产、六个服务器下载包和五个更新包均完成完整字节读回；历史公开路径精确移入可恢复私有归档。完整结果见 [0.9.11 验收](acceptance-0.9.11.md)，文件长度或 API digest 不替代完整包体读取。
 
-六个交付包均已纳入真实 Cubism V12、语音插话打断、Agent 进度／结果回报与对话／项目管理。历史 0.9.7 包仍内置 V11，网页更新不会替换旧包资源，历史边界见 [0.9.7 验收](acceptance-0.9.7.md)。Windows 未做 Authenticode 签名；Android 沿用原开发证书，versionCode 严格递增，仍需系统安装确认。更新清单签名不能替代平台签名。Ubuntu 与 Android 本轮仅完成归档／静态验收，没有目标设备运行验收。
+六包永久移除废弃的 3D 小猫，只保留二次元伙伴；旧小猫偏好自动回落为二次元显示。真实 Cubism V12、语音插话、Agent 回报和对话／项目管理继续保留，本版增加无损纹理压缩、轻量人物预览和空闲请求优化。Three.js 仍供二次元恢复渲染使用。Windows 未做 Authenticode 签名；Android 沿用开发证书，versionCode 递增，仍需系统安装确认。更新清单签名不能替代平台签名。Ubuntu / Android 本轮完成完整包审计，未进行目标设备运行验收。
 
 ## 历史版本与信任配置
 
