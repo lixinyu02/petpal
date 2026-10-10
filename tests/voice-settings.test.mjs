@@ -10,6 +10,7 @@ test('voice defaults are independent and public metadata does not enable remote 
   assert.deepEqual(first, {
     tts: { mode: 'system', baseUrl: '', model: '', voice: '', speed: 1, apiKey: '', emotion: 'auto', emotionIntensity: 'natural' },
     asr: { mode: 'disabled', baseUrl: '', model: '', language: 'zh-CN', apiKey: '' },
+    wake: {enabled:false,phrases:['你好小伴'],idleTimeoutSeconds:45},
   });
   first.tts.voice = 'changed'; assert.equal(second.tts.voice, '');
   const visible = publicVoiceSettings(patchVoiceSettings(first, remote('tts', { apiKey: 'private-token' })));

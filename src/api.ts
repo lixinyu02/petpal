@@ -7,6 +7,7 @@ import type { CentralServerBridge } from './platform/central-server';
 import { createRequestScope, SessionChangedError } from './auth/request-scope.mjs';
 import type { SpeechStreamHandlers } from './avatar/speech-stream.mjs';
 import type { SpeechEmotion } from './avatar/speech-emotion.mjs';
+import type { WakeSettings } from '../server/voice-wake.mjs';
 export { SessionChangedError };
 export type AgentAccess = 'none'|'workspace'|'full';
 export type AgentPermissions = { access:'read-only'|'workspace-write'|'full-access'; approval:'ask'|'auto'|'review';reviewProviderId?:string|null };
@@ -53,6 +54,7 @@ export type VoiceConnectionFields = {baseUrl:string;model:string;hasApiKey?:bool
 export type VoiceConfig = {
   tts:VoiceConnectionFields & {mode:'system'|'remote'|'cosyvoice';voice:string;speed:number;emotion:'original'|'auto'|'neutral'|'happy'|'sad'|'angry'|'gentle';emotionIntensity:'natural'|'strong'};
   asr:VoiceConnectionFields & {mode:'disabled'|'browser'|'remote';language:string};
+  wake?:WakeSettings;
   runtime?:{tts:string;asr:string;remoteConfiguredOnly:boolean};
 };
 export type CosyVoiceConfig = {configured:boolean;hasReference:boolean;referenceName:string;referenceText:string;baseUrl:string;hasApiKey:boolean;editable:boolean;revision:string};

@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import {defaultWakeSettings, normalizeWakeSettings} from './voice-wake.mjs';
 
 const FIELDS = {
   tts: ['mode', 'baseUrl', 'model', 'voice', 'speed', 'apiKey', 'emotion', 'emotionIntensity'],
@@ -12,11 +13,13 @@ export function defaultVoiceSettings() {
   return {
     tts: { mode: 'system', baseUrl: '', model: '', voice: '', speed: 1, apiKey: '', emotion: 'auto', emotionIntensity: 'natural' },
     asr: { mode: 'disabled', baseUrl: '', model: '', language: 'zh-CN', apiKey: '' },
+    wake: defaultWakeSettings(),
   };
 }
 
 function copySettings(settings) {
   const copy = defaultVoiceSettings();
+  copy.wake = normalizeWakeSettings(settings?.wake);
   for (const section of ['tts', 'asr']) {
     if (!record(settings?.[section])) continue;
     for (const field of FIELDS[section]) {
@@ -73,6 +76,10 @@ export function normalizeVoiceUrl(value, label = 'TTS') {
 export function patchVoiceSettings(previous, body) {
   if (!record(body)) throw invalid('语音配置必须是对象。');
   const result = copySettings(previous);
+  if (own(body,'wake')) {
+    if (!record(body.wake)) throw invalid('唤醒配置必须是对象。');
+    result.wake = normalizeWakeSettings({...result.wake,...body.wake});
+  }
   for (const section of ['tts', 'asr']) {
     if (!own(body, section)) continue;
     const patch = body[section], label = section.toUpperCase(), next = result[section];

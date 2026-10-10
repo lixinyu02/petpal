@@ -248,6 +248,13 @@ test('voice credentials and selected settings stay per user and every public pro
   const bob = await (await request('/voice', { token: b.token })).json(); assert.equal(bob.tts.mode, 'system'); assert.equal(bob.tts.hasApiKey, false);
   assert.equal(voice.tts.emotion, 'happy'); assert.equal(voice.tts.emotionIntensity, 'strong');
   assert.equal(bob.tts.emotion, 'auto'); assert.equal(bob.tts.emotionIntensity, 'natural');
+  const wake={enabled:true,phrases:['你好小伴','Hey Cat'],idleTimeoutSeconds:60};
+  assert.equal((await request('/voice',{token:a.token,method:'PATCH',body:{wake,userId:b.user.id}})).status,200);
+  assert.deepEqual((await (await request('/voice',{token:a.token})).json()).wake,wake);
+  assert.deepEqual((await (await request('/voice',{token:b.token})).json()).wake,{enabled:false,phrases:['你好小伴'],idleTimeoutSeconds:45});
+  assert.equal((await request('/voice',{token:null,method:'PATCH',body:{wake}})).status,401);
+  assert.equal((await request('/voice',{token:a.token,method:'PATCH',body:{wake:{phrases:[]}}})).status,400);
+  assert.deepEqual((await (await request('/voice',{token:a.token})).json()).wake,wake);
   assert.equal((await request('/voice', { token: a.token, method: 'PATCH', body: { tts: { baseUrl: 'https://other.example/v1', apiKey: '' } } })).status, 400);
   const texts = [JSON.stringify(await readState(a.token)), JSON.stringify(await readState()), JSON.stringify(voice), await (await request('/admin/users')).text()];
   for (const text of texts) for (const secret of [password, a.token, b.token, 'fixture-provider-private-key', 'alice-private-voice-key', 'alice-private-asr-key', '"password":', '"salt":', '"tokenHash":']) assert.equal(text.includes(secret), false, secret);
@@ -378,7 +385,7 @@ test('member login session, default model, profile, voice and owned history surv
   const p = await provider(); const a = await member('alice', [p.id]);
   await request('/settings', { token: a.token, method: 'PATCH', body: { petName: 'Persistent Alice', companionKind: 'cat', defaultProviderId: ` ${p.id} ` } });
   const chat = await conversation(a.token);
-  await request('/voice', { token: a.token, method: 'PATCH', body: { tts: { voice: 'Persistent local voice' }, asr: { language: 'en-US' } } });
+  await request('/voice', { token: a.token, method: 'PATCH', body: { tts: { voice: 'Persistent local voice' }, asr: { language: 'en-US' }, wake:{enabled:true,phrases:['小伴小伴'],idleTimeoutSeconds:30} } });
   const before = await readState(a.token); await app.close();
   const restarted = await createPetServer({ dataDir: directory, token: 'replacement-local-owner-token', codex: stubCodex() });
   try {
@@ -388,6 +395,7 @@ test('member login session, default model, profile, voice and owned history surv
     assert.deepEqual(state, before); assert.equal(state.conversations[0].id, chat.id); assert.equal(state.settings.defaultProviderId, p.id);
     const voice = await (await fetch(`${base}/voice`, { headers: { Authorization: `Bearer ${a.token}` } })).json();
     assert.equal(voice.tts.voice, 'Persistent local voice'); assert.equal(voice.asr.language, 'en-US');
+    assert.deepEqual(voice.wake,{enabled:true,phrases:['小伴小伴'],idleTimeoutSeconds:30});
     assert.equal((await fetch(`${base}/state`, { headers: { Authorization: `Bearer ${ownerToken}` } })).status, 401, 'old ephemeral desktop bootstrap does not become a persisted member session');
   } finally { await restarted.close(); }
 });
