@@ -24,6 +24,16 @@ node_modules/@jackwener/opencli/LICENSE
 
 Music MCP adapters
 ------------------
+NetEase official music skills
+https://github.com/NetEase/skills, commit 58ff0771d6977feb847d6bfe322280eec4bec004
+License: Apache 2.0. The adapted Chinese PetPal workflow and original LICENSE
+are retained in server/native/skills/petpal-ncmcli/, with source hashes and
+modification details in PROVENANCE.json. PetPal uses its own account-scoped
+dynamic tool and user-operated setup instead of the upstream shell/OpenClaw flow.
+The optional @music163/ncm-cli 0.1.7 runtime is installed separately by the user,
+not distributed as a PetPal dependency. Its npm metadata reports MIT but its
+published archive has no full LICENSE text; PetPal does not invent that notice.
+
 Seraph310/cloudmusic-desktop-mcp, commit a61a611bf1284d9663df2742ec83f8769403465d
 https://github.com/Seraph310/cloudmusic-desktop-mcp
 License: MIT. Original source and LICENSE are retained under

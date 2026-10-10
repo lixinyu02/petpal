@@ -12,6 +12,9 @@ const failure=(status,message,code)=>Object.assign(new Error(message),{status,co
 const aborted=()=>Object.assign(failure(499,'网易云操作已停止。','cancelled'),{name:'AbortError'});
 const object=value=>value!==null&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value));
 const canonical=value=>process.platform==='win32'?path.resolve(value).toLowerCase():path.resolve(value);
+// Executor reconnects can replace managers while a failed termination is pending.
+// Keep ownership until the original child really closes, across manager instances.
+const scopeOperations=new Map();
 const sensitive=/^(?:private[_-]?key|app[_-]?secret|api[_-]?key|access[_-]?token|refresh[_-]?token|token|cookies?|authorization|password|MUSIC_U|__csrf)$/i;
 
 export function validateNcmCliCall(value){
@@ -152,12 +155,15 @@ export class NcmCliManager{
   }
   _check(operation){if(this.closed||operation.controller.signal.aborted)throw aborted();}
   async _operation(work,{signal}={}){
-    if(this.closed||signal?.aborted)throw aborted();if(this.active)throw failure(409,'另一项网易云操作正在执行，请稍后重试。','busy');
+    const scopeKey=canonical(this.root);
+    if(this.closed||signal?.aborted)throw aborted();if(this.active||scopeOperations.has(scopeKey))throw failure(409,'另一项网易云操作正在执行，请稍后重试。','busy');
     let finish;const operation={controller:new AbortController(),done:new Promise(resolve=>{finish=resolve;}),retained:null};operation.finish=finish;this.active=operation;
+    scopeOperations.set(scopeKey,operation);
+    const release=()=>{if(this.active===operation)this.active=null;if(scopeOperations.get(scopeKey)===operation)scopeOperations.delete(scopeKey);operation.finish();};
     const cancel=()=>operation.controller.abort();signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)cancel();
     try{const result=await work(operation);this._check(operation);return result;}
-    catch(error){if(error.ownedCompletion){operation.retained=error.ownedCompletion;error.ownedCompletion.finally(()=>{if(this.active===operation)this.active=null;operation.finish();});}throw error;}
-    finally{signal?.removeEventListener('abort',cancel);if(!operation.retained){if(this.active===operation)this.active=null;operation.finish();}}
+    catch(error){if(error.ownedCompletion){operation.retained=error.ownedCompletion;error.ownedCompletion.finally(release);}throw error;}
+    finally{signal?.removeEventListener('abort',cancel);if(!operation.retained)release();}
   }
   async _ensure(operation){
     for(const directory of [this.dataDir,path.join(this.dataDir,'ncmcli'),this.root,this.profile,...['tmp','AppData/Roaming','AppData/Local','.config/ncm-cli','.local/share'].map(relative=>path.join(this.profile,relative))]){

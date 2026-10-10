@@ -1,0 +1,37 @@
+{
+  "upstream": "https://github.com/NetEase/skills",
+  "revision": "58ff0771d6977feb847d6bfe322280eec4bec004",
+  "license": "Apache-2.0",
+  "licenseGitBlob": "f49a4e16e68b128803cc2dcea614603632b04eac",
+  "upstreamFiles": [
+    {
+      "path": "ncm-cli-setup/SKILL.md",
+      "sha256": "9d65fc3c9328a0c72f05f11437fbc1c6f30a74958d865952992c20fba425c072"
+    },
+    {
+      "path": "netease-music-cli/SKILL.md",
+      "sha256": "199b5a0490e48e3435aeb6833cd2632e9702081165f58af90b661b2d088d71d6"
+    },
+    {
+      "path": "netease-music-assistant/SKILL.md",
+      "sha256": "e11c46fe5541de280093278cca719c22332192e102306b0fc2672a84f2433716"
+    }
+  ],
+  "adaptation": "Chinese PetPal dynamic-tool workflow; private account profile, user-only setup, no CLI native playback or uploads; use PetPal automations.",
+  "files": [
+    {
+      "path": "SKILL.md",
+      "sha256": "91b984c27b0a4e21c10f7eac06f964b615a1d7c48615addab664469bc58e4828"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1"
+    }
+  ],
+  "optionalCli": {
+    "package": "@music163/ncm-cli",
+    "version": "0.1.7",
+    "source": "https://www.npmjs.com/package/@music163/ncm-cli",
+    "bundled": false
+  }
+}

@@ -2,9 +2,10 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, chmod, unlink } from 'node:fs/promises';
 import { normalizeBaseUrl, normalizeReasoningEffort } from './providers.mjs';
+import { materializeAgentSkills } from './agent-skills.mjs';
 
 const failure = (status, message) => Object.assign(new Error(message), { status });
-export const CODEX_TOOL_VERSION = 'opencli-universal-web-v1';
+export const CODEX_TOOL_VERSION = 'petpal-ncmcli-v1';
 export const CODEX_KEY_ENV = 'PETPAL_CODEX_API_KEY';
 export const CODEX_CATALOG_SHA256 = 'd5db15d306c4bd5c4bb8a927940e70473c389d65d9e2bf887ec7028fce893d5f';
 export const CODEX_CATALOG_SOURCE_FILES = Object.freeze(['models-0.143.0.json', 'LICENSE', 'PROVENANCE.json', 'SHA256SUMS'].map(file => `server/native/codex-review/${file}`));
@@ -153,6 +154,7 @@ export async function prepareCodexRuntime(config, dataDir) {
   if (!path.isAbsolute(dataDir)) dataDir = path.resolve(dataDir);
   const home = path.join(dataDir, 'codex', config.revision);
   const workspaceRoot = path.join(home, 'workspace');
+  await materializeAgentSkills(home);
   await mkdir(workspaceRoot, { recursive: true, mode: 0o700 });
   await chmod(home, 0o700);
   const env = isolatedCodexEnvironment(config, home);

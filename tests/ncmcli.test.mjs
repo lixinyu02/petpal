@@ -157,6 +157,17 @@ test('generated installers quote special paths and constructors reject script co
   const prepared=await manager.prepare();assert.match(await readFile(prepared.launchers.install,'utf8'),/'\\''/);assert.match(await readFile(prepared.launchers.login,'utf8'),/ELECTRON_RUN_AS_NODE=1 exec/);
 });
 
+test('executor replacement cannot bypass an older same-account child awaiting confirmed close',async t=>{
+  const child=childFixture({delayed:true});
+  const f=await fixture(t,{platform:'linux',timeoutMs:10,shutdownTimeoutMs:10,resolve:async()=>({entry:path.resolve('fixture.js'),version:NCMCLI_VERSION}),run:(file,args,options)=>runNcmCliProcess(file,args,{...options,spawnProcess:()=>child})});
+  const peer=new NcmCliManager({dataDir:f.directory,platform:'linux',env:{PATH:''},resolve:async()=>null});t.after(()=>peer.close());
+  await assert.rejects(f.manager.execute({action:'run',args:['--version']}),error=>error.code==='shutdown_failed');
+  await assert.rejects(f.manager.close(),error=>error.code==='shutdown_failed');
+  await assert.rejects(peer.status(),error=>error.code==='busy');
+  child.finish(1);await Promise.resolve();await Promise.resolve();
+  assert.equal((await peer.status()).available,false);
+});
+
 test('generated configure/login launcher runs verified CLI using the invoking external Node',async t=>{
   const f=await fixture(t),installed=await runtime(f.manager.runtimeDirectory);const prepared=await f.manager.prepare();
   const launcher=path.join(f.manager.root,'launch.mjs');
@@ -164,7 +175,7 @@ test('generated configure/login launcher runs verified CLI using the invoking ex
     const result=await exec(process.execPath,[launcher,command]);const output=JSON.parse(result.stdout);assert.deepEqual(output.args,[command]);assert.equal(output.home,f.manager.profile);
     assert.ok(!(await readFile(prepared.launchers[command],'utf8')).includes(process.execPath));
   }
-  assert.ok(installed.entry);await assert.rejects(exec(process.execPath,[launcher,'diag']),error=>error.code===1);await assert.rejects(exec(process.execPath,[launcher,'configure','--privateKey','synthetic']),error=>error.code===1);
+  assert.ok(installed.entry);await assert.rejects(exec(process.execPath,[launcher,'diag']),error=>error.code===1&&/Choose configure or login/.test(error.stderr));await assert.rejects(exec(process.execPath,[launcher,'configure','--privateKey','synthetic']),error=>error.code===1&&/Choose one fixed setup action/.test(error.stderr));
 });
 
 test('real official 0.1.7 offline smoke: pinned version and missing-config failure',async t=>{

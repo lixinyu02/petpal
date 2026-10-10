@@ -8,9 +8,11 @@ import { MusicMcpManager, validateMusicMcpCall, MUSIC_MCP_TOOLS } from './music-
 import { ComputerUseMcpManager, validateComputerUseCall, validateComputerUseTools } from './computer-use-mcp.mjs';
 import { CODEX_TOOL_VERSION } from './codex-config.mjs';
 import { SystemControls, validateSystemAudioCommand, validateSystemSettingsCommand } from './system-controls.mjs';
+import { NcmCliManager, validateNcmCliCall, redactNcmCliOutput } from './ncmcli.mjs';
 
 const musicActions = { open: '打开', play: '播放', pause: '暂停', next: '下一首', previous: '上一首' };
 export const desktopToolSpecs = [
+  {type:'function',name:'petpal_ncmcli',description:'在所选执行电脑、当前账号调用网易云官方ncm-cli。status仅离线检查安装和凭据文件，不证明登录；prepare生成用户在本机运行的install/configure/login启动文件，不自动安装、申请API或扫码。CLI为固定0.1.7可选运行时，需要Node.js/npm；私钥仅在用户本机向导输入。run的args是参数数组，先commands或命令--help查真实参数；支持search、playlist，动态API附最小--userInput意图摘要。login仅--check（可能刷新token）。不支持官方mpv播控、文件/封面上传、云盘、笔记、升级、诊断或后台任务；桌面播放走已有音乐MCP/媒体工具。prepare/run需完整访问并遵循当前审批，失败不使用shell/npx或其他账号/电脑回退。',inputSchema:{type:'object',properties:{action:{type:'string',enum:['status','prepare','run']},args:{type:'array',minItems:1,maxItems:40,items:{type:'string',minLength:1,maxLength:2048}}},required:['action'],additionalProperties:false}},
   {type:'function',name:'petpal_system_audio',description:'读取或调整所选执行电脑的系统默认输出总音量和静音，不是播放器或网页语音音量。status只读；set-volume设置0–100整数，adjust-volume每次-20至20非零整数，set-muted明确布尔值。动作仅接受其对应参数。修改前后绑定同一输出设备并读回；默认设备变化、接口失败或读回不符时如实报告且不自动重试。需完整访问和当前审批，不能提权或通过其他电脑回退。',inputSchema:{type:'object',properties:{action:{type:'string',enum:['status','set-volume','adjust-volume','set-muted']},volumePercent:{type:'integer',minimum:0,maximum:100},delta:{type:'integer',minimum:-20,maximum:20,not:{const:0}},muted:{type:'boolean'}},required:['action'],additionalProperties:false}},
   {type:'function',name:'petpal_system_settings',description:'在所选执行电脑打开系统声音或显示设置入口，section仅sound/display。只返回打开请求已发出，不代表设置窗口已显示或设置已改变；后续操作应发现真实窗口并读回。需要完整访问和当前审批；使用当前用户身份，不自动同意UAC或提权。',inputSchema:{type:'object',properties:{section:{type:'string',enum:['sound','display']}},required:['section'],additionalProperties:false}},
   {type:'function',name:'petpal_opencli_setup',description:'检查所选执行电脑的 Chrome 安装环境(status，纯读)；用户要求准备浏览器时，用 install-browser 从固定 Google 官方源下载并验证安装器，返回 prepared 和路径，不代表已安装。用户在系统界面完成协议、安装或提权后再 status 检查。open-extension 仅在该电脑打开固定官方 Browser Bridge 商店页，扩展权限由用户确认；不静默加载扩展、不修改默认浏览器或档案。OpenCLI 已内置，无需全局 npm/npx。后续通过该电脑OpenCLI设置检查连接并显式选在线档案。下载/打开需完整访问和当前审批；旧客户端缺工具时应更新，不能回退到shell下载或绕过授权。',inputSchema:{type:'object',properties:{action:{type:'string',enum:['status','install-browser','open-extension']}},required:['action'],additionalProperties:false}},
@@ -28,7 +30,18 @@ export const desktopToolSpecs = [
   }, required: ['action'], additionalProperties: false } },
 ];
 
-export function createDesktopTools({ dataDir, music = new MusicController(), systemControls = new SystemControls(), opencli, opencliDataDir = dataDir, opencliManager, musicMcpDataDir = dataDir, musicMcpScope = 'local', musicMcp, computerUseMcpDataDir = musicMcpDataDir, computerUseMcp, scopeForConversation } = {}) {
+export function createDesktopTools({ dataDir, music = new MusicController(), systemControls = new SystemControls(), opencli, opencliDataDir = dataDir, opencliManager, musicMcpDataDir = dataDir, musicMcpScope = 'local', musicMcp, computerUseMcpDataDir = musicMcpDataDir, computerUseMcp, ncmCliDataDir = musicMcpDataDir, ncmcli, ncmCliFactory = options => new NcmCliManager(options), scopeForConversation } = {}) {
+  const ncm = ncmcli ?? ncmCliFactory({dataDir:ncmCliDataDir,scope:musicMcpScope});
+  const ncmScoped = new Map([[musicMcpScope,ncm]]);
+  const ncmFor = conversationId => {
+    const scope=scopeForConversation?scopeForConversation(conversationId):musicMcpScope;
+    if(typeof scope!=='string'||!scope)throw new Error('无法确认网易云任务所属账号，请重新创建对话。');
+    if(!ncmScoped.has(scope)){
+      if(ncmScoped.size>=32)throw new Error('本机网易云账号实例已达上限，请重启后重试。');
+      ncmScoped.set(scope,ncmCliFactory({dataDir:ncmCliDataDir,scope}));
+    }
+    return ncmScoped.get(scope);
+  };
   const browser = opencliManager ?? new OpenCliManager({dataDir:opencliDataDir,scope:musicMcpScope,...(opencli?{browser:opencli}:{})});
   const browserScoped = new Map([[musicMcpScope,browser]]);
   const browserFor = conversationId => {
@@ -64,6 +77,11 @@ export function createDesktopTools({ dataDir, music = new MusicController(), sys
   };
   let active = null, closed = false;
   function describe(name, args) {
+    if(name==='petpal_ncmcli'){
+      const value=validateNcmCliCall(args);
+      const label=value.action==='status'?'离线检查官方 CLI 与本账号配置':value.action==='prepare'?'生成用户本机安装、配置与扫码向导（只准备文件）':`官方 CLI ${redactNcmCliOutput(JSON.stringify(value.args))}`;
+      return {description:`所选执行电脑 · 网易云 · ${label}`,approvalRequired:value.action!=='status'};
+    }
     if(name==='petpal_system_audio'){
       const value=validateSystemAudioCommand(args);
       const label=value.action==='status'?'只读查询默认输出设备的系统总音量和静音':value.action==='set-volume'?`系统总音量设为 ${value.volumePercent}%`:value.action==='adjust-volume'?`系统总音量${value.delta>0?'提高':'降低'} ${Math.abs(value.delta)}%`:value.muted?'系统输出静音':'系统输出取消静音';
@@ -132,6 +150,7 @@ export function createDesktopTools({ dataDir, music = new MusicController(), sys
       const operation = { controller, done: new Promise(resolve => { finish = resolve; }) }; active = operation;
       const cancel = () => controller.abort(); signal?.addEventListener('abort', cancel, { once: true });
       try {
+        if(name==='petpal_ncmcli')return await ncmFor(conversationId).execute(args,{signal:controller.signal});
         if(name==='petpal_system_audio')return await systemControls.audio(args,{signal:controller.signal});
         if(name==='petpal_system_settings')return await systemControls.settings(args,{signal:controller.signal});
         if(name==='petpal_opencli_setup')return await browserFor(conversationId).executeSetup(args,{signal:controller.signal});
@@ -149,6 +168,6 @@ export function createDesktopTools({ dataDir, music = new MusicController(), sys
         return await browserFor(conversationId).executeBrowser(args, { signal: controller.signal });
       } finally { signal?.removeEventListener('abort', cancel); if (active === operation) active = null; finish(); }
     },
-    async close() { closed = true; const pending = active; pending?.controller.abort(); await Promise.all([...Array.from(browserScoped.values(),manager=>manager.close()),...Array.from(scoped.values(),manager=>manager.close()),...Array.from(computerScoped.values(),manager=>manager.close())]); await pending?.done; },
+    async close() { closed = true; const pending = active; pending?.controller.abort(); await Promise.all([...Array.from(browserScoped.values(),manager=>manager.close()),...Array.from(scoped.values(),manager=>manager.close()),...Array.from(computerScoped.values(),manager=>manager.close()),...Array.from(ncmScoped.values(),manager=>manager.close())]); await pending?.done; },
   };
 }
