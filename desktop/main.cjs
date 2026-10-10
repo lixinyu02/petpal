@@ -238,7 +238,8 @@ function showPet() {
   } else { fitWindowToDisplay(petWindow, true); petWindow.showInactive(); }
 }
 
-async function inspectAvatarWindow(win, requireWorld, kind, expectedCatEnabled) {
+async function inspectAvatarWindow(win, requireWorld, kind = 'anime') {
+  if (kind !== 'anime') throw new Error('Desktop smoke only accepts the supported anime companion');
   return win.webContents.executeJavaScript(`new Promise((resolve, reject) => {
     const deadline = Date.now() + 25000;
     const check = () => {
@@ -250,15 +251,13 @@ async function inspectAvatarWindow(win, requireWorld, kind, expectedCatEnabled) 
       const ready = ${requireWorld ? `!!document.querySelector('.companion-world[data-ready="true"][data-companion-kind="${kind}"]')` : 'true'};
       const cubism = document.querySelector('.cubism-scene[data-avatar-mode="cubism"]');
       const modelLoaded = performance.getEntriesByType('resource').some(entry => new URL(entry.name).pathname === '/avatars/akari-cubism-v12/akari.moc3');
-      const expectedRenderer = ${JSON.stringify(kind)} === 'anime'
-        ? canvas?.dataset.avatarRenderer === 'cubism' && !!cubism && modelLoaded && Number(canvas.dataset.mocVersion) > 0
-        : !['mesh2d', 'cubism'].includes(canvas?.dataset.avatarRenderer);
+      const expectedRenderer = canvas?.dataset.avatarRenderer === 'cubism' && !!cubism && modelLoaded && Number(canvas.dataset.mocVersion) > 0;
       let display; try { display = JSON.parse(localStorage.getItem('petpal.displayCompanion') || 'null'); } catch {}
-      const displayReady = ${typeof expectedCatEnabled === 'boolean' ? `display?.version === 3 && display.kind === ${JSON.stringify(kind)} && display.catEnabled === ${JSON.stringify(expectedCatEnabled)}` : 'true'};
+      const displayReady = display?.version === 3 && display.kind === 'anime' && display.catEnabled === false;
       if (ready && visible && expectedRenderer && displayReady && canvases.length === 1 && canvas.dataset.petCount === '1' && Number(canvas.dataset.renderFrames) >= 2) {
         const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
         if (gl && !gl.isContextLost()) return resolve({
-          is3d: ${JSON.stringify(kind)} === 'cat', kind: ${JSON.stringify(kind)}, renderer: canvas.dataset.avatarRenderer || 'three3d', petCount: 1, canvasCount: canvases.length,
+          kind: 'anime', renderer: canvas.dataset.avatarRenderer, petCount: 1, canvasCount: canvases.length,
           renderFrames: Number(canvas.dataset.renderFrames), glVersion: gl.getParameter(gl.VERSION),
           petAction: canvas.dataset.petAction || 'unknown',
           width: canvas.width, height: canvas.height, viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
@@ -327,54 +326,22 @@ async function clickSmokeButton(container, label) {
   })()`);
 }
 
-async function inspectSmokeAvatarPair(kind, catEnabled) {
-  const [main, pet] = await Promise.all([inspectAvatarWindow(mainWindow, true, kind, catEnabled), inspectAvatarWindow(petWindow, false, kind, catEnabled)]);
-  if ([main, pet].some(value => value.display?.version !== 3 || value.display.kind !== kind || value.display.catEnabled !== catEnabled)) {
-    console.log(JSON.stringify({ event: 'desktop-smoke-check', check: 'avatar-display-pair', expected: { kind, catEnabled }, main: main.display, pet: pet.display }));
+async function inspectSmokeAvatarPair() {
+  const [main, pet] = await Promise.all([inspectAvatarWindow(mainWindow, true), inspectAvatarWindow(petWindow, false)]);
+  if ([main, pet].some(value => value.display?.version !== 3 || value.display.kind !== 'anime' || value.display.catEnabled !== false)) {
+    console.log(JSON.stringify({ event: 'desktop-smoke-check', check: 'avatar-display-pair', expected: { kind: 'anime' }, main: main.display, pet: pet.display }));
     throw new Error('Effective v3 avatar display did not synchronize between desktop windows');
   }
   return { main, pet };
 }
 
-async function inspectSmokeCatChoice(expectedVisible) {
+async function inspectSmokeRetiredCompanionControls() {
   return mainWindow.webContents.executeJavaScript(`(() => {
     const choice = [...document.querySelectorAll('.companion-switch button')].find(button => button.textContent.trim() === '3D 小猫');
-    const visible = !!choice && choice.getClientRects().length > 0;
-    if (visible !== ${JSON.stringify(expectedVisible)}) throw new Error('Cat choice visibility does not match the explicit capability');
-    return visible;
+    const capabilitySwitch = document.querySelector('.companion-cat-option');
+    if (choice || capabilitySwitch) throw new Error('Retired companion controls are still mounted');
+    return { choiceAbsent: true, capabilitySwitchAbsent: true };
   })()`);
-}
-
-async function inspectSmokeCatSettings(expected, next) {
-  await mainWindow.loadURL(`${origin}/?chat=1&settings=1`);
-  await mainWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
-    const deadline = Date.now() + 20000;
-    const check = () => {
-      const tab = [...document.querySelectorAll('.settings-tabs button')].find(button => button.textContent.trim() === '小伴个性');
-      if (tab && !tab.disabled && tab.getClientRects().length) return resolve(true);
-      if (Date.now() >= deadline) return reject(new Error('Companion settings tab did not become ready'));
-      setTimeout(check, 40);
-    }; check();
-  })`);
-  await clickSmokeButton('.settings-tabs', '小伴个性');
-  return mainWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
-    const deadline = Date.now() + 20000; let clicked = false, before;
-    const check = () => {
-      const control = document.querySelector('.companion-cat-option[role="switch"][aria-label="启用 3D 小猫"]');
-      if (control && !control.disabled && control.getClientRects().length) {
-        const checked = control.getAttribute('aria-checked');
-        if (checked !== 'true' && checked !== 'false') return reject(new Error('Cat settings switch has an invalid state'));
-        if (before === undefined) {
-          before = checked === 'true';
-          if (before !== ${JSON.stringify(expected)}) return reject(new Error('Cat settings switch does not match the expected opt-in'));
-          if (${typeof next === 'boolean'}) { clicked = true; control.click(); }
-        }
-        if (checked === ${JSON.stringify(String(typeof next === 'boolean' ? next : expected))}) return resolve({ before, checked: checked === 'true', clicked });
-      }
-      if (Date.now() >= deadline) return reject(new Error('Cat settings switch did not settle after its UI interaction'));
-      setTimeout(check, 40);
-    }; check();
-  })`);
 }
 
 async function snapshotSmokeRawCompanionPreference() {
@@ -399,7 +366,7 @@ async function assertSmokeRawCompanionPreference(previous) {
   const current = await snapshotSmokeRawCompanionPreference();
   if (current.local !== previous.local || current.serverKind !== previous.serverKind) {
     console.log(JSON.stringify({ event: 'desktop-smoke-check', check: 'raw-companion-preference', localEqual: current.local === previous.local, serverEqual: current.serverKind === previous.serverKind }));
-    throw new Error('Cat capability changed a raw companion preference');
+    throw new Error('Companion reload changed a raw companion preference');
   }
   return true;
 }
@@ -414,6 +381,34 @@ async function reloadSmokeWindow(win) {
     contents.once('did-finish-load', loaded); contents.on('did-fail-load', failed);
     try { contents.reload(); } catch (error) { cleanup(); reject(error); }
   });
+}
+
+async function inspectSmokeLegacyCompanionFallback() {
+  if (!process.argv.includes('--smoke-test') || !process.env.PETPAL_SMOKE_PROFILE) throw new Error('Legacy companion fixture requires an isolated smoke profile');
+  const previous = await snapshotSmokeRawCompanionPreference();
+  const windows = [mainWindow, petWindow];
+  const legacy = await Promise.all(windows.map(win => win.webContents.executeJavaScript(`localStorage.getItem('petpal.companionKind')`)));
+  const setServerKind = async companionKind => {
+    const response = await fetch(`${origin}/api/settings`, { method: 'PATCH', headers: { Authorization: `Bearer ${backend.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ companionKind }) });
+    if (!response.ok) throw new Error('Isolated legacy companion fixture settings failed');
+  };
+  try {
+    await setServerKind('cat');
+    await Promise.all(windows.map(win => win.webContents.executeJavaScript(`(() => { localStorage.setItem('petpal.companionKind', 'cat'); localStorage.setItem('petpal.displayCompanion', JSON.stringify({version:3,kind:'cat',catEnabled:true})); })()`)));
+    await Promise.all([mainWindow.loadURL(origin), petWindow.loadURL(`${origin}/?pet=1&avatar=cat`)]);
+    const initial = await inspectSmokeAvatarPair();
+    const saved = await snapshotSmokeRawCompanionPreference();
+    if (saved.serverKind !== 'cat') throw new Error('Legacy companion fallback changed the existing server preference');
+    await Promise.all(windows.map(reloadSmokeWindow));
+    const reloaded = await inspectSmokeAvatarPair();
+    return { isolatedFixture: true, initial, reloaded, bothWindowsReloaded: true, legacyServerKind: saved.serverKind,
+      rawPreferenceUnchanged: await assertSmokeRawCompanionPreference(saved), retiredControls: await inspectSmokeRetiredCompanionControls() };
+  } finally {
+    await setServerKind(previous.serverKind);
+    await Promise.all(windows.map((win, index) => win.webContents.executeJavaScript(`(() => { const value = ${JSON.stringify(legacy[index])}; if (value === null) localStorage.removeItem('petpal.companionKind'); else localStorage.setItem('petpal.companionKind', value); })()`)));
+    await Promise.all([mainWindow.loadURL(origin), petWindow.loadURL(`${origin}/?pet=1`)]);
+    await inspectSmokeAvatarPair();
+  }
 }
 
 async function expandSmokeAppCompanion() {
@@ -882,8 +877,8 @@ async function boot() {
       return;
     }
     await startupMilestone('smoke-anime');
-    const { main: animeMain, pet: animePet } = await inspectSmokeAvatarPair('anime', false);
-    const defaultChoiceHidden = !(await inspectSmokeCatChoice(false));
+    const { main: animeMain, pet: animePet } = await inspectSmokeAvatarPair();
+    const retiredControls = await inspectSmokeRetiredCompanionControls();
     await mainWindow.webContents.executeJavaScript(`(async () => {
       await document.fonts.ready;
       await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {})));
@@ -896,7 +891,7 @@ async function boot() {
           runtime: desktopTools.opencli.runtime, daemonState: desktopTools.opencli.daemon?.state,
           extensionConnected: desktopTools.opencli.extension?.connected, readOnlyProbe: true } },
       avatars: { anime: { main: animeMain, pet: animePet } }, defaultAvatar: 'anime',
-      catCapability: { defaultOff: { main: animeMain, pet: animePet, choiceHidden: defaultChoiceHidden } },
+      avatarSynchronization: { initial: { main: animeMain, pet: animePet }, retiredControls },
       codex: { available: codex.available, running: codex.running, authenticated: codex.authenticated, sandbox: codex.sandbox },
       pet: { alwaysOnTop: petWindow.isAlwaysOnTop(), transparent: true } };
     await startupMilestone('smoke-system-speech');
@@ -926,58 +921,15 @@ async function boot() {
     }
     await startupMilestone('smoke-anime-gestures');
     result.gestures = { anime: await inspectNaturalGestures('anime') };
-    await startupMilestone('smoke-cat');
+    await startupMilestone('smoke-avatar-reload');
     const initialRawPreference = await snapshotSmokeRawCompanionPreference();
-    const enabledSettings = await inspectSmokeCatSettings(false, true);
-    result.catCapability.defaultOff.settingsChecked = enabledSettings.before;
-    const enablePreservedPreference = await assertSmokeRawCompanionPreference(initialRawPreference);
-    await mainWindow.loadURL(origin);
-    await inspectSmokeAvatarPair('anime', true);
-    const enabledChoiceVisible = await inspectSmokeCatChoice(true);
-    await clickSmokeButton('.companion-switch', '3D 小猫');
-    const { main: catMain, pet: catPet } = await inspectSmokeAvatarPair('cat', true);
-    result.catCapability.enabled = { main: catMain, pet: catPet, settingsChecked: enabledSettings.checked,
-      clickedSettingsSwitch: enabledSettings.clicked, choiceVisible: enabledChoiceVisible, rawPreferenceUnchanged: enablePreservedPreference };
-    result.is3d = true; result.renderer = { main: catMain, pet: catPet }; result.avatars.cat = result.renderer;
-    if (process.env.PETPAL_SMOKE_DIR) {
-      await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'cat-main.png'), (await mainWindow.webContents.capturePage()).toPNG());
-      await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'cat-pet.png'), (await petWindow.webContents.capturePage()).toPNG());
-      if (process.env.PETPAL_SMOKE_POSES === '1') {
-        result.poses.walk = await waitForPose('walk');
-        await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'cat-walk.png'), (await mainWindow.webContents.capturePage()).toPNG());
-      }
-    }
-    await startupMilestone('smoke-cat-gestures');
-    result.gestures.cat = await inspectNaturalGestures('cat');
-    await startupMilestone('smoke-avatar-return');
-    await clickSmokeButton('.companion-switch', '二次元伙伴');
-    const returned = await inspectSmokeAvatarPair('anime', true);
-    result.catCapability.returned = returned;
-    result.switchSynced = true;
-    // Disable while the saved choice is cat: gating must not replace that raw preference with anime.
-    await clickSmokeButton('.companion-switch', '3D 小猫');
-    await inspectSmokeAvatarPair('cat', true);
-    const selectedCatPreference = await snapshotSmokeRawCompanionPreference();
-    if (selectedCatPreference.serverKind !== 'cat') throw new Error('Explicit cat choice did not finish saving before the disable check');
-    const disabledSettings = await inspectSmokeCatSettings(true, false);
-    const disablePreservedPreference = await assertSmokeRawCompanionPreference(selectedCatPreference);
-    await mainWindow.loadURL(origin);
-    const disabledAvatars = await inspectSmokeAvatarPair('anime', false);
-    result.catCapability.disabled = { ...disabledAvatars, settingsChecked: disabledSettings.checked,
-      clickedSettingsSwitch: disabledSettings.clicked, choiceHidden: !(await inspectSmokeCatChoice(false)),
-      rawKindPreserved: selectedCatPreference.serverKind, rawPreferenceUnchanged: disablePreservedPreference };
     await Promise.all([reloadSmokeWindow(mainWindow), reloadSmokeWindow(petWindow)]);
-    const reloadedAvatars = await inspectSmokeAvatarPair('anime', false);
-    const reloadChoiceHidden = !(await inspectSmokeCatChoice(false));
-    const reloadedSettings = await inspectSmokeCatSettings(false);
-    result.catCapability.reloaded = { ...reloadedAvatars, settingsChecked: reloadedSettings.checked,
-      choiceHidden: reloadChoiceHidden, bothWindowsReloaded: true, rawKindPreserved: selectedCatPreference.serverKind,
-      rawPreferenceUnchanged: await assertSmokeRawCompanionPreference(selectedCatPreference) };
-    await mainWindow.loadURL(origin);
-    await inspectSmokeAvatarPair('anime', false);
-    result.catCapability.legacyPreferenceUnchanged = [catMain, returned.main, disabledAvatars.main, reloadedAvatars.main].every(value => value.storedKind === animeMain.storedKind)
-      && [catPet, returned.pet, disabledAvatars.pet, reloadedAvatars.pet].every(value => value.storedKind === animePet.storedKind);
-    if (!result.catCapability.legacyPreferenceUnchanged) throw new Error('Avatar capability or selection overwrote the legacy global preference');
+    result.avatarSynchronization.reloaded = await inspectSmokeAvatarPair();
+    result.avatarSynchronization.bothWindowsReloaded = true;
+    result.avatarSynchronization.rawPreferenceUnchanged = await assertSmokeRawCompanionPreference(initialRawPreference);
+    result.avatarSynchronization.reloadedControls = await inspectSmokeRetiredCompanionControls();
+    await startupMilestone('smoke-legacy-companion');
+    result.avatarSynchronization.legacyFallback = await inspectSmokeLegacyCompanionFallback();
     if (process.env.PETPAL_SMOKE_APP === '1' || process.env.PETPAL_SMOKE_POSES === '1') {
       await startupMilestone('smoke-app');
       result.appFixture = await inspectAppFixture({ expressions: process.env.PETPAL_SMOKE_POSES === '1' });

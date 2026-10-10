@@ -15,7 +15,7 @@ export default defineConfig({
   server: { port: 5173, strictPort: true, proxy: { '/api': 'http://127.0.0.1:4318' } },
   // The service keeps published downloads here. A build must never remove them.
   build: { outDir: 'dist', emptyOutDir: false, rollupOptions: { output: {
-    // Three belongs to the cat and recovery renderer, never native Cubism.
+    // Three belongs to the anime recovery renderer, never native Cubism.
     manualChunks: id => /\/node_modules\/three\//.test(id.replaceAll('\\', '/')) ? 'three' : undefined,
   } } },
 });

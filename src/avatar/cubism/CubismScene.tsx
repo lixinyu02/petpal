@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import AvatarLoading from '../AvatarLoading';
-import type { PetCommand } from '../../pet/PetScene';
+import type { PetCommand } from '../../pet/types';
 import type { PetAction, PetBehaviorState, PetInteraction } from '../../pet/behavior';
 import { createAvatarPerformance, type PerformanceInput } from '../performance.mjs';
 import { createAvatarPresence } from '../presence.mjs';

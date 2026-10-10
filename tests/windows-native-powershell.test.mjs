@@ -5,7 +5,8 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 
 const run = promisify(execFile);
 const verifier = fileURLToPath(new URL('../desktop/verify-windows.ps1', import.meta.url));
@@ -18,10 +19,10 @@ test.after(async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
-async function powershell(body) {
+async function powershell(body, executable = 'powershell.exe') {
   const script = `$ErrorActionPreference='Stop'; $tokens=$null; $parseErrors=$null; $ast=[System.Management.Automation.Language.Parser]::ParseFile(${literal(verifier)}, [ref]$tokens, [ref]$parseErrors); if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) };\n`
     + `$definitions=$ast.FindAll({param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst]}, $true); foreach ($definition in $definitions) { . ([scriptblock]::Create($definition.Extent.Text)) };\n${body}`;
-  const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024 });
+  const { stdout } = await run(executable, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024 });
   return JSON.parse(stdout.trim());
 }
 
@@ -49,9 +50,9 @@ try { $explicitOptions=$env:PETPAL_SMOKE_APP -eq '1' -and $env:PETPAL_SMOKE_POSE
 test('real PowerShell avatar validation accepts Cubism V12/v3 and rejects obsolete or incomplete smoke receipts', { skip: process.platform !== 'win32' }, async () => {
   const result = await powershell(`
 $template=@{kind='anime';display=@{version=3;kind='anime';catEnabled=$false};visible=$true;canvasBounds=@{width=412;height=540};canvasCount=1;petCount=1;renderFrames=12;renderer='cubism';cubismModel='akari-cubism-v12';mocVersion='5';coreVersion='100663552'};
-Assert-WindowsSmokeAvatar -Avatar $template -ExpectedKind anime -ExpectedEnabled $false -Phase fixture;
+Assert-WindowsSmokeAvatar -Avatar $template -Phase fixture;
 $rejected=@();
-foreach ($mutation in @('v2','renderer','model','moc','core','hidden','duplicate','cat')) {
+foreach ($mutation in @('v2','renderer','model','moc','core','hidden','duplicate','cat','staleDisplay')) {
   $avatar=($template | ConvertTo-Json -Depth 10 | ConvertFrom-Json);
   switch ($mutation) {
     'v2' { $avatar.display.version=2 }
@@ -61,15 +62,38 @@ foreach ($mutation in @('v2','renderer','model','moc','core','hidden','duplicate
     'core' { $avatar.coreVersion='0' }
     'hidden' { $avatar.visible=$false }
     'duplicate' { $avatar.canvasCount=2 }
-    'cat' { $avatar.display.catEnabled=$true }
+    'cat' { $avatar.kind='cat'; $avatar.display.kind='cat' }
+    'staleDisplay' { $avatar.display.catEnabled=$true }
   }
-  try { Assert-WindowsSmokeAvatar -Avatar $avatar -ExpectedKind anime -ExpectedEnabled $false -Phase fixture } catch { $rejected += $mutation }
+  try { Assert-WindowsSmokeAvatar -Avatar $avatar -Phase fixture } catch { $rejected += $mutation }
 }
 @{accepted=$true;rejected=$rejected} | ConvertTo-Json -Compress
 `);
   assert.equal(result.accepted, true);
-  assert.deepEqual(result.rejected, ['v2', 'renderer', 'model', 'moc', 'core', 'hidden', 'duplicate', 'cat']);
+  assert.deepEqual(result.rejected, ['v2', 'renderer', 'model', 'moc', 'core', 'hidden', 'duplicate', 'cat', 'staleDisplay']);
 });
+
+for (const engine of ['powershell.exe', 'pwsh.exe']) {
+  test(`${engine} uses actual Node builder manifest bytes for Unicode paths and stripped metadata`, { skip: process.platform !== 'win32' }, async () => {
+    const directory=await mkdtemp(path.join(os.tmpdir(),'petpal-ps-isolation-'));
+    fixtureRoots.push(directory);
+    const file=path.join(directory,'package 中文 空格.json');
+    const manifest={name:'中文包',version:'0.9.11',description:'字符与 Unicode \u2764',dependencies:{alpha:'1.0.0'},scripts:{start:'ignored'},devDependencies:{builder:'1.0.0'},build:{ignored:true},bugs:{url:'https://example.invalid'},keywords:['音乐']};
+    await writeFile(file,JSON.stringify(manifest));
+    for (const fields of [['scripts','devDependencies','build'],['scripts','keywords','bugs']]) {
+      const expected=structuredClone(manifest);for(const field of fields)delete expected[field];
+      const bytes=Buffer.from(JSON.stringify(expected,null,2));
+      const result=await powershell(`
+$bytes=Get-NodePackageManifestBytes -ManifestPath ${literal(file)} -RemoveFields @(${fields.map(literal).join(',')}) -NodeExecutable ${literal(process.execPath)};
+$sha=[System.Security.Cryptography.SHA256]::Create(); try {$hash=[BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-','').ToLowerInvariant()} finally {$sha.Dispose()};
+@{bytes=$bytes.Length;sha256=$hash;engine=$PSVersionTable.PSVersion.Major} | ConvertTo-Json -Compress
+`,engine);
+      assert.equal(result.bytes,bytes.length);
+      assert.equal(result.sha256,createHash('sha256').update(bytes).digest('hex'));
+      assert.equal(result.engine,engine==='powershell.exe'?5:7);
+    }
+  });
+}
 
 test('real PowerShell smoke rejects missing assistant members and altered module byte receipts', { skip: process.platform !== 'win32' }, async () => {
   const expected = ['server/conversation-organization.mjs', 'server/chat-assistant.mjs',

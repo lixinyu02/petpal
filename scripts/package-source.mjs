@@ -31,7 +31,7 @@ const androidFiles = [
   'android/capacitor-cordova-android-plugins/src/main/AndroidManifest.xml',
 ];
 const androidRoots = ['android/app/src/main/java', 'android/app/src/main/res', 'android/app/src/test', 'android/app/src/androidTest'];
-// Preserve the 0.1 art provenance only; current companion choices are anime and procedural WebGL cat.
+// Preserve the 0.1 art provenance only; the supported companion is the anime character.
 const outputFiles = ['source-sprites-magenta.png', 'render-pet-animations.mjs', 'render-receipt.json', 'prompt-receipt.md'].map(name => `outputs/animations/${name}`);
 const evidenceFiles = [
   `test-results-${versionSeries}.json`, `web-build-${versionSeries}.json`, `expressive-avatar-acceptance-${versionSeries}.json`,
@@ -159,7 +159,7 @@ for (const relative of [...selected].sort()) {
   entries.push({ path: relative, content, sha256: hash(content), bytes: content.length, transformed, mode: /\.sh$|(?:^|\/)gradlew$/.test(relative) ? 0o755 : 0o644 });
 }
 const requiredFiles = [
-  'src/App.tsx', 'src/pet/PetScene.tsx', 'src/pet/CatModel.ts', 'src/pet/behavior.mjs', 'src/pet/behavior.d.mts',
+  'src/App.tsx', 'src/pet/types.ts', 'src/pet/behavior.mjs', 'src/pet/behavior.d.mts',
   'src/AccountsSettings.tsx', 'src/VoiceSettings.tsx', 'src/MediaDevicesSettings.tsx',
   'src/auth/request-scope.mjs', 'src/auth/request-scope.d.mts', 'src/media/device-preferences.mjs', 'src/media/device-preferences.d.mts', 'src/media/devices.ts',
   'server/app.mjs', 'server/codex.mjs', 'server/auth.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs',
@@ -183,7 +183,7 @@ const plan = {
   version: metadata.version, archive: path.relative(root, archive).replaceAll('\\', '/'), checkedAt: new Date().toISOString(),
   checkOnly, files: entries.map(({ content, ...entry }) => entry), totalInputBytes: entries.reduce((total, entry) => total + entry.bytes, 0),
   sanitized, excluded, skippedReleaseEvidence, boundaryScan: 'pass', requiredCompanionRoots, pendingCompanionRoots,
-  notes: ['Current companion choices are a default anime-style character and one persistent Three.js/WebGL cat; both share chat and Codex history.', 'All files under src/avatar, public/avatars and artwork/akari are included through recursive roots; final archive creation requires all listed companion roots to be populated.', 'The outputs/animations provenance and legacy public sprite are retained only as historical 0.1 artwork, not current product or current release acceptance.', `codex-live.json is reused 0.1 real CLI backend protocol evidence, not a new ${metadata.version} model call or native renderer acceptance.`, 'Only explicitly selected evidence is included; JSON local paths and identity/credential fields are removed.', 'Fixture credentials in source are fixed synthetic test strings, never live credentials.', 'Generated Android web assets are rebuilt by npm run android:sync; native sources, asset-policy tests and Gradle wrapper are included.', 'No draft atlas, frame intermediates, runtime state, build output, tools, dependency tree, or logs are included.'],
+  notes: ['The supported companion is the anime-style character with a Cubism model and a 2D fallback; it shares chat and Codex history.', 'All files under src/avatar, public/avatars and artwork/akari are included through recursive roots; final archive creation requires all listed companion roots to be populated.', 'The outputs/animations provenance and legacy public sprite are retained only as historical 0.1 artwork, not current product or current release acceptance.', `codex-live.json is reused 0.1 real CLI backend protocol evidence, not a new ${metadata.version} model call or native renderer acceptance.`, 'Only explicitly selected evidence is included; JSON local paths and identity/credential fields are removed.', 'Fixture credentials in source are fixed synthetic test strings, never live credentials.', 'Generated Android web assets are rebuilt by npm run android:sync; native sources, asset-policy tests and Gradle wrapper are included.', 'No draft atlas, frame intermediates, runtime state, build output, tools, dependency tree, or logs are included.'],
 };
 await mkdir(path.join(root, 'evidence'), { recursive: true });
 await writeFile(path.join(root, 'evidence', 'source-package-plan.json'), `${JSON.stringify(plan, null, 2)}\n`);

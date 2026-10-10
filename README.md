@@ -1,6 +1,6 @@
 # 小伴 PetPal
 
-可以聊天、陪伴和使用真实 Codex CLI 的个人伙伴。**0.9.10** 已重打 Windows、Ubuntu、Android 与 Web，包含语音插话打断、后台 Agent 进度与结果回报、对话重命名／归档／恢复／删除及账号项目分类。桌面端继续内置 Codex、OpenCLI 与电脑／音乐控制，支持 Agent 项目目录、Qwen 图片输入和 Chat 派发 Agent。四端共用 React 界面；Node 个人服务负责账号、模型、图片、历史和 Agent 任务，支持 Chat Completions / Responses、CosyVoice 朗读和原创二次元伙伴，3D 小猫默认关闭。
+可以聊天、陪伴和使用真实 Codex CLI 的个人伙伴。**0.9.11** 优化人物与页面加载、后台空闲查询和登录后的语音状态复用，并移除废弃的 3D 小猫，只保留二次元伙伴。保留语音插话打断、后台 Agent 进度与结果回报、对话归档及账号项目分类。桌面端内置 Codex、OpenCLI 与电脑／音乐控制，支持 Agent 项目目录、Qwen 图片输入和 Chat 派发 Agent。四端共用 React 界面；Node 个人服务负责账号、模型、图片、历史和 Agent 任务，支持 Chat Completions / Responses、CosyVoice 朗读和原创二次元伙伴。
 
 **0.9.10 已正式公开发布**：下载优先使用服务器，GitHub Releases 提供备用下载。两份更新清单均为 stable / sequence 12，分别沿用 GitHub 和服务器各自的既有发布公钥，不能混用。平台验收、公开资产回读及更新结果详见 [软件内更新](docs/updates.md) 和 [0.9.10 验收](docs/acceptance-0.9.10.md)。
 
@@ -103,7 +103,7 @@ PC 客户端在“设备连接 → 中央服务器”提供本机服务入口，
 
 主机管理员在「连接与设置 → 账号」创建成员、分配模型及 Agent 授权。成员的聊天、伙伴设置、默认模型和语音配置独立；退出登录、停用、改密码或降低授权会使受影响会话失效并停止对应后台任务。
 
-自动朗读默认关闭，每条完成的 AI 回复旁提供「朗读 / 停止」按钮，使用当前账号选择的语音引擎；点击另一条会停止上一条。关闭朗读、切换会话或账号、隐藏窗口、进入休息及离开页面会停止当前播放。二次元伙伴和小猫按实际播放进度近似同步口型，不能视为音素级唇形同步。
+自动朗读默认关闭，每条完成的 AI 回复旁提供「朗读 / 停止」按钮，使用当前账号选择的语音引擎；点击另一条会停止上一条。关闭朗读、切换会话或账号、隐藏窗口、进入休息及离开页面会停止当前播放。二次元伙伴按实际播放进度近似同步口型，不能视为音素级唇形同步。
 
 系统朗读使用与语言匹配的本地音色；缺少中文音色时需安装系统中文语音包。已接通的远程引擎为 [CosyVoice](docs/cosyvoice.md)：主机管理员配置固定服务、参考声音及可选密钥，成员可以选择、试听并朗读消息。CosyVoice3 支持按账号保存自动、原声复刻、自然、开心、伤心、生气、轻柔，以及情绪程度；人物在实际播放时跟随上游选择的语气。自动是文本规则，口型仍为播放进度和能量近似。1倍速边生成边播放，其他语速完整合成。音频通过已认证的个人服务返回，失败不自动换成系统音色。新增情绪元信息由新版客户端协商取得，已发布旧安装包仍可播放。
 
@@ -113,13 +113,13 @@ PC 客户端在“设备连接 → 中央服务器”提供本机服务入口，
 
 扬声器选择只用于支持输出路由的网页音频。**系统 TTS 始终使用系统默认输出**；不支持网页输出路由的浏览器也使用系统默认扬声器。设备流程见 [账号与语音配置](docs/user-accounts-and-voice.md)，当前能力和证据以 [0.7.0 验收](docs/acceptance-0.7.md) 为准。
 
-## 两种形象，同一位伙伴
+## 二次元伙伴
 
-首页默认使用二次元伙伴，3D 小猫默认关闭；在设置中选择形象，每次只渲染当前角色。切换会保留名字、性格、模型连接、聊天与 Agent 历史；连接个人服务后保存选择，Windows / Ubuntu 的同源桌宠窗口同步选项，Android 悬浮窗接收已选形象。
+首页、Windows / Ubuntu 桌宠窗口及 Android 悬浮窗统一使用二次元伙伴。旧版保存的小猫选择兼容为二次元显示，不改变名字、性格、模型连接、账号、聊天与 Agent 历史。
 
 二次元伙伴使用原创 Cubism V12 的 `.model3.json`、`.moc3`、纹理、动作与物理资源，由官方 Cubism Core 6.0.1 实际加载；运行源码位于 `src/avatar/cubism/`，当前模型位于 `public/avatars/akari-cubism-v12/`。22 个原生参数涵盖眼睛、眉毛、嘴、头发及手部，提供呼吸、眨眼、轻微转头和丰富表情；鼠标／触控在头部、手部等区域触发对应交互。文字进度或实际声音能量驱动近似口型，不能视为音素级唇形识别。CMO3 已结构读回，官方 Editor 重导出尚未验收，详见 [V12 模型与来源](docs/cubism/akari-natural-eyelids.md)。八张原创立绘、无损 WebP、网格形变和 GIF 属于历史方案与素材，保留原始 PNG 于 `artwork/akari/`；历史说明见 [角色方案研究](docs/avatar-research.md) 与 [表情生成记录](docs/avatar-expression-prompts.md)。
 
-橘白小猫由 Three.js WebGL 实时渲染，同一模型完成呼吸、眨眼、转头、摆尾、走动、抚摸、进食、睡眠与跳跃。短宽耳、连续脸颊和口鼻、贴合脸部的眼睛、连续前腿与圆爪改善模型比例；走动时展开后腿、将躯干转为四足站姿，以四拍短步和脚底约束保持贴地。渲染说明见 [3D 小猫方案](docs/renderer-decision.md)。
+3D 小猫已废弃；当前包不再包含小猫渲染模块、模型或动画资源。Three.js 仍用于二次元伙伴在 Cubism 不可用时的恢复渲染，不参与正常 Cubism 加载。
 
 伙伴支持直接鼠标或触控交互，头部抚摸、手部动作和语音倾听姿态由对应区域与状态触发；休息可通过「叫醒」结束。页面隐藏时暂停，遵循系统减少动态效果设置。`/?animations=1` 旧书签也打开当前伙伴首页。旧版图集与 GIF 作为历史素材保留。
 
@@ -179,7 +179,7 @@ npm run android:sync
 
 Android APK 构建：Windows 使用 `scripts/build-android.ps1`，Linux 使用 `scripts/build-android.sh`；要求 JDK 21 和 Android SDK，输出 debug APK。脚本默认单独构建 `.data/android-web-build`，不覆盖已部署的 `dist`；文件名和界面版本取自 Android `versionName`。PowerShell 的 `-WebDirectory` / `-OutputDirectory` 可指定验收目录，已有同名不同内容 APK 会拒绝覆盖。Ubuntu 两架构 portable 包的构建与逐字节校验见 [Ubuntu 打包](docs/linux-packaging.md)。`npm run desktop:linux` 是另行配置的 AppImage / deb 构建入口，本轮交付格式为 `.tar.gz`。X11、Wayland 与 ARM64 图形 / 桌宠行为需要分别实机确认。
 
-项目结构：`src/` 共享前端；`src/avatar/` 双角色选择与 2D 渲染；`src/pet/` 3D 小猫与行为；`public/avatars/` 原创角色资源；`server/` 认证、持久化、图片、模型协议与 Codex 进程；`desktop/` Electron；`android/` Android 与悬浮服务；`tests/` 自动测试；`evidence/` 本地验收结果（不纳入 Git）。
+项目结构：`src/` 共享前端；`src/avatar/` 二次元伙伴与 Cubism 渲染；`src/pet/` 共享互动与行为；`public/avatars/` 原创角色资源；`server/` 认证、持久化、图片、模型协议与 Codex 进程；`desktop/` Electron；`android/` Android 与悬浮服务；`tests/` 自动测试；`evidence/` 本地验收结果（不纳入 Git）。
 
 ## 验证范围
 

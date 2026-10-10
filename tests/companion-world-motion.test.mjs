@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as uiMotion from '../src/platform/ui-motion.mjs';
+import {effectiveCompanionKind} from '../src/avatar/cat-capability.mjs';
 import {createVisiblePoll} from '../src/platform/visible-poll.mjs';
 
 const compile=async file=>ts.transpileModule(await readFile(new URL(file,import.meta.url),'utf8'),{
@@ -56,7 +57,7 @@ function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,
     'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     './BrandMark':stub('BrandMark'),'./MessageMarkdown':stub('MessageMarkdown'),
     './avatar/CompanionScene':{__esModule:true,default:scene},
-    './avatar/preference':{useCompanion:()=>[kind],useCompanionCatEnabled:()=>[true],chooseCompanion:async next=>{choices.push(next);kind=next;},hydrateCompanion:async next=>{hydrations.push(next);if(hydrationGate)await hydrationGate.promise;kind=next;}},
+    './avatar/preference':{useCompanion:()=>[effectiveCompanionKind(kind,true)],hydrateCompanion:async next=>{hydrations.push(next);if(hydrationGate)await hydrationGate.promise;kind=next;}},
     './api':{getSessionEpoch:()=>epoch,getIdentity:()=>authenticated?{instanceId:'fixture-instance',userId:'fixture-owner'}:null,initConnection:async()=>{apiReads.push('initConnection');return{token:authenticated};},loadInitialState:async options=>{assert.equal(options.history,undefined);startupSignal=options.signal;apiReads.push('/bootstrap');return stateGate&&++stateReads===1?await stateGate.promise:state;}},
     './voice/useVoiceConversation':{useVoiceConversation:()=>voice},
     './ChatAssistant':{useChatAssistant:()=>assistant,ChatAssistantControls:Symbol('ChatAssistantControls'),ChatAssistantTasks:Symbol('ChatAssistantTasks')},
@@ -101,7 +102,6 @@ function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,
     ready(){find(scene).props.onReady();render();},
     action(next){find(scene).props.onState({action:next});render();},
     setKind(next){kind=next;render();},
-    choose(next){find('button',p=>p['aria-pressed']!==undefined&&p.children===(next==='cat'?'3D 小猫':'二次元伙伴')).props.onClick();render();},
     refresh(next={}){Object.assign(voice,next);render();},
     open(){const button=find('button',p=>p.className==='companion-voice-entry');assert.equal(button.props.disabled,false);button.props.onClick();render();},
     close(){find('button',p=>p['aria-label']==='关闭语音聊天').props.onClick();render();},
@@ -135,29 +135,31 @@ test('the actual companion waits for scene readiness, enters once and cleans roo
   assert.equal(f.starts,0);assert.deepEqual(f.apiReads,['initConnection']);assert.deepEqual(f.choices,[]);
 });
 
-test('an externally selected character is unready before layout and waits for its own scene callback',async t=>{
+test('a legacy external cat preference leaves the anime scene ready without replaying its entrance',async t=>{
   const f=fixture();t.after(()=>f.dispose());await f.flush();f.ready();finish(f);
   const intro=f.surface('companion-intro'),aura=f.surface('companion-aura'),firstCommit=f.commits.length;
   f.setKind('cat');
-  assert.ok(f.commits.slice(firstCommit).every(commit=>commit.kind==='cat'&&commit.ready===false));
-  assert.equal(intro.entries,1);assert.equal(aura.entries,1);assert.equal(f.find('main').props['data-ready'],false);
-  f.refresh();assert.equal(aura.entries,1);f.ready();assert.equal(intro.entries,2);assert.equal(aura.entries,2);
+  assert.ok(f.commits.slice(firstCommit).every(commit=>commit.kind==='anime'&&commit.ready===true));
+  assert.equal(intro.entries,1);assert.equal(aura.entries,1);assert.equal(f.find('main').props['data-ready'],true);
+  f.refresh();assert.equal(aura.entries,1);f.ready();assert.equal(intro.entries,1);assert.equal(aura.entries,1);
   assert.deepEqual(f.choices,[]);assert.equal(f.starts,0);
 });
 
-test('delayed account hydration can change the ready character without a premature entrance',async t=>{
+test('delayed legacy cat hydration preserves the ready anime scene and raw server value',async t=>{
   const gate=deferred(),f=fixture({authenticated:true,stateGate:gate,stateKind:'cat'});t.after(()=>f.dispose());
   await f.flush();f.ready();finish(f);const aura=f.surface('companion-aura'),before=f.commits.length;
   gate.resolve(f.state);await f.flush();
-  assert.deepEqual(f.hydrations,['cat']);assert.ok(f.commits.slice(before).every(commit=>!commit.ready));
-  assert.equal(aura.entries,1);f.ready();assert.equal(aura.entries,2);assert.deepEqual(f.apiReads,['initConnection','/bootstrap']);
+  assert.deepEqual(f.hydrations,['cat']);assert.ok(f.commits.slice(before).every(commit=>commit.kind==='anime'&&commit.ready));
+  assert.equal(aura.entries,1);f.ready();assert.equal(aura.entries,1);assert.deepEqual(f.apiReads,['initConnection','/bootstrap']);
 });
 
-test('explicit character selection retains stop behavior and starts decoration only after scene ready',async t=>{
+test('home has no retired character selection controls while anime voice entry remains usable',async t=>{
   const f=fixture({authenticated:true});t.after(()=>f.dispose());await f.flush();f.ready();finish(f);
-  const aura=f.surface('companion-aura'),before=f.stops;f.choose('cat');await f.flush();
-  assert.deepEqual(f.choices,['cat']);assert.ok(f.stops>before);assert.equal(aura.entries,1);assert.equal(f.find('main').props['data-ready'],false);
-  f.ready();assert.equal(aura.entries,2);assert.deepEqual(f.apiReads,['initConnection','/bootstrap']);
+  const aura=f.surface('companion-aura');
+  assert.equal(f.find('div',p=>p.className==='companion-switch'),undefined);
+  assert.equal(f.find('button',p=>p.children==='3D 小猫'),undefined);
+  assert.deepEqual(f.choices,[]);assert.equal(aura.entries,1);assert.equal(f.find('main').props['data-ready'],true);
+  f.open();assert.equal(f.starts,1);assert.equal(aura.entries,1);assert.deepEqual(f.apiReads,['initConnection','/bootstrap']);
 });
 
 test('sleep and wake cannot replay the aura while the existing voice-stop side effect remains',async t=>{

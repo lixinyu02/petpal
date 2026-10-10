@@ -16,7 +16,7 @@ function smokeFunction(name, environment) {
 }
 
 test('desktop release smoke requires a live native Cubism V12 model and rejects fallback', async () => {
-  async function inspect({ renderer = 'cubism', native = true, moc = true } = {}) {
+  async function inspect({ renderer = 'cubism', native = true, moc = true, displayKind = 'anime', displayCatEnabled = false, legacyKind = null } = {}) {
     let time = 0;
     const canvas = {
       dataset: { avatarRenderer: renderer, petCount: '1', renderFrames: '12', mocVersion: '5', coreVersion: '6', blinkLeft: '0.25' },
@@ -27,20 +27,63 @@ test('desktop release smoke requires a live native Cubism V12 model and rejects 
     const win = { webContents: { executeJavaScript: code => vm.runInNewContext(code, {
       document: { hidden: false, querySelectorAll: () => [canvas], querySelector: selector => selector.startsWith('.cubism-scene') ? native : true },
       performance: { getEntriesByType: () => moc ? [{ name: 'http://localhost/avatars/akari-cubism-v12/akari.moc3' }] : [] },
-      localStorage: { getItem: key => key === 'petpal.displayCompanion' ? JSON.stringify({ version: 3, kind: 'anime', catEnabled: false }) : null },
+      localStorage: { getItem: key => key === 'petpal.displayCompanion' ? JSON.stringify({ version: 3, kind: displayKind, catEnabled: displayCatEnabled }) : key === 'petpal.companionKind' ? legacyKind : null },
       getComputedStyle: () => ({ display: 'block', visibility: 'visible' }), URL,
       innerWidth: 400, innerHeight: 600, devicePixelRatio: 1, Date: { now: () => time },
       setTimeout: callback => { time += 26000; callback(); },
     }) } };
-    return smokeFunction('inspectAvatarWindow', {})(win, true, 'anime', false);
+    return smokeFunction('inspectAvatarWindow', {})(win, true);
   }
   const ready = await inspect();
   assert.equal(ready.renderer, 'cubism');
   assert.equal(ready.cubismModel, 'akari-cubism-v12');
   assert.equal(ready.blink, '0.25');
-  for (const setup of [{ renderer: 'mesh2d' }, { native: false }, { moc: false }]) {
+  assert.equal((await inspect({ legacyKind: 'cat' })).kind, 'anime', 'legacy raw choice cannot revive a retired renderer');
+  for (const setup of [{ renderer: 'mesh2d' }, { renderer: 'three3d' }, { native: false }, { moc: false }, { displayKind: 'cat' }, {displayCatEnabled:true}, {displayCatEnabled:null}]) {
     await assert.rejects(inspect(setup), /did not become ready/);
   }
+});
+
+test('desktop smoke rejects retired controls even when their DOM elements are hidden', async () => {
+  let choice = false, capability = false;
+  const mainWindow = {webContents:{executeJavaScript:code=>vm.runInNewContext(code,{document:{
+    querySelectorAll:()=>choice?[{textContent:'3D 小猫',getClientRects:()=>[]}]:[],
+    querySelector:()=>capability?{}:null,
+  }})}};
+  const inspect=smokeFunction('inspectSmokeRetiredCompanionControls',{mainWindow});
+  assert.equal((await inspect()).choiceAbsent,true);
+  choice=true;await assert.rejects(inspect(),/Retired companion controls/);
+  choice=false;capability=true;await assert.rejects(inspect(),/Retired companion controls/);
+});
+
+test('legacy native smoke fixture refuses ordinary app profiles before reading or changing preferences', async () => {
+  let reads=0;
+  const inspect=smokeFunction('inspectSmokeLegacyCompanionFallback',{
+    process:{argv:['PetPal.exe'],env:{}},snapshotSmokeRawCompanionPreference:()=>{reads++;},
+  });
+  await assert.rejects(inspect(),/isolated smoke profile/);
+  assert.equal(reads,0);
+});
+
+test('isolated legacy companion smoke restores its private fixture even if native rendering fails', async () => {
+  const settings=[],windows=[];let serverKind='anime',inspections=0;
+  for(const original of ['anime',null]){
+    const data=new Map(original===null?[]:[['petpal.companionKind',original]]);
+    const localStorage={getItem:key=>data.get(key)??null,setItem:(key,value)=>data.set(key,value),removeItem:key=>data.delete(key)};
+    windows.push({data,original,urls:[],async loadURL(url){this.urls.push(url);},webContents:{executeJavaScript:code=>vm.runInNewContext(code,{localStorage})}});
+  }
+  const inspect=smokeFunction('inspectSmokeLegacyCompanionFallback',{
+    process:{argv:['PetPal.exe','--smoke-test'],env:{PETPAL_SMOKE_PROFILE:'isolated-fixture'}},
+    origin:'http://localhost',backend:{token:'fixture-only'},mainWindow:windows[0],petWindow:windows[1],
+    snapshotSmokeRawCompanionPreference:async()=>({serverKind}),
+    fetch:async(_url,request)=>{serverKind=JSON.parse(request.body).companionKind;settings.push(serverKind);return{ok:true};},
+    inspectSmokeAvatarPair:async()=>{inspections++;if(inspections===1)throw Error('Native model failed in fixture');return{};},
+  });
+  await assert.rejects(inspect(),/Native model failed in fixture/);
+  assert.deepEqual(settings,['cat','anime']);assert.equal(serverKind,'anime');assert.equal(inspections,2);
+  for(const win of windows)assert.equal(win.data.get('petpal.companionKind')??null,win.original);
+  assert.deepEqual(windows[0].urls,['http://localhost','http://localhost']);
+  assert.deepEqual(windows[1].urls,['http://localhost/?pet=1&avatar=cat','http://localhost/?pet=1']);
 });
 
 function gestureHarness() {

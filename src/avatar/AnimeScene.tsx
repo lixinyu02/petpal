@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import type { PetCommand } from '../pet/PetScene';
+import type { PetCommand } from '../pet/types';
 import type { PetAction, PetBehaviorState, PetInteraction } from '../pet/behavior';
 import { createAvatarPerformance, type PerformanceInput } from './performance.mjs';
 import { loadAvatarImage, loadAvatarImages, type AvatarImageName } from './anime-resources.mjs';

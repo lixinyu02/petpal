@@ -83,8 +83,8 @@ function fixture({native=true,enabled=true,href='https://app.example/?chat=1&set
 test('delayed native status still replaces a running cat after leaving the settings child',async()=>{
   const current=fixture(),root=current.mountRoot(),settings=current.mountSettings();
   await flush();root.render();
-  assert.equal(current.pending.length,0);
-  settings.tree.props.children[0].props.onClick();
+  assert.equal(settings.tree,null,'Retired appearance setting has no rendered control.');
+  assert.equal(current.pending.length,1);
   root.render();settings.render();
   assert.equal(current.pending.length,1);
   settings.unmount(); // Switching settings tabs keeps SessionRoot mounted.
@@ -92,11 +92,11 @@ test('delayed native status still replaces a running cat after leaving the setti
   assert.deepEqual(current.shown,['anime']);root.unmount();
 });
 
-test('a renewed opt-in blocks the delayed old disable even before React cleans its effect',async()=>{
+test('a legacy renewed opt-in cannot block migration of a running retired native model',async()=>{
   const current=fixture({enabled:false}),root=current.mountRoot();
   current.setEnabled(true);
   current.pending[0].resolve({running:true,companionKind:'cat'});await flush();
-  assert.deepEqual(current.shown,[]);root.render();root.unmount();
+  assert.deepEqual(current.shown,['anime']);root.render();root.unmount();
 });
 
 test('old account and identity responses are ignored before the root rerenders',async()=>{

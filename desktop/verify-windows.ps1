@@ -55,10 +55,21 @@ function Restore-WindowsSmokeIsolation {
   foreach ($entry in $Isolation.prior.GetEnumerator()) { [System.Environment]::SetEnvironmentVariable([string]$entry.Key, [string]$entry.Value, 'Process') }
 }
 function Assert-WindowsSmokeAvatar {
-  param($Avatar, [string]$ExpectedKind, [bool]$ExpectedEnabled, [string]$Phase)
-  if ($Avatar.kind -ne $ExpectedKind -or $Avatar.display.version -ne 3 -or $Avatar.display.kind -ne $ExpectedKind -or $Avatar.display.catEnabled -ne $ExpectedEnabled -or -not $Avatar.visible -or $Avatar.canvasBounds.width -le 0 -or $Avatar.canvasBounds.height -le 0 -or
+  param($Avatar, [string]$Phase)
+  if ($Avatar.kind -ne 'anime' -or $Avatar.display.version -ne 3 -or $Avatar.display.kind -ne 'anime' -or $Avatar.display.catEnabled -ne $false -or -not $Avatar.visible -or $Avatar.canvasBounds.width -le 0 -or $Avatar.canvasBounds.height -le 0 -or
     $Avatar.canvasCount -ne 1 -or $Avatar.petCount -ne 1 -or $Avatar.renderFrames -lt 2 -or
-    ($ExpectedKind -eq 'anime' -and ($Avatar.renderer -ne 'cubism' -or $Avatar.cubismModel -ne 'akari-cubism-v12' -or [int64]$Avatar.mocVersion -ne 5 -or [int64]$Avatar.coreVersion -le 0))) { throw "Effective v3 display and Cubism V12 did not synchronize for $Phase." }
+    $Avatar.renderer -ne 'cubism' -or $Avatar.cubismModel -ne 'akari-cubism-v12' -or [int64]$Avatar.mocVersion -ne 5 -or [int64]$Avatar.coreVersion -le 0) { throw "Effective v3 display and Cubism V12 did not synchronize for $Phase." }
+}
+function Get-NodePackageManifestBytes {
+  param([Parameter(Mandatory=$true)][string]$ManifestPath, [string[]]$RemoveFields, [string]$NodeExecutable)
+  # Match electron-builder's actual JSON.stringify bytes on both PowerShell 5.1 and 7.
+  # This developer verifier runs from a source checkout with its Node build runtime.
+  if (-not $NodeExecutable) { $NodeExecutable = (Get-Command node.exe -ErrorAction Stop).Source }
+  $nodeScript = "const fs=require('node:fs');const manifest=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));for(const name of process.argv[2].split(',').filter(Boolean))delete manifest[name];process.stdout.write(Buffer.from(JSON.stringify(manifest,null,2),'utf8').toString('base64'));"
+  $fields = @($RemoveFields) -join ','
+  $encoded = & $NodeExecutable -e $nodeScript $ManifestPath $fields
+  if ($LASTEXITCODE -ne 0 -or -not $encoded) { throw 'Node package manifest serialization failed.' }
+  return ,([Convert]::FromBase64String(($encoded -join '').Trim()))
 }
 $project = Split-Path -Parent $PSScriptRoot
 $version = (Get-Content -LiteralPath "$project\package.json" -Raw -Encoding utf8 | ConvertFrom-Json).version
@@ -98,21 +109,20 @@ if ($result.electronVersion -ne $sourceManifest.devDependencies.electron) { thro
 if (-not $result.desktopTools.opencli.available -or $result.desktopTools.opencli.version -ne '1.8.8' -or $result.desktopTools.opencli.runtime -ne 'bundled' -or -not $result.desktopTools.opencli.readOnlyProbe) { throw 'Bundled OpenCLI read-only status check failed.' }
 if ($result.desktopTools.opencli.daemonState -notin @('stopped', 'external', 'unavailable')) { throw 'Smoke unexpectedly started or attached to an OpenCLI daemon.' }
 if ($result.desktopTools.music.platform -ne 'win32' -or @($result.desktopTools.music.players | Where-Object { $_.id -in @('qqmusic', 'netease') }).Count -ne 2) { throw 'Windows music status did not report both supported players.' }
-if (-not $result.is3d -or $result.renderer.main.petCount -ne 1 -or $result.renderer.pet.petCount -ne 1 -or $result.renderer.main.renderFrames -lt 2 -or $result.renderer.pet.renderFrames -lt 2) { throw 'Live single-cat 3D renderer verification failed.' }
-if (-not $result.switchSynced -or $result.defaultAvatar -ne 'anime' -or $result.avatars.anime.main.renderer -ne 'cubism' -or $result.avatars.anime.pet.renderer -ne 'cubism' -or $result.avatars.anime.main.petCount -ne 1 -or $result.avatars.anime.pet.petCount -ne 1 -or $result.avatars.anime.main.renderFrames -lt 2 -or $result.avatars.anime.pet.renderFrames -lt 2) { throw 'Cubism renderer or shared-window avatar selection verification failed.' }
-$capability = $result.catCapability
-if (-not $capability.defaultOff.choiceHidden -or $capability.defaultOff.settingsChecked -ne $false -or
-  -not $capability.enabled.choiceVisible -or $capability.enabled.settingsChecked -ne $true -or -not $capability.enabled.clickedSettingsSwitch -or -not $capability.enabled.rawPreferenceUnchanged -or
-  -not $capability.disabled.choiceHidden -or $capability.disabled.settingsChecked -ne $false -or -not $capability.disabled.clickedSettingsSwitch -or -not $capability.disabled.rawPreferenceUnchanged -or $capability.disabled.rawKindPreserved -ne 'cat' -or
-  -not $capability.reloaded.choiceHidden -or $capability.reloaded.settingsChecked -ne $false -or -not $capability.reloaded.bothWindowsReloaded -or -not $capability.reloaded.rawPreferenceUnchanged -or $capability.reloaded.rawKindPreserved -ne 'cat' -or
-  -not $capability.legacyPreferenceUnchanged) { throw 'Explicit cat capability UI, default-off, reload, or raw-preference preservation verification failed.' }
-foreach ($phase in @('defaultOff', 'enabled', 'returned', 'disabled', 'reloaded')) {
-  $expectedKind = if ($phase -eq 'enabled') { 'cat' } else { 'anime' }
-  $expectedEnabled = $phase -in @('enabled', 'returned')
-  foreach ($windowName in @('main', 'pet')) {
-    $avatar = $capability.$phase.$windowName
-    Assert-WindowsSmokeAvatar -Avatar $avatar -ExpectedKind $expectedKind -ExpectedEnabled $expectedEnabled -Phase "$phase/$windowName"
-  }
+if ($result.defaultAvatar -ne 'anime') { throw 'Desktop did not default to its supported anime companion.' }
+$synchronization = $result.avatarSynchronization
+if (-not $synchronization.bothWindowsReloaded -or -not $synchronization.rawPreferenceUnchanged -or
+  -not $synchronization.retiredControls.choiceAbsent -or -not $synchronization.retiredControls.capabilitySwitchAbsent -or
+  -not $synchronization.reloadedControls.choiceAbsent -or -not $synchronization.reloadedControls.capabilitySwitchAbsent) { throw 'Anime synchronization, reload, or retired companion control verification failed.' }
+$legacyFallback = $synchronization.legacyFallback
+if (-not $legacyFallback.isolatedFixture -or -not $legacyFallback.bothWindowsReloaded -or $legacyFallback.legacyServerKind -ne 'cat' -or -not $legacyFallback.rawPreferenceUnchanged -or
+  -not $legacyFallback.retiredControls.choiceAbsent -or -not $legacyFallback.retiredControls.capabilitySwitchAbsent) { throw 'Existing companion preferences did not safely fall back to anime.' }
+foreach ($windowName in @('main', 'pet')) {
+  Assert-WindowsSmokeAvatar -Avatar $result.avatars.anime.$windowName -Phase "anime/$windowName"
+  Assert-WindowsSmokeAvatar -Avatar $synchronization.initial.$windowName -Phase "initial/$windowName"
+  Assert-WindowsSmokeAvatar -Avatar $synchronization.reloaded.$windowName -Phase "reloaded/$windowName"
+  Assert-WindowsSmokeAvatar -Avatar $legacyFallback.initial.$windowName -Phase "legacy-initial/$windowName"
+  Assert-WindowsSmokeAvatar -Avatar $legacyFallback.reloaded.$windowName -Phase "legacy-reloaded/$windowName"
 }
 Add-Type -AssemblyName System.Drawing
 $pet = [System.Drawing.Bitmap]::FromFile((Join-Path $EvidenceDirectory 'pet.png'))
@@ -121,10 +131,7 @@ if (-not $result.bundleFiles -or $result.bundleFiles.Count -lt 10) { throw 'Pack
 foreach ($required in @('desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex-config.mjs', 'server/approval-review.mjs', 'server/system-controls.mjs', 'server/native/system-windows.ps1', 'server/native/codex-review/models-0.143.0.json', 'server/native/codex-review/LICENSE', 'server/native/codex-review/PROVENANCE.json', 'server/native/codex-review/SHA256SUMS', 'server/codex-transport.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs', 'server/native/music-windows.ps1', 'server/conversation-organization.mjs', 'server/chat-assistant.mjs', 'server/automation-schema.mjs', 'server/automation-tools.mjs', 'server/automations.mjs', 'dist/avatars/akari-cubism-v12/akari.moc3', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE')) {
   if (-not @($result.bundleFiles | Where-Object { $_.path -eq $required }).Count) { throw "Missing required desktop assistant runtime member: $required" }
 }
-$generatedPackage = Get-Content -LiteralPath "$project\package.json" -Raw -Encoding utf8 | ConvertFrom-Json
-# electron-builder removes build-time fields and writes its runtime manifest as two-space LF JSON.
-foreach ($field in @('scripts', 'devDependencies', 'build')) { $generatedPackage.PSObject.Properties.Remove($field) }
-$packageBytes = [System.Text.Encoding]::UTF8.GetBytes(($generatedPackage | ConvertTo-Json -Depth 20).Replace("`r`n", "`n"))
+$packageBytes = Get-NodePackageManifestBytes -ManifestPath "$project\package.json" -RemoveFields @('scripts', 'devDependencies', 'build')
 $hasher = [System.Security.Cryptography.SHA256]::Create()
 try { $generatedPackageSha = [BitConverter]::ToString($hasher.ComputeHash($packageBytes)).Replace('-', '') } finally { $hasher.Dispose() }
 foreach ($file in $result.bundleFiles) {
@@ -135,10 +142,8 @@ foreach ($file in $result.bundleFiles) {
   $source = Join-Path $project $file.path
   if ($file.path.StartsWith('dist/', [System.StringComparison]::Ordinal)) { $source = Join-Path $DistDirectory $file.path.Substring(5) }
   if ($file.path -eq 'node_modules/@jackwener/opencli/package.json') {
-    $manifest = Get-Content -LiteralPath $source -Raw -Encoding utf8 | ConvertFrom-Json
     # These metadata-only fields are stripped by electron-builder's fileTransformer.
-    foreach ($field in @('dist','gitHead','build','jspm','ava','xo','nyc','eslintConfig','contributors','bundleDependencies','tags','scripts','keywords','bugs')) { $manifest.PSObject.Properties.Remove($field) }
-    $normalizedBytes = [System.Text.Encoding]::UTF8.GetBytes(($manifest | ConvertTo-Json -Depth 100).Replace("`r`n", "`n"))
+    $normalizedBytes = Get-NodePackageManifestBytes -ManifestPath $source -RemoveFields @('dist','gitHead','build','jspm','ava','xo','nyc','eslintConfig','contributors','bundleDependencies','tags','scripts','keywords','bugs')
     $manifestHasher = [System.Security.Cryptography.SHA256]::Create()
     try { $normalizedSha = [BitConverter]::ToString($manifestHasher.ComputeHash($normalizedBytes)).Replace('-', '') } finally { $manifestHasher.Dispose() }
     if ($normalizedBytes.Length -ne $file.bytes -or $normalizedSha -ne $file.sha256) { throw 'Packaged OpenCLI manifest differs from the expected release dependency.' }

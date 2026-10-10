@@ -58,7 +58,8 @@ test('isolated environment excludes inherited model keys, music variables, loade
 test('output sanitizes nested credentials, raw headers, key blocks and URL parameters',()=>{
   const output=redactNcmCliOutput(JSON.stringify({rows:[{name:'title',privateKey:'synthetic-key',token:'synthetic-token',url:'https://example.test/song?token=synthetic-url&name=ok'}],cookie:{MUSIC_U:'synthetic-cookie'}}));
   assert.match(output,/title/);for(const secret of ['synthetic-key','synthetic-token','synthetic-url','synthetic-cookie'])assert.ok(!output.includes(secret));
-  const text=redactNcmCliOutput('\x1b[31mAuthorization: Bearer synthetic-header\x1b[0m\nprivateKey=synthetic-key\n-----BEGIN RSA PRIVATE KEY-----\nsynthetic-material\n-----END RSA PRIVATE KEY-----\nhttps://example.test/?code=synthetic-code');
+  const fakeKeyMarker=kind=>['-----',kind,' RSA ','PRIVATE',' KEY-----'].join('');
+  const text=redactNcmCliOutput('\x1b[31mAuthorization: Bearer synthetic-header\x1b[0m\nprivateKey=synthetic-key\n'+fakeKeyMarker('BEGIN')+'\nsynthetic-material\n'+fakeKeyMarker('END')+'\nhttps://example.test/?code=synthetic-code');
   for(const secret of ['synthetic-header','synthetic-key','synthetic-material','synthetic-code','\x1b'])assert.ok(!text.includes(secret));assert.ok(redactNcmCliOutput('x'.repeat(70000)).length<=48000);
 });
 

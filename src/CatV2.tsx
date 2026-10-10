@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PetCommand } from './pet/PetScene';
+import type { PetCommand } from './pet/types';
 import CompanionScene from './avatar/CompanionScene';
 import { useCompanion } from './avatar/preference';
 import type { PetInteraction, PetBehaviorState } from './pet/behavior';

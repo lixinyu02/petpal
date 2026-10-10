@@ -1,81 +1,27 @@
-import {overlayCompanion} from './preference-store.mjs';
-
 export const COMPANION_DISPLAY_KEY='petpal.displayCompanion';
-// This release resets earlier opt-ins. A current explicit choice remains local.
+// Retained solely to recognize older callers and scoped storage keys.
 export const COMPANION_CAT_VERSION=2;
 export const companionCatStorageKey=scope=>`petpal.companionCatEnabled:${encodeURIComponent(scope||'')}`;
 
-/** Raw shape preferences remain untouched; a separate local opt-in controls use. */
-export function effectiveCompanionKind(kind,enabled=false){
-  return kind==='cat'&&enabled===true?'cat':'anime';
+/** Legacy wire/storage values remain readable without enabling a retired model. */
+export function effectiveCompanionKind(_kind,_enabled=false){return'anime';}
+export function companionDisplayRecord(_kind,_enabled=false){
+  return JSON.stringify({version:3,kind:'anime',catEnabled:false});
 }
+export function readCompanionDisplay(_raw){return{kind:'anime',catEnabled:false};}
+export function isExplicitNativeCatOverlay(_href){return false;}
+export function resolveCompanionDisplay(_options={}){return'anime';}
 
-export function companionDisplayRecord(kind,enabled=false){
-  return JSON.stringify({version:3,kind:effectiveCompanionKind(kind,enabled),catEnabled:enabled===true});
-}
-
-export function readCompanionDisplay(raw){
-  try{
-    if(typeof raw!=='string'||raw.length>256)return{kind:'anime',catEnabled:false};
-    const value=JSON.parse(raw);
-    if(value?.version!==3||typeof value.catEnabled!=='boolean'||!['anime','cat'].includes(value.kind))return{kind:'anime',catEnabled:false};
-    return{kind:effectiveCompanionKind(value.kind,value.catEnabled),catEnabled:value.catEnabled};
-  }catch{return{kind:'anime',catEnabled:false};}
-}
-
-/** This bridge-free URL is constructed only by Android's existing asset policy.
- * An ordinary web/desktop query is never proof of a local opt-in.
- */
-export function isExplicitNativeCatOverlay(href){
-  try{return new URL(href).href==='https://appassets.androidplatform.net/assets/public/index.html?overlay=1&avatar=cat';}
-  catch{return false;}
-}
-
-export function resolveCompanionDisplay({kind='anime',catEnabled=false,search='',floating=false,displayRaw,href=''}={}){
-  const specified=overlayCompanion(search);
-  if(specified==='cat'&&isExplicitNativeCatOverlay(href))return'cat';
-  if(floating||new URLSearchParams(search).has('overlay')){
-    const display=readCompanionDisplay(displayRaw);
-    // Old URLs cannot resurrect a cat after the main window has disabled it.
-    return specified?effectiveCompanionKind(specified,display.kind==='cat'&&display.catEnabled):display.kind;
-  }
-  return effectiveCompanionKind(kind,catEnabled);
-}
-
-/** Earlier enabled records are reset without altering raw account preferences. */
-export function createCompanionCatCapability({storage,scope=''}={}){
-  const key=companionCatStorageKey(scope),listeners=new Set();
+/** Inert compatibility facade: never reads/writes another account's old opt-in. */
+export function createCompanionCatCapability(_options={}){
   let disposed=false;
-  const read=()=>{
-    if(!storage)return undefined;
-    try{
-      const raw=storage?.getItem(key);
-      if(!raw)return false;
-      if(raw.length>256)return false;
-      try{const value=JSON.parse(raw);return !!value&&!Array.isArray(value)&&value.version===COMPANION_CAT_VERSION&&value.enabled===true;}
-      catch{return false;}
-    }catch{return undefined;}
-  };
-  let enabled=read()??false;
-  const notify=()=>{for(const listener of listeners)listener();};
-  const refresh=()=>{
-    if(disposed)return;
-    const next=read();
-    // Denied storage keeps this page's explicit choice usable in memory.
-    if(next!==undefined&&next!==enabled){enabled=next;notify();}
-  };
+  const listeners=new Set();
   return{
-    snapshot:()=>enabled,
-    subscribe:listener=>{listeners.add(listener);return()=>listeners.delete(listener);},
-    setEnabled:next=>{
-      if(typeof next!=='boolean')throw new TypeError('Cat capability must be a boolean.');
-      if(disposed)return;
-      const changed=enabled!==next;enabled=next;
-      try{storage?.setItem(key,JSON.stringify({version:COMPANION_CAT_VERSION,enabled}));}catch{}
-      if(changed)notify();
-    },
-    refresh,
-    storageChanged:eventKey=>{if(eventKey===null||eventKey===key)refresh();},
+    snapshot:()=>false,
+    subscribe:listener=>{if(!disposed)listeners.add(listener);return()=>listeners.delete(listener);},
+    setEnabled:next=>{if(typeof next!=='boolean')throw new TypeError('Cat capability must be a boolean.');},
+    refresh:()=>{},
+    storageChanged:()=>{},
     dispose:()=>{disposed=true;listeners.clear();},
   };
 }
