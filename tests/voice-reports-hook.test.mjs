@@ -11,12 +11,13 @@ const fakeModules={
   speech:`export const useSpeech=()=>globalThis.__voiceReportsHook.speech;`,
   capture:`export const createVoiceCapture=(...args)=>globalThis.__voiceReportsHook.createCapture(...args);`,
   asr:`export const openAsrSession=(...args)=>globalThis.__voiceReportsHook.openAsr(...args);`,
+  cue:`export const createWakeCueController=(...args)=>globalThis.__voiceReportsHook.createCue(...args);`,
 };
 const bundled=await build({entryPoints:[fileURLToPath(new URL('../src/voice/useVoiceConversation.ts',import.meta.url))],bundle:true,write:false,format:'esm',platform:'node',plugins:[{name:'voice-hook-boundaries',setup(plugin){
   plugin.onResolve({filter:/.*/},args=>{
     if(args.path==='react')return{path:'react',namespace:'voice-hook-fake'};
     if(!args.importer.replaceAll('\\','/').endsWith('/src/voice/useVoiceConversation.ts'))return;
-    const key={'../api':'api','../avatar/useSpeech':'speech','./capture':'capture','./api':'asr'}[args.path];
+    const key={'../api':'api','../avatar/useSpeech':'speech','./capture':'capture','./api':'asr','./wake-cue.mjs':'cue'}[args.path];
     if(key)return{path:key,namespace:'voice-hook-fake'};
   });
   plugin.onLoad({filter:/.*/,namespace:'voice-hook-fake'},args=>({contents:fakeModules[args.path],loader:'js'}));
@@ -27,9 +28,10 @@ const flush=async()=>{for(let i=0;i<100;i++)await Promise.resolve();};
 const report=(id,content='后台任务已完成。')=>({id,role:'assistant',status:'complete',assistantTaskId:'task',content});
 const conversation=messages=>({id:'voice-chat',mode:'chat',messages,assistantTasks:[]});
 function harness(context){
-  const slots=[],effects=[],calls=[],streams=[],plays=[],sessions=[],captures=[],baselines=[];let cursor=0,baseline=conversation([]);
+  const slots=[],effects=[],calls=[],streams=[],plays=[],sessions=[],captures=[],baselines=[],cues=[];let cursor=0,baseline=conversation([]);
   const same=(first,second)=>first&&second&&first.length===second.length&&first.every((value,index)=>Object.is(value,second[index]));
   const runtime={epoch:1,identity:{instanceId:'server',userId:'member'},options:{allowed:true,scope:'server:member',providerId:'model'},
+    createCue(options){const cue={options,unlocks:0,plays:[],stops:0,releases:0,disposed:false,unlock(){this.unlocks++;return Promise.resolve(true);},play(signal){this.plays.push(signal);return true;},stop(){this.stops++;},release(){this.releases++;},dispose(){this.disposed=true;}};cues.push(cue);return cue;},
     useRef(value){const index=cursor++;return(slots[index]??={current:value});},
     useState(value){const index=cursor++;slots[index]??={value};return[slots[index].value,next=>{slots[index].value=typeof next==='function'?next(slots[index].value):next;}];},
     useCallback(callback,deps){const index=cursor++,previous=slots[index];if(!previous||!same(previous.deps,deps))slots[index]={callback,deps};return slots[index].callback;},
@@ -47,7 +49,7 @@ function harness(context){
   context.after(()=>{for(const slot of slots)slot?.cleanup?.();for(const[key,descriptor]of descriptors)if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];});
   function render(options={}){runtime.options={...runtime.options,...options};cursor=0;const voice=useVoiceConversation(runtime.options);while(effects.length)effects.shift()();return voice;}
   const voice=render();
-  return{voice,render,runtime,calls,streams,plays,sessions,baselines,window,document,navigator,captures,preferences,baseline(value){baseline=value;},feed(level=.05){captures.at(-1).handlers.onFrame(new Float32Array(6000).fill(level),level);},async ask(text='继续聊'){this.feed();this.feed();await flush();const finishing=voice.finishUtterance();sessions.at(-1).final.resolve(text);await flush();return{finishing};}};
+  return{voice,render,runtime,calls,streams,plays,sessions,baselines,window,document,navigator,captures,preferences,cues,baseline(value){baseline=value;},feed(level=.05){captures.at(-1).handlers.onFrame(new Float32Array(6000).fill(level),level);},async ask(text='继续聊'){this.feed();this.feed();await flush();const finishing=voice.finishUtterance();sessions.at(-1).final.resolve(text);await flush();return{finishing};}};
 }
 
 test('real hook reads account wake settings at each start and settings changes stop the old microphone',async context=>{
@@ -63,6 +65,22 @@ for(const event of ['hidden','pagehide','petpal:session-change','petpal:voice-se
   if(event==='hidden'){h.document.hidden=true;h.document.dispatchEvent(new Event('visibilitychange'));}
   else if(event==='devicechange')h.navigator.mediaDevices.dispatchEvent(new Event(event));else h.window.dispatchEvent(new Event(event));
   assert.equal(h.render().active,false);assert.equal(h.captures[0].stopped,true);h.feed(.1);await flush();assert.equal(h.sessions.length,0);
+  assert.equal(h.cues[0].releases,1);assert.ok(h.cues[0].stops>0);
+});
+
+test('real hook warms cue in start gesture, routes account speaker and acknowledges only final wake',async context=>{
+  const h=harness(context);h.runtime.voiceConfig={wake:{enabled:true}};
+  h.preferences.set(`petpal.mediaDevices:${encodeURIComponent(h.runtime.options.scope)}`,JSON.stringify({speakerId:'headphones'}));
+  assert.equal(h.cues[0].options.getSpeakerId(),'headphones');
+  const starting=h.voice.start();assert.equal(h.cues[0].unlocks,1);await starting;assert.equal(h.cues[0].plays.length,0);
+  h.feed();h.feed();await flush();h.sessions[0].onTranscript('你好小伴');assert.equal(h.cues[0].plays.length,0);
+  const finishing=h.voice.finishUtterance();h.sessions[0].final.resolve('你好小伴');await finishing;assert.equal(h.cues[0].plays.length,1);
+  assert.equal(h.render().phase,'listening');h.voice.stop();assert.equal(h.cues[0].plays[0].aborted,true);assert.equal(h.cues[0].releases,1);
+});
+
+test('session epoch changes still close cue context even when stale UI publication is suppressed',async context=>{
+  const h=harness(context);await h.voice.start();h.runtime.epoch++;h.window.dispatchEvent(new Event('petpal:session-change'));
+  assert.equal(h.cues[0].releases,1);assert.equal(h.captures[0].stopped,true);
 });
 
 test('late account settings cannot reactivate a stopped startup; logged-out voice acquires no microphone',async context=>{

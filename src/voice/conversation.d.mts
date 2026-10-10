@@ -9,6 +9,7 @@ export function createVoiceConversation(options:{
  getSensitivity?():unknown;
  createCapture(callbacks:{onFrame(frame:Float32Array,level:number):void;onError(error:Error):void}):{start(deviceId:string):Promise<void>;pause():void;stop():void};
  unlock():Promise<boolean>;verify(signal:AbortSignal):Promise<unknown>;stopSpeech():void;
+ wakeCue?(signal:AbortSignal):void|boolean;stopWakeCue?():void;releaseWakeCue?():void;
  openAsr(signal:AbortSignal,onTranscript:(text:string)=>void):Promise<AsrSession>;
  createChat(providerId:string,signal:AbortSignal):Promise<string>;
  stopChat?(id:string,signal:AbortSignal):Promise<unknown>;

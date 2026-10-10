@@ -26,8 +26,10 @@ export function createVoiceConversation(options) {
   const publish=patch=>{state={...state,...patch};if(!disposed)options.onState({...state});};
   const valid=job=>!disposed&&current===job&&!job.abort.signal.aborted&&options.isCurrent();
   const validUtterance=(job,utterance)=>valid(job)&&job.utterance===utterance&&!utterance.abort.signal.aborted;
+  const stopCue=()=>{try{options.stopWakeCue?.();}catch{/* Optional feedback cannot break cancellation. */}};
   function release(job){
     if(!job)return;job.display?.close();job.display=null;clearTimeout(job.idleTimer);job.abort.abort(cancelled());job.turn?.abort(cancelled());
+    stopCue();try{options.releaseWakeCue?.();}catch{/* Still release microphone and speech. */}
     job.utterance?.abort.abort(cancelled());job.utterance?.session?.cancel();job.capture.stop();options.stopSpeech();
   }
   function stop(){const job=current;job?.display?.flush();current=null;release(job);publish({phase:'idle',active:false,level:0,error:'',hasUtterance:false,awaitingWake:false});}
@@ -82,7 +84,7 @@ export function createVoiceConversation(options) {
   function cancelTurn(job){
     job.display?.flush();job.display?.close();job.display=null;
     job.sequence++;clearTimeout(job.idleTimer);job.turn?.abort(cancelled());job.turn=null;
-    job.utterance?.abort.abort(cancelled());job.utterance?.session?.cancel();job.utterance=null;options.stopSpeech();
+    job.utterance?.abort.abort(cancelled());job.utterance?.session?.cancel();job.utterance=null;stopCue();options.stopSpeech();
     if(job.chatPending&&job.chatStopFor!==job.chatPending){
       job.chatStopFor=job.chatPending;
       // The server stop receipt waits until its active conversation slot is
@@ -175,6 +177,8 @@ export function createVoiceConversation(options) {
         const match=matchWakePhrase(transcript,job.wake.phrases);
         if(!match){arm(job);return true;}
         publish({transcript:match.text,reply:'',hasUtterance:false,awaitingWake:false});
+        // A final match acknowledges once. Never await output or pause the microphone.
+        if(valid(job))try{options.wakeCue?.(job.abort.signal);}catch{/* Continue even if local feedback is unavailable. */}
         if(match.text)await answer(job,match.text);else await listen(job);return true;
       }
       publish({transcript,hasUtterance:false});

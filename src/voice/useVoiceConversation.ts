@@ -10,6 +10,7 @@ import {mergeAssistantTask} from '../chat-assistant-preferences.mjs';
 import {createVoiceReportTracker} from './reports.mjs';
 import {createVoiceDetectionPreferences} from './detection-preferences.mjs';
 import {defaultWakeSettings} from '../../server/voice-wake.mjs';
+import {createWakeCueController} from './wake-cue.mjs';
 
 export function useVoiceConversation(options:{allowed:boolean;scope:string;providerId:string;enabled?:boolean;assistantSnapshot?:()=>ChatAssistantConfig|undefined}) {
   const speech=useSpeech(options.allowed&&options.enabled!==false,options.scope);
@@ -23,6 +24,11 @@ export function useVoiceConversation(options:{allowed:boolean;scope:string;provi
     const epoch=getSessionEpoch();let mounted=true,voiceActive=false,voiceProviderId='';
     const current=()=>mounted&&epoch===getSessionEpoch();
     const voiceCurrent=()=>current()&&voiceActive&&refs.current.options.allowed&&refs.current.options.enabled!==false&&Boolean(getConnection().token&&getIdentity())&&options.scope===refs.current.options.scope&&voiceProviderId===refs.current.options.providerId;
+    const wakeCue=createWakeCueController({getSpeakerId:()=>{
+      let storage:Storage|undefined;try{storage=window.localStorage;}catch{}
+      const preferences=createDevicePreferences(storage,options.scope);
+      try{return preferences.read().speakerId;}finally{preferences.dispose();}
+    }});
     const reports=createVoiceReportTracker({
       isCurrent:voiceCurrent,
       load:(id,signal)=>api<Conversation>(`/conversations/${encodeURIComponent(id)}`,{signal}),
@@ -44,7 +50,8 @@ export function useVoiceConversation(options:{allowed:boolean;scope:string;provi
       getDeviceId:()=>{let storage:Storage|undefined;try{storage=localStorage;}catch{}const preferences=createDevicePreferences(storage,options.scope);try{return preferences.read().microphoneId;}finally{preferences.dispose();}},
       getSensitivity:()=>{let storage:Storage|undefined;try{storage=window.localStorage;}catch{}const preferences=createVoiceDetectionPreferences(storage,options.scope);try{return preferences.read();}finally{preferences.dispose();}},
       createCapture:createVoiceCapture,
-      unlock:()=>{const active=refs.current.speech;if(active.engine!=='cosyvoice'||!active.streamingEnabled||!active.supported)throw new Error('请先在“语音与设备”中选择 CosyVoice，并将语速设为 1.0 倍，再开始语音聊天。');return active.unlock();},
+      unlock:()=>{const active=refs.current.speech;if(active.engine!=='cosyvoice'||!active.streamingEnabled||!active.supported)throw new Error('请先在“语音与设备”中选择 CosyVoice，并将语速设为 1.0 倍，再开始语音聊天。');void wakeCue.unlock().catch(()=>{});return active.unlock();},
+      wakeCue:signal=>voiceCurrent()?wakeCue.play(signal):false,stopWakeCue:()=>wakeCue.stop(),releaseWakeCue:()=>wakeCue.release(),
       verify:async signal=>{const [config,voice]=await Promise.all([api<{configured:boolean}>('/voice/asr',{signal}),api<VoiceConfig>('/voice',{signal})]);if(!config.configured)throw new Error('尚未连接语音识别服务，请联系管理员在“语音与设备”中配置。');return {wake:voice.wake};},
       stopSpeech:()=>refs.current.speech.stop(),openAsr:openAsrSession,
       stopChat:(id,signal)=>api(`/conversations/${encodeURIComponent(id)}/stop`,{method:'POST',signal:AbortSignal.any([signal,AbortSignal.timeout(10000)])}),
@@ -72,7 +79,7 @@ export function useVoiceConversation(options:{allowed:boolean;scope:string;provi
     document.addEventListener('visibilitychange',hidden);window.addEventListener('pagehide',stop);window.addEventListener('petpal:session-change',stop);
     window.addEventListener('petpal:voice-settings-change',stop);window.addEventListener('petpal:audio-output-change',stop);
     navigator.mediaDevices?.addEventListener('devicechange',stop);
-    return()=>{mounted=false;reports.stop();machine.dispose();if(controller.current===machine){controller.current=null;receiveReports.current=()=>{};}document.removeEventListener('visibilitychange',hidden);window.removeEventListener('pagehide',stop);window.removeEventListener('petpal:session-change',stop);window.removeEventListener('petpal:voice-settings-change',stop);window.removeEventListener('petpal:audio-output-change',stop);navigator.mediaDevices?.removeEventListener('devicechange',stop);};
+    return()=>{mounted=false;reports.stop();machine.dispose();wakeCue.dispose();if(controller.current===machine){controller.current=null;receiveReports.current=()=>{};}document.removeEventListener('visibilitychange',hidden);window.removeEventListener('pagehide',stop);window.removeEventListener('petpal:session-change',stop);window.removeEventListener('petpal:voice-settings-change',stop);window.removeEventListener('petpal:audio-output-change',stop);navigator.mediaDevices?.removeEventListener('devicechange',stop);};
   },[options.scope]);
   const start=useCallback(()=>controller.current?.start()??Promise.resolve(),[]);
   const stop=useCallback(()=>controller.current?.stop(),[]);
