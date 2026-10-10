@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { PNG } from 'pngjs';
 import { waitForCubismCore } from '../src/avatar/cubism/runtime.mjs';
 
@@ -38,11 +39,31 @@ function sample(rig, parameters = {}) {
   return { points: Array.from(model.drawables.vertexPositions, p => Array.from(p)), opacity: Array.from(model.drawables.opacities) };
 }
 
-test('V12 retains every V11 texture byte, native parameter and unrelated mesh under combined poses', async () => {
+test('V12 retains audited V11 RGBA texels, native parameters and unrelated meshes under combined poses', async () => {
   assert.deepEqual(Array.from(current.model.parameters.ids), Array.from(old.model.parameters.ids));
   for (const field of ['minimumValues', 'maximumValues', 'defaultValues']) assert.deepEqual(Array.from(current.model.parameters[field]), Array.from(old.model.parameters[field]));
   assert.equal(current.model.drawables.count, 16);
-  for (let i = 0; i < old.manifest.FileReferences.Textures.length; i++) assert.deepEqual(await fs.readFile(path.join(current.directory, current.manifest.FileReferences.Textures[i])), await fs.readFile(path.join(old.directory, old.manifest.FileReferences.Textures[i])));
+  assert.equal(current.manifest.FileReferences.Textures.length, old.manifest.FileReferences.Textures.length);
+  for (let i = 0; i < old.manifest.FileReferences.Textures.length; i++) {
+    const [original, published] = await Promise.all([
+      fs.readFile(path.join(old.directory, old.manifest.FileReferences.Textures[i])),
+      fs.readFile(path.join(current.directory, current.manifest.FileReferences.Textures[i])),
+    ]);
+    if (current.manifest.FileReferences.Textures[i].endsWith('.png')) assert.deepEqual(published, original);
+    else {
+      // The developer asset audit compares decoded WebP RGBA, including alpha=0
+      // RGB. These hashes bind that audit to the actual retained V11 PNG and V12
+      // bytes without adding an image decoder dependency to the Node test runner.
+      const receipt = JSON.parse(await fs.readFile(path.join(current.directory, 'texture-transport.json'), 'utf8'));
+      const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+      assert.equal(receipt.sourceSha256, sha(original));
+      assert.equal(receipt.publishedSha256, sha(published));
+      assert.equal(receipt.decodedRgbaSha256, sha(PNG.sync.read(original).data));
+      assert.equal(receipt.rgbaEqual, true);
+      assert.equal(receipt.format, 'webp-lossless-exact');
+      assert.ok(receipt.published.endsWith(`/${current.manifest.FileReferences.Textures[i]}`));
+    }
+  }
   for (const sign of [-1, 0, 1]) {
     const pose = { ParamAngleX: 30 * sign, ParamAngleY: 20 * sign, ParamAngleZ: 20 * sign, ParamHandsLift: (sign + 1) / 2, ParamHandsSway: sign, ParamHairFront: sign, ParamMouthOpenY: .6, ParamMouthA: 1, ParamBrowLY: sign, ParamEyeBallX: sign };
     const a = sample(old, pose), b = sample(current, pose);

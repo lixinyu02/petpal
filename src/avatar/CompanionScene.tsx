@@ -4,6 +4,7 @@ import type PetScene from '../pet/PetScene';
 import type { CompanionKind } from '../api';
 import type { PerformanceInput } from './performance.mjs';
 import AvatarLoading from './AvatarLoading';
+import { avatarPreview } from './preview';
 import '../companion.css';
 import '../companion-portrait.css';
 // The bundled native model retains the original character's neutral proportions.
@@ -15,7 +16,7 @@ class AvatarBoundary extends Component<{ children: ReactNode; kind: CompanionKin
   static getDerivedStateFromError() { return { failed: true }; }
   render() {
     if (!this.state.failed) return this.props.children;
-    return <div className="avatar-module-fallback" role="status">{this.props.kind !== 'cat' && <img src="/avatars/akari/idle.webp" alt="二次元伙伴"/>}<p>动画暂时未能加载；请保存输入后刷新页面重试。</p><button type="button" onClick={() => location.reload()}>刷新恢复动画</button></div>;
+    return <div className="avatar-module-fallback" role="status">{this.props.kind !== 'cat' && <img src={avatarPreview} alt="二次元伙伴" width="384" height="576"/>}<p>动画暂时未能加载；请保存输入后刷新页面重试。</p><button type="button" onClick={() => location.reload()}>刷新恢复动画</button></div>;
   }
 }
 

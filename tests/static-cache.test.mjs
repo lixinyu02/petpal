@@ -6,7 +6,8 @@ import {staticCacheControl} from '../server/static-cache.mjs';
 test('only content-addressed scripts/styles are immutable; mutable avatars revalidate',()=>{
   const root=path.resolve('fixture-site');
   const policy=name=>staticCacheControl(root,path.join(root,name));
-  for(const file of ['assets/index-DLeQOhCG.js','assets/theme-B_iD--q8.css'])assert.match(policy(file),/31536000, immutable$/);
+  for(const file of ['assets/index-DLeQOhCG.js','assets/theme-B_iD--q8.css','avatars/akari/preview-1234abcdef56.webp','avatars/akari-cubism-v12/akari.2048/texture_00-1234abcdef56.webp'])assert.match(policy(file),/31536000, immutable$/);
   for(const file of ['avatars/akari-cubism-v12/akari.moc3','vendor/live2dcubismcore.min.js','favicon.svg'])assert.equal(policy(file),'public, max-age=0, must-revalidate');
+  for(const file of ['avatars/akari/idle.webp','avatars/akari/preview-1234.webp','avatars/akari-cubism-v12/akari.model3.json','avatars/akari-cubism-v11/akari.2048/texture_00-1234abcdef56.webp','avatars/other/preview-1234abcdef56.webp'])assert.equal(policy(file),'public, max-age=0, must-revalidate');
   for(const file of ['index.html','version.json','assets/main.js','assets/test.js','downloads/manifest.json','../assets/main-DLeQOhCG.js'])assert.equal(policy(file),'no-store');
 });

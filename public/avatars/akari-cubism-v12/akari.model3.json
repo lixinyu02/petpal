@@ -3,7 +3,7 @@
   "FileReferences": {
     "Moc": "akari.moc3",
     "Textures": [
-      "akari.2048/texture_00.png"
+      "akari.2048/texture_00-61e2fb82b9f4.webp"
     ],
     "Physics": "akari.physics3.json",
     "DisplayInfo": "akari.cdi3.json",

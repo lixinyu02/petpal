@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import {useUiEntrance} from '../platform/ui-motion.ts';
 import { ArrowRight, Link2, Loader2, ShieldCheck, X } from 'lucide-react';
 import BrandMark from '../BrandMark';
+import { avatarPreview } from '../avatar/preview';
 import { api, connectWithToken, getConnection, isSessionChanged, login, type Connection } from '../api';
 import './login.css';
 
@@ -37,7 +38,7 @@ export function ConnectionDialog({ close }: { close?(): void }) {
     {window.petpal && <button className="secondary-button full-button auth-owner" disabled={busy} onClick={localOwner}>以本机管理员身份登录</button>}
     <p className="field-help login-note"><ShieldCheck size={14} aria-hidden="true"/>管理员分配模型与 Agent 权限；登录凭据仅保留当前会话。</p>
   </section>;
-  return close ? <div ref={scrimEntrance} className="modal-backdrop" data-ui-layer="dialog" role="dialog" aria-modal="true">{formContent}</div> : <main ref={pageEntrance} className="login-page"><a href="/" className="login-brand"><BrandMark size={36}/><span>小伴<small>PetPal</small></span></a><div className="login-layout"><div className="login-welcome"><span>你的日常伙伴</span><h1>聊聊想法，<br/>一起把事情做好。</h1><img src="/avatars/akari/idle.webp" alt="温柔的二次元伙伴" width="1024" height="1536" decoding="async" fetchPriority="high" onError={e => { e.currentTarget.style.display = 'none'; }}/></div>{formContent}</div></main>;
+  return close ? <div ref={scrimEntrance} className="modal-backdrop" data-ui-layer="dialog" role="dialog" aria-modal="true">{formContent}</div> : <main ref={pageEntrance} className="login-page"><a href="/" className="login-brand"><BrandMark size={36}/><span>小伴<small>PetPal</small></span></a><div className="login-layout"><div className="login-welcome"><span>你的日常伙伴</span><h1>聊聊想法，<br/>一起把事情做好。</h1><img src={avatarPreview} alt="温柔的二次元伙伴" width="384" height="576" decoding="async" fetchPriority="high" onError={e => { e.currentTarget.style.display = 'none'; }}/></div>{formContent}</div></main>;
 }
 
 export default function LoginGate({ children }: { children: ReactNode }) {

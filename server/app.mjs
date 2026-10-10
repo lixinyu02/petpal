@@ -1157,7 +1157,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const directory = path.resolve(staticDir);
     // Compression is limited to public UI files, never authenticated API streams
     // or multi-hundred-megabyte resumable installers.
-    app.use(compression({filter:(req,res)=>!/^\/downloads(?:\/|$)/.test(req.path)&&compression.filter(req,res)}));
+    app.use(compression({filter:(req,res)=>!req.headers.range&&!res.getHeader('Content-Range')&&!/^\/downloads(?:\/|$)/.test(req.path)&&compression.filter(req,res)}));
     // Client package URLs are files, never SPA routes. In particular, an
     // archived package must return 404 instead of a successful HTML download.
     app.use('/downloads', async (req,res,next)=>{

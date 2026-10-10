@@ -10,6 +10,7 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const until = async predicate => { for (let attempt = 0; attempt < 200; attempt++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('Fixture gate was not reached'); };
 const modelDirectory = new URL('../public/avatars/akari-cubism-v12/', import.meta.url);
+const isTexture = path => /\.(?:png|webp)$/u.test(path);
 let fixtureId = 0;
 
 /** Real runtime/model/motions; only browser/GPU and module transport are gated. */
@@ -51,7 +52,7 @@ async function actualFixture(t, { readControl, manifestOverride, waitShaders = f
     assert.ok(String(url).startsWith('https://petpal.test/avatars/akari-cubism-v12/'), 'fixture must never request real upstreams');
     reads.push({ url, signal }); active++; maximumReads = Math.max(active, maximumReads);
     const path = new URL(url).pathname.split('/').slice(3).join('/');
-    const proceed = async () => new Response(path === 'akari.model3.json' ? JSON.stringify(manifest) : await fs.readFile(new URL(path === 'second.png' ? 'akari.2048/texture_00.png' : path, modelDirectory)));
+    const proceed = async () => new Response(path === 'akari.model3.json' ? JSON.stringify(manifest) : await fs.readFile(new URL(path === 'second.webp' ? manifest.FileReferences.Textures[0] : path, modelDirectory)));
     try { return await (readControl ? readControl(path, signal, proceed) : proceed()); }
     finally { active--; }
   });
@@ -113,12 +114,12 @@ test('owned reads reject oversized returned bytes, preserve first error and hand
 
 test('real startup overlaps manifest/Core and texture/MOC, retains every V12 motion and waits for shaders', async t => {
   const moc = deferred(), texture = deferred();
-  const f = await actualFixture(t, { waitShaders: true, readControl: async (path, signal, proceed) => { if (path === 'akari.moc3') await moc.promise; if (path.endsWith('.png')) await texture.promise; return proceed(); } });
+  const f = await actualFixture(t, { waitShaders: true, readControl: async (path, signal, proceed) => { if (path === 'akari.moc3') await moc.promise; if (isTexture(path)) await texture.promise; return proceed(); } });
   const parent = new AbortController(); let settled = false;
   const loading = f.runtime.createCubismAvatar({ canvas: f.canvas, signal: parent.signal }).then(value => { settled = true; return value; });
   await until(() => f.reads.length === 3);
   assert.equal(f.scripts.length, 1); assert.equal(f.motions.length, 0);
-  assert.ok(f.reads.some(read => read.url.endsWith('akari.moc3')) && f.reads.some(read => read.url.endsWith('.png')), 'validated MOC and raw texture start before Core finishes');
+  assert.ok(f.reads.some(read => read.url.endsWith('akari.moc3')) && f.reads.some(read => read.url.endsWith(f.manifest.FileReferences.Textures[0])), 'validated MOC and the actual manifest texture start before Core finishes');
   f.activateCore(); moc.resolve(); await until(() => f.rendererCreated);
   assert.equal(f.motions.length, 16); assert.equal(new Set(f.motions).size, 16);
   assert.equal(f.images.length, 0, 'raw texture prefetch does not decode or allocate GPU texture before complete motion initialization');
@@ -137,13 +138,13 @@ test('real startup overlaps manifest/Core and texture/MOC, retains every V12 mot
 
 test('real startup prefetches only first texture and decodes/uploads multiple textures in order', async t => {
   const manifest = JSON.parse(await fs.readFile(new URL('akari.model3.json', modelDirectory), 'utf8'));
-  manifest.FileReferences.Textures.push('second.png'); const moc = deferred();
+  manifest.FileReferences.Textures.push('second.webp'); const moc = deferred();
   const f = await actualFixture(t, { manualImages: true, manifestOverride: manifest, readControl: async (path, signal, proceed) => { if (path === 'akari.moc3') await moc.promise; return proceed(); } });
   const loading = f.runtime.createCubismAvatar({ canvas: f.canvas });
   await until(() => f.reads.length === 3);
-  assert.equal(f.reads.some(read => read.url.endsWith('second.png')), false, 'second raw texture is not held alongside first');
+  assert.equal(f.reads.some(read => read.url.endsWith('second.webp')), false, 'second raw texture is not held alongside first');
   f.activateCore(); moc.resolve(); await until(() => f.images.length === 1);
-  assert.equal(f.reads.some(read => read.url.endsWith('second.png')), false, 'first image completes decode/upload before requesting next');
+  assert.equal(f.reads.some(read => read.url.endsWith('second.webp')), false, 'first image completes decode/upload before requesting next');
   f.images[0].finish(); await until(() => f.images.length === 2);
   assert.deepEqual(f.uploads, [0]); f.images[1].finish(); const avatar = await loading;
   assert.deepEqual(f.uploads, [0, 1]); assert.equal(f.maximumImages, 1); avatar.release();
@@ -153,7 +154,7 @@ test('real startup cancels and drains a late speculative texture before releasin
   const moc = deferred(), texture = deferred(); let textureSignal;
   const f = await actualFixture(t, { readControl: async (path, signal, proceed) => {
     if (path === 'akari.moc3') { await moc.promise; throw new Error('MOC transport failed'); }
-    if (path.endsWith('.png')) { textureSignal = signal; await texture.promise; }
+    if (isTexture(path)) { textureSignal = signal; await texture.promise; }
     return proceed();
   } });
   const parent = new AbortController(), loading = f.runtime.createCubismAvatar({ canvas: f.canvas, signal: parent.signal });
@@ -168,7 +169,7 @@ test('real startup cancels and drains a late speculative texture before releasin
 
 test('unmount during real model initialization waits for late raw texture, never decodes it and preserves abort reason', async t => {
   const texture = deferred(); let textureSignal;
-  const f = await actualFixture(t, { readControl: async (path, signal, proceed) => { if (path.endsWith('.png')) { textureSignal = signal; await texture.promise; } return proceed(); } });
+  const f = await actualFixture(t, { readControl: async (path, signal, proceed) => { if (isTexture(path)) { textureSignal = signal; await texture.promise; } return proceed(); } });
   const parent = new AbortController(), reason = new Error('avatar unmounted');
   const loading = f.runtime.createCubismAvatar({ canvas: f.canvas, signal: parent.signal });
   const failed = assert.rejects(loading, error => error === reason);

@@ -50,6 +50,12 @@ test('public package files remain downloadable while missing packages return 404
   }
   const hashed=await request('/assets/index-DLeQOhCG.js');assert.match(hashed.headers.get('cache-control'),/immutable/);await hashed.arrayBuffer();
   const compressed=await request('/assets/index-DLeQOhCG.js',{headers:{'Accept-Encoding':'gzip'}});assert.equal(compressed.headers.get('content-encoding'),'gzip');assert.match(compressed.headers.get('vary'),/Accept-Encoding/);await compressed.arrayBuffer();
+  // A byte range refers to the source representation. Dynamic gzip would break
+  // Content-Range and resume clients even when the selected range is >1 KiB.
+  const jsRange=await request('/assets/index-DLeQOhCG.js',{headers:{Range:'bytes=0-2047','Accept-Encoding':'gzip'}});
+  assert.equal(jsRange.status,206);assert.equal(jsRange.headers.get('content-encoding'),null);
+  assert.equal(jsRange.headers.get('content-range'),`bytes 0-2047/${'export const cached=true;'.repeat(200).length}`);
+  assert.equal(await jsRange.text(),'export const cached=true;'.repeat(200).slice(0,2048));
   const conditional=await request('/assets/index-DLeQOhCG.js',{headers:{'If-None-Match':hashed.headers.get('etag'),'Cache-Control':'max-age=0'}});assert.equal(conditional.status,304);
   const avatar=await request('/avatars/face.webp');assert.equal(avatar.headers.get('cache-control'),'public, max-age=0, must-revalidate');await avatar.arrayBuffer();
   const version=await request('/version.json');assert.equal(version.headers.get('cache-control'),'no-store');await version.arrayBuffer();

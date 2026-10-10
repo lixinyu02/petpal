@@ -18,3 +18,7 @@
 2026-09-30 发布资源改为无损 WebP；原始 PNG 保存在 [`artwork/akari/`](../../../artwork/akari/)，不重复进入网页或安装包。使用现有 `cwebp -lossless -exact -m 6` 编码，8 张解码后 RGBA（包括全透明像素中的 RGB）均逐字节一致。总下载量从 17,899,049 降至 11,222,842 字节，减少 37.30%；首张 idle 从 2,356,254 降至 1,492,668 字节。分辨率和解码后的内存量没有降低。
 
 可复现转换和完整像素审计：`python scripts/encode-avatar-webp.py`；只读复核：`python scripts/encode-avatar-webp.py --check`。这两个开发命令需要已有的 Pillow；重建额外需要已有的 cwebp，应用运行不需要这些工具。[`manifest.json`](manifest.json) 记录原始文件、发布文件及解码 RGBA 的哈希。
+
+2026-10-10 新增独立的加载预览 `preview-1173a5b2a1df.webp`：从原始 `artwork/akari/idle.png` 按 LANCZOS 缩为 384×576，RGB 使用 WebP q85，alpha 与缩放源逐字节相同；58,004 字节。它只供模块／模型加载占位，8 张完整表情纹理、原始 PNG 与本目录的 `manifest.json` 均保持不变。文件名含内容 SHA256 前 12 位，避免更换预览后复用旧缓存。
+
+`loading-preview.json` 记录源、编码参数、发布 SHA、解码 RGBA／alpha 哈希与小于 120 KB 的预算；`python scripts/optimize-avatar-loading.py --check` 会只读核验实际解码结果，不需要 cwebp。重建和完整像素测试参见 V12 README；应用不依赖编码工具。

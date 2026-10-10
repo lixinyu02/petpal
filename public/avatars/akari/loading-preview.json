@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "format": "webp-lossy-rgb-lossless-alpha",
+  "encoderOptions": [
+    "-q",
+    "85",
+    "-alpha_q",
+    "100",
+    "-exact",
+    "-m",
+    "6"
+  ],
+  "resizeFilter": "Pillow-LANCZOS",
+  "source": "artwork/akari/idle.png",
+  "published": "public/avatars/akari/preview-1173a5b2a1df.webp",
+  "width": 384,
+  "height": 576,
+  "originalBytes": 2356254,
+  "publishedBytes": 58004,
+  "sourceSha256": "e351b622273c8db8faf24caa164d89b555f3fdf69d046343fd11f29fbdbca026",
+  "publishedSha256": "1173a5b2a1df49fee7cb072d9fe95116be451834f2fca22e4f3be92372ad8e0e",
+  "decodedRgbaSha256": "9e47e2ace610c26d947a1fd6eb7b8624ef500040ed9e3fb15b5243098a9e0e23",
+  "resizedSourceAlphaSha256": "d70a0340648f2ae0f3b5823c7bcf159a66160a77bb17034fcae2d3e03cd5f97e",
+  "decodedAlphaSha256": "d70a0340648f2ae0f3b5823c7bcf159a66160a77bb17034fcae2d3e03cd5f97e",
+  "alphaEqual": true,
+  "maximumPublishedBytesExclusive": 120000
+}
