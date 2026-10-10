@@ -22,6 +22,27 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 async function hash(file) { const h = createHash('sha256'); for await (const chunk of createReadStream(file)) h.update(chunk); return h.digest('hex'); }
 async function exists(file) { try { await access(file); return true; } catch { return false; } }
 async function walk(dir) { const files = []; for (const item of await readdir(dir, { withFileTypes: true })) { const file = path.join(dir, item.name); if (item.isDirectory()) files.push(...await walk(file)); else if (item.isFile()) files.push(file); else throw new Error(`Unsupported source entry: ${file}`); } return files.sort(); }
+const ncmSkillDirectory = 'server/native/skills/petpal-ncmcli';
+const ncmSkillMembers = ['SKILL.md', 'LICENSE', 'PROVENANCE.json'];
+function assertNoOptionalNcmCliDependency(pkg, location) {
+  assert.notEqual(pkg.name, '@music163/ncm-cli', `Optional ncm-cli runtime must not be distributed: ${location}`);
+  for (const dependencies of [pkg.dependencies, pkg.optionalDependencies, pkg.peerDependencies]) {
+    for (const [name, version] of Object.entries(dependencies ?? {})) assert.ok(name !== '@music163/ncm-cli' && !/^npm:@music163\/ncm-cli(?:@|$)/i.test(String(version)), `Optional ncm-cli runtime must not be a production dependency: ${location}`);
+  }
+}
+async function auditNcmCliSkillDirectory(appRoot) {
+  const skills = await readdir(path.join(appRoot, 'server/native/skills'), { withFileTypes: true });
+  assert.ok(skills.length === 1 && skills[0].name === 'petpal-ncmcli' && skills[0].isDirectory(), 'Unexpected packaged agent skill directory');
+  const members = await readdir(path.join(appRoot, ncmSkillDirectory), { withFileTypes: true });
+  assert.equal(members.length, ncmSkillMembers.length, 'Required packaged agent skill assets or unknown members');
+  for (const member of members) assert.ok(member.isFile() && ncmSkillMembers.includes(member.name), `Unexpected packaged agent skill member: ${ncmSkillDirectory}/${member.name}`);
+  const provenance = JSON.parse(await readFile(path.join(appRoot, ncmSkillDirectory, 'PROVENANCE.json'), 'utf8'));
+  assert.ok(provenance.upstream === 'https://github.com/NetEase/skills' && provenance.license === 'Apache-2.0' && Array.isArray(provenance.files) && provenance.files.length === 2 && provenance.optionalCli?.package === '@music163/ncm-cli' && provenance.optionalCli.bundled === false, 'Invalid packaged ncm-cli skill provenance');
+  for (const name of ['SKILL.md', 'LICENSE']) {
+    const records = provenance.files.filter(item => item.path === name);
+    assert.ok(records.length === 1 && await hash(path.join(appRoot, ncmSkillDirectory, name)) === records[0].sha256, `Packaged ncm-cli skill provenance hash mismatch: ${name}`);
+  }
+}
 
 if (process.argv.includes('--help')) { console.log('Usage: node scripts/windows-native-verify.mjs [portable.exe] [7za.exe] [--dist-dir directory --receipt file.json]\n--receipt writes a new independent receipt and refuses to overwrite it. An isolated --dist-dir requires --receipt.\nLegacy calls retain the version-series receipt. Extraction always uses a fresh directory; PETPAL_WINDOWS_READBACK_ROOT selects its parent. No browser or music commands.'); process.exit(0); }
 const positional = [], cli = {};
@@ -40,6 +61,8 @@ for (let index = 2; index < process.argv.length; index++) {
 assert.ok(positional.length <= 2, 'Expected only portable.exe and 7za.exe positional arguments');
 assert.ok(!cli['--dist-dir'] || cli['--receipt'], '--dist-dir requires --receipt to preserve existing release evidence');
 assert.equal(process.platform, 'win32', 'Windows verification requires Windows');
+assertNoOptionalNcmCliDependency(sourcePackage, 'source package.json');
+await auditNcmCliSkillDirectory(root);
 const executable = path.resolve(positional[0] || path.join(root, `releases/desktop/PetPal-${version}-Windows-x64.exe`));
 const distDirectory = path.resolve(cli['--dist-dir'] || path.join(root, 'dist'));
 const receiptPath = path.resolve(cli['--receipt'] || path.join(root, `evidence/native/windows-${series}-asar-verification.json`));
@@ -89,6 +112,18 @@ async function compare(file, unpacked = false, sourceOverride) {
 for (const file of packedPaths) {
   assert.ok(!/(?:^|\/)(?:\.data|\.tools|\.preview|evidence|private)(?:\/|$)|(?:^|\/)\.env(?:\.|$)|^server\/data(?:\/|$)/i.test(file), `Private/development data in package: ${file}`);
   assert.ok(!/^node_modules\/@openai\/codex-(?:linux|darwin)-/.test(file), `Wrong platform Codex package: ${file}`);
+  assert.ok(!/(?:^|\/)node_modules\/@music163\/ncm-cli(?:\/|$)/i.test(file), `Optional ncm-cli runtime must not be distributed: ${file}`);
+  if (/^server\/native\/skills(?:\/|$)/i.test(file)) {
+    const normalized = file.replace(/\/$/, ''), directory = Boolean(asar.statFile(archive, path.normalize(file)).files);
+    assert.ok(directory ? ['server/native/skills', ncmSkillDirectory].includes(normalized) : ncmSkillMembers.some(name => normalized === `${ncmSkillDirectory}/${name}`), `Unexpected packaged agent skill member: ${file}`);
+  }
+  if (file.startsWith('node_modules/') && file.endsWith('/package.json')) assertNoOptionalNcmCliDependency(JSON.parse(packedBytes(file)), file);
+}
+await auditNcmCliSkillDirectory(`${archive}.unpacked`);
+for (const absolute of await walk(`${archive}.unpacked`)) {
+  const file = path.relative(`${archive}.unpacked`, absolute).split(path.sep).join('/');
+  assert.ok(!/(?:^|\/)node_modules\/@music163\/ncm-cli(?:\/|$)/i.test(file), `Optional ncm-cli runtime must not enter unpacked payload: ${file}`);
+  if (file.startsWith('node_modules/') && file.endsWith('/package.json')) assertNoOptionalNcmCliDependency(JSON.parse(await readFile(absolute, 'utf8')), file);
 }
 for (const absolute of await walk(distDirectory)) {
   const file = `dist/${path.relative(distDirectory, absolute).split(path.sep).join('/')}`;
@@ -104,6 +139,8 @@ for (const absolute of await walk(path.join(root, 'server'))) {
 for (const file of ['desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs', 'desktop/remote-http.cjs', 'desktop/updates.mjs', 'desktop/executor.mjs', 'package.json']) await compare(file);
 for (const file of ['desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs']) assert.ok(compared.has(file), `Required executor module missing: ${file}`);
 for (const file of ['server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex-config.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/conversation-organization.mjs', 'server/chat-assistant.mjs', 'server/automation-schema.mjs', 'server/automation-tools.mjs', 'server/automations.mjs', 'server/approval-review.mjs', 'server/system-controls.mjs', 'server/native/system-windows.ps1', 'server/native/codex-review/models-0.143.0.json', 'server/native/codex-review/LICENSE', 'server/native/codex-review/PROVENANCE.json', 'server/native/codex-review/SHA256SUMS']) assert.ok(compared.has(file), `Required assistant module missing: ${file}`);
+for (const file of ['server/ncmcli.mjs', 'server/agent-skills.mjs', ...ncmSkillMembers.map(name => `${ncmSkillDirectory}/${name}`)]) assert.ok(compared.has(file), `Required ncm-cli integration member missing: ${file}`);
+for (const name of ncmSkillMembers) assert.equal(asar.statFile(archive, path.normalize(`${ncmSkillDirectory}/${name}`)).unpacked, true, `Agent skill assets must be unpacked: ${name}`);
 for (const file of ['server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs']) {
   assert.ok(compared.has(file), `Required OpenCLI module missing: ${file}`);
   assert.equal(asar.statFile(archive, path.normalize(file)).unpacked, true, `OpenCLI worker closure must be unpacked: ${file}`);
@@ -118,6 +155,7 @@ const computerUseAudit = await auditComputerUsePackage(`${archive}.unpacked`, {
   platform: 'win32', arch: 'x64', expected: await auditComputerUsePackage(root, { platform: 'win32', arch: 'x64' }),
 });
 const metadata = JSON.parse(packedBytes('package.json'));
+assertNoOptionalNcmCliDependency(metadata, 'packaged package.json');
 assert.equal(metadata.version, version);
 assert.equal(metadata.dependencies['@jackwener/opencli'], '1.8.8');
 

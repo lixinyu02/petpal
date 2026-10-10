@@ -37,6 +37,19 @@ requiredApplicationSource.push('desktop/startup-diagnostics.cjs', 'server/music-
   'server/native/music-mcp/netease/server.py', 'server/native/music-mcp/netease/LICENSE', 'server/native/music-mcp/netease/pyproject.toml', 'server/native/music-mcp/netease/PROVENANCE.json',
   'server/native/music-mcp/qqmusic/login.py', 'server/native/music-mcp/qqmusic/LICENSE', 'server/native/music-mcp/qqmusic/pyproject.toml', 'server/native/music-mcp/qqmusic/PROVENANCE.json',
   'server/native/music-mcp/qqmusic/src/mcp_qqmusic/__init__.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/__main__.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/server.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/format.py');
+requiredApplicationSource.push('server/ncmcli.mjs', 'server/agent-skills.mjs',
+  'server/native/skills/petpal-ncmcli/SKILL.md', 'server/native/skills/petpal-ncmcli/LICENSE', 'server/native/skills/petpal-ncmcli/PROVENANCE.json');
+const ncmSkillDirectory = 'server/native/skills/petpal-ncmcli';
+const ncmSkillMembers = ['SKILL.md', 'LICENSE', 'PROVENANCE.json'];
+function assertNoOptionalNcmCliDependency(pkg, location) {
+  if (pkg.name === '@music163/ncm-cli') throw new Error(`Optional ncm-cli runtime must not be distributed: ${location}`);
+  for (const dependencies of [pkg.dependencies, pkg.optionalDependencies, pkg.peerDependencies]) {
+    for (const [name, version] of Object.entries(dependencies ?? {})) {
+      if (name === '@music163/ncm-cli' || /^npm:@music163\/ncm-cli(?:@|$)/i.test(String(version))) throw new Error(`Optional ncm-cli runtime must not be a production dependency: ${location}`);
+    }
+  }
+}
+assertNoOptionalNcmCliDependency(metadata, 'package.json');
 const opencliPrefix = 'node_modules/@jackwener/opencli';
 const requiredOpencliFiles = ['package.json', 'LICENSE', 'cli-manifest.json', 'dist/src/main.js', 'dist/src/daemon.js', 'dist/src/browser/base-page.js',
   'dist/src/execution.js', 'dist/src/registry.js', 'dist/src/errors.js',
@@ -105,6 +118,25 @@ async function allFiles(directory, prefix = '') {
     if (entry.isDirectory()) result.push(...await allFiles(absolute, relative)); else result.push(relative);
   }
   return result;
+}
+
+async function auditNcmcliPackaging(appRoot, files) {
+  const skillsRoot = path.join(appRoot, 'server/native/skills');
+  const directories = await readdir(skillsRoot, { withFileTypes: true });
+  if (directories.length !== 1 || directories[0].name !== 'petpal-ncmcli' || !directories[0].isDirectory()) throw new Error('Unexpected packaged agent skill directory');
+  const members = await readdir(path.join(appRoot, ncmSkillDirectory), { withFileTypes: true });
+  for (const member of members) if (!member.isFile() || !ncmSkillMembers.includes(member.name)) throw new Error(`Unexpected packaged agent skill member: ${ncmSkillDirectory}/${member.name}`);
+  if (members.length !== ncmSkillMembers.length) throw new Error('Required packaged agent skill asset is absent');
+  const provenance = JSON.parse(await readFile(path.join(appRoot, ncmSkillDirectory, 'PROVENANCE.json'), 'utf8'));
+  if (provenance.upstream !== 'https://github.com/NetEase/skills' || provenance.license !== 'Apache-2.0' || !Array.isArray(provenance.files) || provenance.files.length !== 2 || provenance.optionalCli?.package !== '@music163/ncm-cli' || provenance.optionalCli.bundled !== false) throw new Error('Invalid packaged ncm-cli skill provenance');
+  for (const name of ['SKILL.md', 'LICENSE']) {
+    const records = provenance.files.filter(item => item.path === name);
+    if (records.length !== 1 || await digest(path.join(appRoot, ncmSkillDirectory, name)) !== records[0].sha256) throw new Error(`Packaged ncm-cli skill provenance hash mismatch: ${name}`);
+  }
+  for (const file of files) {
+    if (/(?:^|\/)node_modules\/@music163\/ncm-cli(?:\/|$)/i.test(file)) throw new Error(`Optional ncm-cli runtime must not be distributed: ${file}`);
+    if (file === 'package.json' || file.startsWith('node_modules/') && file.endsWith('/package.json')) assertNoOptionalNcmCliDependency(JSON.parse(await readFile(path.join(appRoot, file), 'utf8')), file);
+  }
 }
 
 async function auditZip(file) {
@@ -215,6 +247,7 @@ try {
   await filterComputerUseNative(source,{platform:'linux'});
   const sourceFiles = await allFiles(source);
   for (const file of requiredApplicationSource) if (!sourceFiles.includes(file)) throw new Error(`Required application source is absent: ${file}`);
+  await auditNcmcliPackaging(source, sourceFiles);
   for (const file of sourceFiles.filter(file => file.startsWith('server/native/music-mcp/'))) if (!requiredApplicationSource.includes(file)) throw new Error(`Unexpected music MCP vendor member: ${file}`);
   if (sourceFiles.some(file => /(?:^|\/)(?:\.env|\.data|\.tools|\.preview|preview|evidence|private|auth\.json|token)(?:$|\/)|\.exe$|\.dll$/i.test(file))) throw new Error('Source snapshot unexpectedly contains credentials/runtime/preview data or Windows binaries.');
   const sourceReceipt = [];
@@ -300,6 +333,7 @@ try {
     if (packagedCodex.sha256 !== nativeAudit.sha256) throw new Error('Builder changed native Codex binary');
     await elf(path.join(portable, 'petpal'), arch);
     const packagedApp = path.join(portable, 'resources', 'app');
+    await auditNcmcliPackaging(packagedApp, await allFiles(packagedApp));
     for(const file of archSourceReceipt.filter(item=>item.path.startsWith('server/native/computer-use/'))){if(await digest(path.join(packagedApp,file.path))!==file.sha256)throw Error('Computer Use native provenance payload mismatch');}
     await cp(path.join(appRoot,'node_modules','@zavora-ai','computer-use-mcp','package.json'),path.join(packagedApp,'node_modules','@zavora-ai','computer-use-mcp','package.json'));
     const computerUseAudit=await auditComputerUsePackage(packagedApp,{platform:'linux',arch,expected:computerUseSource});

@@ -9,7 +9,7 @@ import semver from 'semver';
 
 const archive = process.argv[2];
 if (!archive) throw new Error('Usage: node scripts/linux-verify.mjs <PetPal-Ubuntu.tar.gz>');
-const native = []; const failures = []; const frontend = []; const applicationSource = []; const seen = new Set(); let manifest; let count = 0;
+const native = []; const failures = []; const frontend = []; const applicationSource = []; const seen = new Set(); let manifest; let appPackageMetadata; let count = 0;
 const requiredApplicationSource = ['server/app.mjs', 'server/auth.mjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/updates.mjs', 'desktop/updates.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/index.mjs', 'server/providers.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'NOTICE'];
 requiredApplicationSource.push('desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs');
 requiredApplicationSource.push('server/native/codex-review/models-0.143.0.json', 'server/native/codex-review/LICENSE', 'server/native/codex-review/PROVENANCE.json', 'server/native/codex-review/SHA256SUMS');
@@ -23,7 +23,12 @@ requiredApplicationSource.push('desktop/startup-diagnostics.cjs', 'server/music-
   'server/native/music-mcp/netease/server.py', 'server/native/music-mcp/netease/LICENSE', 'server/native/music-mcp/netease/pyproject.toml', 'server/native/music-mcp/netease/PROVENANCE.json',
   'server/native/music-mcp/qqmusic/login.py', 'server/native/music-mcp/qqmusic/LICENSE', 'server/native/music-mcp/qqmusic/pyproject.toml', 'server/native/music-mcp/qqmusic/PROVENANCE.json',
   'server/native/music-mcp/qqmusic/src/mcp_qqmusic/__init__.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/__main__.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/server.py', 'server/native/music-mcp/qqmusic/src/mcp_qqmusic/format.py');
-const isApplicationSource = relative => /^(?:server\/[^/]+\.mjs|server\/native\/[^/]+\.ps1|server\/native\/codex-review\/(?:models-0\.143\.0\.json|LICENSE|PROVENANCE\.json|SHA256SUMS)|server\/native\/computer-use\/(?:LICENSE|patches\/linux-x11-window-geometry\.patch|linux-(?:x64|arm64)\/(?:PROVENANCE\.json|computer-use-napi\.linux-(?:x64|arm64)\.node))|server\/native\/music-mcp\/(?:netease\/(?:server\.py|LICENSE|pyproject\.toml|PROVENANCE\.json)|qqmusic\/(?:login\.py|LICENSE|pyproject\.toml|PROVENANCE\.json|src\/mcp_qqmusic\/(?:__init__|__main__|server|format)\.py))|desktop\/(?:main|preload|window-layout|media-permissions|service-settings|startup-diagnostics|app-preferences|app-preferences-ipc|central-server|central-server-ipc|central-server-smoke|remote-http)\.cjs|desktop\/(?:updates|executor)\.mjs|NOTICE)$/.test(relative);
+requiredApplicationSource.push('server/ncmcli.mjs', 'server/agent-skills.mjs',
+  'server/native/skills/petpal-ncmcli/SKILL.md', 'server/native/skills/petpal-ncmcli/LICENSE', 'server/native/skills/petpal-ncmcli/PROVENANCE.json');
+const ncmSkillDirectory = 'server/native/skills/petpal-ncmcli';
+const ncmSkillMembers = ['SKILL.md', 'LICENSE', 'PROVENANCE.json'];
+const ncmSkillAssets = new Map();
+const isApplicationSource = relative => /^(?:server\/[^/]+\.mjs|server\/native\/[^/]+\.ps1|server\/native\/codex-review\/(?:models-0\.143\.0\.json|LICENSE|PROVENANCE\.json|SHA256SUMS)|server\/native\/computer-use\/(?:LICENSE|patches\/linux-x11-window-geometry\.patch|linux-(?:x64|arm64)\/(?:PROVENANCE\.json|computer-use-napi\.linux-(?:x64|arm64)\.node))|server\/native\/music-mcp\/(?:netease\/(?:server\.py|LICENSE|pyproject\.toml|PROVENANCE\.json)|qqmusic\/(?:login\.py|LICENSE|pyproject\.toml|PROVENANCE\.json|src\/mcp_qqmusic\/(?:__init__|__main__|server|format)\.py))|server\/native\/skills\/petpal-ncmcli\/(?:SKILL\.md|LICENSE|PROVENANCE\.json)|desktop\/(?:main|preload|window-layout|media-permissions|service-settings|startup-diagnostics|app-preferences|app-preferences-ipc|central-server|central-server-ipc|central-server-smoke|remote-http)\.cjs|desktop\/(?:updates|executor)\.mjs|NOTICE)$/.test(relative);
 const packageMetadata = new Map(), dependencyHashes = new Map(), launchers = new Map();
 requiredApplicationSource.push('server/computer-use-mcp.mjs','server/computer-use-tool-names.mjs','server/computer-use-mcp-routes.mjs','server/dynamic-tool-output.mjs','server/model-request-limits.mjs');
 requiredApplicationSource.push('server/native/computer-use/LICENSE','server/native/computer-use/patches/linux-x11-window-geometry.patch');
@@ -46,6 +51,7 @@ await tar.t({ file: archive, strict: true, onReadEntry(entry) {
   if (!['File', 'Directory'].includes(entry.type)) failures.push(`Unsupported entry type: ${entry.path}`);
   if (/\.exe$|\.dll$|codex-win32-|codex-darwin-/i.test(entry.path) || entry.path.split('/').includes('..')) failures.push(`Wrong platform or unsafe entry: ${entry.path}`);
   if (/(?:^|\/)(?:\.data|\.tools|\.preview|preview|evidence|private|auth\.json|token)(?:$|\/)/i.test(entry.path)) failures.push(`Runtime/preview/private data must not be distributed: ${entry.path}`);
+  if (/(?:^|\/)node_modules\/@music163\/ncm-cli(?:\/|$)/i.test(entry.path)) failures.push(`Optional ncm-cli runtime must not be distributed: ${entry.path}`);
   if (entry.path.endsWith('/BUILD-MANIFEST.json')) {
     let text = ''; entry.on('data', chunk => { text += chunk; }); entry.on('end', () => { manifest = JSON.parse(text); });
   }
@@ -54,6 +60,23 @@ await tar.t({ file: archive, strict: true, onReadEntry(entry) {
     entry.on('end', () => frontend.push({ path: `dist/${entry.path.split('/resources/app/dist/')[1]}`, sha256: hash.digest('hex') }));
   }
   const appRelative = entry.path.split('/resources/app/')[1];
+  if (appRelative === 'package.json' && entry.type === 'File') {
+    let text = ''; entry.on('data', chunk => { text += chunk; });
+    entry.on('end', () => { try { appPackageMetadata = JSON.parse(text); } catch { failures.push('Invalid application package.json'); } });
+  }
+  if (appRelative && /^server\/native\/skills(?:\/|$)/i.test(appRelative)) {
+    const normalized = appRelative.replace(/\/$/, '');
+    const allowed = entry.type === 'Directory' ? ['server/native/skills', ncmSkillDirectory].includes(normalized) : ncmSkillMembers.some(name => normalized === `${ncmSkillDirectory}/${name}`);
+    if (!allowed) failures.push(`Unexpected packaged agent skill member: ${appRelative}`);
+    if (allowed && entry.type === 'File') {
+      const chunks = []; let bytes = 0;
+      entry.on('data', chunk => { bytes += chunk.length; if (bytes <= 64 * 1024) chunks.push(chunk); });
+      entry.on('end', () => {
+        if (bytes < 1 || bytes > 64 * 1024) failures.push(`Invalid packaged agent skill asset size: ${appRelative}`);
+        else ncmSkillAssets.set(path.posix.basename(appRelative), Buffer.concat(chunks));
+      });
+    }
+  }
   if (entry.type === 'File' && appRelative?.startsWith('server/native/music-mcp/') && !requiredApplicationSource.includes(appRelative)) failures.push(`Unexpected packaged music MCP member: ${appRelative}`);
   if (entry.type === 'File' && appRelative && isApplicationSource(appRelative)) {
     const hash = createHash('sha256'); entry.on('data', chunk => hash.update(chunk));
@@ -84,6 +107,25 @@ await tar.t({ file: archive, strict: true, onReadEntry(entry) {
     });
   }
 } });
+function verifyOptionalNcmCliExclusion(pkg, location) {
+  if (pkg?.name === '@music163/ncm-cli') failures.push(`Optional ncm-cli runtime must not be distributed: ${location}`);
+  for (const dependencies of [pkg?.dependencies, pkg?.optionalDependencies, pkg?.peerDependencies]) {
+    for (const [name, version] of Object.entries(dependencies ?? {})) {
+      if (name === '@music163/ncm-cli' || /^npm:@music163\/ncm-cli(?:@|$)/i.test(String(version))) failures.push(`Optional ncm-cli runtime must not be a production dependency: ${location}`);
+    }
+  }
+}
+if (!appPackageMetadata) failures.push('Application package.json missing');
+else verifyOptionalNcmCliExclusion(appPackageMetadata, 'package.json');
+for (const [location, pkg] of packageMetadata) verifyOptionalNcmCliExclusion(pkg, location);
+try {
+  const provenance = JSON.parse(ncmSkillAssets.get('PROVENANCE.json')?.toString('utf8'));
+  if (provenance.upstream !== 'https://github.com/NetEase/skills' || provenance.license !== 'Apache-2.0' || !Array.isArray(provenance.files) || provenance.files.length !== 2 || provenance.optionalCli?.package !== '@music163/ncm-cli' || provenance.optionalCli.bundled !== false) throw new Error('Invalid packaged ncm-cli skill provenance');
+  for (const name of ['SKILL.md', 'LICENSE']) {
+    const records = provenance.files.filter(item => item.path === name), bytes = ncmSkillAssets.get(name);
+    if (!bytes || records.length !== 1 || createHash('sha256').update(bytes).digest('hex') !== records[0].sha256) failures.push(`Packaged ncm-cli skill provenance hash mismatch: ${name}`);
+  }
+} catch { failures.push('Invalid packaged ncm-cli skill provenance'); }
 if (!manifest) failures.push('Missing manifest');
 else {
   if (manifest.platform !== 'linux' || !['x64', 'arm64'].includes(manifest.arch)) failures.push('Invalid Linux manifest platform/architecture');

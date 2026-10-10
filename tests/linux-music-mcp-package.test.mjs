@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {execFile} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,readdir,rm,rmdir,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {createRequire} from 'node:module';
 import {promisify} from 'node:util';
 import vm from 'node:vm';
 import * as tar from 'tar';
@@ -13,8 +14,11 @@ import ts from 'typescript';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 const run=promisify(execFile);
+const require=createRequire(import.meta.url),asar=require('@electron/asar');
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const centralFiles=['desktop/central-server.cjs','desktop/central-server-ipc.cjs','desktop/central-server-smoke.cjs'];
+const ncmCliFiles=['server/ncmcli.mjs','server/agent-skills.mjs',
+  'server/native/skills/petpal-ncmcli/SKILL.md','server/native/skills/petpal-ncmcli/LICENSE','server/native/skills/petpal-ncmcli/PROVENANCE.json'];
 const vendorFiles=[
   'server/native/music-mcp/netease/server.py',
   'server/native/music-mcp/netease/LICENSE',
@@ -47,11 +51,69 @@ async function requiredOpencliRuntime(){
 
 test('Linux package and independent verifier require the complete pinned music MCP sources',async()=>{
   const packagePolicy=await requiredSource('linux-package.mjs'),verifyPolicy=await requiredSource('linux-verify.mjs');
-  for(const file of [...vendorFiles,...centralFiles,'server/music-mcp.mjs','server/music-mcp-routes.mjs','desktop/startup-diagnostics.cjs']){
+  for(const file of [...vendorFiles,...centralFiles,...ncmCliFiles,'server/music-mcp.mjs','server/music-mcp-routes.mjs','desktop/startup-diagnostics.cjs']){
     assert.ok(packagePolicy.includes(file),`Builder does not require ${file}`);
     assert.ok(verifyPolicy.includes(file),`Verifier does not require ${file}`);
   }
   assert.deepEqual([...packagePolicy].sort(),[...verifyPolicy].sort());
+});
+
+async function packagingPolicy(script){
+  const source=await readFile(path.join(root,'scripts',script),'utf8'),parsed=ts.createSourceFile(script,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
+  const variables=new Set(['ncmSkillDirectory','ncmSkillMembers']),functions=new Set(['assertNoOptionalNcmCliDependency','auditNcmcliPackaging','auditNcmCliSkillDirectory']);
+  const statements=parsed.statements.filter(statement=>ts.isFunctionDeclaration(statement)&&functions.has(statement.name?.getText(parsed))
+    ||ts.isVariableStatement(statement)&&statement.declarationList.declarations.some(item=>variables.has(item.name.getText(parsed))));
+  const digest=async file=>hash(await readFile(file));
+  const context={assert,path,readdir,readFile,digest,hash:digest};
+  return vm.runInNewContext(`${statements.map(statement=>statement.getText(parsed)).join('\n')}\n({dependency:assertNoOptionalNcmCliDependency,assets:typeof auditNcmcliPackaging==='function'?auditNcmcliPackaging:auditNcmCliSkillDirectory});`,context);
+}
+
+test('Linux staging and Windows readback reject optional CLI dependencies and unknown skill members',async t=>{
+  const directory=await mkdtemp(path.join(os.tmpdir(),'petpal-skill-policy-'));
+  t.after(async()=>{assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir())+path.sep));await rm(directory,{recursive:true,force:true});});
+  const skillDirectory=path.join(directory,'server/native/skills/petpal-ncmcli');
+  await mkdir(skillDirectory,{recursive:true});
+  for(const name of ['SKILL.md','LICENSE','PROVENANCE.json'])await writeFile(path.join(skillDirectory,name),await readFile(path.join(root,'server/native/skills/petpal-ncmcli',name)));
+  for(const script of ['linux-package.mjs','windows-native-verify.mjs']){
+    const policy=await packagingPolicy(script);
+    await policy.assets(directory,[]);
+    for(const metadata of [
+      {name:'@music163/ncm-cli'},
+      {dependencies:{'@music163/ncm-cli':'0.1.7'}},
+      {optionalDependencies:{'@music163/ncm-cli':'0.1.7'}},
+      {peerDependencies:{music:'npm:@music163/ncm-cli@0.1.7'}},
+    ])assert.throws(()=>policy.dependency(metadata,'fixture'),/Optional ncm-cli/);
+    policy.dependency({dependencies:{'@jackwener/opencli':'1.8.8'},devDependencies:{'@music163/ncm-cli':'0.1.7'}},'fixture');
+    for(const member of ['credential.json','privateKey.txt','notes']){
+      const file=path.join(skillDirectory,member);await writeFile(file,'fixture');
+      try{await assert.rejects(()=>policy.assets(directory,[]),/skill/);}finally{await rm(file);}
+    }
+    const extraDirectory=path.join(directory,'server/native/skills/unknown');await mkdir(extraDirectory);
+    try{await assert.rejects(()=>policy.assets(directory,[]),/skill/);}finally{await rmdir(extraDirectory);}
+    const content=await readFile(path.join(skillDirectory,'SKILL.md'));
+    await writeFile(path.join(skillDirectory,'SKILL.md'),Buffer.concat([content,Buffer.from('\nmodified fixture\n')]));
+    try{await assert.rejects(()=>policy.assets(directory,[]),/provenance hash mismatch/);}finally{await writeFile(path.join(skillDirectory,'SKILL.md'),content);}
+  }
+});
+
+test('real ASAR roundtrip unpacks skills and Electron materializes them from its default ASAR source',async t=>{
+  const directory=await mkdtemp(path.join(os.tmpdir(),'petpal-ncm-asar-'));
+  t.after(async()=>{assert.ok(path.resolve(directory).startsWith(path.resolve(os.tmpdir())+path.sep));await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});});
+  const source=path.join(directory,'source'),archive=path.join(directory,'app.asar'),skill='server/native/skills/petpal-ncmcli';
+  await mkdir(path.join(source,skill),{recursive:true});
+  await writeFile(path.join(source,'package.json'),'{"type":"module"}');
+  await writeFile(path.join(source,'server/agent-skills.mjs'),await readFile(path.join(root,'server/agent-skills.mjs')));
+  for(const name of ['SKILL.md','LICENSE','PROVENANCE.json'])await writeFile(path.join(source,skill,name),await readFile(path.join(root,skill,name)));
+  await asar.createPackageWithOptions(source,archive,{unpackDir:path.join('server','native')});
+  for(const name of ['server/native/skills',skill])assert.ok(asar.statFile(archive,path.normalize(name)).files,'ASAR directory entries must be recognized by files');
+  const ncmAssetPaths=['SKILL.md','LICENSE','PROVENANCE.json'].map(name=>`${skill}/${name}`);
+  for(const file of ncmAssetPaths){assert.equal(asar.statFile(archive,path.normalize(file)).unpacked,true);assert.deepEqual(asar.extractFile(archive,path.normalize(file)),await readFile(path.join(`${archive}.unpacked`,file)));}
+  const runner=path.join(directory,'materialize.mjs'),home=path.join(directory,'private-codex-home');
+  await writeFile(runner,'const {materializeAgentSkills}=await import(process.argv[2]); const receipt=await materializeAgentSkills(process.argv[3]); process.stdout.write(JSON.stringify({receipt,electron:process.versions.electron}));');
+  const environment={...process.env,ELECTRON_RUN_AS_NODE:'1',HOME:directory,USERPROFILE:directory,APPDATA:directory,LOCALAPPDATA:directory,XDG_CONFIG_HOME:directory,XDG_CACHE_HOME:directory};
+  const result=await run(require('electron'),[runner,pathToFileURL(path.join(archive,'server/agent-skills.mjs')).href,home],{cwd:directory,env:environment,windowsHide:true,timeout:15000,maxBuffer:1024*1024});
+  const receipt=JSON.parse(result.stdout);assert.ok(receipt.electron,'Actual Electron ASAR module loading is required');assert.equal(receipt.receipt.directory,path.join(home,'skills','petpal-ncmcli'));
+  for(const file of ncmAssetPaths)assert.deepEqual(await readFile(path.join(receipt.receipt.directory,path.posix.basename(file))),await readFile(path.join(root,file)));
 });
 
 test('Linux archive audit rejects every missing or modified music MCP vendor member',async t=>{
@@ -68,6 +130,8 @@ test('Linux archive audit rejects every missing or modified music MCP vendor mem
     await mkdir(path.dirname(file),{recursive:true});await writeFile(file,value);
   }
   const sourceReceipt=[];
+  const appPackage={name:'petpal',version:'fixture',dependencies:{'@jackwener/opencli':'1.8.8'}};
+  await put('resources/app/package.json',JSON.stringify(appPackage));
   for(const file of await requiredSource('linux-verify.mjs')){
     const content=await readFile(path.join(root,file));bytes.set(file,content);
     await put(`resources/app/${file}`,content);sourceReceipt.push({path:file,sha256:hash(content)});
@@ -105,7 +169,7 @@ test('Linux archive audit rejects every missing or modified music MCP vendor mem
     catch(error){assert.equal(error.code,1,error.stderr);return {code:error.code,...JSON.parse(error.stdout)};}
   }
   const baseline=await verify();assert.equal(baseline.ok,true,baseline.failures.join('\n'));
-  for(const file of [...vendorFiles,...centralFiles,'server/native/computer-use/patches/linux-x11-window-geometry.patch','server/opencli-manager.mjs','server/opencli-sites.mjs','server/opencli-worker.mjs','server/opencli-routes.mjs']){
+  for(const file of [...vendorFiles,...centralFiles,...ncmCliFiles,'server/native/computer-use/patches/linux-x11-window-geometry.patch','server/opencli-manager.mjs','server/opencli-sites.mjs','server/opencli-worker.mjs','server/opencli-routes.mjs']){
     await t.test(`missing ${file}`,async()=>{
       await rm(path.join(app,file));
       try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Required application source missing: ${file}`));}
@@ -124,6 +188,27 @@ test('Linux archive audit rejects every missing or modified music MCP vendor mem
   });
   await t.test('private credential files are outside the vendor distribution inventory',async()=>{
     const file='server/native/music-mcp/qqmusic/credential.json';await put(`resources/app/${file}`,'{"private":"fixture"}');
-    const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Unexpected packaged music MCP member: ${file}`));
+    try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Unexpected packaged music MCP member: ${file}`));}finally{await rm(path.join(app,file));}
   });
+  for(const file of ['server/native/skills/petpal-ncmcli/credential.json','server/native/skills/petpal-ncmcli/privateKey.txt','server/native/skills/another/SKILL.md'])await t.test(`unknown skill member ${file}`,async()=>{
+    await put(`resources/app/${file}`,'private fixture');
+    try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Unexpected packaged agent skill member: ${file}`));}finally{await rm(path.join(app,file));if(file.includes('/another/'))await rmdir(path.dirname(path.join(app,file)));}
+  });
+  await t.test('unknown empty skill directory',async()=>{
+    const file='server/native/skills/petpal-ncmcli/private-config';await mkdir(path.join(app,file));
+    try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.some(failure=>failure.startsWith(`Unexpected packaged agent skill member: ${file}`)));}finally{await rmdir(path.join(app,file));}
+  });
+  await t.test('official optional ncm-cli runtime entered archive',async()=>{
+    const file='node_modules/@music163/ncm-cli/package.json';await put(`resources/app/${file}`,JSON.stringify({name:'@music163/ncm-cli',version:'0.1.7'}));
+    try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.some(failure=>failure.includes('Optional ncm-cli runtime must not be distributed:')));}finally{await rm(path.join(app,file));await rmdir(path.dirname(path.join(app,file)));await rmdir(path.join(app,'node_modules/@music163'));}
+  });
+  await t.test('renamed official runtime package cannot bypass archive exclusion',async()=>{
+    const file='node_modules/aliased-music/package.json';await put(`resources/app/${file}`,JSON.stringify({name:'@music163/ncm-cli',version:'0.1.7'}));
+    try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Optional ncm-cli runtime must not be distributed: ${file}`));}finally{await rm(path.join(app,file));await rmdir(path.dirname(path.join(app,file)));}
+  });
+  for(const section of ['dependencies','optionalDependencies','peerDependencies'])await t.test(`optional official CLI is forbidden in production ${section}`,async()=>{
+    await put('resources/app/package.json',JSON.stringify({...appPackage,[section]:{...appPackage[section],music:'npm:@music163/ncm-cli@0.1.7'}}));
+    try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes('Optional ncm-cli runtime must not be a production dependency: package.json'));}finally{await put('resources/app/package.json',JSON.stringify(appPackage));}
+  });
+  assert.equal((await verify()).ok,true,'All mutation fixtures must restore the accepted baseline');
 });
