@@ -11,7 +11,7 @@ export function secureEqual(left, right) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 export function username(value) {
-  if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9_.-]{2,39}$/i.test(value)) throw invalid('账号须为 3 至 40 位英文字母、数字、下划线、点或连字符。');
+  if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9_.-]{1,39}$/i.test(value)) throw invalid('账号须为 2 至 40 位英文字母、数字、下划线、点或连字符。');
   return value.toLowerCase();
 }
 export async function hashPassword(password) {

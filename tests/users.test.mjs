@@ -6,6 +6,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createPetServer } from '../server/app.mjs';
+import { JsonStore } from '../server/store.mjs';
 
 
 
@@ -50,6 +51,49 @@ async function hangingUpstream(t) {
   t.after(async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   return `http://127.0.0.1:${server.address().port}/v1`;
 }
+
+test('two-character regular accounts create, sign in case-insensitively and survive a JsonStore restart', async t => {
+  const { request, member, login, directory, app } = await setup(t);
+  const account = await member('pk');
+  assert.equal(account.user.username, 'pk'); assert.equal(account.user.role, 'user');
+  assert.equal(account.user.isAdmin, false); assert.equal(account.user.agentAccess, 'full');
+  const upper = await login('PK');
+  assert.equal(upper.user.id, account.user.id); assert.equal(upper.user.username, 'pk');
+  const file = path.join(directory, 'state.json'), beforeDuplicate = await readFile(file, 'utf8');
+  const duplicate = await request('/admin/users', { method: 'POST', body: { username: 'Pk', password } });
+  assert.equal(duplicate.status, 409); assert.equal(await readFile(file, 'utf8'), beforeDuplicate);
+  assert.equal(beforeDuplicate.includes(password), false);
+  assert.equal(beforeDuplicate.includes(account.token), false); assert.equal(beforeDuplicate.includes(upper.token), false);
+  await app.close();
+  const reopened = await new JsonStore(directory).init();
+  const stored = reopened.state.users.find(user => user.id === account.user.id);
+  assert.equal(stored.username, 'pk'); assert.equal(stored.role, 'user'); assert.equal(stored.disabled, false);
+  const restarted = await createPetServer({ dataDir: directory, token: ownerToken, codex: stubCodex() });
+  try {
+    await listenFixture(restarted.server);
+    const base = `http://127.0.0.1:${restarted.server.address().port}/api`;
+    const response = await fetch(`${base}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'PK', password }) });
+    assert.equal(response.status, 200); const signedIn = await response.json();
+    assert.equal(signedIn.user.id, account.user.id); assert.equal(signedIn.user.role, 'user'); assert.equal(signedIn.user.isAdmin, false);
+    const session = await fetch(`${base}/state`, { headers: { Authorization: `Bearer ${account.token}` } });
+    assert.equal(session.status, 200); assert.equal((await session.json()).user.id, account.user.id);
+  } finally { await restarted.close(); }
+});
+
+test('one-character, invalid and overlong usernames cannot create an account or authenticate', async t => {
+  const { request, member, directory } = await setup(t);
+  await member('pk');
+  const file = path.join(directory, 'state.json'), before = await readFile(file, 'utf8');
+  for (const name of ['p', '-k', '_k', '.k', 'p k', 'p/k', 'p@k', 'p\nk', '小伴', 'p'.repeat(41)]) {
+    const create = await request('/admin/users', { method: 'POST', body: { username: name, password } });
+    assert.equal(create.status, 400, JSON.stringify(name));
+    const login = await request('/auth/login', { token: null, method: 'POST', body: { username: name, password } });
+    assert.equal(login.status, 401, JSON.stringify(name));
+    assert.equal(await readFile(file, 'utf8'), before, 'rejected identities must not change persisted accounts or sessions');
+  }
+  const longest = await member('p'.repeat(40));
+  assert.equal(longest.user.username.length, 40);
+});
 
 test('members switch an existing chat to another assigned model while retaining context and reply attribution', async t => {
   const requests = [];

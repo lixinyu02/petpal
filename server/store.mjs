@@ -69,7 +69,7 @@ export class JsonStore {
     if (!validText(state.instanceId) || !validText(state.ownerId) || !Array.isArray(state.users) || !state.users.length || !Array.isArray(state.sessions)) throw new Error('本地用户数据格式无效，请保留文件并检查备份。');
     const ids = new Set(), names = new Set();
     for (const user of state.users) {
-      if (!validText(user.id) || ids.has(user.id) || !/^[a-z0-9][a-z0-9_.-]{2,39}$/.test(user.username) || names.has(user.username) || !validText(user.displayName) || !['admin', 'user', 'member'].includes(user.role) || typeof user.disabled !== 'boolean' || !Array.isArray(user.providerIds) || user.providerIds.some(id => !validText(id))) throw new Error('本地用户记录无效，请保留文件并检查备份。');
+      if (!validText(user.id) || ids.has(user.id) || !/^[a-z0-9][a-z0-9_.-]{1,39}$/.test(user.username) || names.has(user.username) || !validText(user.displayName) || !['admin', 'user', 'member'].includes(user.role) || typeof user.disabled !== 'boolean' || !Array.isArray(user.providerIds) || user.providerIds.some(id => !validText(id))) throw new Error('本地用户记录无效，请保留文件并检查备份。');
       ids.add(user.id); names.add(user.username);
       if (user.agentAccess !== undefined && !['none', 'workspace', 'full'].includes(user.agentAccess)) throw new Error('本地 Agent 授权无效。');
       if (user.role === 'member' || user.agentAccess !== 'full') { user.role = normalizeUserRole(user.role); user.agentAccess = 'full'; changed = identityMigrated = true; }
