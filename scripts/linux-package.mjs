@@ -30,6 +30,7 @@ requiredApplicationSource.push('server/native/codex-review/models-0.143.0.json',
 requiredApplicationSource.push('server/approval-review.mjs', 'server/system-controls.mjs', 'server/native/system-windows.ps1');
 requiredApplicationSource.push('desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs');
 requiredApplicationSource.push('server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs');
+requiredApplicationSource.push("server/opencli-weather-common.mjs", "server/opencli-weather-policies.mjs", "server/opencli-weather-cn.mjs", "server/opencli-weather-nmc.mjs", "server/opencli-weather-adapters.mjs");
 requiredApplicationSource.push('server/opencli-browser-policies.mjs', 'server/opencli-browser-adapters.mjs', 'server/opencli-browser-setup.mjs');
 requiredApplicationSource.push('server/computer-use-mcp.mjs','server/computer-use-tool-names.mjs','server/computer-use-mcp-routes.mjs','server/dynamic-tool-output.mjs','server/model-request-limits.mjs');
 requiredApplicationSource.push('server/native/computer-use/LICENSE','server/native/computer-use/patches/linux-x11-window-geometry.patch');

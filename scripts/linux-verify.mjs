@@ -18,6 +18,7 @@ requiredApplicationSource.push('desktop/central-server.cjs', 'desktop/central-se
 requiredApplicationSource.push('desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs');
 requiredApplicationSource.push('server/conversation-organization.mjs', 'server/chat-assistant.mjs', 'server/automation-schema.mjs', 'server/automation-tools.mjs', 'server/automations.mjs');
 requiredApplicationSource.push('server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs');
+requiredApplicationSource.push("server/opencli-weather-common.mjs", "server/opencli-weather-policies.mjs", "server/opencli-weather-cn.mjs", "server/opencli-weather-nmc.mjs", "server/opencli-weather-adapters.mjs");
 requiredApplicationSource.push('server/opencli-browser-policies.mjs', 'server/opencli-browser-adapters.mjs', 'server/opencli-browser-setup.mjs');
 requiredApplicationSource.push('desktop/startup-diagnostics.cjs', 'server/music-mcp.mjs', 'server/music-mcp-routes.mjs',
   'server/native/music-mcp/netease/server.py', 'server/native/music-mcp/netease/LICENSE', 'server/native/music-mcp/netease/pyproject.toml', 'server/native/music-mcp/netease/PROVENANCE.json',

@@ -2,6 +2,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { OPENCLI_BROWSER_POLICIES, browserQueryPolicy, notebookWebsiteCatalog, normalizeSiteOrigins } from './opencli-browser-policies.mjs';
+import { OPENCLI_WEATHER_POLICIES, weatherQueryPolicy } from './opencli-weather-policies.mjs';
 
 export const OPENCLI_VERSION = '1.8.8';
 const require = createRequire(import.meta.url);
@@ -43,7 +44,7 @@ export const OPENCLI_QUERY_POLICIES = freeze([
 const policies = new Map(OPENCLI_QUERY_POLICIES.map(policy => [`${policy.site}/${policy.command}`, policy]));
 const clone = value => JSON.parse(JSON.stringify(value));
 
-export function openCliQueryPolicy(site, command) { const policy = policies.get(`${site}/${command}`); return policy ? { ...clone(policy), mode: 'public' } : browserQueryPolicy(site, command); }
+export function openCliQueryPolicy(site, command) { const policy = policies.get(`${site}/${command}`); return policy ? { ...clone(policy), mode: 'public' } : weatherQueryPolicy(site, command) || browserQueryPolicy(site, command); }
 export function validateOpenCliSites(body = {}) {
   if (!object(body) || Object.keys(body).some(key => !['site', 'command'].includes(key))) throw invalid('OpenCLI 网站查询参数无效。');
   for (const key of ['site', 'command']) if (body[key] !== undefined && (typeof body[key] !== 'string' || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(body[key]))) throw invalid(`OpenCLI ${key} 无效。`);
@@ -94,11 +95,16 @@ export async function loadOpenCliCatalog(packageJsonPath, siteOrigins = {}) {
   const records = manifest.map(entry => {
     if (!entry || typeof entry.site !== 'string' || typeof entry.name !== 'string') throw new Error('OpenCLI 命令清单无效。');
     const policy = openCliQueryPolicy(entry.site, entry.name);
+    if (policy?.engine === 'builtin-public') throw new Error('上游清单与内置公开适配器命名冲突。');
     if (policy?.mode === 'public' && (entry.access !== 'read' || entry.strategy !== 'public' || entry.browser !== false || entry.modulePath !== policy.modulePath)) throw new Error('已开放 OpenCLI 命令与固定清单不匹配。');
     if (policy?.engine === 'upstream' && (entry.access !== 'read' || entry.browser !== true || entry.modulePath !== policy.modulePath)) throw new Error('已开放浏览器命令与固定清单不匹配。');
     return { site: entry.site, command: entry.name, description: String(policy?.description || entry.description || '').slice(0, 600), access: policy?.engine === 'builtin' ? 'read' : entry.access, strategy: policy?.engine === 'builtin' ? 'browser' : entry.strategy, browser: policy?.engine === 'builtin' || entry.browser === true, domain: entry.domain || null, mode: policy?.mode || 'inventory', callable: Boolean(policy), ...(policy ? { inputSchema: clone(policy.inputSchema), ...(policy.login ? { login: policy.login } : {}) } : {}) };
   });
   if (records.filter(entry => entry.mode === 'public').length !== policies.size || records.filter(entry => entry.mode === 'browser').length !== OPENCLI_BROWSER_POLICIES.filter(policy => manifest.some(entry => entry.site === policy.site && entry.name === policy.command)).length) throw new Error('已开放 OpenCLI 命令缺失。');
+  for (const policy of OPENCLI_WEATHER_POLICIES) {
+    records.push({ site: policy.site, command: policy.command, description: policy.description, access: 'read', strategy: 'public', browser: false,
+      domain: policy.site === 'nmc' ? 'www.nmc.cn' : 'www.weather.com.cn', mode: 'public', callable: true, inputSchema: clone(policy.inputSchema), engine: policy.engine });
+  }
   for (const policy of OPENCLI_BROWSER_POLICIES) {
     if (records.some(entry => entry.site === policy.site && entry.command === policy.command)) continue;
     const website = websites.get(policy.site), ready = website.status === 'ready';
@@ -110,9 +116,10 @@ export async function loadOpenCliCatalog(packageJsonPath, siteOrigins = {}) {
     const browserCommands = entries.filter(entry => entry.browser).length;
     const website = websites.get(site);
     if (website) domains.splice(0, domains.length, ...website.origins.map(origin => new URL(origin).hostname));
-    return { id: site, site, domains, commands: entries.length, queryCommands: enabledCommands.length, enabledCommands, browserCommands, needsBrowserBridge: browserCommands > 0, local: domains.length > 0 && domains.every(domain => ['127.0.0.1', 'localhost', 'doubao-app'].includes(domain)), mode: entries.find(entry => entry.mode !== 'inventory')?.mode || 'inventory', ...(website ? { label: website.label, websiteStatus: website.status, login: website.login } : {}) };
+    const weatherLabel = OPENCLI_WEATHER_POLICIES.find(policy => policy.site === site)?.label;
+    return { id: site, site, domains, commands: entries.length, queryCommands: enabledCommands.length, enabledCommands, browserCommands, needsBrowserBridge: browserCommands > 0, local: domains.length > 0 && domains.every(domain => ['127.0.0.1', 'localhost', 'doubao-app'].includes(domain)), mode: entries.find(entry => entry.mode !== 'inventory')?.mode || 'inventory', ...(weatherLabel ? { label: weatherLabel } : {}), ...(website ? { label: website.label, websiteStatus: website.status, login: website.login } : {}) };
   });
-  const summary = { adapterNamespaces: sites.length, totalCommands: records.length, readCommands: records.filter(entry => entry.access === 'read').length, writeCommands: records.filter(entry => entry.access === 'write').length, browserCommands: records.filter(entry => entry.browser).length, querySites: sites.filter(site => site.queryCommands > 0).length, queryCommands: records.filter(entry => entry.callable).length, publicQueryCommands: policies.size, browserQueryCommands: records.filter(entry => entry.callable && entry.browser).length, configuredSites: notebookSites.filter(site => site.status === 'ready').length };
+  const summary = { adapterNamespaces: sites.length, totalCommands: records.length, readCommands: records.filter(entry => entry.access === 'read').length, writeCommands: records.filter(entry => entry.access === 'write').length, browserCommands: records.filter(entry => entry.browser).length, querySites: sites.filter(site => site.queryCommands > 0).length, queryCommands: records.filter(entry => entry.callable).length, publicQueryCommands: policies.size + OPENCLI_WEATHER_POLICIES.length, browserQueryCommands: records.filter(entry => entry.callable && entry.browser).length, configuredSites: notebookSites.filter(site => site.status === 'ready').length };
   return { version: OPENCLI_VERSION, summary, sites, records, notebookSites };
 }
 

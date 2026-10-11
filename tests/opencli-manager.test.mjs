@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { OpenCliManager } from '../server/opencli-manager.mjs';
 import { OPENCLI_QUERY_POLICIES } from '../server/opencli-sites.mjs';
+import { OPENCLI_WEATHER_POLICIES } from '../server/opencli-weather-policies.mjs';
 import { OPENCLI_BROWSER_POLICIES } from '../server/opencli-browser-policies.mjs';
 
 async function setup(t, options = {}) {
@@ -41,8 +42,8 @@ test('default configuration, status and inventory read without writing or spawni
   const config = await f.manager.config(); assert.equal(config.enabled, true);
   assert.match(config.revision, /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
   const status = await f.manager.status(); assert.equal(status.queryReady, true); assert.equal(status.browserQueryReady, false);
-  assert.equal(status.catalog.publicQueryCommands, 23);
-  assert.equal((await f.manager.sites()).summary.queryCommands, OPENCLI_QUERY_POLICIES.length + OPENCLI_BROWSER_POLICIES.length);
+  assert.equal(status.catalog.publicQueryCommands, 23 + OPENCLI_WEATHER_POLICIES.length);
+  assert.equal((await f.manager.sites()).summary.queryCommands, OPENCLI_QUERY_POLICIES.length + OPENCLI_BROWSER_POLICIES.length + OPENCLI_WEATHER_POLICIES.length);
   assert.equal(f.launches.length, 0); assert.deepEqual(await readdir(f.directory), []);
 });
 
@@ -53,7 +54,7 @@ test('saved disable persists, CAS rejects stale updates and inventories remain r
   await assert.rejects(f.manager.configure({ ...initial, enabled: true }), error => error.status === 409);
   await assert.rejects(f.manager.query(query), error => error.code === 'disabled');
   await assert.rejects(f.manager.executeBrowser({ action: 'connect' }), error => error.code === 'disabled');
-  assert.equal((await f.manager.sites()).summary.publicQueryCommands, 23); assert.equal(f.launches.length, 0); assert.equal(f.browserExecute(), 0);
+  assert.equal((await f.manager.sites()).summary.publicQueryCommands, 23 + OPENCLI_WEATHER_POLICIES.length); assert.equal(f.launches.length, 0); assert.equal(f.browserExecute(), 0);
   const other = new OpenCliManager({ dataDir: f.directory, browser: { close: async () => {} } });
   assert.deepEqual(await other.config(), disabled); await other.close();
   await f.manager.configure({ ...disabled, enabled: true });

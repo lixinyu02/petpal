@@ -111,7 +111,7 @@ export async function finalizeWindowsRelease({ root = projectRoot, argv = [] } =
     for (const name of ['@jackwener/opencli', '@modelcontextprotocol/sdk', '@zavora-ai/computer-use-mcp']) {
       assert.ok(asar.opencliDependencyPackages?.some(entry => entry.name === name), `Missing runtime dependency closure: ${name}`);
     }
-    for (const file of ['server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs']) {
+    for (const file of ['server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs', "server/opencli-weather-common.mjs", "server/opencli-weather-policies.mjs", "server/opencli-weather-cn.mjs", "server/opencli-weather-nmc.mjs", "server/opencli-weather-adapters.mjs"]) {
       assert.equal(asar.files?.find(item => item.path === file)?.unpacked, true, `OpenCLI worker was not read back unpacked: ${file}`);
     }
   }
