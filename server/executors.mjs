@@ -5,6 +5,7 @@ import { MODEL_REQUEST_BYTES } from './model-request-limits.mjs';
 import { normalizeProjectDirectory } from './project-directory.mjs';
 import { describeAutomationTool, validateAutomationTool } from './automation-tools.mjs';
 import { approvalReviewCapability, validApprovalReview } from './approval-review.mjs';
+import { canAccessExecutionHost } from './user-roles.mjs';
 
 const failure = (status, message, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 const unknown = () => failure(409, '执行电脑已断开，任务执行状态未知；队列已暂停，不会自动重试。', 'execution_unknown');
@@ -35,8 +36,9 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
   let closed = false, registration = Promise.resolve();
   const localHost = { id: 'central', name: '中央服务器', kind: 'central', platform: process.platform, online: true };
   const hostFor = (userId, id) => {
+    if (!canAccessExecutionHost(store.state, userId, id)) throw failure(403, id === 'central' ? '中央服务器仅管理员可以执行，请选择自己登录的 PC 客户端。' : '无权访问这台执行电脑，请选择自己登录的 PC 客户端。', 'executor_forbidden');
     if (id === 'central') return localHost;
-    const host = store.state.executionHosts.find(item => item.id === id && item.userId === userId);
+    const host = store.state.executionHosts.find(item => item.id === id);
     if (!host) throw failure(404, '执行电脑不存在或不属于当前账号。');
     return host;
   };
@@ -82,7 +84,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
   const timer = setInterval(sweep, Math.min(1000, leaseMs)); timer.unref();
   const list = userId => {
     sweep();
-    return [localHost, ...store.state.executionHosts.filter(host => host.userId === userId).map(host => ({ id: host.id, name: host.name, platform: host.platform, kind: 'desktop', online: current.has(host.id), lastSeenAt: current.has(host.id) ? connections.get(current.get(host.id)).lastSeenAt : host.lastSeenAt,
+    return [...(canAccessExecutionHost(store.state, userId, 'central') ? [localHost] : []), ...store.state.executionHosts.filter(host => canAccessExecutionHost(store.state, userId, host.id)).map(host => ({ id: host.id, name: host.name, platform: host.platform, kind: 'desktop', online: current.has(host.id), isOwn: host.userId === userId, owner: Object.fromEntries(['id', 'username', 'displayName'].map(key => [key, store.state.users.find(user => user.id === host.userId)[key]])), lastSeenAt: current.has(host.id) ? connections.get(current.get(host.id)).lastSeenAt : host.lastSeenAt,
       codex: { available: current.has(host.id), authenticated: current.has(host.id), configured: getConfig().mode === 'api' && Boolean(getConfig().model), supportsSteer: true, approvalReview: approvalReviewCapability(true, current.has(host.id) && connections.get(current.get(host.id)).capabilities.approvalReview === true, current.has(host.id) && connections.get(current.get(host.id)).capabilities.independentReviewModel === true), projectDirectory: current.has(host.id) && connections.get(current.get(host.id)).capabilities.projectDirectory === true, automations: Boolean(automationTool) && current.has(host.id) && connections.get(current.get(host.id)).capabilities.automations === true, mode: 'api', model: getConfig().model, executionMode: 'remote-cli' } }))];
   };
   const target = (userId, id = 'central', projectDirectory, permissions) => {

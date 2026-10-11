@@ -88,7 +88,7 @@ export default function CentralServerSettings({ connected, user, onConnect, onAc
       {status && <div className={`central-server-state${status.listening ? ' is-listening' : ''}`} role="status"><span aria-hidden="true" />{status.listening ? '正在监听局域网连接' : status.enabled ? '已设置开启，当前未监听' : '中央服务器已关闭'}</div>}
       {status?.reason && <p className="central-server-note central-server-reason">{status.reason}</p>}
       {status?.supported && <>
-        {!status.ownerHasPassword && <div className="central-server-password"><p>开启前，请先为本机管理员设置登录密码，再为其他用户创建成员账号。</p><button type="button" className="secondary-button" disabled={!!busy} onClick={onAccounts}>设置账号密码</button></div>}
+        {!status.ownerHasPassword && <div className="central-server-password"><p>开启前，请先为本机管理员设置登录密码，再为其他用户创建账号。</p><button type="button" className="secondary-button" disabled={!!busy} onClick={onAccounts}>设置账号密码</button></div>}
         <form onSubmit={event => void save(event)} className="central-server-form">
           <fieldset disabled={!!busy}>
             <label className="central-server-toggle"><span><strong>启用中央服务器</strong><small id={`${id}-enabled-help`}>随小伴启动恢复；收起到托盘继续运行，完全退出会停止服务。保存后生效。</small></span><input type="checkbox" role="switch" aria-label="启用中央服务器" aria-describedby={`${id}-enabled-help`} checked={enabled} disabled={!status.ownerHasPassword && !enabled} onChange={event => setEnabled(event.target.checked)} /></label>

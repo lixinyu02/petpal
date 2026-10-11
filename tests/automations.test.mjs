@@ -19,7 +19,7 @@ async function fixture(t, options = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-automations-'));
   const store = await new JsonStore(directory).init();
   const ownerId = store.state.ownerId, providerId = randomUUID(), remoteId = randomUUID();
-  const member = { id: randomUUID(), username: 'automation-member', displayName: 'Member', role: 'member', agentAccess: 'full', disabled: false, providerIds: [providerId], password: null, settings: defaultSettings(), voice: defaultVoiceSettings(), createdAt: new Date().toISOString() };
+  const member = { id: randomUUID(), username: 'automation-member', displayName: 'Member', role: 'user', agentAccess: 'full', disabled: false, providerIds: [providerId], password: null, settings: defaultSettings(), voice: defaultVoiceSettings(), createdAt: new Date().toISOString() };
   store.state.users.push(member);
   store.state.executionHosts.push({ id: remoteId, deviceId: randomUUID(), userId: ownerId, name: 'Fixture PC', platform: 'linux', arch: 'x64', createdAt: new Date().toISOString(), lastSeenAt: new Date().toISOString() });
   await store.save();
@@ -29,9 +29,9 @@ async function fixture(t, options = {}) {
     authorizations.push({ userId, spec, online: requireOnline, dispatch });
     const user = store.state.users.find(item => item.id === userId);
     if (!user || user.disabled) throw Object.assign(new Error('Account revoked'), { status: 401 });
-    if (!modelAllowed || spec.providerId !== providerId && !(spec.providerId === null && userId === ownerId)) throw Object.assign(new Error('Model revoked'), { status: 403 });
-    if (spec.hostId !== 'central' && !store.state.executionHosts.some(item => item.id === spec.hostId && item.userId === userId)) throw Object.assign(new Error('Foreign host'), { status: 404 });
-    if (spec.permissions.access === 'full-access' && user.agentAccess !== 'full') throw Object.assign(new Error('Permission revoked'), { status: 403 });
+    if (!modelAllowed || spec.providerId !== providerId && !(spec.providerId === null && user.role === 'admin')) throw Object.assign(new Error('Model revoked'), { status: 403 });
+    const host = store.state.executionHosts.find(item => item.id === spec.hostId);
+    if (spec.hostId === 'central' ? user.role !== 'admin' : !host || user.role !== 'admin' && host.userId !== userId) throw Object.assign(new Error('Foreign host'), { status: 403 });
     if (requireOnline && !online) throw Object.assign(new Error('Fixed computer offline'), { status: 409, code: 'executor_offline' });
     if (dispatch && busy) throw Object.assign(new Error('Fixed computer busy'), { status: 409, code: 'executor_busy' });
     return { hostName: spec.hostId === 'central' ? 'Central' : 'Fixture PC', providerName: 'Fixture model' };
@@ -249,7 +249,9 @@ test('fifty jobs per account limit is independent from receipts and another acco
   const f = await fixture(t); await f.create();
   await f.store.save({ automation: { apply: data => { const base = data.jobs[0]; for (let i = 1; i < 50; i++) data.jobs.push({ ...structuredClone(base), id: randomUUID(), revision: randomUUID(), runs: [] }); } } });
   await assert.rejects(f.create(), /50/);
-  assert.equal((await f.service.create(f.member.id, f.input())).createdBy, 'user');
+  const memberPC = { ...f.store.state.executionHosts[0], id: randomUUID(), deviceId: randomUUID(), userId: f.member.id };
+  f.store.state.executionHosts.push(memberPC); await f.store.save();
+  assert.equal((await f.service.create(f.member.id, f.input({ hostId: memberPC.id }))).createdBy, 'user');
   assert.equal(f.service.list(f.ownerId).automations.length, 50); assert.equal(f.service.list(f.member.id).automations.length, 1);
 });
 

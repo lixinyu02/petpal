@@ -34,6 +34,15 @@ test('an existing review permission is shown honestly without silently changing 
   assert.equal(f.changes[0].approval,'ask');
 });
 
+test('ordinary authenticated users can select full access and automatic execution without an account permission tier',()=>{
+  const f=render({user:{role:'user',isAdmin:false,isOwner:false,canUseCodex:true,agentAccess:'none'},value:{access:'read-only',approval:'ask'}});
+  assert.ok(f.find('option',props=>props.value==='full-access'));
+  f.find('select',props=>props['aria-label']==='Agent 访问范围').props.onChange({target:{value:'full-access'}});
+  f.find('select',props=>props['aria-label']==='Agent 运行方式').props.onChange({target:{value:'auto'}});
+  assert.equal(f.changes[0].access,'full-access');assert.equal(f.changes[1].approval,'auto');
+  assert.equal(f.find('option',props=>props.value==='review').props.disabled,true,'CLI review capability remains authoritative');
+});
+
 test('permission controls remain usable without static explanation paragraphs for any access or run mode',()=>{
   for(const access of ['read-only','workspace-write','full-access'])for(const approval of ['ask','auto','review'])for(const disabled of [false,true]){
     const f=render({reviewCapability:capability,reviewModel:'qwen3.8flash',value:{access,approval},disabled});

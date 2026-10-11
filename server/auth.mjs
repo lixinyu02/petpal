@@ -1,5 +1,6 @@
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
+import { isAdministrator, normalizeUserRole } from './user-roles.mjs';
 
 const scrypt = promisify(scryptCallback);
 export const SESSION_LIFETIME = 7 * 24 * 60 * 60 * 1000;
@@ -33,8 +34,7 @@ export function newSession(userId) {
 }
 export function publicUser(user, ownerId) {
   const isOwner = user.id === ownerId;
-  const agentAccess = isOwner ? 'full' : user.agentAccess ?? 'none';
-  return { id: user.id, username: user.username, displayName: user.displayName, role: user.role, isOwner, agentAccess, canUseCodex: agentAccess !== 'none' };
+  return { id: user.id, username: user.username, displayName: user.displayName, role: normalizeUserRole(user.role), isAdmin: isAdministrator(user), isOwner, agentAccess: 'full', canUseCodex: !user.disabled };
 }
 export function createLoginLimiter() {
   const buckets = new Map(), windowMs = 15 * 60 * 1000;

@@ -180,14 +180,20 @@ test('initialization timeout and a pre-aborted request do not create a usable se
 });
 
 test('cancellation during delayed Python probing waits for child exit and cannot later start stdio', async t => {
-  const calls = []; let killed = 0, exited = false;
+  const calls = []; let killed = 0, exited = false, markProbeStarted;
+  const probeStarted = new Promise(resolve => { markProbeStarted = resolve; });
   const delayedSpawn = (command, args) => {
     calls.push({ command, args }); const child = new EventEmitter(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
     const version = setTimeout(() => { child.stdout.end('Python 3.11.9\n'); child.emit('close', 0); }, 250);
-    child.kill = () => { killed++; clearTimeout(version); setTimeout(() => { exited = true; child.emit('close', 0); }, 40); return true; }; return child;
+    child.kill = () => { killed++; clearTimeout(version); setTimeout(() => { exited = true; child.emit('close', 0); }, 40); return true; };
+    markProbeStarted(); return child;
   };
   const { manager, transportOptions } = await harness(t, { spawn: delayedSpawn }); const controller = new AbortController();
-  const pending = manager.connect('qqmusic', { signal: controller.signal }); const outcome = pending.catch(error => error); await new Promise(resolve => setTimeout(resolve, 50)); controller.abort();
+  const pending = manager.connect('qqmusic', { signal: controller.signal }); const outcome = pending.catch(error => error);
+  // Profile recovery/file I/O may take longer than 50ms under the full suite.
+  // Cancel only after this test's real probe child exists, never before spawn.
+  await Promise.race([probeStarted, outcome.then(() => assert.fail('Connection settled before the delayed Python probe started'))]);
+  controller.abort();
   assert.equal((await outcome).name, 'AbortError'); assert.equal(exited, true); assert.equal(killed, 1); assert.equal(manager.children.size, 0); assert.equal(transportOptions.length, 0);
   await new Promise(resolve => setTimeout(resolve, 280)); assert.equal(calls.length, 1); assert.equal(transportOptions.length, 0);
 });

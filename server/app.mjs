@@ -21,6 +21,7 @@ import { createDownloadsCatalog } from './downloads.mjs';
 import { staticCacheControl } from './static-cache.mjs';
 import compression from 'compression';
 import { createExecutors } from './executors.mjs';
+import { isAdministrator, normalizeUserRole, canAccessExecutionHost } from './user-roles.mjs';
 import { normalizeProjectDirectory } from './project-directory.mjs';
 import { RemoteCodexBridge } from './remote-codex.mjs';
 import { createChatAssistant, normalizeChatAssistant } from './chat-assistant.mjs';
@@ -187,16 +188,15 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   });
   const isOwner = user => user.id === state.ownerId;
   const settingsFor = user => isOwner(user) ? state.settings : user.settings;
-  const canUseProvider = (user, id) => isOwner(user) || user.providerIds.includes(id);
-  const visibleProvider = (provider, user) => ({ ...publicProvider(provider), editable: isOwner(user), testable: true });
+  const canUseProvider = (user, id) => isAdministrator(user) || user.providerIds.includes(id);
+  const visibleProvider = (provider, user) => ({ ...publicProvider(provider), editable: isAdministrator(user), testable: true });
   const visibleUser = user => publicUser(user, state.ownerId);
-  const managedUser = user => ({ ...visibleUser(user), disabled: user.disabled, providerIds: isOwner(user) ? state.providers.map(provider => provider.id) : [...user.providerIds], hasPassword: Boolean(user.password), createdAt: user.createdAt });
-  const requireAdmin = user => { if (!isOwner(user)) throw failure(403, '仅管理员可管理账号和模型。'); };
+  const managedUser = user => ({ ...visibleUser(user), disabled: user.disabled, providerIds: isAdministrator(user) ? state.providers.map(provider => provider.id) : [...user.providerIds], hasPassword: Boolean(user.password), createdAt: user.createdAt });
+  const requireAdmin = user => { if (!isAdministrator(user)) throw failure(403, '仅管理员可管理账号和模型。'); };
   const requireCodex = user => { if (!visibleUser(user).canUseCodex) throw failure(403, '此账号尚未获管理员授权使用 Agent。'); };
   const normalizeAgentAccess = value => { if (!['none', 'workspace', 'full'].includes(value)) throw failure(400, 'Agent 授权须为 none、workspace 或 full。'); return value; };
   const requirePermissions = (user, value) => {
     requireCodex(user); const permissions = normalizeAgentPermissions(value);
-    if (visibleUser(user).agentAccess !== 'full' && permissions.access === 'full-access') throw failure(403, '此账号未获完整主机权限。');
     return permissions;
   };
   const requireCurrentAuth = req => {
@@ -222,7 +222,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const userCodexStatus = async user => {
     if (!visibleUser(user).canUseCodex) return { available: false, running: false, disabled: true, eligibleProviderIds: [], approvalReviewProviderIds: [], message: '此账号尚未获管理员授权使用 Agent。' };
     const status = redactCodex(await readCodexStatus());
-    return { ...(isOwner(user) ? status : { available: status.available, running: status.running, authenticated: status.authenticated, configured: status.configured, error: status.error, message: status.message, ...(status.approvalReview ? { approvalReview: status.approvalReview } : {}) }), ...publicCodexConfig(state.codexConfig), eligibleProviderIds: eligibleProviders(user), approvalReviewProviderIds: reviewProviders(user) };
+    return { ...(isAdministrator(user) ? status : { available: status.available, running: status.running, authenticated: status.authenticated, configured: status.configured, error: status.error, message: status.message, ...(status.approvalReview ? { approvalReview: status.approvalReview } : {}) }), ...publicCodexConfig(state.codexConfig), eligibleProviderIds: eligibleProviders(user), approvalReviewProviderIds: reviewProviders(user) };
   };
   const userCodexMetadata = user => {
     if (!visibleUser(user).canUseCodex) return { available: false, running: false, disabled: true, eligibleProviderIds: [], approvalReviewProviderIds: [], message: '此账号尚未获管理员授权使用 Agent。' };
@@ -266,7 +266,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (configChanging) throw failure(409, 'Agent 配置正在切换。');
     const config = state.codexConfig;
     if (providerId === null) {
-      if (!isOwner(user)) throw failure(403, '请选择管理员已分配给此账号的 Agent 模型。');
+      if (!isAdministrator(user)) throw failure(403, '请选择管理员已分配给此账号的 Agent 模型。');
       return { model: config.model || '', effort: config.reasoningEffort || '', codexRevision: config.revision };
     }
     const provider = providerById(providerId, user);
@@ -308,7 +308,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       const { user, expiresAt } = authorizeAgentIdentity(entry.auth);
       if (entry.auth.automation !== undefined) automations.authorizePrincipal(entry.auth, entry);
       requirePermissions(user, entry.permissions);
-      if (entry.projectDirectory && entry.projectAccess === 'full' && !isOwner(user) && user.agentAccess !== 'full') throw failure(403, '外部项目的 Agent 授权已撤销，请重新选择默认工作区。');
+      executors.hostFor(user.id, entry.hostId ?? 'central');
       const conversation = state.conversations.find(item => item.id === entry.conversationId && item.userId === user.id);
       if (!conversation || conversation.mode !== 'codex' || conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Agent 会话已删除或配置已变化，请新建会话。');
       assertAvailable(conversation.id);
@@ -347,8 +347,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       const host = executors.hostFor(userId, hostId), projectDirectory = normalizeProjectDirectory(value, host.platform);
       if (!projectDirectory) return {};
       executors.target(userId, hostId, projectDirectory);
-      const user = state.users.find(item => item.id === userId);
-      return { projectDirectory, projectAccess: isOwner(user ?? {}) || user?.agentAccess === 'full' ? 'full' : 'workspace' };
+      return { projectDirectory, projectAccess: 'full' };
     },
     authorize: entry => { const expiresAt = authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId ?? 'central', entry.projectDirectory, entry.permissions); return expiresAt; },
     authorizeRemoval: entry => authorizeAgentIdentity(entry.auth).expiresAt,
@@ -430,6 +429,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const chatAssistant = createChatAssistant({ store, agentTasks, revision: () => state.codexConfig.revision,
     resolveHost: (userId, hostId, options) => {
       if (options?.requireOnline === false) {
+        executors.hostFor(userId, hostId);
         const host = executors.list(userId).find(item => item.id === hostId);
         if (!host) throw failure(404, '执行电脑不存在或不属于当前账号。');
         return { hostId: host.id, hostName: host.name };
@@ -442,6 +442,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       if (!state.conversations.includes(conversation) || conversation.userId !== user.id || conversation.mode !== 'chat') throw failure(404, '后台任务所属聊天不存在。');
       resolveAgentModel(user.id, options.providerId);
       resolveAgentReview(user.id, options.permissions);
+      executors.hostFor(user.id, options.hostId);
       const host = executors.list(user.id).find(host => host.id === options.hostId);
       if (!host) throw failure(404, '执行电脑不存在或不属于当前账号。');
       if (options.projectDirectory) { normalizeProjectDirectory(options.projectDirectory, host.platform); if (host.kind !== 'central' && !host.codex?.projectDirectory) throw failure(409, '所选电脑客户端尚不支持项目目录，请升级客户端或使用默认工作区。'); }
@@ -507,7 +508,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     res.json(await notifications.remove(executorAuth(req), req.params.deviceId));
   });
   app.get('/api/agent/hosts', async (req, res) => {
-    requireCodex(req.user); const hosts = executors.list(req.user.id); hosts[0] = { ...hosts[0], codex: { ...await userCodexStatus(req.user), projectDirectory: true, automations: true } }; requireCurrentAuth(req); res.json({ hosts });
+    requireCodex(req.user); const hosts = executors.list(req.user.id);
+    const central = hosts.find(host => host.id === 'central');
+    if (central) central.codex = { ...await userCodexStatus(req.user), projectDirectory: true, automations: true };
+    requireCurrentAuth(req); res.json({ hosts });
   });
   const automationRequest = req => {
     requireCurrentAuth(req); requireCodex(req.user);
@@ -586,20 +590,23 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.get('/api/admin/users', (req, res) => { requireAdmin(req.user); res.json({ users: state.users.map(managedUser) }); });
   app.post('/api/admin/users', async (req, res) => {
     requireAdmin(req.user);
-    if (req.body.role !== undefined || req.body.isOwner !== undefined || req.body.canUseCodex !== undefined) throw failure(400, '新账号只能是普通成员。');
+    if (req.body.isOwner !== undefined || req.body.canUseCodex !== undefined || req.body.isAdmin !== undefined) throw failure(400, '账号身份请使用 role 字段设置。');
+    const role = normalizeUserRole(req.body.role);
     const name = username(req.body.username), displayName = string(req.body.displayName ?? name, '显示名称', 64);
-    const grants = providerIds(req.body.providerIds ?? []), agentAccess = normalizeAgentAccess(req.body.agentAccess ?? 'none'), password = await hashPassword(req.body.password);
-    requireCurrentAuth(req); providerIds(grants);
+    const grants = providerIds(req.body.providerIds ?? []), agentAccess = 'full', password = await hashPassword(req.body.password);
+    if (req.body.agentAccess !== undefined) normalizeAgentAccess(req.body.agentAccess);
+    requireCurrentAuth(req); requireAdmin(req.user); providerIds(grants);
     if (state.users.length >= 100) throw failure(400, '最多保存 100 个账号。');
     if (state.users.some(user => user.username === name)) throw failure(409, '这个账号名称已被使用。');
-    const user = { id: randomUUID(), username: name, displayName, role: 'member', agentAccess, disabled: false, providerIds: grants, password, settings: defaultSettings(), voice: defaultVoiceSettings(), createdAt: now() };
+    const user = { id: randomUUID(), username: name, displayName, role, agentAccess, disabled: false, providerIds: grants, password, settings: defaultSettings(), voice: defaultVoiceSettings(), createdAt: now() };
     state.users.push(user); await store.save(); res.status(201).json({ user: managedUser(user) });
   });
   app.patch('/api/admin/users/:id', async (req, res) => {
     requireAdmin(req.user);
     const user = state.users.find(item => item.id === req.params.id); if (!user) throw failure(404, '账号不存在。');
-    if (req.body.role !== undefined || req.body.username !== undefined || req.body.isOwner !== undefined || req.body.canUseCodex !== undefined) throw failure(400, '账号角色和身份不可修改。');
+    if (req.body.username !== undefined || req.body.isOwner !== undefined || req.body.canUseCodex !== undefined || req.body.isAdmin !== undefined) throw failure(400, '账号名称和主账号身份不可修改。');
     const patch = {};
+    if (req.body.role !== undefined) { patch.role = normalizeUserRole(req.body.role); if (isOwner(user) && patch.role !== 'admin') throw failure(400, '主机 owner 不可降级为普通用户。'); }
     if (req.body.displayName !== undefined) patch.displayName = string(req.body.displayName, '显示名称', 64);
     if (req.body.disabled !== undefined) {
       if (typeof req.body.disabled !== 'boolean') throw failure(400, '账号停用状态无效。');
@@ -607,18 +614,18 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       patch.disabled = req.body.disabled;
     }
     if (req.body.providerIds !== undefined) { const grants = providerIds(req.body.providerIds); if (!isOwner(user)) patch.providerIds = grants; }
-    if (req.body.agentAccess !== undefined) { patch.agentAccess = normalizeAgentAccess(req.body.agentAccess); if (isOwner(user) && patch.agentAccess !== 'full') throw failure(400, '主机 owner 的 Agent 权限不可降级。'); }
+    if (req.body.agentAccess !== undefined) { normalizeAgentAccess(req.body.agentAccess); patch.agentAccess = 'full'; }
     if (req.body.password !== undefined) patch.password = await hashPassword(req.body.password);
-    requireCurrentAuth(req);
+    requireCurrentAuth(req); requireAdmin(req.user);
     if (patch.providerIds !== undefined) providerIds(patch.providerIds);
-    const rank = { none: 0, workspace: 1, full: 2 };
-    const revoked = patch.password !== undefined || patch.disabled === true || (patch.agentAccess !== undefined && rank[patch.agentAccess] < rank[user.agentAccess]) || (patch.providerIds !== undefined && user.providerIds.some(id => !patch.providerIds.includes(id)));
+    const revoked = patch.password !== undefined || patch.disabled === true || (patch.role !== undefined && patch.role !== user.role) || (patch.providerIds !== undefined && user.providerIds.some(id => !patch.providerIds.includes(id)));
     Object.assign(user, patch);
     const settings = settingsFor(user);
     if (settings.defaultProviderId && !canUseProvider(user, settings.defaultProviderId)) settings.defaultProviderId = null;
     if (revoked) state.sessions = state.sessions.filter(session => session.userId !== user.id);
     if (revoked) await stopTasks(task => task.userId === user.id);
-    await store.save(); res.json({ user: managedUser(user) });
+    const clearHost = settings.chatAssistantHostId !== null && !canAccessExecutionHost(state, user.id, settings.chatAssistantHostId);
+    await store.save(clearHost ? { chatAssistantDefaultHost: { userId: user.id, hostId: null } } : undefined); res.json({ user: managedUser(user) });
   });
   app.get('/api/voice', (req, res) => res.json(publicVoiceSettings(req.user.voice)));
   app.patch('/api/voice', async (req, res) => {
@@ -628,7 +635,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const updated = patchVoiceSettings(req.user.voice, req.body);
     req.user.voice = updated; await store.save(); res.json(publicVoiceSettings(updated));
   });
-  app.get('/api/voice/cosyvoice', (req, res) => res.json(cosyvoice.publicConfig(isOwner(req.user))));
+  app.get('/api/voice/cosyvoice', (req, res) => res.json(cosyvoice.publicConfig(isAdministrator(req.user))));
   const asrRoute = handler => async (req, res) => {
     try { await handler(req, res); }
     catch (error) {
@@ -638,7 +645,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     }
   };
   const emptyAsrBody = req => { if (Object.keys(req.body).length) throw failure(400, '此识别操作不接受附加字段。'); };
-  app.get('/api/voice/asr', (req, res) => res.json(asr.publicConfig(isOwner(req.user))));
+  app.get('/api/voice/asr', (req, res) => res.json(asr.publicConfig(isAdministrator(req.user))));
   app.patch('/api/voice/asr', (req, res, next) => { requireAdmin(req.user); next(); }, asrRoute(async (req, res) => {
     const config = await asr.configure(req.body, { authorize: () => requireCurrentAuth(req) });
     requireCurrentAuth(req); res.json(config);
@@ -1040,7 +1047,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (collaborationOptions && conversation.mode !== 'chat') throw failure(400, 'Chat + Agent 仅用于聊天会话。');
     if (conversation.mode === 'codex') {
       requireCodex(req.user);
-      if (!isOwner(req.user)) throw failure(403, '成员账号须使用支持已授权模型选择的 Agent 客户端。');
+      executors.hostFor(req.user.id, 'central');
       if (conversation.agent?.run?.status === 'unknown') throw failure(409, '上次远程执行状态未知，本会话不会开始新任务。');
       if ([conversation.agentHostId, conversation.threadHostId, ...conversation.agent?.queue?.map(entry => entry.hostId) ?? []].some(hostId => hostId && hostId !== 'central')) throw failure(409, '这个会话包含桌面执行任务，请使用支持执行电脑选择的 Agent 客户端。');
       if (req.body.projectDirectory || conversation.agentProjectDirectory || conversation.threadProjectDirectory || conversation.agent?.queue?.some(entry => entry.projectDirectory)) throw failure(409, '这个会话包含项目目录，请使用支持项目目录的 Agent 客户端提交。');

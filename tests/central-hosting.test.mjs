@@ -169,7 +169,7 @@ test('dual listeners share user models, Chat history and voice preferences while
   assert.equal((await f.request(listener, `/api/conversations/${conversation.id}`, { token: bob.token })).status, 404);
   assert.equal((await f.local(`/api/conversations/${conversation.id}`)).status, 404);
   assert.equal((await f.request(listener, '/api/admin/users', { token: alice.token })).status, 403);
-  assert.equal((await f.request(listener, '/api/agent/hosts', { token: alice.token })).status, 403);
+  const userHosts = await f.request(listener, '/api/agent/hosts', { token: alice.token }); assert.equal(userHosts.status, 200); assert.deepEqual(await f.responseJson(userHosts), { hosts: [] });
 });
 
 test('LAN listener enforces exact Host and Origin and does not implicitly trust Android or forwarded origins', async t => {

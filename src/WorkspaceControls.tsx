@@ -116,20 +116,20 @@ export function ModelPicker({ providers, value, onChange, disabled = false, labe
 
 type ExecutionHostPickerProps = {
   hosts: AgentHost[]; value: string; onChange(hostId: string): void; disabled?: boolean; loading?: boolean; error?: string; localHostId?: string;
-  label?: string; lockReason?: string; onRefresh?(): void; onDownload?(): void; allowOffline?:boolean;
+  label?: string; lockReason?: string; onRefresh?(): void; onDownload?(): void; allowOffline?:boolean; canAccessAllHosts?:boolean;
 };
 
 /** Keep the popup inside its owning controls so dialog focus and ordinary Tab continue to work. */
-export function ExecutionHostPicker({hosts,value,onChange,disabled=false,loading=false,error='',localHostId='',label='执行电脑',lockReason='',onRefresh,onDownload,allowOffline=false}:ExecutionHostPickerProps) {
+export function ExecutionHostPicker({hosts,value,onChange,disabled=false,loading=false,error='',localHostId='',label='执行电脑',lockReason='',onRefresh,onDownload,allowOffline=false,canAccessAllHosts=true}:ExecutionHostPickerProps) {
   const id=useId(),[query,setQuery]=useState(''),container=useRef<HTMLDivElement>(null);
   useEffect(()=>{
     const wrapper=container.current;if(!wrapper)return;
     const opened=(event:Event)=>{const details=event.target;if(details instanceof HTMLDetailsElement&&details===wrapper.querySelector('details')&&details.open)setQuery('');};
     wrapper.addEventListener('toggle',opened,true);return()=>wrapper.removeEventListener('toggle',opened,true);
   },[]);
-  const choices=useMemo(()=>executionHostChoices(hosts,value,localHostId),[hosts,value,localHostId]);
+  const choices=useMemo(()=>executionHostChoices(hosts,value,localHostId,canAccessAllHosts),[hosts,value,localHostId,canAccessAllHosts]);
   const groups=useMemo(()=>groupExecutionHosts(choices,query),[choices,query]);
-  const selected=choices.find(choice=>choice.id===value),hasDesktop=hosts.some(host=>host.kind==='desktop'&&host.online);
+  const selected=choices.find(choice=>choice.id===value),hasDesktop=choices.some(host=>host.kind==='desktop'&&host.online&&!host.missing);
   const legacyDesktop=typeof window!=='undefined'&&!!window.petpal&&!window.petpal.executor;
   const unavailable=!!selected&&!selected.online;
   const selectionLabel=selected?`${selected.name}${selected.disambiguator?` · ${selected.disambiguator}`:''}${selected.isLocal?' · 此电脑':''}${selected.missing?' · 未连接':!selected.online?' · 离线':''}`:loading?'正在寻找执行电脑…':'选择执行电脑';
@@ -152,13 +152,13 @@ export function ExecutionHostPicker({hosts,value,onChange,disabled=false,loading
         {groups.map(group=><section className="workspace-host-group" key={group.id} aria-labelledby={`${id}-${group.id}`}><h4 id={`${id}-${group.id}`}>{group.label}<span>{group.choices.length}</span></h4>
           {group.choices.map(choice=><button type="button" className={`workspace-host-option${choice.id===value?' is-selected':''}`} key={choice.id} aria-pressed={choice.id===value} disabled={!selectable(choice)} onClick={event=>choose(choice,event)}>
             <span className="workspace-host-option-icon">{choice.kind==='central'?<Cloud size={17} aria-hidden="true"/>:<Monitor size={17} aria-hidden="true"/>}</span>
-            <span className="workspace-host-option-copy"><strong title={choice.name}>{choice.name}</strong><span>{choice.platformLabel}{choice.isLocal?' · 此电脑':''} · {choice.missing?'未连接':choice.online?'已连接':'离线'}{choice.disambiguator&&<> · {choice.disambiguator}</>}</span><small>{choice.note}</small></span>
+            <span className="workspace-host-option-copy"><strong title={choice.name}>{choice.name}</strong><span>{choice.platformLabel}{choice.isLocal?' · 此电脑':''} · {choice.missing?'未连接':choice.online?'已连接':'离线'}{choice.disambiguator&&<> · {choice.disambiguator}</>}</span>{choice.ownerLabel&&<span className="workspace-host-owner">{choice.isOwn?'我的电脑':'所属用户'} · {choice.ownerLabel}</span>}<small>{choice.note}</small></span>
             <span className="workspace-host-selected">{choice.id===value&&<Check size={17} aria-label="已选中"/>}</span>
           </button>)}
         </section>)}
         {!groups.length&&<p className="workspace-host-empty" role="status">{query.trim()?'没有匹配的电脑，试试名称或 Windows、Ubuntu。':loading?'正在寻找执行电脑…':'还没有可选的执行电脑。'}</p>}
       </div>
-      {selected?.kind==='central'&&<p className="workspace-host-server-note">当前任务在服务器执行。操作 QQ 音乐等电脑软件时，请选择对应的桌面电脑。</p>}
+      {selected?.kind==='central'&&!selected.missing&&<p className="workspace-host-server-note">当前任务在服务器执行。操作 QQ 音乐等电脑软件时，请选择对应的桌面电脑。</p>}
       {!hasDesktop&&!loading&&<div className="workspace-host-guide"><strong>连接你的电脑</strong><p>{legacyDesktop?'此客户端还没有执行器，请更新桌面客户端后重新登录。':'在 Windows 或 Ubuntu 客户端登录同一账号，并保持客户端运行，即可在这里选择它。'}</p>{onDownload&&<button type="button" onClick={onDownload}><Download size={16} aria-hidden="true"/>下载客户端</button>}</div>}
       <p className="workspace-host-menu-footnote">切换执行电脑后，聊天记录保持不变。</p>
     </WorkspaceDisclosure>

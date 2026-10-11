@@ -32,7 +32,9 @@ export function chatAssistantDefaultIssue(value, defaultHostId) {
 export function chatAssistantTargetIssue(value, hosts, providers=[], owner=false) {
   const selected=hosts.find(host=>host.id===value.hostId);
   if (!value.hostId) return '先选择一台执行电脑。';
-  if (!selected?.online) return '所选电脑已离线，聊天照常继续；请在该电脑登录小伴。';
+  if(!owner&&(value.hostId==='central'||!selected||selected.isOwn===false))return '请选择自己登录的执行电脑。';
+  if(!selected)return '此前电脑未连接或已无访问权限，请重新选择可用设备。';
+  if (!selected.online) return '所选电脑已离线，聊天照常继续；请在该电脑登录小伴。';
   if (selected.codex?.available===false) return '这台电脑的 Agent 暂不可用，请检查桌面客户端和 Codex 连接。';
   if (!value.providerId&&!owner) return '请选择管理员分配的 Agent 模型。';
   if (value.providerId&&!providers.some(item=>item.id===value.providerId)) return '此前选择的 Agent 模型已不可用，请重新选择。';

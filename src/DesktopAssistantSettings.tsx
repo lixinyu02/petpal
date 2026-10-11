@@ -21,7 +21,7 @@ export default function DesktopAssistantSettings({connected,user,onConfigSaved}:
   const alive=useRef(false),epoch=useRef(getSessionEpoch()).current,controllers=useRef(new Set<AbortController>());
   const operation=useRef(false),loadRevision=useRef({config:0,tools:0});
   const activeAction=useRef<AbortController|null>(null);
-  const owner=!!user?.isOwner,enabled=owner&&connected;
+  const owner=!!(user?.isAdmin||user?.isOwner),enabled=owner&&connected;
   const current=(controller?:AbortController)=>alive.current&&getSessionEpoch()===epoch&&!controller?.signal.aborted;
   function controller(){const next=new AbortController();controllers.current.add(next);return next;}
   async function loadConfig(){
@@ -79,7 +79,7 @@ export default function DesktopAssistantSettings({connected,user,onConfigSaved}:
   const actionDisabled=busy||!!tools?.busy;
   return <section className="settings-section desktop-assistant" aria-label="电脑助手配置">
     <div className="section-title"><div><h2>电脑助手</h2><p>配置 Codex，管理服务主机上的音乐和浏览器工具。</p></div><ShieldCheck size={24}/></div>
-    {!connected&&<p className="assistant-unavailable">登录主机管理员账号后，可以读取配置和使用工具。</p>}
+    {!connected&&<p className="assistant-unavailable">登录管理员账号后，可以读取配置和使用工具。</p>}
     <section className="assistant-section" aria-labelledby="assistant-api-title">
       <div className="assistant-section-heading"><div><h3 id="assistant-api-title"><Terminal size={19}/>Codex 连接</h3><p>API 模式使用独立配置；本机模式沿用主机已有登录。</p></div><button type="button" className="secondary-button" disabled={!enabled||busy} onClick={()=>void loadConfig()}><RefreshCw size={14}/>重新读取</button></div>
       {configError&&<p className="form-error" role="alert">{configError}</p>}

@@ -11,7 +11,7 @@ import { createPetServer } from '../server/app.mjs';
 
 const ownerToken = 'isolated-test-owner-token';
 const password = 'test-password-123';
-const stubCodex = () => ({ statusCalls: 0, approvalCalls: 0, async status() { this.statusCalls++; return { available: true, workspaceRoot: '/owner-private-workspace' }; }, async run() { return { text: 'owner reply', threadId: 'owner-thread' }; }, async approve() { this.approvalCalls++; return { ok: true }; }, async close() {} });
+const stubCodex = () => ({ statusCalls: 0, runCalls: 0, approvalCalls: 0, async status() { this.statusCalls++; return { available: true, workspaceRoot: '/owner-private-workspace' }; }, async run() { this.runCalls++; return { text: 'owner reply', threadId: 'owner-thread' }; }, async approve() { this.approvalCalls++; return { ok: true }; }, async close() {} });
 async function setup(t, options = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-users-'));
   if (options.legacy) await writeFile(path.join(directory, 'state.json'), options.legacy);
@@ -216,9 +216,11 @@ test('members see only assigned models and private settings/history; identity bo
   const a = await member('alice', [p1.id]), b = await member('bob', [p2.id]);
   const owner = await readState(); const calls = codex.statusCalls;
   const alice = await readState(a.token), bob = await readState(b.token);
-  assert.equal(codex.statusCalls, calls, 'member state must never start or query the shared CLI');
+  assert.equal(codex.statusCalls, calls + 2, 'authenticated users may read redacted CLI availability');
+  assert.equal(codex.runCalls, 0, 'state reads never execute the shared CLI');
   assert.equal(alice.instanceId, owner.instanceId); assert.notEqual(alice.user.id, bob.user.id);
-  assert.equal(alice.user.canUseCodex, false); assert.equal(alice.codex.disabled, true); assert.equal(alice.codex.workspaceRoot, undefined);
+  assert.equal(alice.user.role, 'user'); assert.equal(alice.user.isAdmin, false);
+  assert.equal(alice.user.canUseCodex, true); assert.equal(alice.user.agentAccess, 'full'); assert.equal(alice.codex.workspaceRoot, undefined);
   assert.deepEqual(alice.providers.map(item => item.id), [p1.id]); assert.equal(alice.providers[0].editable, false); assert.equal(alice.providers[0].testable, true);
   assert.deepEqual(bob.providers.map(item => item.id), [p2.id]);
   assert.equal((await request('/settings', { token: a.token, method: 'PATCH', body: { userId: b.user.id, petName: 'Alice only', persona: 'Alice persona', defaultProviderId: p1.id } })).status, 200);
@@ -233,9 +235,14 @@ test('members see only assigned models and private settings/history; identity bo
   ]) assert.equal((await request(route, { token: b.token, method, body })).status, 404, route);
   for (const [route, method, body] of [
     ['/providers', 'POST', { name: 'intruder' }], [`/providers/${p1.id}`, 'DELETE'], ['/admin/users', 'GET'], ['/admin/users', 'POST', {}], [`/admin/users/${a.user.id}`, 'PATCH', { disabled: true }],
-    ['/codex/status', 'GET'], ['/codex/approvals/guess', 'POST', { decision: 'accept' }], ['/conversations', 'POST', { mode: 'codex' }],
   ]) assert.equal((await request(route, { token: a.token, method, body })).status, 403, route);
-  assert.equal(codex.statusCalls, calls + 1, 'only the explicit owner read above queried the CLI');
+  assert.equal((await request('/codex/status', { token: a.token })).status, 200);
+  assert.equal((await request('/codex/approvals/guess', { token: a.token, method: 'POST', body: { decision: 'accept' } })).status, 404);
+  const agent = await request('/conversations', { token: a.token, method: 'POST', body: { mode: 'codex' } });
+  assert.equal(agent.status, 201); const agentChat = await agent.json();
+  assert.equal((await request(`/conversations/${agentChat.id}/messages`, { token: a.token, method: 'POST', body: { content: 'central must remain inaccessible' } })).status, 403);
+  assert.deepEqual((await (await request('/agent/hosts', { token: a.token })).json()).hosts, []);
+  assert.equal(codex.runCalls, 0, 'ordinary users cannot run central Codex');
 });
 
 test('voice credentials and selected settings stay per user and every public projection excludes secrets', async t => {
@@ -312,20 +319,22 @@ test('logout cancels only requests from that session while another login remains
   await request(`/conversations/${c2.id}/stop`, { token: other.token, method: 'POST' }); await s2;
 });
 
-test('owner password can be set while pairing remains owner; identity elevation and invalid updates are atomic', async t => {
+test('owner password can be set while pairing remains owner; invalid identity updates are atomic', async t => {
   const { request, readState, login, member, directory } = await setup(t);
   const state = await readState();
   const update = await request(`/admin/users/${state.user.id}`, { method: 'PATCH', body: { password } });
   assert.equal(update.status, 200); assert.equal((await update.json()).user.hasPassword, true);
   const account = await login('owner'); assert.equal(account.user.isOwner, true);
   const a = await member('alice');
-  for (const [id, body] of [[state.user.id, { disabled: true }], [a.user.id, { role: 'admin' }], [a.user.id, { providerIds: ['not-a-model'] }], [a.user.id, { password: 'short', displayName: 'must not write' }]]) {
+  for (const [id, body] of [[state.user.id, { disabled: true }], [state.user.id, { role: 'user' }], [a.user.id, { role: 'superadmin' }], [a.user.id, { providerIds: ['not-a-model'] }], [a.user.id, { password: 'short', displayName: 'must not write' }]]) {
     const before = await readFile(path.join(directory, 'state.json'), 'utf8');
     assert.equal((await request(`/admin/users/${id}`, { method: 'PATCH', body })).status, 400);
     assert.equal(await readFile(path.join(directory, 'state.json'), 'utf8'), before);
   }
   assert.equal((await request('/admin/users', { method: 'POST', body: { username: 'Alice', password } })).status, 409);
-  assert.equal((await request('/admin/users', { method: 'POST', body: { username: 'eve', password, role: 'admin' } })).status, 400);
+  assert.equal((await request('/admin/users', { method: 'POST', body: { username: 'eve', password, role: 'superadmin' } })).status, 400);
+  const admin = await request('/admin/users', { method: 'POST', body: { username: 'fixture-admin', password, role: 'admin' } });
+  assert.equal(admin.status, 201); assert.equal((await admin.json()).user.isAdmin, true);
   await request(`/admin/users/${state.user.id}`, { method: 'PATCH', body: { password: 'owner-new-password' } });
   assert.equal((await request('/auth/me', { token: account.token })).status, 401);
   assert.equal((await request('/auth/me')).status, 200);
@@ -363,7 +372,7 @@ test('Codex approval requires a live owner task and stale or guessed IDs never r
   const response = await request(`/conversations/${chat.id}/messages`, { method: 'POST', body: { content: 'owner only' } });
   const reader = response.body.getReader(); let output = '';
   while (!output.includes('test-approval')) output += new TextDecoder().decode((await reader.read()).value);
-  assert.equal((await request('/codex/approvals/test-approval', { token: a.token, method: 'POST', body: { decision: 'accept' } })).status, 403);
+  assert.equal((await request('/codex/approvals/test-approval', { token: a.token, method: 'POST', body: { decision: 'accept' } })).status, 404);
   assert.equal(codex.approvalCalls, 0);
   assert.equal((await request('/codex/approvals/test-approval', { method: 'POST', body: { decision: 'accept' } })).status, 200);
   while (!(await reader.read()).done) {} reader.releaseLock();

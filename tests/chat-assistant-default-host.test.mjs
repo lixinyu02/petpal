@@ -71,17 +71,17 @@ test('new and legacy owner/member profiles get an unset default without changing
 
 test('default targets are account scoped, visible to a second session and durable across restart', async t => {
   const f = await fixture(t), alice = await f.member('scope-alice'), bob = await f.member('scope-bob');
-  const ownerPC = await f.register(), alicePC = await f.register(alice.token);
+  const ownerPC = await f.register(), alicePC = await f.register(alice.token), bobPC = await f.register(bob.token);
   assert.equal((await f.patch(ownerPC.hostId)).status, 200);
   assert.equal((await f.patch(alicePC.hostId, alice.token)).status, 200);
-  assert.equal((await f.patch('central', bob.token)).status, 200);
+  assert.equal((await f.patch(bobPC.hostId, bob.token)).status, 200);
   const secondSession = await f.login(alice.username);
   assert.equal((await f.settings(secondSession)).chatAssistantHostId, alicePC.hostId);
   await f.restart();
   assert.equal((await f.settings()).chatAssistantHostId, ownerPC.hostId);
   assert.equal((await f.settings(alice.token)).chatAssistantHostId, alicePC.hostId);
   assert.equal((await f.settings(secondSession)).chatAssistantHostId, alicePC.hostId);
-  assert.equal((await f.settings(bob.token)).chatAssistantHostId, 'central');
+  assert.equal((await f.settings(bob.token)).chatAssistantHostId, bobPC.hostId);
   assert.deepEqual(f.calls, []);
   const state = (await f.request('/state', { token: alice.token })).data;
   assert.deepEqual(state.conversations, []);
@@ -96,10 +96,11 @@ test('foreign and unregistered targets cannot replace a valid default or mutate 
   const before = await f.settings(alice.token);
   for (const id of [bobPC.hostId, ownerPC.hostId, randomUUID()]) {
     const result = await f.patch(id, alice.token, { petName: 'Must not save' });
-    assert.equal(result.status, 404);
+    assert.equal(result.status, 403);
     assert.deepEqual(await f.settings(alice.token), before);
   }
-  assert.equal((await f.patch(alicePC.hostId)).status, 404, 'owner cannot select another account computer');
+  assert.equal((await f.patch(alicePC.hostId)).status, 200, 'administrator may select another account computer');
+  assert.equal((await f.settings()).chatAssistantHostId, alicePC.hostId);
 });
 
 test('malformed default host IDs are rejected without coercion', async t => {
@@ -117,7 +118,7 @@ test('a registered offline target remains saved and never falls back to the onli
   assert.equal((await f.request(`/agent/executors/${pc.connectionId}`, { token: alice.token, method: 'DELETE' })).status, 200);
   const hosts = (await f.request('/agent/hosts', { token: alice.token })).data.hosts;
   assert.equal(hosts.find(host => host.id === pc.hostId).online, false);
-  assert.equal(hosts.find(host => host.id === 'central').online, true);
+  assert.equal(hosts.some(host => host.id === 'central'), false, 'ordinary users never receive the central execution target');
   assert.equal((await f.patch(pc.hostId, alice.token)).status, 200);
   await f.restart();
   assert.equal((await f.settings(alice.token)).chatAssistantHostId, pc.hostId);
@@ -125,10 +126,10 @@ test('a registered offline target remains saved and never falls back to the onli
 });
 
 test('null and empty strings clear only the authenticated account default, while unauthenticated writes fail', async t => {
-  const f = await fixture(t), alice = await f.member('clear-alice');
+  const f = await fixture(t), alice = await f.member('clear-alice'), pc = await f.register(alice.token);
   assert.equal((await f.patch('central')).status, 200);
   for (const empty of [null, '']) {
-    assert.equal((await f.patch('central', alice.token)).status, 200);
+    assert.equal((await f.patch(pc.hostId, alice.token)).status, 200);
     const result = await f.patch(empty, alice.token);
     assert.equal(result.status, 200); assert.equal(result.data.chatAssistantHostId, null);
     assert.equal((await f.settings()).chatAssistantHostId, 'central');
@@ -137,7 +138,7 @@ test('null and empty strings clear only the authenticated account default, while
   assert.equal((await f.settings()).chatAssistantHostId, 'central');
 });
 
-test('accounts without Agent access cannot set a default, but may clear a preference after authorization is revoked', async t => {
+test('legacy Agent access flags do not remove owned PC access or allow central execution', async t => {
   const f = await fixture(t), denied = await f.member('denied-alice', 'none');
   assert.equal((await f.patch('central', denied.token)).status, 403);
   assert.equal((await f.settings(denied.token)).chatAssistantHostId, null);
@@ -147,7 +148,8 @@ test('accounts without Agent access cannot set a default, but may clear a prefer
   assert.equal((await f.request(`/admin/users/${alice.user.id}`, { method: 'PATCH', body: { agentAccess: 'none' } })).status, 200);
   const replacementSession = await f.login(alice.username);
   assert.equal((await f.settings(replacementSession)).chatAssistantHostId, pc.hostId);
-  assert.equal((await f.patch(pc.hostId, replacementSession)).status, 403);
+  assert.equal((await f.patch(pc.hostId, replacementSession)).status, 200);
+  assert.equal((await f.patch('central', replacementSession)).status, 403);
   assert.equal((await f.patch(null, replacementSession)).status, 200);
   assert.equal((await f.settings(replacementSession)).chatAssistantHostId, null);
   assert.deepEqual(f.calls, []);
@@ -163,7 +165,7 @@ test('stored malformed preferences fail closed without replacing the existing st
   }
 });
 
-test('stored preferences require a registered host belonging to the profile owner', async t => {
+test('stored preferences require a registered host and permit central for administrators', async t => {
   const directory = await temporaryDirectory(t), store = await new JsonStore(directory).init();
   store.state.settings.chatAssistantHostId = randomUUID(); await writeFile(store.file, JSON.stringify(store.state));
   await assert.rejects(new JsonStore(directory).init(), /默认执行电脑归属无效/);

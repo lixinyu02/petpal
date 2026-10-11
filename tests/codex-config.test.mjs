@@ -233,7 +233,8 @@ test('member cannot inspect/configure/operate host tools; owner click uses share
   const { request } = await setup(t, { desktopTools: tools });
   await request('/admin/users', { method: 'POST', body: { username: 'member', displayName: 'Member', password: 'test-password-123' } });
   const session = await (await request('/auth/login', { method: 'POST', body: { username: 'member', password: 'test-password-123' } })).json();
-  for (const [route, method, body] of [['/codex/config', 'GET'], ['/codex/config', 'PATCH', api], ['/desktop-tools/status', 'GET'], ['/desktop-tools/action', 'POST', { tool: 'fixed', arguments: {} }]]) assert.equal((await request(route, { method, body, token: session.token })).status, 403);
+  assert.equal((await request('/codex/config', { token: session.token })).status, 200);
+  for (const [route, method, body] of [['/codex/config', 'PATCH', api], ['/desktop-tools/status', 'GET'], ['/desktop-tools/action', 'POST', { tool: 'fixed', arguments: {} }]]) assert.equal((await request(route, { method, body, token: session.token })).status, 403);
   assert.equal(statuses, 0); assert.equal(actions, 0);
   assert.deepEqual(await (await request('/desktop-tools/action', { method: 'POST', body: { tool: 'fixed', arguments: {} } })).json(), { ok: true, action: 'fixture' });
   assert.equal(actions, 1);

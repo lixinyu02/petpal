@@ -6,7 +6,7 @@ import './agent-controls.css';
 
 export const defaultAgentPermissions: Permissions = { access:'read-only', approval:'ask' };
 export default function AgentPermissions({ value, onChange, user, disabled=false, reviewCapability, reviewProviders=[], reviewProgress }: { value:Permissions; onChange(value:Permissions):void; user?:User; disabled?:boolean;reviewCapability?:ApprovalReviewCapability;reviewModel?:string;reviewProviders?:Provider[];reviewProgress?:AgentApprovalReview }) {
-  const full = user?.isOwner || user?.agentAccess === 'full';
+  const full = user?.canUseCodex || user?.isOwner || user?.isAdmin;
   const scopes = { 'read-only': '只读', 'workspace-write': '工作区', 'full-access': '完全访问' };
   const approvals = { ask: '需要时询问', review: '自动审查', auto: '自动运行' };
   const independentReview=canUseIndependentApprovalReview(reviewCapability),providers=reviewProviders.filter(provider=>provider.protocol==='responses');

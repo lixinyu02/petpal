@@ -9,6 +9,29 @@ import { createCubismParameterBridge, cubismParameterTargets } from '../src/avat
 const buffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < .00001, `${actual} differs from ${expected}`);
 
+// Image decoding is stubbed below; retain actual dimensions for both the
+// historical PNGs and the lossless WebP transport used by the bundled V12.
+function textureDimensions(bytes) {
+  if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+    assert.equal(bytes.toString('ascii', 12, 16), 'IHDR');
+    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  }
+  assert.equal(bytes.toString('ascii', 0, 4), 'RIFF');
+  assert.equal(bytes.toString('ascii', 8, 12), 'WEBP');
+  assert.equal(bytes.readUInt32LE(4) + 8, bytes.length, 'WebP container must be complete');
+  for (let offset = 12; offset + 8 <= bytes.length;) {
+    const type = bytes.toString('ascii', offset, offset + 4), length = bytes.readUInt32LE(offset + 4), payload = offset + 8;
+    assert.ok(payload + length <= bytes.length, 'WebP chunk must be complete');
+    if (type === 'VP8L') {
+      assert.ok(length >= 5); assert.equal(bytes[payload], 0x2f);
+      const header = bytes.readUInt32LE(payload + 1);
+      return { width: (header & 0x3fff) + 1, height: ((header >>> 14) & 0x3fff) + 1 };
+    }
+    offset = payload + length + length % 2;
+  }
+  assert.fail('Fixture requires an actual PNG or lossless WebP texture');
+}
+
 test('smile intent controls eyelids independently of the iris squash channel and only the reviewed rig limits speech opening', () => {
   const smile = cubismParameterTargets({ eyeSmile: 1, speaking: true, mouthOpen: .9 });
   assert.equal(smile.ParamEyeBallForm, 0);
@@ -82,12 +105,12 @@ test('production avatar factory defaults to V12, keeps legacy limits, and isolat
     set src(value) {
       this.value = value;
       if (!value) return;
-      // Read real PNG header dimensions from the Blob used by loadTexture.
+      // Read real PNG/WebP dimensions from the Blob used by loadTexture.
       // Decoding/rendering the bitmap is outside this routing/parameter test.
       void prior.fetch(value).then(response => response.arrayBuffer()).then(bytes => {
         if (this.value !== value) return;
-        const data = new DataView(bytes);
-        this.naturalWidth = data.getUint32(16); this.naturalHeight = data.getUint32(20);
+        const dimensions = textureDimensions(Buffer.from(bytes));
+        this.naturalWidth = dimensions.width; this.naturalHeight = dimensions.height;
         this.onload?.();
       }).catch(() => this.onerror?.());
     }

@@ -35,7 +35,6 @@ export default function ProjectDirectory({value,onChange,host,user,disabled=fals
       <div className="agent-project-actions"><button type="button" disabled={disabled||!value&&!draft} onClick={()=>{onChange('');setDraft('');setError('');}}>恢复默认</button><button type="submit" disabled={disabled||!capable||draft.trim()===value}>使用此目录</button></div>
     </form>
     <p>路径属于所选执行电脑。执行前会检查目录是否存在；不会自动创建或改用其他目录。</p>
-    {!user?.isOwner&&user?.agentAccess!=='full'&&<p>你的账号只能选择默认工作区内的目录，实际范围由执行电脑校验。</p>}
     {!capable&&<p className="agent-project-note">自定义目录需要支持此功能的新版客户端；默认工作区仍可使用。</p>}
     {disabled&&<p className="agent-project-note">{lockReason||'正在执行、排队或等待提交确认，项目目录已固定。'}</p>}
     {(error||issue)&&<p className="agent-project-error" role="alert">{error||issue}</p>}

@@ -30,7 +30,7 @@ export default function OpenCliSettings({connected,user,onPrepareBrowser,prepare
   const [busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const alive=useRef(false),epoch=useRef(getSessionEpoch()).current,requests=useRef(new Set<AbortController>());
   const operation=useRef<symbol|null>(null),nativeAction=useRef(false);
-  const allowed=connected&&(transport.native?!!user?.canUseCodex&&(user.isOwner||user.agentAccess==='full'):!!user?.isOwner);
+  const allowed=connected&&(transport.native?!!user?.canUseCodex&&(user.isOwner||user.agentAccess==='full'):!!(user?.isAdmin||user?.isOwner));
   const allowedNow=useRef(allowed);allowedNow.current=allowed;
   const current=(controller?:AbortController)=>alive.current&&allowedNow.current&&getSessionEpoch()===epoch&&!controller?.signal.aborted;
   const dirty=openCliConfigChanged(config,enabled,originDraft);
@@ -147,7 +147,7 @@ export default function OpenCliSettings({connected,user,onPrepareBrowser,prepare
   const bridgeState=managedStatus?`${bridgeStates[managedStatus.daemon.state]} · ${managedStatus.extension.connected?'扩展已连接':'扩展未连接'}`:'Browser Bridge 尚未检测';
   return <section className="assistant-section opencli-settings" aria-labelledby="opencli-title">
     <div className="assistant-section-heading"><div><h3 id="opencli-title"><Globe2 size={19}/>OpenCLI 网站工具</h3><p>{transport.native?'管理这台电脑':'管理服务主机'}的内置网站查询与 Chrome 网页工具。</p></div><button type="button" className="secondary-button" disabled={!allowed||running} onClick={()=>void read()}><RefreshCw size={14}/>刷新状态</button></div>
-    {!allowed&&<p className="assistant-unavailable">{!connected?'登录后可以读取 OpenCLI 设置。':transport.native?'需要账号拥有完全访问这台电脑的 Agent 权限。':'服务主机的 OpenCLI 配置由主账号管理。网页和 Android 可通过所选执行电脑调用。'}</p>}
+    {!allowed&&<p className="assistant-unavailable">{!connected?'登录后可以读取 OpenCLI 设置。':transport.native?'需要账号拥有完全访问这台电脑的 Agent 权限。':'服务主机的 OpenCLI 配置由管理员管理。网页和 Android 可通过所选执行电脑调用。'}</p>}
     {error&&<p className="form-error" role="alert">{error}</p>}
     <form id="opencli-config-form" className="opencli-enable-form" onSubmit={save} noValidate>
       <label className="opencli-enable"><input type="checkbox" checked={enabled} disabled={!allowed||running||!config} onChange={event=>{setEnabled(event.target.checked);setNotice('');}}/><span><strong>启用内置 OpenCLI</strong><small>首次配置默认开启，保留你保存的关闭选择。</small></span></label>

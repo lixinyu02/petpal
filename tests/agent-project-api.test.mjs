@@ -10,6 +10,7 @@ import { createPetServer } from '../server/app.mjs';
 import { JsonStore } from '../server/store.mjs';
 import { defaultCodexConfig } from '../server/codex-config.mjs';
 import { resolveProjectDirectory } from '../server/project-directory.mjs';
+import { DesktopExecutor } from '../desktop/executor.mjs';
 
 const bootstrap = 'isolated-project-api-owner';
 const password = randomUUID();
@@ -27,7 +28,7 @@ async function fixture(t) {
   store.state.codexConfig = { ...defaultCodexConfig(), mode: 'api', baseUrl: 'https://project-model.example/v1', model: 'fixture-default-agent', apiKey: ['fixture', 'private', 'project', 'key'].join('-') };
   const provider = { id: randomUUID(), name: 'Assigned project agent', protocol: 'responses', baseUrl: store.state.codexConfig.baseUrl, model: 'fixture-member-agent', apiKey: ['fixture', 'private', 'provider'].join('-') };
   store.state.providers = [provider]; await store.save();
-  const calls = [], attempts = [];
+  const calls = [], attempts = [], workers = [], hosts = new Map();
   const codex = {
     async status() { return { available: true, authenticated: true, workspaceRoot }; },
     async run(args) {
@@ -52,17 +53,19 @@ async function fixture(t) {
     const created = await request('/admin/users', { method: 'POST', body: { username, password, agentAccess, providerIds: [provider.id] } });
     assert.equal(created.status, 201);
     const login = await request('/auth/login', { token: '', method: 'POST', body: { username, password } }); assert.equal(login.status, 200);
-    return { user: created.data.user, token: login.data.token };
+    const worker = new DesktopExecutor({ dataDir: path.join(directory, `pc-${created.data.user.id}`), name: username, resolveCommand: async () => ({ file: 'fixture-codex', args: [] }), toolsFactory: () => ({ specs: [], async close() {} }), bridgeFactory: () => codex });
+    workers.push(worker); const online = await worker.connect({ url: `http://127.0.0.1:${app.server.address().port}`, token: login.data.token, instanceId: store.state.instanceId, userId: created.data.user.id }); assert.equal(online.state, 'online'); hosts.set(login.data.token, online.hostId);
+    return { user: created.data.user, token: login.data.token, hostId: online.hostId };
   };
   const create = async (token = bootstrap) => { const response = await request('/conversations', { token, method: 'POST', body: { mode: 'codex' } }); assert.equal(response.status, 201); return response.data; };
   const submit = (conversation, token = bootstrap, extra = {}) => request(`/conversations/${conversation.id}/agent/submit`, { token, method: 'POST', body: {
-    submissionId: randomUUID(), content: 'Read the test project marker', ...(token !== bootstrap ? { providerId: provider.id } : {}), ...extra,
+    submissionId: randomUUID(), content: 'Read the test project marker', ...(token !== bootstrap ? { providerId: provider.id, hostId: hosts.get(token) } : {}), ...extra,
   } });
   const register = async (token, extra = {}) => {
     const response = await request('/agent/executors/register', { token, method: 'POST', body: { deviceId: randomUUID(), name: 'Fixture project PC', platform: process.platform, arch: process.arch, ...extra } });
     assert.equal(response.status, 200); return response.data;
   };
-  t.after(async () => { await app.close(); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-project-api-'))); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => { await Promise.allSettled(workers.map(worker => worker.close())); await app.close(); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-project-api-'))); await rm(directory, { recursive: true, force: true }); });
   return { request, raw, member, create, submit, register, calls, attempts, directory, dataDir, workspaceRoot, inside, outside, provider };
 }
 
@@ -76,6 +79,8 @@ test('full account grant allows an external project with read-only or workspace-
     assert.equal(call.cwd, await realpath(f.outside)); assert.equal(call.args.permissions.access, access);
     const visible = (await f.request(`/conversations/${conversation.id}`, { token: member.token })).data;
     assert.equal(visible.agent.run.projectDirectory, f.outside); assert.equal(visible.agent.run.projectAccess, undefined);
+    call.resolve({ text: 'Read-only fixture completed', threadId: randomUUID() });
+    await until(async () => { const run = (await f.request(`/conversations/${conversation.id}`, { token: member.token })).data.agent.run; assert.ok(!['error', 'unknown'].includes(run.status), JSON.stringify(run)); return run.status === 'completed'; });
   }
 });
 
@@ -87,44 +92,45 @@ test('project access is derived from the account; request bodies cannot assert o
   assert.equal(f.attempts.length, 0);
   assert.equal((await f.submit(conversation, member.token, { projectDirectory: f.inside, permissions: { access: 'workspace-write', approval: 'ask' } })).status, 200);
   await until(() => f.calls.length === 1);
-  assert.equal(f.calls[0].args.projectAccess, 'workspace'); assert.equal(f.calls[0].cwd, await realpath(f.inside));
+  assert.equal(f.calls[0].args.projectAccess, 'full'); assert.equal(f.calls[0].cwd, await realpath(f.inside));
   const saved = JSON.parse(await readFile(path.join(f.dataDir, 'state.json'), 'utf8')).conversations.find(item => item.id === conversation.id);
   assert.equal(saved.agent.run.projectDirectory, f.inside);
 });
 
-test('workspace account external directory reaches the real resolver and is rejected without default fallback', async t => {
+test('missing project directory reaches the real resolver and is rejected without default fallback', async t => {
   const f = await fixture(t), member = await f.member('project-boundary', 'workspace'), conversation = await f.create(member.token);
-  assert.equal((await f.submit(conversation, member.token, { projectDirectory: f.outside })).status, 200);
+  const missing = path.join(f.outside, 'not-created');
+  assert.equal((await f.submit(conversation, member.token, { projectDirectory: missing })).status, 200);
   const outcome = await until(async () => {
     const visible = (await f.request(`/conversations/${conversation.id}`, { token: member.token })).data;
     return visible.agent.run?.status === 'error' && visible;
   });
-  assert.equal(f.attempts.length, 1); assert.equal(f.attempts[0].projectAccess, 'workspace'); assert.equal(f.calls.length, 0);
-  assert.equal(outcome.agent.paused, true); assert.match(outcome.agent.run.error, /外部项目|默认工作区/);
-  assert.equal(outcome.agent.run.projectDirectory, f.outside);
+  assert.equal(f.attempts.length, 1); assert.equal(f.attempts[0].projectAccess, 'full'); assert.equal(f.calls.length, 0);
+  assert.equal(outcome.agent.paused, true); assert.match(outcome.agent.run.error, /不存在|目录|无法/);
+  assert.equal(outcome.agent.run.projectDirectory, missing);
 });
 
-test('revoking a full account grant stops the external-project run and prevents its queued task', async t => {
+test('revoking the assigned model stops the external-project run and prevents its queued task', async t => {
   const f = await fixture(t), member = await f.member('project-revoke', 'full'), conversation = await f.create(member.token);
   assert.equal((await f.submit(conversation, member.token, { projectDirectory: f.outside })).status, 200); await until(() => f.calls.length === 1);
   assert.equal((await f.submit(conversation, member.token, { content: 'Must stay unexecuted', projectDirectory: f.outside, permissions: { access: 'workspace-write', approval: 'ask' } })).status, 200);
   const before = (await f.request(`/conversations/${conversation.id}`, { token: member.token })).data;
   assert.equal(before.agent.queue.length, 1); assert.equal(before.agent.queue[0].projectDirectory, f.outside);
-  assert.equal((await f.request(`/admin/users/${member.user.id}`, { method: 'PATCH', body: { agentAccess: 'workspace' } })).status, 200);
-  assert.equal(f.calls[0].args.signal.aborted, true); assert.equal((await f.request('/auth/me', { token: member.token })).status, 401);
+  assert.equal((await f.request(`/admin/users/${member.user.id}`, { method: 'PATCH', body: { providerIds: [] } })).status, 200);
+  await until(() => f.calls[0].args.signal.aborted); assert.equal((await f.request('/auth/me', { token: member.token })).status, 401);
   const saved = JSON.parse(await readFile(path.join(f.dataDir, 'state.json'), 'utf8')).conversations.find(item => item.id === conversation.id);
-  assert.equal(saved.agent.queue.length, 0); assert.equal(saved.agent.paused, true); assert.equal(saved.agent.run.status, 'cancelled');
+  assert.equal(saved.agent.queue.length, 0); assert.equal(saved.agent.paused, true); assert.equal(saved.agent.run.status, 'unknown', 'A revoked PC session cannot authenticate the final stop receipt');
   await delay(20); assert.equal(f.calls.length, 1); assert.equal(f.attempts.length, 1);
 });
 
 test('project directory selection rejects foreign computers and old clients before execution', async t => {
   const f = await fixture(t), alice = await f.member('project-alice', 'full'), bob = await f.member('project-bob', 'full');
   const conversation = await f.create(alice.token), foreign = await f.register(bob.token, { capabilities: { projectDirectory: true } }), older = await f.register(alice.token);
-  const foreignResult = await f.submit(conversation, alice.token, { hostId: foreign.hostId, projectDirectory: f.outside }); assert.equal(foreignResult.status, 404);
+  const foreignResult = await f.submit(conversation, alice.token, { hostId: foreign.hostId, projectDirectory: f.outside }); assert.equal(foreignResult.status, 403);
   const olderResult = await f.submit(conversation, alice.token, { hostId: older.hostId, projectDirectory: f.outside }); assert.equal(olderResult.status, 409); assert.match(olderResult.data.error, /升级|不支持/);
   assert.equal(f.attempts.length, 0);
   const hosts = (await f.request('/agent/hosts', { token: alice.token })).data.hosts;
-  assert.equal(hosts[0].codex.projectDirectory, true); assert.equal(hosts.find(host => host.id === older.hostId).codex.projectDirectory, false);
+  assert.equal(hosts.find(host => host.id === alice.hostId).codex.projectDirectory, true); assert.equal(hosts.find(host => host.id === older.hostId).codex.projectDirectory, false);
 });
 
 test('legacy messages cannot silently drop an explicit or remembered project directory', async t => {

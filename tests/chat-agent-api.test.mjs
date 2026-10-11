@@ -10,6 +10,7 @@ import { listenFixture } from './helpers/loopback.mjs';
 import { createPetServer } from '../server/app.mjs';
 import { JsonStore } from '../server/store.mjs';
 import { defaultCodexConfig } from '../server/codex-config.mjs';
+import { DesktopExecutor } from '../desktop/executor.mjs';
 
 const bootstrap = randomBytes(32).toString('hex');
 const password = randomBytes(32).toString('hex');
@@ -32,7 +33,7 @@ function events(source) {
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-chat-agent-api-'));
-  const upstreamRequests = [], calls = [], control = { failFollowUp: false, followUpGate: null };
+  const upstreamRequests = [], calls = [], workers = [], control = { failFollowUp: false, followUpGate: null };
   const upstream = http.createServer(async (req, res) => {
     const bytes = []; for await (const chunk of req) bytes.push(chunk);
     const body = JSON.parse(Buffer.concat(bytes).toString()); upstreamRequests.push(body);
@@ -86,7 +87,10 @@ async function fixture(t) {
     const created = await json('/admin/users', { method: 'POST', body: { username, password, agentAccess, providerIds: [chatProvider.id, agentProvider.id] } });
     assert.equal(created.status, 201);
     const login = await json('/auth/login', { token: null, method: 'POST', body: { username, password } });
-    assert.equal(login.status, 200); return { user: created.data.user, token: login.data.token };
+    assert.equal(login.status, 200);
+    const worker = new DesktopExecutor({ dataDir: path.join(directory, `pc-${created.data.user.id}`), name: username, resolveCommand: async () => ({ file: 'fixture-codex', args: [] }), toolsFactory: () => ({ specs: [], async close() {} }), bridgeFactory: () => codex });
+    workers.push(worker); const online = await worker.connect({ url: `http://127.0.0.1:${app.server.address().port}`, token: login.data.token, instanceId: store.state.instanceId, userId: created.data.user.id }); assert.equal(online.state, 'online');
+    return { user: created.data.user, token: login.data.token, hostId: online.hostId };
   };
   const submission = (content = operation, extra = {}) => ({ content, submissionId: randomUUID(), assistant: { enabled: true, hostId: 'central', providerId: null, permissions: { ...chosenPermissions } }, ...extra });
   const send = async (chat, body = submission(), token = bootstrap) => {
@@ -94,7 +98,7 @@ async function fixture(t) {
     const text = await response.text(); return { status: response.status, text, events: response.headers.get('content-type')?.includes('text/event-stream') ? events(text) : [], contentType: response.headers.get('content-type') };
   };
   t.after(async () => {
-    await app.close(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve));
+    await Promise.allSettled(workers.map(worker => worker.close())); await app.close(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve));
     assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-chat-agent-api-'))); await rm(directory, { recursive: true, force: true });
   });
   return { directory, app, request, json, createChat, member, submission, send, calls, upstreamRequests, control, chatProvider, agentProvider };
@@ -190,23 +194,23 @@ test('duplicate Chat submissions preserve message IDs and never repeat model dec
   assert.deepEqual((await f.json(`/conversations/${chat.id}`)).data.messages, before.messages);
 });
 
-test('Agent grants, chosen model and conversation/computer ownership are enforced before any model request', async t => {
+test('chosen model and user conversation/computer ownership are enforced before any model request', async t => {
   const f = await fixture(t), denied = await f.member('hybrid-none'), workspace = await f.member('hybrid-workspace', 'workspace'), foreign = await f.member('hybrid-foreign', 'full');
   const ownerChat = await f.createChat(), deniedChat = await f.createChat(denied.token), memberChat = await f.createChat(workspace.token);
   const selected = { enabled: true, hostId: 'central', providerId: f.agentProvider.id, permissions: { ...chosenPermissions } };
   const deniedResult = await f.send(deniedChat, f.submission(operation, { assistant: selected }), denied.token); assert.equal(deniedResult.status, 403);
   const escalated = await f.send(memberChat, f.submission(operation, { assistant: { ...selected, permissions: { access: 'full-access', approval: 'auto' } } }), workspace.token); assert.equal(escalated.status, 403);
-  const missingModel = await f.send(memberChat, f.submission(), workspace.token); assert.equal(missingModel.status, 403);
+  const missingModel = await f.send(memberChat, f.submission(operation, { assistant: { ...selected, hostId: workspace.hostId, providerId: null } }), workspace.token); assert.equal(missingModel.status, 403);
   const crossed = await f.send(ownerChat, f.submission(), foreign.token); assert.equal(crossed.status, 404);
   const anonymous = await f.send(ownerChat, f.submission(), null); assert.equal(anonymous.status, 401);
   const registration = await f.json('/agent/executors/register', { token: foreign.token, method: 'POST', body: { deviceId: randomUUID(), name: 'Another account computer', platform: 'win32', arch: 'x64' } });
   assert.equal(registration.status, 200);
-  const hostForgery = await f.send(ownerChat, f.submission(operation, { assistant: { ...selected, hostId: registration.data.hostId } })); assert.equal(hostForgery.status, 404);
+  const hostForgery = await f.send(memberChat, f.submission(operation, { assistant: { ...selected, hostId: registration.data.hostId } }), workspace.token); assert.equal(hostForgery.status, 403);
   assert.equal(f.calls.length, 0); assert.equal(f.upstreamRequests.length, 0);
   for (const [chat, token] of [[ownerChat, bootstrap], [deniedChat, denied.token], [memberChat, workspace.token]]) {
     const current = (await f.json(`/conversations/${chat.id}`, { token })).data; assert.deepEqual(current.messages, []); assert.equal(current.assistantTasks, undefined);
   }
-  const allowed = await f.send(memberChat, f.submission(operation, { assistant: selected }), workspace.token);
+  const allowed = await f.send(memberChat, f.submission(operation, { assistant: { ...selected, hostId: workspace.hostId } }), workspace.token);
   assert.ok(allowed.events.some(event => event.type === 'done')); await until(() => f.calls.length === 1);
   assert.equal(f.calls[0].args.model, 'fixture-granted-agent-model'); assert.equal(f.calls[0].args.effort, 'high'); assert.deepEqual(f.calls[0].args.permissions, chosenPermissions);
   const child = allowed.events.find(event => event.type === 'task').data.task;

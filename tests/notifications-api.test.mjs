@@ -41,17 +41,18 @@ test('restricted device credential cannot access full state, models, voice, othe
   assert.equal((await f.request('/notifications/device/feed?after=0&userId=other', { token: device.token })).status, 400);
   assert.equal((await f.request('/notifications/device/feed?after=0', { token: device.token, headers: { Origin: 'https://untrusted.example' } })).status, 403);
   const chatOnly = await f.account('notifications-chat-only', 'none');
-  assert.equal((await f.request('/notifications/devices', { token: chatOnly.token, method: 'POST', body: { deviceId: randomUUID() } })).status, 403);
+  assert.equal((await f.request('/notifications/devices', { token: chatOnly.token, method: 'POST', body: { deviceId: randomUUID() } })).status, 201);
+  assert.deepEqual((await f.request('/agent/hosts', { token: chatOnly.token })).data.hosts, [], 'Agent is enabled but no PC is implicitly granted');
 });
 
-test('logout and Agent downgrade abort pending HTTP feeds and preserve account isolation', async t => {
+test('logout and account disabling abort pending HTTP feeds and preserve account isolation', async t => {
   const f = await fixture(t), a = await f.account('notifications-first'), b = await f.account('notifications-second');
   const da = await f.register(a.token), db = await f.register(b.token);
   const pending = f.request('/notifications/device/feed?after=0&wait=25', { token: da.token }); await delay(15);
   assert.equal((await f.request('/auth/logout', { token: a.token, method: 'POST', body: {} })).status, 200); assert.equal((await pending).status, 401);
   assert.equal((await f.request('/notifications/device/feed?after=0', { token: db.token })).status, 200);
   const second = f.request('/notifications/device/feed?after=0&wait=25', { token: db.token }); await delay(15);
-  assert.equal((await f.request(`/admin/users/${b.id}`, { method: 'PATCH', body: { agentAccess: 'none' } })).status, 200); assert.equal((await second).status, 401);
+  assert.equal((await f.request(`/admin/users/${b.id}`, { method: 'PATCH', body: { disabled: true } })).status, 200); assert.equal((await second).status, 401);
   const stored = JSON.parse(await readFile(path.join(f.directory, 'state.json'), 'utf8')); assert.equal(stored.notifications.devices.length, 0);
 });
 

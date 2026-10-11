@@ -10,6 +10,7 @@ import { restoreAssistantTasks } from './chat-assistant.mjs';
 import { validateStoredNotifications } from './notifications.mjs';
 import { validateStoredAutomations } from './automation-schema.mjs';
 import { validateStoredOrganization, createOrganizationPersistence } from './conversation-organization.mjs';
+import { canAccessExecutionHost, normalizeUserRole } from './user-roles.mjs';
 
 export const isCompanionKind = value => value === 'anime' || value === 'cat';
 const isChatAssistantHostId = value => value === null || typeof value === 'string' && (value === 'central' || /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value));
@@ -40,7 +41,7 @@ export class JsonStore {
       this.state = initialState();
       await this.save();
     }
-    let changed = false;
+    let changed = false, identityMigrated = false;
     // Validate before backing up or replacing a legacy store.
     for (const provider of this.state.providers) {
       if (!provider || typeof provider !== 'object' || Array.isArray(provider)) throw new Error('本地模型连接格式无效，请保留文件并检查备份。');
@@ -68,11 +69,10 @@ export class JsonStore {
     if (!validText(state.instanceId) || !validText(state.ownerId) || !Array.isArray(state.users) || !state.users.length || !Array.isArray(state.sessions)) throw new Error('本地用户数据格式无效，请保留文件并检查备份。');
     const ids = new Set(), names = new Set();
     for (const user of state.users) {
-      if (!validText(user.id) || ids.has(user.id) || !/^[a-z0-9][a-z0-9_.-]{2,39}$/.test(user.username) || names.has(user.username) || !validText(user.displayName) || !['admin', 'member'].includes(user.role) || typeof user.disabled !== 'boolean' || !Array.isArray(user.providerIds) || user.providerIds.some(id => !validText(id))) throw new Error('本地用户记录无效，请保留文件并检查备份。');
+      if (!validText(user.id) || ids.has(user.id) || !/^[a-z0-9][a-z0-9_.-]{2,39}$/.test(user.username) || names.has(user.username) || !validText(user.displayName) || !['admin', 'user', 'member'].includes(user.role) || typeof user.disabled !== 'boolean' || !Array.isArray(user.providerIds) || user.providerIds.some(id => !validText(id))) throw new Error('本地用户记录无效，请保留文件并检查备份。');
       ids.add(user.id); names.add(user.username);
-      if (user.id !== state.ownerId && user.role !== 'member') throw new Error('仅主机 owner 可拥有管理员权限。');
-      if (user.agentAccess === undefined) { user.agentAccess = user.id === state.ownerId ? 'full' : 'none'; changed = true; }
-      if (!['none', 'workspace', 'full'].includes(user.agentAccess) || (user.id === state.ownerId && user.agentAccess !== 'full')) throw new Error('本地 Agent 授权无效。');
+      if (user.agentAccess !== undefined && !['none', 'workspace', 'full'].includes(user.agentAccess)) throw new Error('本地 Agent 授权无效。');
+      if (user.role === 'member' || user.agentAccess !== 'full') { user.role = normalizeUserRole(user.role); user.agentAccess = 'full'; changed = identityMigrated = true; }
       const settings = user.id === state.ownerId ? state.settings : user.settings;
       if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('本地用户设置无效。');
       if (settings.companionKind === undefined) { settings.companionKind = 'anime'; changed = true; }
@@ -89,12 +89,13 @@ export class JsonStore {
     if (validateExecutionHosts(state)) changed = true;
     for (const user of state.users) {
       const id = (user.id === state.ownerId ? state.settings : user.settings).chatAssistantHostId;
-      if (id !== null && id !== 'central' && !state.executionHosts.some(host => host.id === id && host.userId === user.id)) throw new Error('本地 Chat + Agent 默认执行电脑归属无效。');
+      if (id !== null && id !== 'central' && !state.executionHosts.some(host => host.id === id)) throw new Error('本地 Chat + Agent 默认执行电脑归属无效。');
+      if (id !== null && !canAccessExecutionHost(state, user.id, id)) { (user.id === state.ownerId ? state.settings : user.settings).chatAssistantHostId = null; changed = identityMigrated = true; }
     }
     for (const conversation of this.state.conversations) {
       if (!ids.has(conversation.userId)) throw new Error('本地会话缺少有效用户归属，已停止加载。');
       for (const hostId of [conversation.agentHostId, conversation.threadHostId, conversation.agent?.run?.hostId, ...(conversation.agent?.queue ?? []).map(entry => entry.hostId)]) {
-        if (hostId !== undefined && hostId !== 'central' && !state.executionHosts.some(host => host.id === hostId && host.userId === conversation.userId)) throw new Error('本地会话执行电脑归属无效。');
+        if (hostId !== undefined && hostId !== 'central' && !state.executionHosts.some(host => host.id === hostId)) throw new Error('本地会话执行电脑无效。');
       }
       if (restoreAgentState(conversation)) changed = true;
       if (restoreAssistantTasks(conversation, state.executionHosts, state.conversations)) changed = true;
@@ -110,6 +111,11 @@ export class JsonStore {
     if (validateStoredOrganization(state)) changed = true;
     this.organizationPersistence = createOrganizationPersistence(this);
     this.#chatAssistantHosts = new Map(state.users.map(user => [user.id, (user.id === state.ownerId ? state.settings : user.settings).chatAssistantHostId]));
+    if (identityMigrated && raw) {
+      const backup = path.join(this.directory, `state.identity.backup-${createHash('sha256').update(raw).digest('hex').slice(0, 16)}.json`);
+      try { const handle = await open(backup, 'wx', 0o600); try { await handle.writeFile(raw, 'utf8'); await handle.sync(); } finally { await handle.close(); } }
+      catch (error) { if (error.code !== 'EEXIST' || await readFile(backup, 'utf8') !== raw) throw error; }
+    }
     if (changed) await this.save();
     return this;
   }
@@ -120,12 +126,13 @@ export class JsonStore {
       // Merge at queue execution, rather than capture time. Other saves may
       // have captured the previous target while an explicit change was queued.
       settings.chatAssistantHostId = this.#chatAssistantHosts?.has(user.id) ? this.#chatAssistantHosts.get(user.id) : settings.chatAssistantHostId ?? null;
+      if (settings.chatAssistantHostId !== null && !canAccessExecutionHost(snapshot, user.id, settings.chatAssistantHostId)) settings.chatAssistantHostId = null;
     }
     if (action === undefined) return;
     if (!action || typeof action !== 'object' || Array.isArray(action) || Object.keys(action).some(key => !['userId', 'hostId', 'authorize'].includes(key)) || typeof action.userId !== 'string' || !isChatAssistantHostId(action.hostId) || action.authorize !== undefined && typeof action.authorize !== 'function') throw new Error('默认执行电脑持久化操作无效。');
     action.authorize?.();
     const user = snapshot.users.find(item => item.id === action.userId);
-    if (!user || !this.state.users.some(item => item.id === action.userId) || action.hostId !== null && action.hostId !== 'central' && !snapshot.executionHosts.some(host => host.id === action.hostId && host.userId === action.userId)) throw new Error('默认执行电脑持久化归属无效。');
+    if (!user || !this.state.users.some(item => item.id === action.userId) || action.hostId !== null && !canAccessExecutionHost(snapshot, action.userId, action.hostId)) throw new Error('默认执行电脑持久化归属无效。');
     (user.id === snapshot.ownerId ? snapshot.settings : user.settings).chatAssistantHostId = action.hostId;
   }
 

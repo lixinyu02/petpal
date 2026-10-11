@@ -36,7 +36,7 @@ export function ConnectionDialog({ close }: { close?(): void }) {
       <button className="primary-button full-button" type="submit">{busy ? <Loader2 className="spin" size={17} aria-hidden="true"/> : <ArrowRight size={17} aria-hidden="true"/>}登录并继续</button>
     </fieldset></form>
     {window.petpal && <button className="secondary-button full-button auth-owner" disabled={busy} onClick={localOwner}>以本机管理员身份登录</button>}
-    <p className="field-help login-note"><ShieldCheck size={14} aria-hidden="true"/>管理员分配模型与 Agent 权限；登录凭据仅保留当前会话。</p>
+    <p className="field-help login-note"><ShieldCheck size={14} aria-hidden="true"/>管理员分配模型与账号身份；登录凭据仅保留当前会话。</p>
   </section>;
   return close ? <div ref={scrimEntrance} className="modal-backdrop" data-ui-layer="dialog" role="dialog" aria-modal="true">{formContent}</div> : <main ref={pageEntrance} className="login-page"><a href="/" className="login-brand"><BrandMark size={36}/><span>小伴<small>PetPal</small></span></a><div className="login-layout"><div className="login-welcome"><span>你的日常伙伴</span><h1>聊聊想法，<br/>一起把事情做好。</h1><img src={avatarPreview} alt="温柔的二次元伙伴" width="384" height="576" decoding="async" fetchPriority="high" onError={e => { e.currentTarget.style.display = 'none'; }}/></div>{formContent}</div></main>;
 }

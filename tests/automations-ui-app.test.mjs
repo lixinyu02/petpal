@@ -30,14 +30,14 @@ const text=tree=>Array.isArray(tree)?tree.map(text).join(''):tree==null||typeof 
 
 /** Execute App's real effects and navigation handlers. Only child UIs, browser surfaces
  * and network are isolated; notification and history decisions stay in App.tsx. */
-function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],initialProjects=[],organizationResponse,registeredAutomationIds=[],search='?chat=1',failAgentSubmit=false,handleAgentControl=false,globalReviewCapability,hostReviewCapability,extraProviders=[],approvalReviewProviderIds,assistantSnapshot,startupGate=null,hydrationGate=null,deferredCodex=false,centralCodex}={}){
+function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],initialProjects=[],organizationResponse,registeredAutomationIds=[],search='?chat=1',failAgentSubmit=false,handleAgentControl=false,globalReviewCapability,hostReviewCapability,extraProviders=[],approvalReviewProviderIds,assistantSnapshot,startupGate=null,hydrationGate=null,deferredCodex=false,centralCodex}={}){
   const permissions={access:'read-only',approval:'ask'},identity={instanceId:'fixture-service',userId:'fixture-user'};
-  const state={instanceId:identity.instanceId,user:{id:identity.userId,username:'fixture',displayName:'Fixture',isOwner:false,canUseCodex,agentAccess:canUseCodex?'full':'none'},
+  const state={instanceId:identity.instanceId,user:{id:identity.userId,username:'fixture',displayName:'Fixture',role:isAdmin?'admin':'user',isAdmin,isOwner:false,canUseCodex,agentAccess:canUseCodex?'full':'none'},
     settings:{petName:'Fixture companion',persona:'Fixture',companionKind:'anime',defaultProviderId:'model'},
     providers:[{id:'model',name:'Fixture model',model:'fixture-model',protocol:'responses',supportsImages:true},...extraProviders],conversations:[],codex:{available:!deferredCodex,pending:deferredCodex,eligibleProviderIds:['model'],approvalReviewProviderIds,approvalReview:globalReviewCapability}};
   const hosts=[{id:'central',name:'Fixture server',kind:'central',platform:'linux',online:true,...(centralCodex?{codex:centralCodex}:{})},
-    {id:'pc-one',name:'Fixture PC one',kind:'desktop',platform:'win32',online:true,codex:{available:true,approvalReview:hostReviewCapability}},
-    {id:'pc-two',name:'Fixture PC two',kind:'desktop',platform:'linux',online:true,codex:{available:true}}];
+    {id:'pc-one',name:'Fixture PC one',kind:'desktop',platform:'win32',online:true,isOwn:!foreignHostIds.includes('pc-one'),codex:{available:true,approvalReview:hostReviewCapability}},
+    {id:'pc-two',name:'Fixture PC two',kind:'desktop',platform:'linux',online:true,isOwn:!foreignHostIds.includes('pc-two'),codex:{available:true}}];
   const hooks=[],effects=[],timers=new Map(),calls=[],requests=[],streams=[],navigations=[],hydrations=[],startupSignals=[],lazyLoads=[],backendConversations=structuredClone(initialConversations),backendProjects=structuredClone(initialProjects),delayedResponses=[],apiFailures=[],window=new EventTarget(),document=new EventTarget();
   let notificationSnapshot={navigation:null},notificationTakes=0;
   let index=0,tree,timerId=0,getterReads=0,createdConversations=initialConversations.length,createdProjects=initialProjects.length,sessionEpoch=1,disposed=false,lateStateWrites=0;
@@ -301,11 +301,22 @@ test('real App unmount or account change fences late startup state before identi
 
 test('real App uses the selected central executor status instead of deferred bootstrap availability',async t=>{
   for(const available of [true,false]){
-    const f=workspaceFixture({canUseCodex:true,deferredCodex:true,centralCodex:{available,model:'real-central-runtime'}});t.after(()=>f.close());await f.ready();f.enterAgent();await f.ready();f.chooseHost('central');f.typeDraft('fixture central execution');
+    const f=workspaceFixture({canUseCodex:true,isAdmin:true,deferredCodex:true,centralCodex:{available,model:'real-central-runtime'}});t.after(()=>f.close());await f.ready();f.enterAgent();await f.ready();f.chooseHost('central');f.typeDraft('fixture central execution');
     assert.equal(f.find('button',props=>props['aria-label']==='发送消息').props.disabled,!available);
     if(available){await f.submit();const submitted=f.requests.find(request=>request.path.endsWith('/agent/submit'));assert.ok(submitted);assert.equal(submitted.body.hostId,'central');}
     else assert.ok(f.requests.every(request=>request.method==='GET'));
   }
+});
+
+test('users cannot submit to a remembered central server or select another owner even if a stale list contains them',async t=>{
+  const f=workspaceFixture({canUseCodex:true,foreignHostIds:['pc-two']});t.after(()=>f.close());await f.ready();f.enterAgent();await f.ready();f.typeDraft('只在我的电脑执行');
+  assert.equal(f.component('ExecutionTarget').props.canAccessAllHosts,false);
+  assert.equal(f.component('ExecutionTarget').props.value,'central','the old target remains explicit instead of falling back');
+  assert.equal(f.find('button',props=>props['aria-label']==='发送消息').props.disabled,true);
+  f.chooseHost('pc-two');assert.equal(f.component('ExecutionTarget').props.value,'central');
+  f.chooseHost('pc-one');assert.equal(f.component('ExecutionTarget').props.value,'pc-one');
+  f.chooseHost('central');assert.equal(f.component('ExecutionTarget').props.value,'pc-one');
+  await f.submit();assert.equal(f.requests.find(request=>request.path.endsWith('/agent/submit')).body.hostId,'pc-one');
 });
 
 test('automation navigation mounts an account-bound independent view and keeps Chat text and image drafts', async t => {
@@ -538,7 +549,7 @@ test('project filter changes preserve the selected conversation, unsent text and
 
 for(const mode of ['chat','codex'])test(`new ${mode} conversations inherit the chosen project and return from archive view`,async t=>{
   const f=workspaceFixture({canUseCodex:true,initialProjects:[project('work','工作')]});t.after(()=>f.close());await f.ready();
-  f.filter('work',true);if(mode==='codex')f.enterAgent();else f.newChat();await f.ready();
+  f.filter('work',true);if(mode==='codex')f.enterAgent();else f.newChat();await f.ready();if(mode==='codex')f.chooseHost('pc-one');
   assert.equal(f.historyProps().projectFilter,'work');assert.equal(f.historyProps().archived,false);
   f.typeDraft(mode==='chat'?'在这个项目里聊天':'在这个项目里执行');await f.submit();await f.ready();
   const creation=f.requests.find(item=>item.path==='/conversations'&&item.method==='POST');assert.ok(creation);assert.equal(creation.body.mode,mode);assert.equal(creation.body.projectId,'work');

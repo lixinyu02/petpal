@@ -16,6 +16,7 @@ import {createBrowserSetupDraft} from '../src/browser-setup-draft.mjs';
 import {reasoningEfforts} from '../src/desktop-settings.mjs';
 import * as uiMotion from '../src/platform/ui-motion.mjs';
 import {composerKeyAction} from '../src/composer-keyboard.mjs';
+import {createVisiblePoll} from '../src/platform/visible-poll.mjs';
 
 const source=ts.transpileModule(await readFile(new URL('../src/App.tsx',import.meta.url),'utf8'),{
   fileName:'App.tsx',compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true},
@@ -30,12 +31,12 @@ const text=tree=>Array.isArray(tree)?tree.map(text).join(''):tree==null||typeof 
 /** Mount App itself and execute its real effects/handlers. Child UIs and network are isolated. */
 function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],search='?chat=1',failAgentSubmit=false}={}){
   const permissions={access:'read-only',approval:'ask'},identity={instanceId:'fixture-service',userId:'fixture-user'};
-  const state={instanceId:identity.instanceId,user:{id:identity.userId,username:'fixture',displayName:'Fixture',isOwner:false,canUseCodex,agentAccess:canUseCodex?'full':'none'},
+  const state={instanceId:identity.instanceId,user:{id:identity.userId,username:'fixture',displayName:'Fixture',role:'user',isAdmin:false,isOwner:false,canUseCodex,agentAccess:canUseCodex?'full':'none'},
     settings:{petName:'Fixture companion',persona:'Fixture',companionKind:'anime',defaultProviderId:'model'},
     providers:[{id:'model',name:'Fixture model',model:'fixture-model',protocol:'responses',supportsImages:true}],conversations:[],codex:{available:true,eligibleProviderIds:['model']}};
   const hosts=[{id:'central',name:'Fixture server',kind:'central',platform:'linux',online:true},
-    {id:'pc-one',name:'Fixture PC one',kind:'desktop',platform:'win32',online:true,codex:{available:true}},
-    {id:'pc-two',name:'Fixture PC two',kind:'desktop',platform:'linux',online:true,codex:{available:true}}];
+    {id:'pc-one',name:'Fixture PC one',kind:'desktop',platform:'win32',online:true,isOwn:true,codex:{available:true}},
+    {id:'pc-two',name:'Fixture PC two',kind:'desktop',platform:'linux',online:true,isOwn:true,codex:{available:true}}];
   const hooks=[],effects=[],timers=new Map(),calls=[],requests=[],streams=[],navigations=[],backendConversations=[...initialConversations],window=new EventTarget(),document=new EventTarget();
   let notificationSnapshot={navigation:null},notificationTakes=0;
   let index=0,tree,timerId=0,getterReads=0;
@@ -55,6 +56,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
   const element=(type,props)=>({type,props}),component=name=>({__esModule:true,default:Symbol(name)});
   const controls=Object.fromEntries(['ModelPicker','ExecutionTarget','AgentOnboarding'].map(name=>[name,Symbol(name)]));
   const api={getConnection:()=>({url:'https://fixture.invalid',token:'fixture-token'}),getIdentity:()=>identity,getSessionEpoch:()=>1,
+    loadInitialState:options=>{assert.equal(options.history,true);return api.api('/state',{signal:options.signal});},
     initConnection:async()=>({url:'https://fixture.invalid',token:'fixture-token'}),isSessionChanged:()=>false,SessionChangedError:Error,
     api:async(path,options={})=>{
       calls.push(path);requests.push({path,method:options.method||'GET',body:options.body?JSON.parse(options.body):undefined});
@@ -88,6 +90,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
   const attachments={items:[...attachmentItems],uploading:attachmentUploading,error:'',clearCount:0,clear(){attachments.items=[];attachments.uploading=false;attachments.clearCount++;},inputRef:{current:null}};
   const speech={enabled:false,playing:false,active:false,pending:false,supported:false,stop(){},prepare(){},speak(){},speakIfEnabled(){}};
   const modules={
+    './platform/visible-poll.mjs':{createVisiblePoll:options=>createVisiblePoll({...options,setTimeoutFn:callback=>{const id=++timerId;timers.set(id,callback);return id;},clearTimeoutFn:id=>timers.delete(id)})},
     react,'react/jsx-runtime':{jsx:element,jsxs:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     '@capacitor/core':{Capacitor:{isNativePlatform:()=>native}},'./api':api,'./WorkspaceControls':controls,'./composer-keyboard.mjs':{composerKeyAction},
     './companion-mount.mjs':{watchCompanionBreakpoint},'./chat-display.mjs':{createChatDisplay},'./useChatScroll':{useChatScroll:()=>({contentRef:{current:null},onScroll(){},latest(){},showLatest:false})},
@@ -103,7 +106,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     './platform/task-notification-session':{taskNotificationSession:{subscribe(){},snapshot:()=>notificationSnapshot,takeNavigation(){notificationTakes++;const previous=notificationSnapshot.navigation;notificationSnapshot={navigation:null};return previous;}}},'./desktop-settings.mjs':{reasoningEfforts},
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
   };
-  for(const name of ['DownloadsView','BrandMark','CompanionOptions','ChatMessages','ConversationHistory','AgentQueue','UpdatesSettings','CatV2','WorkspaceDisclosure','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','ClientBehaviorSettings'])modules[`./${name}`]=component(name);
+  for(const name of ['DownloadsView','BrandMark','CompanionOptions','ChatMessages','ChatScrollDock','ConversationHistory','AgentQueue','UpdatesSettings','CatV2','WorkspaceDisclosure','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','ClientBehaviorSettings'])modules[`./${name}`]=component(name);
   const module={exports:{}},context={module,exports:module.exports,require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);return modules[name];},
     window,document,location:{search,origin:'https://fixture.invalid',assign:path=>navigations.push(path)},URL,URLSearchParams,AbortController,DOMException,crypto:{randomUUID:()=>`fixture-submission-${requests.length}`},
     setTimeout(callback){const id=++timerId;timers.set(id,callback);return id;},clearTimeout:id=>timers.delete(id)};
@@ -344,12 +347,13 @@ test('App discard confirmation rechecks a Chat submission started before its nex
 });
 
 test('App discard confirmation cannot bypass an unconfirmed Agent submission',async t=>{
-  const f=workspaceFixture({canUseCodex:true,failAgentSubmit:true});t.after(()=>f.close());await f.ready();f.enterAgent();await f.ready();
+  const f=workspaceFixture({canUseCodex:true,failAgentSubmit:true});t.after(()=>f.close());await f.ready();f.enterAgent();await f.ready();f.chooseHost('pc-one');
   f.typeDraft('需要确认的任务');f.newChat();f.keyDown();await f.ready();
   assert.match(f.text(),/上次提交正在等待确认/);assert.equal(f.find('button',props=>text(props.children)==='丢弃并切换').props.disabled,true);
   const selected=f.selectedId;f.confirm();assert.equal(f.selectedId,selected);assert.equal(f.find('textarea').props.value,'需要确认的任务');
   assert.equal(f.attachments.clearCount,1,'only the initial empty mode switch clears attachments');
   assert.equal(f.requests.filter(item=>item.path.endsWith('/agent/submit')).length,1,'confirmation must not create another task');
+  assert.equal(f.requests.find(item=>item.path.endsWith('/agent/submit')).body.hostId,'pc-one','the user executes only on their own PC');
 });
 
 for(const input of['text','image','upload']){
@@ -386,7 +390,7 @@ test('App brand and Agent queue new-conversation callsites use the same discard 
 });
 
 test('App browser preparation and welcome suggestions still create editable drafts without submitting them',async t=>{
-  const f=workspaceFixture({canUseCodex:true});t.after(()=>f.close());await f.ready();f.enterAgent();await f.ready();f.openView('连接与设置');f.prepareBrowser();
+  const f=workspaceFixture({canUseCodex:true});t.after(()=>f.close());await f.ready();f.enterAgent();await f.ready();f.chooseHost('pc-one');f.openView('连接与设置');f.prepareBrowser();
   assert.match(f.find('textarea').props.value,/浏览器/);assert.equal(f.find('button',props=>text(props.children)==='继续编辑'),undefined);
   assert.equal(f.find('button',props=>props['aria-label']==='Agent 执行任务').props['aria-pressed'],true);
   f.suggestion('查询网站信息');assert.match(f.find('textarea').props.value,/OpenCLI/);assert.equal(f.streams.length,0);

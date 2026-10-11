@@ -67,3 +67,26 @@ test('duplicate names and systems get a short discriminator without exposing com
   assert.deepEqual(choices.map(choice=>choice.disambiguator),['abc123','def456','']);
   assert.equal(groupExecutionHosts(choices,'private-prefix').length,0);
 });
+
+test('user choices hide the central server, other owners and inaccessible saved selections without silently replacing them',()=>{
+  const source=[...hosts,{id:'foreign',name:'另一位用户的电脑',kind:'desktop',platform:'win32',online:true,isOwn:false}];
+  const choices=executionHostChoices(source,'central','mine',false);
+  assert.equal(choices.some(choice=>choice.id==='foreign'),false);
+  assert.equal(choices.find(choice=>choice.id==='central'),undefined);
+  assert.equal(choices.find(choice=>choice.id==='mine').isLocal,true);
+  const empty=executionHostChoices([],'central','',false);
+  assert.equal(empty.length,0);
+  assert.equal(executionHostChoices(source,'removed','',false).some(choice=>choice.missing),false);
+});
+
+test('administrators see device owners and can search display names or usernames without exposing owner IDs',()=>{
+  const source=[{...hosts[2],owner:{id:'secret-owner-id',username:'alice',displayName:'爱丽丝'},isOwn:false},
+    {...hosts[0],owner:{id:'another-secret-id',username:'bob',displayName:'鲍勃'},isOwn:true},hosts[1]];
+  const choices=executionHostChoices(source,'mine','',true);
+  assert.equal(choices[0].ownerLabel,'爱丽丝 · @alice');assert.equal(choices[0].isOwn,false);
+  assert.equal(choices[1].isOwn,true);assert.equal(choices[2].ownerLabel,'');
+  assert.deepEqual(groupExecutionHosts(choices,'alice').flatMap(group=>group.choices.map(choice=>choice.id)),['mine']);
+  assert.deepEqual(groupExecutionHosts(choices,'鲍勃').flatMap(group=>group.choices.map(choice=>choice.id)),['other']);
+  assert.equal(groupExecutionHosts(choices,'secret-owner-id').length,0);
+  assert.equal(canSelectExecutionHost(choices[0]),true);assert.equal(canSelectExecutionHost(choices[2]),true);
+});

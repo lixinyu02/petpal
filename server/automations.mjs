@@ -27,7 +27,6 @@ export function createAutomationService({ store, authorize, dispatch, observe = 
     if (closed) throw fail(503, '自动化服务正在退出。');
     const user = store.state.users.find(item => item.id === userId);
     if (!user || user.disabled) throw fail(401, '自动化账号已失效。');
-    if (user.agentAccess === 'none') throw fail(403, '账号没有 Agent 权限。');
     return user;
   };
   const checkScope = (userId, spec, online, dispatch = false) => {

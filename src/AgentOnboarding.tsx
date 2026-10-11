@@ -4,7 +4,7 @@ import WorkspaceDisclosure from './WorkspaceDisclosure';
 import './workspace-controls.css';
 
 export function AgentOnboarding({ codex, user, host, hostLoading = false, localHostId = '', onConfigure, onPrepareBrowser, prepareBrowserDisabled = false }: { codex: CodexStatus; user?: User; host?: AgentHost; hostLoading?: boolean; localHostId?: string; onConfigure(): void; onPrepareBrowser?():void; prepareBrowserDisabled?:boolean }) {
-  const owner = Boolean(user?.isOwner), local = Boolean(host && host.id === localHostId);
+  const owner = Boolean(user?.isAdmin||user?.isOwner), local = Boolean(host && host.id === localHostId);
   let status: 'locked'|'checking'|'offline'|'configuration'|'unavailable'|'authentication'|'ready';
   if (!user?.canUseCodex) status = 'locked';
   else if (hostLoading && !host) status = 'checking';
@@ -15,7 +15,7 @@ export function AgentOnboarding({ codex, user, host, hostLoading = false, localH
   else if (codex.available === true && codex.authenticated === true) status = 'ready';
   else status = 'checking';
   const details = {
-    locked: { icon: ShieldCheck, title: '此账号尚未开通 Agent', description: '请联系管理员分配主机访问权限和可用模型。' },
+    locked: { icon: ShieldCheck, title: '此账号尚未开通 Agent', description: '请先登录账号，再选择自己的电脑与可用模型。' },
     checking: { icon: Loader2, title: '正在检查执行主机', description: '确认 Codex 连接后，即可发送任务。' },
     offline: { icon: Terminal, title: host ? `${host.name} 已离线` : '请选择一台在线电脑', description: '在 Windows 或 Ubuntu 客户端登录同一账号，并保持客户端运行。任务会等待你选择，不会自动转到其他电脑。' },
     configuration: { icon: Settings2, title: '先连接 Agent 模型', description: owner ? '为执行主机填写 Responses API 地址、密钥和模型，或使用主机已有的 Codex 登录。' : '执行主机尚未配置模型，请联系管理员完成连接。' },

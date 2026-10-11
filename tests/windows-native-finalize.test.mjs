@@ -17,7 +17,7 @@ function visit(node) {
   if (ts.isVariableDeclaration(node) && node.name.getText(tree) === 'requiredExecutionSource') required = [...vm.runInNewContext(node.initializer.getText(tree))];
   ts.forEachChild(node, visit);
 }
-visit(tree); assert.ok(required);
+visit(tree); assert.ok(required); assert.ok(required.includes('server/user-roles.mjs'));
 const present = async file => { try { await access(file); return true; } catch { return false; } };
 const fixtureRoots = [];
 test.after(async () => {
@@ -48,7 +48,9 @@ async function fixture({ legacy = false, freezeArray = false } = {}) {
   const runtime = { ...base, electronVersion: '39.8.10', portableSmoke: smoke, ownedProcessesRemaining: 0, restrictedPath: true, authenticodeStatus: 'NotSigned',
     environmentIsolation: { freshProfile: true, credentialEnvironmentCleared: true, inheritedElectronFlagsCleared: true, inheritedPortableFlagsCleared: true, restored: true } };
   const nativeFiles = [...COMPUTER_USE_RUNTIME_FILES, 'computer-use-napi.win32-x64.node'].map(file => ({ path: `${COMPUTER_USE_PACKAGE}/${file}`, bytes: 12, sha256: digest(`native:${file}`), unpacked: true }));
-  const workerFiles = ['server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs'].map(file => ({ path: file, bytes: 4, sha256: digest(file), unpacked: true }));
+  const workerFiles = ['server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs',
+    'server/opencli-weather-common.mjs', 'server/opencli-weather-policies.mjs', 'server/opencli-weather-cn.mjs', 'server/opencli-weather-nmc.mjs', 'server/opencli-weather-adapters.mjs'
+  ].map(file => ({ path: file, bytes: 4, sha256: digest(file), unpacked: true }));
   const asar = { ...base, electron: '39.8.10', opencliVersion: '1.8.8', nativeHelperCompared: true, filesCompared: 999,
     files: [...freeze, ...nativeFiles, ...workerFiles], computerUseAudit: { version: '7.4.0', platform: 'win32', arch: 'x64', native: { machine: 0x8664 }, files: nativeFiles },
     opencliDependencyPackages: ['@jackwener/opencli', '@modelcontextprotocol/sdk', '@zavora-ai/computer-use-mcp'].map(name => ({ name })) };
@@ -111,14 +113,13 @@ test('legacy finalization accepts the array freeze and keeps byte-identical gene
 });
 
 test('finalization refuses corrupted and missing lifecycle receipts before writing output', async () => {
-  for (const group of ['freeze', 'packed', 'smoke']) for (const mode of ['missing', 'corrupt']) {
+  for (const file of ['desktop/main.cjs', 'server/user-roles.mjs']) for (const group of ['freeze', 'packed', 'smoke']) for (const mode of ['missing', 'corrupt']) {
     const f = await fixture();
-    const file = 'desktop/main.cjs';
     const change = rows => mode === 'missing' ? rows.filter(item => item.path !== file) : rows.map(item => item.path === file ? { ...item, sha256: '0'.repeat(64) } : item);
     if (group === 'freeze') await f.json(f.config.freezeReceipt, { version, files: change(f.freeze) });
     if (group === 'packed') { f.asar.files = change(f.asar.files); await f.json(f.config.asarReceipt, f.asar); }
     if (group === 'smoke') { f.runtime.portableSmoke.bundleFiles = change(f.runtime.portableSmoke.bundleFiles); await f.json(f.config.runtimeReceipt, f.runtime); }
-    await assert.rejects(finalizeWindowsRelease({ root: f.root, argv: f.argv }), /desktop\/main.cjs/);
+    await assert.rejects(finalizeWindowsRelease({ root: f.root, argv: f.argv }), error => error.message.includes(file));
     assert.equal(await present(f.config.receiptPath), false);
     assert.equal(await present(path.join(f.config.directory, 'README.md')), false);
     assert.equal(await readFile(f.historical, 'utf8'), 'historical receipt retained');
@@ -126,7 +127,7 @@ test('finalization refuses corrupted and missing lifecycle receipts before writi
 });
 
 test('finalization rejects changed source, stale executable, smoke bytes, missing MCP and wrong native architecture', async () => {
-  for (const mutation of ['source', 'exe', 'smoke', 'mcp', 'native', 'worker', 'isolation']) {
+  for (const mutation of ['source', 'exe', 'smoke', 'mcp', 'native', 'worker', 'weather-worker', 'isolation']) {
     const f = await fixture();
     if (mutation === 'source') await f.put(path.join(f.root, 'desktop/main.cjs'), 'changed source');
     if (mutation === 'exe') await f.put(f.config.executable, 'different portable');
@@ -134,6 +135,7 @@ test('finalization rejects changed source, stale executable, smoke bytes, missin
     if (mutation === 'mcp') f.asar.opencliDependencyPackages = f.asar.opencliDependencyPackages.filter(item => item.name !== '@modelcontextprotocol/sdk');
     if (mutation === 'native') f.asar.computerUseAudit.native.machine = 0xaa64;
     if (mutation === 'worker') f.asar.files = f.asar.files.filter(item => item.path !== 'server/opencli-worker.mjs');
+    if (mutation === 'weather-worker') f.asar.files = f.asar.files.filter(item => item.path !== 'server/opencli-weather-cn.mjs');
     if (mutation === 'isolation') f.runtime.environmentIsolation.credentialEnvironmentCleared = false;
     await f.json(f.config.asarReceipt, f.asar); await f.json(f.config.runtimeReceipt, f.runtime);
     await assert.rejects(finalizeWindowsRelease({ root: f.root, argv: f.argv }));

@@ -145,7 +145,7 @@ export function validateStoredAutomations(state, { restore = true, clock = Date.
     ids.add(job.id);
     try {
       storedSpec({ prompt: job.prompt, hostId: job.hostId, providerId: job.providerId, projectDirectory: job.projectDirectory, permissions: job.permissions }); normalizeAutomationSchedule(job.schedule);
-      if (job.hostId !== 'central' && !state.executionHosts.some(host => host.id === job.hostId && host.userId === job.userId)) invalid();
+      if (job.hostId !== 'central' && !state.executionHosts.some(host => host.id === job.hostId)) invalid();
       if (job.sourceConversationId && state.conversations.some(item => item.id === job.sourceConversationId && item.userId !== job.userId)) invalid();
     } catch { invalid(); }
     let blockingCount = 0;

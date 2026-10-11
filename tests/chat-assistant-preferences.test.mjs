@@ -43,7 +43,7 @@ test('an enabled turn cannot use an unsaved candidate or silently switch away fr
   const local=storage();saveChatAssistantPreferences(local,'server:alice',selected);
   const restored=restoreChatAssistantPreferences(local,'server:alice','missing-desktop');
   assert.equal(restored.hostId,'missing-desktop');
-  assert.match(chatAssistantTargetIssue(restored,[{id:'central',online:true}],[],true),/离线/);
+  assert.match(chatAssistantTargetIssue(restored,[{id:'central',online:true}],[],true),/未连接或已无访问权限/);
   assert.equal(snapshotChatAssistant({...selected,hostId:'missing-desktop'},true,undefined,'missing-desktop').hostId,'missing-desktop');
 });
 
@@ -51,9 +51,10 @@ test('offline or missing targets are preserved and never rerouted to another onl
   const hosts=[{id:'central',kind:'central',online:true,codex:{available:true}},{id:'desk-one',kind:'desktop',online:false}];
   assert.match(chatAssistantTargetIssue(selected,hosts,[{id:'model-one'}]),/离线/);
   assert.equal(snapshotChatAssistant(selected,true).hostId,'desk-one');
-  assert.match(chatAssistantTargetIssue({...selected,hostId:'gone'},hosts,[{id:'model-one'}]),/离线/);
+  assert.match(chatAssistantTargetIssue({...selected,hostId:'gone'},hosts,[{id:'model-one'}]),/请选择自己登录的执行电脑/);
   assert.match(chatAssistantTargetIssue({...selected,hostId:''},hosts,[{id:'model-one'}]),/选择/);
-  assert.equal(chatAssistantTargetIssue({...selected,hostId:'central'},hosts,[{id:'model-one'}]),'');
+  assert.match(chatAssistantTargetIssue({...selected,hostId:'central'},hosts,[{id:'model-one'}]),/请选择自己登录的执行电脑/);
+  assert.equal(chatAssistantTargetIssue({...selected,hostId:'central'},hosts,[{id:'model-one'}],true),'');
 });
 
 test('ordinary accounts need an assigned Agent model; owners can explicitly use the host default',()=>{

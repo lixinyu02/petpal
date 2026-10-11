@@ -18,7 +18,7 @@ export default function MusicMcpSettings({connected,user}:{connected:boolean;use
   const [status,setStatus]=useState<MusicMcpStatus|null>(null),[busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const alive=useRef(false),epoch=useRef(getSessionEpoch()).current;
   const requests=useRef(new Set<AbortController>()),operation=useRef<symbol|null>(null);
-  const allowed=connected&&(transport.native?!!user?.canUseCodex&&(user.isOwner||user.agentAccess==='full'):!!user?.isOwner);
+  const allowed=connected&&(transport.native?!!user?.canUseCodex&&(user.isOwner||user.agentAccess==='full'):!!(user?.isAdmin||user?.isOwner));
   const allowedNow=useRef(allowed);allowedNow.current=allowed;
   const current=(controller?:AbortController)=>alive.current&&allowedNow.current&&getSessionEpoch()===epoch&&!controller?.signal.aborted;
   const dirty=!!config&&!!draft&&JSON.stringify(draftFrom(config))!==JSON.stringify(draft);

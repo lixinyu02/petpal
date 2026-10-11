@@ -10,7 +10,7 @@ async function until(fn){for(let i=0;i<100;i++){if(fn())return;await delay(2);}a
 function fixture(t, options={}) {
   const userId=randomUUID(), otherUserId=randomUUID(), auth={userId,sessionHash:'session-first',bootstrap:false};
   const valid=new Set([auth.sessionHash,'session-second']), config={mode:'api',model:'model-1',revision:randomUUID(),baseUrl:'https://central-model.example/v1',apiKey:'never-send-this-key'};
-  const store={state:{users:[{id:userId},{id:otherUserId}],executionHosts:[]},save:async()=>{}};
+  const store={state:{users:[{id:userId,username:'fixture-user',displayName:'Fixture User',role:'user',disabled:false},{id:otherUserId,username:'other-user',displayName:'Other User',role:'user',disabled:false}],executionHosts:[]},save:async()=>{}};
   const authorization=[];
   const manager=createExecutors({store,getConfig:()=>config,authorizeSession:value=>{if(!valid.has(value.sessionHash))throw Object.assign(new Error('expired'),{status:401});},authorizeEntry:entry=>{authorization.push(entry.id);if(!valid.has(entry.auth.sessionHash))throw Object.assign(new Error('revoked'),{status:401});},readAttachment:async(_userId,id)=>({record:{id,mimeType:'image/png'},bytes:Buffer.from('fixture-image')}),pollMs:5,commandMs:100,stopMs:15,...options});
   t.after(()=>manager.close());
@@ -31,8 +31,9 @@ test('registration is scoped to account, stable device identity, and rotated con
   const f=fixture(t),deviceId=randomUUID(),first=await f.registration({deviceId}),second=await f.registration({deviceId});
   assert.equal(first.hostId,second.hostId);assert.notEqual(first.connectionId,second.connectionId);
   assert.throws(()=>f.manager.heartbeat(first.connectionId,f.auth),{status:404});
-  assert.equal(f.manager.list(f.userId).length,2);assert.equal(f.manager.list(f.otherUserId).length,1);
-  assert.throws(()=>f.manager.target(f.otherUserId,first.hostId),{status:404});
+  assert.equal(f.manager.list(f.userId).length,1);assert.equal(f.manager.list(f.otherUserId).length,0);
+  assert.throws(()=>f.manager.target(f.otherUserId,first.hostId),{status:403});
+  assert.throws(()=>f.manager.target(f.userId,'central'),{status:403});
   assert.throws(()=>f.manager.heartbeat(second.connectionId,{...f.auth,userId:f.otherUserId}),{status:404});
   assert.throws(()=>f.manager.heartbeat(second.connectionId,{...f.auth,sessionHash:'session-second'}),{status:404});
   assert.doesNotMatch(JSON.stringify(f.manager.list(f.userId)),/session-first|deviceId|never-send-this-key/);
@@ -115,7 +116,7 @@ test('project-directory capability belongs to the live connection and never the 
   assert.equal(Object.hasOwn(f.store.state.executionHosts[0],'capabilities'),false);
   assert.equal(validateExecutionHosts(f.store.state),false);
   assert.deepEqual(f.manager.target(f.userId,supported.hostId,'C:\\projects\\cat'),{hostId:supported.hostId,hostName:'My Windows PC'});
-  assert.throws(()=>f.manager.target(f.otherUserId,supported.hostId,'C:\\projects\\cat'),{status:404});
+  assert.throws(()=>f.manager.target(f.otherUserId,supported.hostId,'C:\\projects\\cat'),{status:403});
   const older=await f.registration({deviceId});
   assert.equal(f.manager.list(f.userId).find(host=>host.id===older.hostId).codex.projectDirectory,false);
   assert.throws(()=>f.manager.target(f.userId,older.hostId,'C:\\projects\\cat'),{status:409,code:'executor_project_directory_unsupported'});

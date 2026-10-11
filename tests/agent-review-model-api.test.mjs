@@ -10,6 +10,7 @@ import { JsonStore } from '../server/store.mjs';
 import { defaultCodexConfig } from '../server/codex-config.mjs';
 import { approvalReviewCapability } from '../server/approval-review.mjs';
 import { listenFixture } from './helpers/loopback.mjs';
+import { DesktopExecutor } from '../desktop/executor.mjs';
 
 const bootstrap = 'independent-review-fixture-owner';
 async function until(callback) { for (let i = 0; i < 300; i++) { const value = await callback(); if (value) return value; await delay(5); } assert.fail('Reviewer task did not settle'); }
@@ -22,7 +23,7 @@ async function fixture(t) {
   const foreign = { ...review, id: randomUUID(), name: 'Other review', model: 'review-foreign', apiKey: 'synthetic-other-review-key' };
   const chat = { ...review, id: randomUUID(), name: 'Chat', protocol: 'chat-completions', model: 'chat-only' };
   store.state.providers = [agent, review, foreign, chat]; await store.save();
-  const calls = [];
+  const calls = [], workers = [], hosts = new Map();
   const codex = { async status() { return { available: true, authenticated: true, approvalReview: approvalReviewCapability(true) }; },
     run(args) { return new Promise((resolve, reject) => { const threadId = args.threadId || randomUUID(); calls.push({ args, threadId, resolve: text => resolve({ threadId, text: text || 'done' }), reject }); args.onEvent('thread', { threadId }); args.onEvent('turn', { turnId: randomUUID() }); args.signal.addEventListener('abort', () => reject(args.signal.reason), { once: true }); }); },
     async close() { for (const call of calls) call.reject(new Error('fixture closed')); } };
@@ -31,11 +32,17 @@ async function fixture(t) {
     const response = await fetch(`http://127.0.0.1:${app.server.address().port}/api${route}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return { status: response.status, data: await response.json() };
   };
-  const member = async () => { const password = 'synthetic-review-password'; const created = await request('/admin/users', { method: 'POST', body: { username: `review-${randomUUID().slice(0, 8)}`, password, agentAccess: 'full', providerIds: [agent.id, review.id, chat.id] } }); assert.equal(created.status, 201); const login = await request('/auth/login', { token: '', method: 'POST', body: { username: created.data.user.username, password } }); assert.equal(login.status, 200); return { user: created.data.user, token: login.data.token }; };
+  const member = async () => {
+    const password = 'synthetic-review-password'; const created = await request('/admin/users', { method: 'POST', body: { username: `review-${randomUUID().slice(0, 8)}`, password, agentAccess: 'full', providerIds: [agent.id, review.id, chat.id] } }); assert.equal(created.status, 201);
+    const login = await request('/auth/login', { token: '', method: 'POST', body: { username: created.data.user.username, password } }); assert.equal(login.status, 200);
+    const worker = new DesktopExecutor({ dataDir: path.join(directory, `pc-${created.data.user.id}`), name: created.data.user.username, resolveCommand: async () => ({ file: 'fixture-codex', args: [] }), toolsFactory: () => ({ specs: [], async close() {} }), bridgeFactory: () => codex });
+    workers.push(worker); const online = await worker.connect({ url: `http://127.0.0.1:${app.server.address().port}`, token: login.data.token, instanceId: store.state.instanceId, userId: created.data.user.id }); assert.equal(online.state, 'online'); hosts.set(login.data.token, online.hostId);
+    return { user: created.data.user, token: login.data.token };
+  };
   const create = async (token = bootstrap) => { const response = await request('/conversations', { token, method: 'POST', body: { mode: 'codex' } }); assert.equal(response.status, 201); return response.data; };
-  const submit = (conversation, token = bootstrap, extra = {}) => request(`/conversations/${conversation.id}/agent/submit`, { token, method: 'POST', body: { submissionId: randomUUID(), content: 'fixture request', providerId: agent.id, permissions: { access: 'read-only', approval: 'review', reviewProviderId: review.id }, ...extra } });
+  const submit = (conversation, token = bootstrap, extra = {}) => request(`/conversations/${conversation.id}/agent/submit`, { token, method: 'POST', body: { submissionId: randomUUID(), content: 'fixture request', providerId: agent.id, ...(token !== bootstrap ? { hostId: hosts.get(token) } : {}), permissions: { access: 'read-only', approval: 'review', reviewProviderId: review.id }, ...extra } });
   const finish = async (conversation, call, token = bootstrap) => { call.resolve(); await until(async () => (await request(`/conversations/${conversation.id}`, { token })).data.agent.run?.status === 'completed'); };
-  t.after(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
+  t.after(async () => { await Promise.allSettled(workers.map(worker => worker.close())); await app.close(); await rm(directory, { recursive: true, force: true }); });
   return { app, request, member, create, submit, finish, calls, agent, review, foreign, chat, saved: async () => JSON.parse(await readFile(path.join(dataDir, 'state.json'), 'utf8')) };
 }
 
@@ -47,7 +54,7 @@ test('authorized reviewer can use a different Responses endpoint and its credent
   assert.ok(!state.data.codex.eligibleProviderIds.includes(f.review.id));
   assert.equal(state.data.codex.approvalReview.independentModel, true);
   const conversation = await f.create(user.token); assert.equal((await f.submit(conversation, user.token)).status, 200); await until(() => f.calls.length === 1);
-  const args = f.calls[0].args; assert.deepEqual(args.reviewConfig, { providerId: f.review.id, model: f.review.model, baseUrl: f.review.baseUrl, apiKey: f.review.apiKey, reasoningEffort: '' });
+  const args = f.calls[0].args; assert.equal(args.reviewConfig.providerId, f.review.id); assert.equal(args.reviewConfig.model, f.review.model); assert.match(args.reviewConfig.baseUrl, /\/runs\/.+\/review$/); assert.notEqual(args.reviewConfig.apiKey, f.review.apiKey);
   assert.equal(args.model, f.agent.model); assert.doesNotThrow(args.authorizeReview);
   const visible = (await f.request(`/conversations/${conversation.id}`, { token: user.token })).data;
   assert.equal(visible.agent.run.reviewModel, f.review.model); assert.equal(visible.agent.run.reviewFingerprint, undefined);

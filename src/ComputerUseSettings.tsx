@@ -9,7 +9,7 @@ export default function ComputerUseSettings({connected,user}:{connected:boolean;
   const [config,setConfig]=useState<ComputerUseConfig|null>(null),[draft,setDraft]=useState<ComputerUseConfig|null>(null),[status,setStatus]=useState<ComputerUseStatus|null>(null);
   const [busy,setBusy]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const alive=useRef(false),request=useRef<AbortController|null>(null);
-  const allowed=connected&&(transport.native?!!user?.canUseCodex&&(user.isOwner||user.agentAccess==='full'):!!user?.isOwner),allowedNow=useRef(allowed);allowedNow.current=allowed;
+  const allowed=connected&&(transport.native?!!user?.canUseCodex&&(user.isOwner||user.agentAccess==='full'):!!(user?.isAdmin||user?.isOwner)),allowedNow=useRef(allowed);allowedNow.current=allowed;
   const current=(signal?:AbortSignal)=>alive.current&&allowedNow.current&&getSessionEpoch()===epoch&&!signal?.aborted;
   const dirty=!!config&&!!draft&&(draft.enabled!==config.enabled||draft.profile!==config.profile);
   function apply(value:ComputerUseConfig){setConfig(value);setDraft(value);}

@@ -45,8 +45,8 @@ async function fixture(t, { seed, autoStart = true } = {}) {
     const response = await fetch(`http://127.0.0.1:${app.server.address().port}/api${route}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     return { status: response.status, data: await response.json() };
   };
-  const member = async (username, agentAccess = 'workspace') => {
-    const created = await request('/admin/users', { method: 'POST', body: { username, password, agentAccess, providerIds: [provider.id] } }); assert.equal(created.status, 201);
+  const member = async (username, agentAccess = 'workspace', role = 'user') => {
+    const created = await request('/admin/users', { method: 'POST', body: { username, password, role, agentAccess, providerIds: [provider.id] } }); assert.equal(created.status, 201);
     const login = await request('/auth/login', { token: '', method: 'POST', body: { username, password } }); assert.equal(login.status, 200);
     return { user: created.data.user, token: login.data.token };
   };
@@ -88,9 +88,11 @@ async function fixture(t, { seed, autoStart = true } = {}) {
   return { app, request, member, body, create, jobs, calls, saved, completed, provider, foreign, tools: () => desktopTools, advance(minutes) { time += minutes * 60000; }, directory, dataDir };
 }
 
-test('account APIs require Agent authorization, isolate users and retain exact create/run request receipts', async t => {
-  const f = await fixture(t), alice = await f.member('schedule-alice'), bob = await f.member('schedule-bob'), chatOnly = await f.member('schedule-chat', 'none');
-  assert.equal((await f.request('/automations', { token: '' })).status, 401); assert.equal((await f.request('/automations', { token: chatOnly.token })).status, 403);
+test('account APIs require login, isolate histories and retain exact administrator central-run receipts', async t => {
+  const f = await fixture(t), alice = await f.member('schedule-alice', 'full', 'admin'), bob = await f.member('schedule-bob'), legacyUser = await f.member('schedule-legacy', 'none');
+  assert.equal((await f.request('/automations', { token: '' })).status, 401); assert.equal((await f.request('/automations', { token: legacyUser.token })).status, 200);
+  assert.equal(legacyUser.user.role, 'user'); assert.equal(legacyUser.user.canUseCodex, true);
+  assert.equal((await f.request('/automations', { token: legacyUser.token, method: 'POST', body: f.body() })).status, 403);
   const body = f.body(), first = await f.request('/automations', { token: alice.token, method: 'POST', body }), repeated = await f.request('/automations', { token: alice.token, method: 'POST', body });
   assert.equal(first.status, 201); assert.equal(repeated.data.automation.id, first.data.automation.id); assert.equal((await f.jobs(alice.token)).length, 1);
   assert.equal((await f.request('/automations', { token: alice.token, method: 'POST', body: { ...body, prompt: 'Changed content' } })).status, 409);
@@ -120,14 +122,17 @@ test('scheduled Agent dispatch resolves its fixed independent reviewer without s
   await f.completed(job, 0);
 });
 
-test('owned offline computers may be saved, while foreign hosts, models and escalated access are rejected', async t => {
+test('users may save owned offline PCs and full access, while foreign hosts, central and unassigned models are rejected', async t => {
   const f = await fixture(t), alice = await f.member('scope-alice'), bob = await f.member('scope-bob');
   const register = token => f.request('/agent/executors/register', { token, method: 'POST', body: { deviceId: randomUUID(), name: 'Fixture PC', platform: process.platform, arch: process.arch } });
   const own = (await register(alice.token)).data, other = (await register(bob.token)).data;
-  assert.equal((await f.request('/automations', { token: alice.token, method: 'POST', body: f.body({ hostId: other.hostId }) })).status, 404);
-  assert.equal((await f.request('/automations', { token: alice.token, method: 'POST', body: f.body({ providerId: f.foreign.id }) })).status, 404);
-  assert.equal((await f.request('/automations', { token: alice.token, method: 'POST', body: f.body({ providerId: null }) })).status, 403);
+  assert.equal(alice.user.role, 'user'); assert.equal(bob.user.role, 'user');
+  assert.equal((await f.request('/automations', { token: alice.token, method: 'POST', body: f.body({ hostId: other.hostId }) })).status, 403);
+  assert.equal((await f.request('/automations', { token: alice.token, method: 'POST', body: f.body({ hostId: own.hostId, providerId: f.foreign.id }) })).status, 404);
+  assert.equal((await f.request('/automations', { token: alice.token, method: 'POST', body: f.body({ hostId: own.hostId, providerId: null }) })).status, 403);
   assert.equal((await f.request('/automations', { token: alice.token, method: 'POST', body: f.body({ permissions: { access: 'full-access', approval: 'auto' } }) })).status, 403);
+  const full = await f.create(alice.token, { hostId: own.hostId, permissions: { access: 'full-access', approval: 'auto' } });
+  assert.equal(full.permissions.access, 'full-access'); assert.equal(full.hostId, own.hostId);
   await f.request(`/agent/executors/${own.connectionId}`, { token: alice.token, method: 'DELETE' });
   const job = await f.create(alice.token, { hostId: own.hostId });
   const run = await f.request(`/automations/${job.id}/run`, { token: alice.token, method: 'POST', body: { requestId: randomUUID() } });
@@ -136,19 +141,19 @@ test('owned offline computers may be saved, while foreign hosts, models and esca
 });
 
 test('scheduled work survives browser logout, keeps its fixed scope, and observes revocation', async t => {
-  const f = await fixture(t), member = await f.member('persist-schedule'), job = await f.create(member.token);
+  const f = await fixture(t), member = await f.member('persist-schedule', 'full', 'admin'), job = await f.create(member.token);
   await f.request('/auth/logout', { token: member.token, method: 'POST', body: {} });
   f.advance(5); await f.app.automations.tick(); await until(() => f.calls.length === 1);
   assert.equal(f.calls[0].args.model, f.provider.model); assert.deepEqual(f.calls[0].args.permissions, { access: 'read-only', approval: 'auto' });
   assert.equal((await f.request('/automations', { token: member.token })).status, 401);
-  const changed = await f.request(`/admin/users/${member.user.id}`, { method: 'PATCH', body: { agentAccess: 'none' } }); assert.equal(changed.status, 200);
+  const changed = await f.request(`/admin/users/${member.user.id}`, { method: 'PATCH', body: { role: 'user' } }); assert.equal(changed.status, 200);
   assert.equal(f.calls[0].args.signal.aborted, true); await f.app.automations.tick();
   const saved = await f.saved(), stored = saved.automations.jobs.find(item => item.id === job.id); assert.equal(stored.runs[0].status, 'cancelled');
   f.advance(5); await f.app.automations.tick(); assert.equal(f.calls.length, 1); assert.equal((await f.saved()).automations.jobs.find(item => item.id === job.id).enabled, false);
 });
 
 test('Agent creation uses current entry scope and permissions, preferences and 10-per-turn limit are durable', async t => {
-  const f = await fixture(t), member = await f.member('agent-schedules'), conversation = (await f.request('/conversations', { token: member.token, method: 'POST', body: { mode: 'codex' } })).data;
+  const f = await fixture(t), member = await f.member('agent-schedules', 'full', 'admin'), conversation = (await f.request('/conversations', { token: member.token, method: 'POST', body: { mode: 'codex' } })).data;
   const permissions = { access: 'workspace-write', approval: 'ask' };
   assert.equal((await f.request(`/conversations/${conversation.id}/agent/submit`, { token: member.token, method: 'POST', body: { submissionId: randomUUID(), content: 'Fixture task', hostId: 'central', providerId: f.provider.id, permissions } })).status, 200);
   await until(() => f.calls.length === 1);
@@ -287,8 +292,8 @@ test('an HTTP create queued behind a disk write is rejected if its login ends be
 });
 
 test('an Agent create already in the disk queue cannot commit after the current turn is stopped', async t => {
-  const f = await fixture(t), member = await f.member('queued-tool-schedule'), conversation = (await f.request('/conversations', { token: member.token, method: 'POST', body: { mode: 'codex' } })).data;
-  await f.request(`/conversations/${conversation.id}/agent/submit`, { token: member.token, method: 'POST', body: { submissionId: randomUUID(), content: 'Fixture guarded turn', providerId: f.provider.id, permissions: { access: 'read-only', approval: 'auto' } } }); await until(() => f.calls.length === 1);
+  const f = await fixture(t), member = await f.member('queued-tool-schedule', 'full', 'admin'), conversation = (await f.request('/conversations', { token: member.token, method: 'POST', body: { mode: 'codex' } })).data;
+  assert.equal((await f.request(`/conversations/${conversation.id}/agent/submit`, { token: member.token, method: 'POST', body: { submissionId: randomUUID(), content: 'Fixture guarded turn', hostId: 'central', providerId: f.provider.id, permissions: { access: 'read-only', approval: 'auto' } } })).status, 200); await until(() => f.calls.length === 1);
   const barrier = blockAutomationSave(t, f.dataDir), pending = f.tools().execute('petpal_automation_create', { title: 'Must not persist', prompt: 'Fixture only', schedule: { kind: 'interval', minutes: 5 }, requestId: randomUUID() }, { conversationId: conversation.id, signal: f.calls[0].args.signal });
   const rejected = assert.rejects(pending); await barrier.started;
   const stopping = f.request(`/conversations/${conversation.id}/stop`, { token: member.token, method: 'POST', body: {} }); await until(() => f.calls[0].args.signal.aborted);
