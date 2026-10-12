@@ -202,6 +202,99 @@ function toggleMainFullscreen() {
   void setMainFullscreen(enabled).catch(() => {});
 }
 
+async function smokeWindowPresentation() {
+  const expect = process.env.PETPAL_WINDOW_SMOKE_EXPECT_STARTUP || 'windowed';
+  const next = process.env.PETPAL_WINDOW_SMOKE_NEXT_STARTUP || 'windowed';
+  if (!['windowed', 'fullscreen', 'tray'].includes(expect) || !['windowed', 'fullscreen', 'tray'].includes(next) || !process.env.PETPAL_SMOKE_PROFILE)
+    throw new Error('Window smoke requires an isolated profile and valid startup mode');
+  const wait = async predicate => {
+    const deadline = Date.now() + 5000;
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error('Native window expectation timed out');
+      await new Promise(resolve => setTimeout(resolve, 30));
+    }
+  };
+  const launch = appPreferences.current();
+  if (expect === 'tray') {
+    if (!launch.startMinimized || !launch.startFullscreen || mainWindow.isVisible() || mainWindow.isFullScreen())
+      throw new Error('Tray startup revealed or entered fullscreen prematurely');
+    showMain();
+  }
+  await wait(() => mainWindow.isVisible() && mainWindow.isFullScreen() === (expect !== 'windowed'));
+  // WSLg can report fullscreen while the newly mapped window still has its
+  // temporary off-screen coordinates. Record only settled native geometry.
+  await wait(() => {
+    const bounds = mainWindow.getBounds(), display = screen.getDisplayMatching(bounds);
+    const area = expect === 'windowed' ? display.workArea : display.bounds;
+    return expect === 'windowed'
+      ? bounds.x >= area.x && bounds.y >= area.y && bounds.x + bounds.width <= area.x + area.width && bounds.y + bounds.height <= area.y + area.height
+      : ['x', 'y', 'width', 'height'].every(key => bounds[key] === area[key]);
+  });
+  const initial = { mode: expect, visible: mainWindow.isVisible(), fullscreen: mainWindow.isFullScreen(), bounds: mainWindow.getBounds() };
+  const loginGate = await loginSmokeMain();
+  const before = await mainWindow.webContents.executeJavaScript('window.petpal.preferences.status()');
+  if (!before.fullscreenSupported || !before.autoLaunchSupported || before.platform !== 'linux') throw new Error('Native Linux settings unavailable');
+  const enter = await mainWindow.webContents.executeJavaScript('window.petpal.preferences.setFullscreen(true)');
+  if (!enter.fullscreen || !mainWindow.isFullScreen()) throw new Error('Native fullscreen did not enter');
+  await wait(() => {
+    const bounds = mainWindow.getBounds(), display = screen.getDisplayMatching(bounds).bounds;
+    return ['x', 'y', 'width', 'height'].every(key => bounds[key] === display[key]);
+  });
+  const fullscreenBounds = mainWindow.getBounds(), displayBounds = screen.getDisplayMatching(fullscreenBounds).bounds;
+  if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'fullscreen.png'), (await mainWindow.webContents.capturePage()).toPNG());
+  mainWindow.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+  mainWindow.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+  await wait(() => !mainWindow.isFullScreen());
+  mainWindow.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'F11' });
+  mainWindow.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'F11' });
+  await wait(() => mainWindow.isFullScreen());
+  await mainWindow.webContents.executeJavaScript('window.petpal.preferences.setFullscreen(false)');
+  await mainWindow.loadURL(`${origin}/?chat=1&settings=1`);
+  const ui = await mainWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 20000; let opened = false;
+    const check = () => {
+      const tab = [...document.querySelectorAll('.settings-tabs button')].find(button => button.textContent.trim() === '设备连接');
+      if (!opened && tab && !tab.disabled) { opened = true; tab.click(); }
+      const panel = document.querySelector('.client-behavior-settings');
+      const inputs = panel && [...panel.querySelectorAll('input[role="switch"]')];
+      const button = panel && [...panel.querySelectorAll('button')].find(button => button.textContent.trim() === '进入全屏');
+      if (inputs?.length === 6 && !panel.querySelector('[role="alert"]') && panel.getAttribute('aria-busy') === 'false' && button && !button.disabled) {
+        panel.scrollIntoView({ block: 'start' });
+        return resolve({ switches: inputs.map(input => ({ label: input.getAttribute('aria-label'), disabled: input.disabled })), button: button.textContent.trim() });
+      }
+      if (Date.now() >= deadline) return reject(new Error('Native window settings UI unavailable'));
+      setTimeout(check, 40);
+    }; check();
+  })`);
+  if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'settings.png'), (await mainWindow.webContents.capturePage()).toPNG());
+  await clickSmokeButton('.client-behavior-fullscreen', '进入全屏');
+  await wait(() => mainWindow.isFullScreen());
+  await mainWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+    const deadline = Date.now() + 5000;
+    const check = () => {
+      const button = document.querySelector('.client-behavior-fullscreen button');
+      if (button?.textContent.trim() === '退出全屏' && !button.disabled) return resolve(true);
+      if (Date.now() >= deadline) return reject(new Error('Native fullscreen UI readback failed'));
+      setTimeout(check, 40);
+    }; check();
+  })`);
+  await clickSmokeButton('.client-behavior-fullscreen', '退出全屏');
+  await wait(() => !mainWindow.isFullScreen());
+  const registered = await mainWindow.webContents.executeJavaScript('window.petpal.preferences.update({autoLaunch:true})');
+  if (!registered.autoLaunch) throw new Error('XDG autostart did not register');
+  const entry = await fs.readFile(path.join(process.env.XDG_CONFIG_HOME, 'autostart', 'com.petpal.desktop.desktop'), 'utf8');
+  if (!entry.includes('--petpal-autostart') || !entry.includes('--ozone-platform=x11')) throw new Error('XDG graphics arguments missing');
+  await mainWindow.webContents.executeJavaScript(`window.petpal.preferences.update(${JSON.stringify({autoLaunch:before.autoLaunch,startFullscreen:next!=='windowed',startMinimized:next==='tray',showPetOnLaunch:false})})`);
+  const persisted = await appPreferences.status();
+  if (persisted.startFullscreen !== (next !== 'windowed') || persisted.startMinimized !== (next === 'tray')) throw new Error('Startup preference did not persist');
+  const result = { event: 'window-presentation-smoke', platform: process.platform, electronVersion: process.versions.electron, packaged: app.isPackaged,
+    loginGate, initial, fullscreenBounds, displayBounds, keyboard: { f11: true, escape: true }, ui,
+    xdgAutostart: { registered: true, restored: true, graphicsPreserved: true }, nextStartup: next, persisted: true,
+    isolatedProfile: true, arm64PanelVerified: false };
+  if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'window-result.json'), JSON.stringify(result, null, 2));
+  console.log(JSON.stringify(result));
+}
+
 function createMain(showOnReady = true) {
   mainWindow = new BrowserWindow({
     ...mainWindowLayout(screen.getPrimaryDisplay().workArea),
@@ -838,11 +931,18 @@ async function boot() {
   tray.on('double-click', showMain);
   await startupMilestone('window-create');
   const launchPreferences = appPreferences.current(), smoke = process.argv.includes('--smoke-test');
-  createMain(smoke || !launchPreferences.startMinimized);
-  if ((smoke && !process.argv.includes('--smoke-central-server')) || (!smoke && launchPreferences.showPetOnLaunch)) showPet();
+  const windowSmoke = smoke && process.argv.includes('--smoke-window-presentation');
+  createMain((smoke && !windowSmoke) || !launchPreferences.startMinimized);
+  if ((smoke && !process.argv.includes('--smoke-central-server') && !windowSmoke) || (!smoke && launchPreferences.showPetOnLaunch)) showPet();
   await startupMilestone('window-load');
   await Promise.all([mainLoaded, petLoaded]);
   await startupMilestone('ready');
+  if (windowSmoke) {
+    await startupMilestone('smoke-window-presentation');
+    await smokeWindowPresentation();
+    await startupMilestone('smoke-complete');
+    app.quit(); return;
+  }
   if (process.argv.includes('--smoke-test')) {
     if (process.argv.includes('--smoke-central-server')) {
       await startupMilestone('smoke-central-server');

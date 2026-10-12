@@ -2,10 +2,11 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import * as tar from 'tar';
 import semver from 'semver';
+import { includeClientPayload, listClientPayloadFiles } from './client-payload.mjs';
 
 const archive = process.argv[2];
 if (!archive) throw new Error('Usage: node scripts/linux-verify.mjs <PetPal-Ubuntu.tar.gz>');
@@ -61,6 +62,7 @@ await tar.t({ file: archive, strict: true, onReadEntry(entry) {
     entry.on('end', () => frontend.push({ path: `dist/${entry.path.split('/resources/app/dist/')[1]}`, sha256: hash.digest('hex') }));
   }
   const appRelative = entry.path.split('/resources/app/')[1];
+  if (appRelative && !includeClientPayload(appRelative)) failures.push(`Published installer cache must not be distributed: ${appRelative}`);
   if (appRelative === 'package.json' && entry.type === 'File') {
     let text = ''; entry.on('data', chunk => { text += chunk; });
     entry.on('end', () => { try { appPackageMetadata = JSON.parse(text); } catch { failures.push('Invalid application package.json'); } });
@@ -196,15 +198,7 @@ if (process.argv.includes('--compare-current-dist')) {
     try { const hash = createHash('sha256'); for await (const chunk of createReadStream(path.join(root, file.path))) hash.update(chunk); if (hash.digest('hex') !== file.sha256) failures.push(`Current application member mismatch: ${file.path}`); }
     catch { failures.push(`Current application member missing: ${file.path}`); }
   }
-  const expectedFiles = async relative => {
-    const result = [];
-    for (const entry of await readdir(path.join(root, relative), { withFileTypes: true })) {
-      const file = path.posix.join(relative, entry.name);
-      if (entry.isDirectory()) result.push(...await expectedFiles(file)); else result.push(file);
-    }
-    return result;
-  };
-  for (const file of await expectedFiles('dist')) if (!frontend.some(item => item.path === file)) failures.push(`Current frontend member absent from archive: ${file}`);
+  for (const file of await listClientPayloadFiles(root, 'dist')) if (!frontend.some(item => item.path === file)) failures.push(`Current frontend member absent from archive: ${file}`);
 }
 const companionAssets = frontend.filter(file => file.path.startsWith('dist/avatars/'));
 for (const name of ['idle', 'blink', 'talk', 'round', 'curious', 'warm', 'sad', 'pout']) {

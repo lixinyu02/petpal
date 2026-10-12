@@ -169,6 +169,11 @@ test('Linux archive audit rejects every missing or modified music MCP vendor mem
     catch(error){assert.equal(error.code,1,error.stderr);return {code:error.code,...JSON.parse(error.stdout)};}
   }
   const baseline=await verify();assert.equal(baseline.ok,true,baseline.failures.join('\n'));
+  for(const name of ['PetPal-Windows.exe','PetPal-Ubuntu.tar.gz','PetPal-Android.apk','latest.json'])await t.test(`published installer cache ${name} is not a client asset`,async()=>{
+    const file=`dist/downloads/${name}`;await put(`resources/app/${file}`,'fixture cached distribution');
+    try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Published installer cache must not be distributed: ${file}`));}
+    finally{await rm(path.join(app,file));await rmdir(path.join(app,'dist/downloads'));}
+  });
   for(const file of [...vendorFiles,...centralFiles,...ncmCliFiles,'server/native/computer-use/patches/linux-x11-window-geometry.patch','server/opencli-manager.mjs','server/opencli-sites.mjs','server/opencli-worker.mjs','server/opencli-routes.mjs']){
     await t.test(`missing ${file}`,async()=>{
       await rm(path.join(app,file));

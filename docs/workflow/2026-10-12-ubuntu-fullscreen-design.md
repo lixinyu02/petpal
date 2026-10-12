@@ -14,7 +14,7 @@ Ubuntu 登录系统后可自动启动小伴，并按本机偏好铺满当前显�
 
 ## Non-goals
 
-不替换系统桌面、启用 kiosk 锁定、改系统显示参数或重启设备；不发布新正式版本。
+不替换系统桌面、启用 kiosk 锁定、改系统显示参数或重启设备；只生成本地 Ubuntu 预览包，不发布新正式版本。
 
 ## Solution
 
@@ -25,6 +25,8 @@ Linux 自启只保留当前已知、安全枚举的 X11／Wayland 与 GL／ANGLE
 ## Impact
 
 desktop preferences、IPC/preload、主窗口生命周期、客户端设置和相关回归。全屏复用现有 412×960 自适应页面。
+
+本地打包发现网页的 `dist/downloads` 安装包缓存被递归复制，导致安全审计拒绝 Windows 二进制。客户端 snapshot 现在只排除这个分发缓存，保留网页缓存及下载后端；归档审计和 current-dist 比较使用同一规则，其余安全拒绝规则保持。
 
 ## Risks
 

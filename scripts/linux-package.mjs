@@ -13,6 +13,7 @@ import builderUtil from 'builder-util';
 import semver from 'semver';
 import yauzl from 'yauzl';
 import {filterComputerUseNative,auditComputerUsePackage} from './computer-use-package.mjs';
+import { copyClientPayload } from './client-payload.mjs';
 
 const { build, Platform } = electronBuilder;
 const { Arch } = builderUtil;
@@ -235,7 +236,7 @@ async function preserveOpencliMetadata(appRoot, sourceAudit) {
 
 try {
   // Snapshot only application source and production package content, never user data.
-  for (const name of ['dist', 'server', 'desktop']) await cp(path.join(root, name), path.join(source, name), { recursive: true });
+  await copyClientPayload(root, source);
   await cp(path.join(root, 'NOTICE'), path.join(source, 'NOTICE'));
   const manifest = { name: metadata.name, version: metadata.version, description: metadata.description, type: 'module', main: metadata.main, private: true, dependencies: metadata.dependencies };
   await writeFile(path.join(source, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
