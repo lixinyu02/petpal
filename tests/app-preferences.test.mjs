@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const { createAppPreferences } = createRequire(import.meta.url)('../desktop/app-preferences.cjs');
-const defaults = { autoLaunch: false, startMinimized: false, showPetOnLaunch: true, closeToTray: true, petAlwaysOnTop: true };
+const defaults = { autoLaunch: false, startMinimized: false, startFullscreen: false, showPetOnLaunch: true, closeToTray: true, petAlwaysOnTop: true };
 const registrationName = 'com.petpal.desktop';
 const failure = error => error.code === 'PETPAL_APP_PREFERENCES' && !error.message.includes('fixture-private');
 
@@ -74,7 +74,7 @@ test('missing preferences load defaults without creating any file or enabling lo
 test('window flags persist atomically and reload without writing an OS login item', async t => {
   const f = await fixture(t);
   await f.preferences.load();
-  const patch = { startMinimized: true, showPetOnLaunch: false, closeToTray: false, petAlwaysOnTop: false };
+  const patch = { startMinimized: true, startFullscreen: true, showPetOnLaunch: false, closeToTray: false, petAlwaysOnTop: false };
   assert.deepEqual(await f.preferences.update(patch), { platform: 'win32', autoLaunchSupported: true, ...defaults, ...patch });
   assert.deepEqual(JSON.parse(await nativeFs.readFile(f.settingsFile, 'utf8')), { ...defaults, ...patch });
   assert.deepEqual(await nativeFs.readdir(f.userData), ['app-preferences.json']);
@@ -84,9 +84,38 @@ test('window flags persist atomically and reload without writing an OS login ite
   assert.ok(f.calls.every(call => call.operation === 'read'));
 });
 
+test('legacy preferences without fullscreen load its off default and preserve every stored window choice', async t => {
+  for (const platform of ['linux', 'win32']) {
+    const f = await fixture(t, { platform });
+    const { startFullscreen: _missing, ...legacy } = { ...defaults, startMinimized: true, showPetOnLaunch: false, closeToTray: false, petAlwaysOnTop: false };
+    const previous = Buffer.from(JSON.stringify(legacy)); await nativeFs.writeFile(f.settingsFile, previous);
+    const loaded = await f.preferences.load();
+    assert.deepEqual(f.preferences.current(), { ...legacy, startFullscreen: false });
+    assert.equal(loaded.startFullscreen, false); assert.equal(loaded.startMinimized, true);
+    assert.deepEqual(await nativeFs.readFile(f.settingsFile), previous, 'loading a legacy file does not rewrite it');
+    assert.ok(f.calls.every(call => call.operation === 'read'));
+    if (platform === 'linux') await assert.rejects(nativeFs.stat(f.autostartFile), { code: 'ENOENT' });
+  }
+});
+
+test('Linux fullscreen preference survives reloading while its autostart entry remains byte-for-byte unchanged', async t => {
+  const f = await fixture(t, { platform: 'linux', env: { APPIMAGE: '/opt/PetPal/PetPal.AppImage' } });
+  await f.preferences.load(); await f.preferences.update({ autoLaunch: true });
+  const entry = await nativeFs.readFile(f.autostartFile);
+  const saved = await f.preferences.update({ startFullscreen: true, startMinimized: true });
+  assert.equal(saved.startFullscreen, true); assert.equal(saved.autoLaunch, true);
+  assert.deepEqual(await nativeFs.readFile(f.autostartFile), entry);
+  const reloaded = createAppPreferences(f.options), actual = await reloaded.load();
+  assert.equal(actual.autoLaunch, true); assert.equal(actual.startFullscreen, true); assert.equal(actual.startMinimized, true);
+  assert.deepEqual(await nativeFs.readFile(f.autostartFile), entry);
+  await reloaded.update({ startFullscreen: false });
+  assert.equal(JSON.parse(await nativeFs.readFile(f.settingsFile, 'utf8')).startFullscreen, false);
+  assert.deepEqual(await nativeFs.readFile(f.autostartFile), entry);
+});
+
 test('unknown keys, non-boolean values, arrays and primitives are rejected with no mutations', async t => {
   const f = await fixture(t);
-  for (const input of [null, [], false, 'true', 1, { autoLaunch: 1 }, { closeToTray: null }, { startMinimized: 'false' },
+  for (const input of [null, [], false, 'true', 1, { autoLaunch: 1 }, { closeToTray: null }, { startMinimized: 'false' }, { startFullscreen: 'true' }, { startFullscreen: null },
     { arbitrary: 'fixture-private' }, { __proto__: { inherited: true }, autoLaunch: false }])
     await assert.rejects(f.preferences.update(input), failure);
   assert.deepEqual(f.preferences.current(), defaults);
@@ -465,6 +494,50 @@ test('Linux status respects external disabling and a stale executable', async t 
   await nativeFs.writeFile(f.autostartFile, original.replace('/opt/PetPal/petpal', '/opt/OldPetPal/petpal'));
   await f.preferences.update({ autoLaunch: false });
   await assert.rejects(nativeFs.stat(f.autostartFile), { code: 'ENOENT' });
+});
+
+test('Linux autostart preserves the ARM Mali launch switches and recognizes the same target on reload', async t => {
+  const f = await fixture(t, { platform: 'linux', env: { APPIMAGE: '/opt/Pet Pal/PetPal-arm64.AppImage' } });
+  const switches = { 'ozone-platform': 'x11', 'use-gl': 'angle', 'use-angle': 'gles-egl' };
+  f.app.commandLine = { getSwitchValue: key => switches[key] ?? '' };
+  await f.preferences.load(); await f.preferences.update({ autoLaunch: true, startFullscreen: true });
+  const entry = await nativeFs.readFile(f.autostartFile, 'utf8');
+  assert.match(entry, /^Exec="\/opt\/Pet Pal\/PetPal-arm64\.AppImage" --petpal-autostart --ozone-platform=x11 --use-gl=angle --use-angle=gles-egl$/m);
+  const next = createAppPreferences(f.options), status = await next.load();
+  assert.equal(status.autoLaunch, true); assert.equal(status.autoLaunchReason, undefined); assert.equal(status.startFullscreen, true);
+  assert.equal(await nativeFs.readFile(f.autostartFile, 'utf8'), entry);
+  await next.update({ autoLaunch: false }); await assert.rejects(nativeFs.stat(f.autostartFile), { code: 'ENOENT' });
+});
+
+test('Linux startup accepts only known graphics switch values and never copies arbitrary argv', async t => {
+  const f = await fixture(t, { platform: 'linux' });
+  const switches = { 'ozone-platform': 'x11 --no-sandbox', 'use-gl': 'angle\nHidden=true', 'use-angle': 'unsupported',
+    'no-sandbox': 'true', 'disable-web-security': 'true', 'user-data-dir': '/fixture-private-profile' };
+  const queried = new Set();
+  f.app.commandLine = { getSwitchValue: key => { queried.add(key); return switches[key] ?? ''; } };
+  f.app.argv = ['--no-sandbox', '--disable-web-security', '--user-data-dir=/fixture-private-profile'];
+  await f.preferences.load(); await f.preferences.update({ autoLaunch: true });
+  const entry = await nativeFs.readFile(f.autostartFile, 'utf8');
+  assert.match(entry, /^Exec="\/opt\/PetPal\/petpal" --petpal-autostart$/m);
+  assert.doesNotMatch(entry, /no-sandbox|disable-web-security|user-data-dir|fixture-private|Hidden=true|unsupported/);
+  assert.deepEqual([...queried].sort(), ['ozone-platform', 'use-angle', 'use-gl']);
+  assert.equal((await createAppPreferences(f.options).load()).autoLaunch, true);
+});
+
+test('Linux re-registers graphics mode changes only after an explicit enable and retains fullscreen preferences', async t => {
+  const f = await fixture(t, { platform: 'linux' });
+  const switches = { 'ozone-platform': 'wayland', 'use-gl': 'egl', 'use-angle': 'vulkan' };
+  f.app.commandLine = { getSwitchValue: key => switches[key] ?? '' };
+  await f.preferences.load(); await f.preferences.update({ autoLaunch: true, startFullscreen: true });
+  const previous = await nativeFs.readFile(f.autostartFile, 'utf8');
+  assert.match(previous, /--ozone-platform=wayland --use-gl=egl --use-angle=vulkan/);
+  switches['ozone-platform'] = 'auto'; switches['use-gl'] = 'desktop'; switches['use-angle'] = 'default';
+  const next = createAppPreferences(f.options), loaded = await next.load();
+  assert.equal(loaded.autoLaunch, false); assert.match(loaded.autoLaunchReason, /旧位置/); assert.equal(loaded.startFullscreen, true);
+  assert.equal(await nativeFs.readFile(f.autostartFile, 'utf8'), previous);
+  await next.update({ autoLaunch: true });
+  assert.match(await nativeFs.readFile(f.autostartFile, 'utf8'), /--ozone-platform=auto --use-gl=desktop --use-angle=default/);
+  assert.equal((await next.status()).autoLaunch, true); assert.equal(next.current().startFullscreen, true);
 });
 
 test('invalid executable paths cannot inject Desktop Entry directives or register Windows relative paths', async t => {

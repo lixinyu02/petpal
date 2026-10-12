@@ -108,7 +108,8 @@ function harness(overrides = {}) {
   });
   return { event, calls, updates, applied, handlers, setConnection: value => { current = value; }, disallow: () => { allowed = false; },
     status: raw => handlers['petpal:app-preferences:status'](raw ?? event),
-    update: (patch = { closeToTray: false }, input = connection, raw = event) => handlers['petpal:app-preferences:update'](raw, input, patch) };
+    update: (patch = { closeToTray: false }, input = connection, raw = event) => handlers['petpal:app-preferences:update'](raw, input, patch),
+    fullscreen: (enabled = true, input = connection, raw = event) => handlers['petpal:app-preferences:fullscreen'](raw, input, enabled) };
 }
 
 test('status is a trusted low-sensitivity read, available before login without verification', async () => {
@@ -204,22 +205,131 @@ test('an asynchronous apply does not return a preference response into a changed
   await assert.rejects(pending, /账号已变化/);
 });
 
+test('status and saved preference responses merge the latest native window state', async () => {
+  let fullscreen = false;
+  const h = harness({ preferences: { status: async () => ({ closeToTray: true, startFullscreen: true, fullscreen: true }) },
+    options: { readWindowState: () => ({ fullscreenSupported: true, fullscreen }), onUpdated: async () => { fullscreen = true; } } });
+  assert.deepEqual(await h.status(), { closeToTray: true, startFullscreen: true, fullscreenSupported: true, fullscreen: false });
+  const updated = await h.update({ startFullscreen: false });
+  assert.deepEqual(updated, { closeToTray: true, startFullscreen: false, fullscreenSupported: true, fullscreen: true });
+  assert.deepEqual(h.updates, [{ startFullscreen: false }]);
+});
+
+test('logged-in Chat-only users can change real fullscreen with repeated authorization and no preference persistence', async () => {
+  let fullscreen = false; const native = [];
+  const h = harness({ preferences: { status: async () => ({ startFullscreen: false, startMinimized: true }) },
+    options: { readWindowState: () => ({ fullscreenSupported: true, fullscreen }), setFullscreen: async (enabled, authorize) => {
+      await authorize(); native.push(enabled); fullscreen = enabled;
+    } } });
+  assert.deepEqual(await h.fullscreen(), { startFullscreen: false, startMinimized: true, fullscreenSupported: true, fullscreen: true });
+  assert.equal(h.calls.length, 2); assert.deepEqual(native, [true]); assert.equal(h.updates.length, 0); assert.equal(h.applied.length, 0);
+  assert.deepEqual(await h.fullscreen(false), { startFullscreen: false, startMinimized: true, fullscreenSupported: true, fullscreen: false });
+  assert.deepEqual(native, [true, false]); assert.equal(h.updates.length, 0);
+});
+
+test('fullscreen requires an exact boolean and a supported native operation before any mutation', async () => {
+  const native = [], h = harness({ options: { setFullscreen: async enabled => native.push(enabled) } });
+  for (const value of [null, 'true', 1, {}, [], undefined]) {
+    await assert.rejects(h.handlers['petpal:app-preferences:fullscreen'](h.event, connection, value), error => error.code === 'PETPAL_PREFERENCES_FULLSCREEN');
+  }
+  assert.equal(native.length, 0); assert.equal(h.calls.length, 0); assert.equal(h.updates.length, 0);
+  const unsupported = harness();
+  await assert.rejects(unsupported.fullscreen(), error => error.code === 'PETPAL_PREFERENCES_FULLSCREEN');
+  assert.equal(unsupported.calls.length, 0);
+});
+
+test('guest, different account, and untrusted fullscreen requests cannot reach native window control', async () => {
+  for (const input of [null, { ...connection, token: '' }]) {
+    let modified = false; const h = harness({ options: { setFullscreen: async () => { modified = true; } } });
+    await assert.rejects(h.fullscreen(true, input), /请先登录/); assert.equal(modified, false); assert.equal(h.calls.length, 0);
+  }
+  for (const key of ['url', 'token']) {
+    let modified = false; const h = harness({ options: { setFullscreen: async () => { modified = true; } } });
+    h.setConnection({ ...connection, [key]: key === 'url' ? 'https://other.example' : 'next-account' });
+    await assert.rejects(h.fullscreen(), /账号已变化/); assert.equal(modified, false); assert.equal(h.calls.length, 0);
+  }
+  let modified = false; const h = harness({ options: { setFullscreen: async () => { modified = true; } } });
+  await assert.rejects(h.fullscreen(true, connection, { sender: 'pet' }), /可信主窗口/);
+  h.disallow(); await assert.rejects(h.fullscreen(), /可信主窗口/); assert.equal(modified, false);
+});
+
+test('account changes during fullscreen login verification stop before native transitions', async () => {
+  for (const change of ['logout', 'account', 'service', 'quit']) {
+    const entered = deferred(), finish = deferred(); let modified = false;
+    const h = harness({ options: { verifyConnection: async () => { entered.resolve(); return finish.promise; }, setFullscreen: async () => { modified = true; } } });
+    const pending = h.fullscreen(); await entered.promise;
+    if (change === 'quit') h.disallow();
+    else h.setConnection({ ...connection, token: change === 'logout' ? '' : change === 'account' ? 'next-account' : connection.token,
+      url: change === 'service' ? 'https://other.example' : connection.url });
+    finish.resolve(identity);
+    await assert.rejects(pending, change === 'quit' ? /可信主窗口/ : /请先登录|账号已变化/);
+    assert.equal(modified, false); assert.equal(h.updates.length, 0); assert.equal(h.applied.length, 0);
+  }
+});
+
+test('a fullscreen transition waiting in the native queue rechecks the account immediately before mutation', async () => {
+  for (const change of ['logout', 'account', 'quit']) {
+    const entered = deferred(), finish = deferred(); let modified = false;
+    const h = harness({ options: { setFullscreen: async (_enabled, authorize) => {
+      entered.resolve(); await finish.promise;
+      try { await authorize(); } catch { throw new Error('private native queue wrapper'); }
+      modified = true;
+    } } });
+    const pending = h.fullscreen(); await entered.promise;
+    if (change === 'quit') h.disallow(); else h.setConnection({ ...connection, token: change === 'logout' ? '' : 'next-account' });
+    finish.resolve();
+    await assert.rejects(pending, error => /请先登录|账号已变化|可信主窗口/.test(error.message) && !error.message.includes('private'));
+    assert.equal(modified, false); assert.equal(h.updates.length, 0); assert.equal(h.applied.length, 0);
+  }
+});
+
+test('unavailable login verification and native failures report controlled fullscreen errors', async () => {
+  let modified = false;
+  const verification = harness({ options: { verifyConnection: async () => { throw new Error('private verification failure'); }, setFullscreen: async () => { modified = true; } } });
+  await assert.rejects(verification.fullscreen(), error => error.code === 'PETPAL_PREFERENCES_VERIFICATION' && !error.message.includes('private'));
+  assert.equal(modified, false);
+  const native = harness({ options: { setFullscreen: async () => { throw new Error('private display path'); } } });
+  await assert.rejects(native.fullscreen(), error => error.code === 'PETPAL_PREFERENCES_FULLSCREEN' && !error.message.includes('private'));
+  assert.equal(native.updates.length, 0);
+});
+
+test('fullscreen returns the native result instead of echoing its request', async () => {
+  const h = harness({ options: { readWindowState: () => ({ fullscreenSupported: true, fullscreen: false }), setFullscreen: async (_enabled, authorize) => { await authorize(); } } });
+  assert.deepEqual(await h.fullscreen(true), { closeToTray: true, fullscreenSupported: true, fullscreen: false });
+});
+
+test('fullscreen cannot return status after the account changes during native work or readback', async () => {
+  const entered = deferred(), finish = deferred();
+  const h = harness({ options: { setFullscreen: async (_enabled, authorize) => { await authorize(); entered.resolve(); await finish.promise; } } });
+  const pending = h.fullscreen(); await entered.promise; h.setConnection({ ...connection, token: 'next-account' }); finish.resolve();
+  await assert.rejects(pending, /账号已变化/);
+  const reading = deferred(), readEntered = deferred();
+  const readback = harness({ preferences: { status: async () => { readEntered.resolve(); return reading.promise; } },
+    options: { setFullscreen: async (_enabled, authorize) => { await authorize(); } } });
+  const request = readback.fullscreen(); await readEntered.promise; readback.setConnection({ ...connection, token: '' }); reading.resolve({ closeToTray: true });
+  await assert.rejects(request, /请先登录/);
+});
+
 const preloadSource = await readFile(new URL('../desktop/preload.cjs', import.meta.url), 'utf8');
 function preloadFixture() {
   let facade, saved = null, reads = 0, denyStorage = false;
-  const calls = [];
+  const calls = [], listeners = new Map();
   vm.runInNewContext(preloadSource, {
     require(name) {
       assert.equal(name, 'electron');
       return {
         contextBridge: { exposeInMainWorld(name, value) { assert.equal(name, 'petpal'); facade = value; } },
-        ipcRenderer: { invoke: async (...args) => { calls.push(args); return { ok: true }; } },
+        ipcRenderer: { invoke: async (...args) => { calls.push(args); return { ok: true }; },
+          on(channel, listener) { listeners.set(channel, listener); },
+          removeListener(channel, listener) { if (listeners.get(channel) === listener) listeners.delete(channel); },
+        },
       };
     },
     sessionStorage: { getItem(key) { reads++; assert.equal(key, 'petpal.connection'); if (denyStorage) throw new Error('storage denied'); return saved; } },
     location: { origin: 'http://127.0.0.1:5182' },
   });
-  return { facade, calls, setSaved: value => { saved = value; }, deny: () => { denyStorage = true; }, get reads() { return reads; } };
+  return { facade, calls, listeners, emitWindowState: value => listeners.get('petpal:window-state')?.({ sender: 'private electron sender' }, value),
+    setSaved: value => { saved = value; }, deny: () => { denyStorage = true; }, get reads() { return reads; } };
 }
 
 test('real preload normalizes only same-site empty URL and carries only the current selected account snapshot', async () => {
@@ -242,4 +352,25 @@ test('real preload status requires no storage and missing or rejected storage ca
   assert.equal(h.calls.some(call => call[0] === 'petpal:connection'), false);
   const invalid = preloadFixture(); invalid.setSaved('{invalid JSON'); await invalid.facade.preferences.update({ closeToTray: true });
   assert.equal(invalid.calls[0][1], null);
+});
+
+test('real preload fullscreen uses the current selected account and never changes startup settings', async () => {
+  const h = preloadFixture();
+  h.setSaved(JSON.stringify({ url: '', token: connection.token, ignored: 'private metadata' }));
+  await h.facade.preferences.setFullscreen(true);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls[0])), ['petpal:app-preferences:fullscreen', { url: 'http://127.0.0.1:5182', token: connection.token }, true]);
+  h.setSaved(JSON.stringify({ ...connection, token: 'next-account' })); await h.facade.preferences.setFullscreen(false);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls[1])), ['petpal:app-preferences:fullscreen', { url: connection.url, token: 'next-account' }, false]);
+  h.deny(); await h.facade.preferences.setFullscreen(true); assert.equal(h.calls[2][1], null);
+  assert.equal(h.calls.some(call => call[0] === 'petpal:connection' || call[0] === 'petpal:app-preferences:update'), false);
+});
+
+test('real preload window state exposes only a validated boolean and can remove its native listener', () => {
+  const h = preloadFixture(), events = [];
+  assert.throws(() => h.facade.preferences.onWindowState(null), /Expected a window state callback/);
+  const unsubscribe = h.facade.preferences.onWindowState(value => events.push(JSON.parse(JSON.stringify(value))));
+  h.emitWindowState({ fullscreen: true, token: 'private credential', sender: 'private sender' });
+  for (const value of [null, {}, { fullscreen: 1 }, { fullscreen: 'false' }]) h.emitWindowState(value);
+  assert.deepEqual(events, [{ fullscreen: true }]);
+  unsubscribe(); assert.equal(h.listeners.size, 0); h.emitWindowState({ fullscreen: false }); assert.equal(events.length, 1);
 });

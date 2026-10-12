@@ -5,12 +5,17 @@ const nativeFs = require('node:fs/promises');
 const os = require('node:os');
 const { randomUUID } = require('node:crypto');
 
-const DEFAULTS = Object.freeze({ autoLaunch: false, startMinimized: false, showPetOnLaunch: true,
+const DEFAULTS = Object.freeze({ autoLaunch: false, startMinimized: false, startFullscreen: false, showPetOnLaunch: true,
   closeToTray: true, petAlwaysOnTop: true });
 const KEYS = new Set(Object.keys(DEFAULTS));
 const MAX_BYTES = 8192;
 const AUTOSTART_FILE = 'com.petpal.desktop.desktop';
 const AUTOSTART_ARGS = ['--petpal-autostart'];
+const LINUX_GRAPHICS_SWITCHES = Object.freeze({
+  'ozone-platform': ['x11', 'wayland', 'auto'],
+  'use-gl': ['angle', 'egl', 'desktop'],
+  'use-angle': ['gles-egl', 'gl', 'egl', 'vulkan', 'default', 'swiftshader'],
+});
 const WINDOWS_REGISTRATION_NAME = 'com.petpal.desktop';
 const PRIVATE_TARGET_KEY = '_windowsAutoLaunchTarget';
 const preferenceError = message => Object.assign(new Error(message), { code: 'PETPAL_APP_PREFERENCES' });
@@ -31,9 +36,9 @@ function validate(value) {
 // Desktop Entry string escaping is applied before Exec tokenization. A literal
 // backslash therefore needs four backslashes; literal percent signs need %%. No
 // shell is involved, and paths containing line/control characters are rejected.
-function desktopExec(executable) {
+function desktopExec(executable, args = AUTOSTART_ARGS) {
   const escaped = executable.replace(/["`$\\]/g, '\\$&').replace(/\\/g, '\\\\').replace(/%/g, '%%');
-  return `"${escaped}" ${AUTOSTART_ARGS.join(' ')}`;
+  return `"${escaped}" ${args.join(' ')}`;
 }
 
 function validWindowsPath(value) {
@@ -106,7 +111,14 @@ function createAppPreferences({ app, platform = process.platform, env = process.
       if (typeof executable !== 'string' || !path.posix.isAbsolute(executable) || /[\x00-\x1f\x7f]/.test(executable) ||
           typeof configHome !== 'string' || !path.posix.isAbsolute(configHome) || /[\x00-\x1f\x7f]/.test(configHome))
         throw new Error('Invalid autostart path');
-      return { supported: true, executable, file: path.join(configHome, 'autostart', AUTOSTART_FILE) };
+      // Preserve the current graphics backend for devices such as ARM Mali.
+      // Never copy arbitrary argv, URLs, profile paths or sandbox switches.
+      const args = [...AUTOSTART_ARGS];
+      for (const [name, allowed] of Object.entries(LINUX_GRAPHICS_SWITCHES)) {
+        const value = app.commandLine?.getSwitchValue(name);
+        if (allowed.includes(value)) args.push(`--${name}=${value}`);
+      }
+      return { supported: true, executable, args, file: path.join(configHome, 'autostart', AUTOSTART_FILE) };
     } catch { return { supported: false, reason: '无法确定客户端启动位置，请重新安装或移动客户端后重试。' }; }
   }
 
@@ -145,7 +157,7 @@ function createAppPreferences({ app, platform = process.platform, env = process.
   }
 
   function desktopEntry(target) {
-    return Buffer.from(`[Desktop Entry]\nType=Application\nVersion=1.0\nName=PetPal\nComment=PetPal desktop companion\nExec=${desktopExec(target.executable)}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n`);
+    return Buffer.from(`[Desktop Entry]\nType=Application\nVersion=1.0\nName=PetPal\nComment=PetPal desktop companion\nExec=${desktopExec(target.executable, target.args)}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n`);
   }
 
   function readWindowsTarget(executable) {
@@ -189,7 +201,7 @@ function createAppPreferences({ app, platform = process.platform, env = process.
       const split = line.indexOf('=');
       if (split > 0) values.set(line.slice(0, split).trim(), line.slice(split + 1).trim());
     }
-    const matches = values.get('Type') === 'Application' && values.get('Exec') === desktopExec(target.executable);
+    const matches = values.get('Type') === 'Application' && values.get('Exec') === desktopExec(target.executable, target.args);
     const disabled = values.get('Hidden') === 'true' || values.get('X-GNOME-Autostart-enabled') === 'false';
     return { enabled: matches && !disabled, snapshot,
       ...(!matches ? { reason: '已有启动项指向旧位置，重新开启开机自启可更新。' } : {}) };

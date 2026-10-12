@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
-import { Download, Loader2, RefreshCw, Settings2 } from 'lucide-react';
+import { Download, Loader2, Maximize, Minimize, RefreshCw, Settings2 } from 'lucide-react';
 import { getIdentity, getSessionEpoch, subscribeSession } from './api';
 import TaskNotificationsSettings from './TaskNotificationsSettings';
 import ThemeSettings from './ThemeSettings';
@@ -12,6 +12,7 @@ type SettingKey = keyof AppPreferences;
 const startupSettings: { key: SettingKey; title: string; help: string }[] = [
   { key: 'autoLaunch', title: '开机自启', help: '登录这台电脑后自动打开小伴。' },
   { key: 'startMinimized', title: '启动时最小化', help: '启动后藏到托盘，不会自动登录账号。' },
+  { key: 'startFullscreen', title: '启动后全屏', help: '打开主窗口后铺满当前屏幕。' },
 ];
 const windowSettings: { key: SettingKey; title: string; help: string }[] = [
   { key: 'showPetOnLaunch', title: '启动显示桌宠', help: '打开小伴时显示独立桌宠窗口。' },
@@ -34,19 +35,30 @@ export default function ClientBehaviorSettings({ connected, onDownload }: Props)
   const bridge = clientBridge(), desktop = !!window.petpal, android = supportsTaskNotifications();
   const id = useId();
   const [snapshot, setSnapshot] = useState<{ scope: string; status: AppPreferencesStatus } | null>(null);
-  const [busy, setBusy] = useState<'load' | SettingKey | null>(null);
+  const [busy, setBusy] = useState<'load' | 'fullscreen' | SettingKey | null>(null);
   const [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [feedbackScope, setFeedbackScope] = useState(scope);
   const generation = useRef(0), operation = useRef(false);
+  const windowState = useRef<{ revision: number; fullscreen?: boolean }>({ revision: 0 });
   const status = snapshot?.scope === scope ? snapshot.status : null;
   const current = (revision: number) => revision === generation.current && connected && scope === sessionScope();
+
+  async function readStatus() {
+    const eventRevision = windowState.current.revision;
+    const next = readAppPreferencesStatus(await bridge!.status());
+    // A keyboard/tray event received during the read is newer than that snapshot.
+    if (next.fullscreenSupported && windowState.current.revision !== eventRevision && typeof windowState.current.fullscreen === 'boolean') {
+      next.fullscreen = windowState.current.fullscreen;
+    }
+    return next;
+  }
 
   async function load() {
     if (!connected || !bridge || operation.current || scope !== sessionScope()) return;
     const revision = generation.current;
     operation.current = true; setFeedbackScope(scope); setBusy('load'); setError(''); setNotice('');
     try {
-      const next = readAppPreferencesStatus(await bridge.status());
+      const next = await readStatus();
       if (current(revision)) setSnapshot({ scope, status: next });
     } catch {
       if (current(revision)) { setSnapshot(null); setError('无法读取这台电脑的设置，请重新读取。'); }
@@ -57,14 +69,29 @@ export default function ClientBehaviorSettings({ connected, onDownload }: Props)
 
   useEffect(() => {
     ++generation.current; operation.current = false;
+    windowState.current = { revision: 0 };
     setSnapshot(null); setFeedbackScope(scope); setBusy(null); setError(''); setNotice('');
+    const revision = generation.current;
+    let unsubscribe: (() => void) | undefined;
+    if (connected && typeof bridge?.onWindowState === 'function') {
+      try {
+        unsubscribe = bridge.onWindowState(event => {
+          if (!current(revision) || !event || typeof event.fullscreen !== 'boolean') return;
+          windowState.current = { revision: windowState.current.revision + 1, fullscreen: event.fullscreen };
+          setSnapshot(previous => previous?.scope === scope && previous.status.fullscreenSupported ? {
+            scope, status: { ...previous.status, fullscreen: event.fullscreen },
+          } : previous);
+        });
+      } catch { /* Older clients may lack event support; status readback remains available. */ }
+    }
     if (connected && bridge) void load();
-    return () => { ++generation.current; };
+    return () => { ++generation.current; if (typeof unsubscribe === 'function') unsubscribe(); };
   }, [connected, scope, bridge]);
 
   async function update(key: SettingKey, value: boolean) {
     if (!connected || !bridge || !status || operation.current || scope !== sessionScope()
-      || (key === 'autoLaunch' && !status.autoLaunchSupported)) return;
+      || (key === 'autoLaunch' && !status.autoLaunchSupported)
+      || (key === 'startFullscreen' && !status.fullscreenSupported)) return;
     const revision = generation.current;
     operation.current = true; setFeedbackScope(scope); setBusy(key); setError(''); setNotice('');
     let submitted = false;
@@ -72,7 +99,7 @@ export default function ClientBehaviorSettings({ connected, onDownload }: Props)
       await bridge.update({ [key]: value }); submitted = true;
       if (!current(revision)) return;
       // Read back the operating system state instead of displaying an optimistic update.
-      const next = readAppPreferencesStatus(await bridge.status());
+      const next = await readStatus();
       if (!current(revision)) return;
       setSnapshot({ scope, status: next });
       if (next[key] === value) setNotice('设置已保存到这台电脑。');
@@ -87,11 +114,33 @@ export default function ClientBehaviorSettings({ connected, onDownload }: Props)
     }
   }
 
+  async function toggleFullscreen() {
+    if (!connected || typeof bridge?.setFullscreen !== 'function' || !status?.fullscreenSupported || operation.current || scope !== sessionScope()) return;
+    const revision = generation.current, value = !status.fullscreen;
+    operation.current = true; setFeedbackScope(scope); setBusy('fullscreen'); setError(''); setNotice('');
+    let submitted = false;
+    try {
+      await bridge.setFullscreen(value); submitted = true;
+      if (!current(revision)) return;
+      const next = await readStatus();
+      if (!current(revision)) return;
+      setSnapshot({ scope, status: next });
+      if (!next.fullscreenSupported || next.fullscreen !== value) setError('窗口未切换，已显示这台电脑的实际状态。');
+    } catch {
+      if (current(revision)) {
+        setSnapshot(null);
+        setError(submitted ? '未能确认窗口状态，请重新读取这台电脑的设置。' : '无法切换全屏，请重新读取后重试。');
+      }
+    } finally {
+      if (current(revision)) { operation.current = false; setBusy(null); }
+    }
+  }
+
   function rows(settings: typeof startupSettings) {
-    return settings.map(setting => {
+    return settings.filter(setting => setting.key !== 'startFullscreen' || status?.fullscreenSupported).map(setting => {
       const unsupported = setting.key === 'autoLaunch' && !status?.autoLaunchSupported;
       const disabled = !connected || !status || !!busy || unsupported;
-      const help = setting.key === 'autoLaunch' && status?.autoLaunchReason ? status.autoLaunchReason : unsupported ? '当前安装方式不支持系统自启，请使用正式安装包。' : setting.help;
+      const help = setting.key === 'autoLaunch' && status?.autoLaunchReason ? status.autoLaunchReason : unsupported ? '当前安装方式不支持系统自启，请使用正式安装包。' : setting.key === 'startFullscreen' && status?.startMinimized ? '从托盘打开主窗口时进入全屏。' : setting.help;
       const helpId = `${id}-${setting.key}-help`;
       return <label key={setting.key} className={`client-behavior-row${disabled ? ' is-disabled' : ''}`}>
         <span className="client-behavior-copy"><strong>{setting.title}</strong><small id={helpId}>{help}</small></span>
@@ -113,6 +162,12 @@ export default function ClientBehaviorSettings({ connected, onDownload }: Props)
         {onDownload && <button type="button" className="secondary-button" onClick={onDownload}><Download size={15} aria-hidden="true" />下载桌面客户端</button>}
       </> : !bridge ? <p className="client-behavior-note">当前客户端还不支持这些设置，请更新客户端后使用。</p> : <>
         {status && <div className="client-behavior-groups"><fieldset><legend>启动</legend>{rows(startupSettings)}</fieldset><fieldset><legend>窗口</legend>{rows(windowSettings)}</fieldset></div>}
+        {status?.fullscreenSupported && typeof bridge.setFullscreen === 'function' && <div className="client-behavior-fullscreen">
+          <button type="button" className="secondary-button" disabled={!!busy} onClick={() => void toggleFullscreen()}>
+            {busy === 'fullscreen' ? <Loader2 size={15} className="spin" aria-hidden="true" /> : status.fullscreen ? <Minimize size={15} aria-hidden="true" /> : <Maximize size={15} aria-hidden="true" />}
+            {status.fullscreen ? '退出全屏' : '进入全屏'}
+          </button><span>F11 切换 · Esc 退出</span>
+        </div>}
         {busy === 'load' && <p className="client-behavior-state" role="status"><Loader2 size={15} className="spin" aria-hidden="true" />正在读取本机设置…</p>}
         {feedbackScope === scope && error && <p className="form-error" role="alert">{error}</p>}
         {feedbackScope === scope && notice && <p className="client-behavior-state" role="status">{notice}</p>}

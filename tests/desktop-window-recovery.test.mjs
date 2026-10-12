@@ -62,11 +62,11 @@ function harness({ origin = 'http://127.0.0.1:4318', tray = true, deferredPetLoa
     rendererFailure() { calls.fatalErrors++; }, remoteHttp: { cancelOwner() {} },
     screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }) },
     mainWindowLayout: () => ({}), petWindowLayout: () => ({}),
-    trackWindowDisplay() {}, secureWindow() {}, fitWindowToDisplay(win, isPet = false) { calls.fitted.push({ win, isPet }); },
+    trackWindowDisplay() {}, secureWindow() {}, applyMainStartupFullscreen() {}, fitWindowToDisplay(win, isPet = false) { calls.fitted.push({ win, isPet }); },
     process: { platform: 'win32' }, path: { join: (...parts) => parts.join('/') }, __dirname: 'desktop', iconPath: 'icon.png',
   });
   vm.runInContext(`let mainWindow, petWindow, mainLoaded, petLoaded, quitting = false;
-    let pendingMainReveal = false, mainWindowCreated = false;
+    let pendingMainReveal = false, mainWindowCreated = false, mainStartupFullscreenPending = false, mainFullscreenChange = null;
     let origin = ${JSON.stringify(origin)}, tray = ${tray ? '{}' : 'null'};
     ${['createMain', 'showMain', 'showPet', 'applyPetWindowPreferences'].map(declaration).join('\n')}
     ${registration('second-instance')}

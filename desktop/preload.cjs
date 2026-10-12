@@ -32,10 +32,10 @@ function updateCall(action, ...args) {
   return ipcRenderer.invoke(`petpal:updates:${action}`, token, ...args);
 }
 
-function preferenceUpdate(patch) {
+function preferenceCall(action, value) {
   let connection = null;
   try { const value = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); if (value) connection = { url: value.url === '' ? location.origin : value.url, token: value.token }; } catch { /* logged out */ }
-  return ipcRenderer.invoke('petpal:app-preferences:update', connection, patch);
+  return ipcRenderer.invoke(`petpal:app-preferences:${action}`, connection, value);
 }
 
 function centralServerCall(action, ...args) {
@@ -51,7 +51,16 @@ contextBridge.exposeInMainWorld('petpal', Object.freeze({
   hidePet: () => ipcRenderer.invoke('petpal:hide-pet'),
   preferences: Object.freeze({
     status: () => ipcRenderer.invoke('petpal:app-preferences:status'),
-    update: preferenceUpdate,
+    update: patch => preferenceCall('update', patch),
+    setFullscreen: enabled => preferenceCall('fullscreen', enabled),
+    onWindowState: callback => {
+      if (typeof callback !== 'function') throw new TypeError('Expected a window state callback');
+      const listener = (_event, state) => {
+        if (state && typeof state.fullscreen === 'boolean') callback({ fullscreen: state.fullscreen });
+      };
+      ipcRenderer.on('petpal:window-state', listener);
+      return () => ipcRenderer.removeListener('petpal:window-state', listener);
+    },
   }),
   centralServer: Object.freeze({
     status: () => centralServerCall('status'),

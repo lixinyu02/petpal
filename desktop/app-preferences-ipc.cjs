@@ -10,6 +10,7 @@ const messages = Object.freeze({
   status: '无法读取应用设置，请重新打开小伴后再试。',
   update: '应用设置未能保存，请检查系统权限后再试。',
   apply: '设置已保存，但窗口状态未能更新，请重新打开小伴。',
+  fullscreen: '未能切换全屏，请重试或使用 F11。',
 });
 
 const preferenceError = key => Object.assign(new Error(messages[key]), { code: `PETPAL_PREFERENCES_${key.toUpperCase()}` });
@@ -88,7 +89,8 @@ async function verifyPreferencesSessionConnection(connection, {
   }
 }
 
-function createAppPreferencesHandlers(preferences, { isAllowed, readConnection, verifyConnection = verifyPreferencesSessionConnection, onUpdated = () => {} }) {
+function createAppPreferencesHandlers(preferences, { isAllowed, readConnection, verifyConnection = verifyPreferencesSessionConnection,
+  onUpdated = () => {}, readWindowState = () => ({}), setFullscreen }) {
   const assertAllowed = event => {
     let allowed = false;
     try { allowed = isAllowed(event); } catch {}
@@ -98,42 +100,61 @@ function createAppPreferencesHandlers(preferences, { isAllowed, readConnection, 
     try { return validatePreferencesConnection(await readConnection(event)); }
     catch { throw preferenceError('login'); }
   };
+  const authorization = (event, connection) => {
+    assertAllowed(event);
+    const expected = validatePreferencesConnection(connection);
+    const compare = async () => {
+      assertAllowed(event);
+      if (!sameConnection(expected, await snapshot(event))) throw preferenceError('changed');
+      assertAllowed(event);
+    };
+    let error;
+    const authorize = async () => {
+      try {
+        await compare();
+        try { await verifyConnection(expected); } catch { throw preferenceError('verification'); }
+        await compare();
+      } catch (failure) { error = failure; throw failure; }
+    };
+    return { compare, authorize, error: () => error };
+  };
+  const state = value => {
+    try { return { ...value, ...readWindowState() }; } catch { throw preferenceError('status'); }
+  };
   return {
     'petpal:app-preferences:status': async event => {
       assertAllowed(event);
       let value;
       try { value = await preferences.status(); } catch { throw preferenceError('status'); }
       assertAllowed(event);
-      return value;
+      return state(value);
     },
     'petpal:app-preferences:update': async (event, connection, patch) => {
-      assertAllowed(event);
-      const expected = validatePreferencesConnection(connection);
-      const compare = async () => {
-        assertAllowed(event);
-        if (!sameConnection(expected, await snapshot(event))) throw preferenceError('changed');
-        assertAllowed(event);
-      };
-      let authorizationError;
-      const authorize = async () => {
-        try {
-          await compare();
-          try { await verifyConnection(expected); } catch { throw preferenceError('verification'); }
-          await compare();
-        } catch (error) { authorizationError = error; throw error; }
-      };
+      const guard = authorization(event, connection), { compare, authorize } = guard;
       await authorize();
       let next;
       try { next = await preferences.update(patch, { authorize }); }
       catch (error) {
-        if (authorizationError) throw authorizationError;
+        if (guard.error()) throw guard.error();
         if (Object.values(messages).includes(error?.message) && /^PETPAL_PREFERENCES_[A-Z]+$/.test(error?.code || '')) throw error;
         throw preferenceError('update');
       }
       await compare();
       try { await onUpdated(next); } catch { throw preferenceError('apply'); }
       await compare();
-      return next;
+      return state(next);
+    },
+    'petpal:app-preferences:fullscreen': async (event, connection, enabled) => {
+      const guard = authorization(event, connection);
+      if (typeof enabled !== 'boolean' || typeof setFullscreen !== 'function') throw preferenceError('fullscreen');
+      await guard.authorize();
+      try { await setFullscreen(enabled, guard.authorize); }
+      catch { if (guard.error()) throw guard.error(); throw preferenceError('fullscreen'); }
+      await guard.compare();
+      let next;
+      try { next = await preferences.status(); } catch { throw preferenceError('status'); }
+      await guard.compare();
+      return state(next);
     },
   };
 }

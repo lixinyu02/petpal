@@ -17,6 +17,7 @@ const { spawn } = require('node:child_process');
 
 let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
 let pendingMainReveal = false, mainWindowCreated = false;
+let mainStartupFullscreenPending = false, mainFullscreenChange = null;
 let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor;
 let appPreferences, centralServer;
 let startupDiagnostics, startupPhase = 'electron-ready', startupFailed = false;
@@ -158,6 +159,49 @@ function trackWindowDisplay(win, isPet = false) {
   });
 }
 
+function mainWindowState() {
+  return { fullscreenSupported: true, fullscreen: !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isFullScreen() };
+}
+
+function applyMainStartupFullscreen() {
+  if (!mainStartupFullscreenPending || !mainWindow || mainWindow.isDestroyed()) return;
+  mainStartupFullscreenPending = false;
+  mainWindow.setFullScreen(true);
+}
+
+function setMainFullscreen(enabled, authorize = () => {}) {
+  // Linux window managers may acknowledge fullscreen after setFullScreen returns.
+  // Serialize transitions, verify on the native event and bound failed transitions.
+  const win = mainWindow, previous = mainFullscreenChange, change = { win, enabled };
+  change.promise = Promise.resolve(previous?.promise).catch(() => {}).then(async () => {
+    await authorize();
+    if (quitting || !win || mainWindow !== win || win.isDestroyed()) throw new Error('Window unavailable');
+    if (win.isFullScreen() === enabled) return;
+    await new Promise((resolve, reject) => {
+      let timer;
+      const finish = error => {
+        clearTimeout(timer);
+        win.removeListener('enter-full-screen', changed);
+        win.removeListener('leave-full-screen', changed);
+        win.removeListener('closed', closed);
+        if (error) reject(error); else resolve();
+      };
+      const changed = () => { if (!win.isDestroyed() && win.isFullScreen() === enabled) finish(); };
+      const closed = () => finish(new Error('Window closed'));
+      win.on('enter-full-screen', changed); win.on('leave-full-screen', changed); win.once('closed', closed);
+      timer = setTimeout(() => finish(new Error('Window transition timed out')), 3000);
+      try { win.setFullScreen(enabled); changed(); } catch { finish(new Error('Window transition failed')); }
+    });
+  });
+  mainFullscreenChange = change;
+  return change.promise.finally(() => { if (mainFullscreenChange === change) mainFullscreenChange = null; });
+}
+
+function toggleMainFullscreen() {
+  const enabled = !(mainFullscreenChange?.enabled ?? mainWindowState().fullscreen);
+  void setMainFullscreen(enabled).catch(() => {});
+}
+
 function createMain(showOnReady = true) {
   mainWindow = new BrowserWindow({
     ...mainWindowLayout(screen.getPrimaryDisplay().workArea),
@@ -165,13 +209,25 @@ function createMain(showOnReady = true) {
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   mainWindowCreated = true;
+  mainStartupFullscreenPending = appPreferences.current().startFullscreen === true;
   const win = mainWindow;
   trackWindowDisplay(mainWindow);
   secureWindow(mainWindow);
   win.once('ready-to-show', () => {
     if (quitting || mainWindow !== win || win.isDestroyed()) return;
     if (pendingMainReveal) showMain();
-    else if (showOnReady || !tray) win.show();
+    else if (showOnReady || !tray) { applyMainStartupFullscreen(); win.show(); }
+  });
+  const notifyWindowState = () => {
+    if (!quitting && mainWindow === win && !win.isDestroyed()) win.webContents.send('petpal:window-state', { fullscreen: win.isFullScreen() });
+  };
+  win.on('enter-full-screen', notifyWindowState); win.on('leave-full-screen', notifyWindowState);
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || input.isAutoRepeat || input.control || input.alt || input.meta) return;
+    if (input.key === 'F11') { event.preventDefault(); toggleMainFullscreen(); }
+    else if (input.key === 'Escape' && (win.isFullScreen() || mainFullscreenChange?.enabled)) {
+      event.preventDefault(); void setMainFullscreen(false).catch(() => {});
+    }
   });
   mainWindow.on('close', event => {
     if (!quitting && tray && appPreferences.current().closeToTray) { event.preventDefault(); mainWindow.hide(); return; }
@@ -200,6 +256,7 @@ function showMain() {
   pendingMainReveal = false;
   if (!mainWindow) createMain();
   if (mainWindow.isMinimized()) mainWindow.restore();
+  applyMainStartupFullscreen();
   fitWindowToDisplay(mainWindow);
   mainWindow.show(); mainWindow.focus();
 }
@@ -721,6 +778,8 @@ async function boot() {
     readConnection: event => event.sender.executeJavaScript(`(() => { try { const value = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); return value && { url: value.url === '' ? location.origin : value.url, token: value.token }; } catch { return null; } })()`),
     verifyConnection: verifyPreferencesSessionConnection,
     onUpdated: applyPetWindowPreferences,
+    readWindowState: mainWindowState,
+    setFullscreen: setMainFullscreen,
   }))) ipcMain.handle(channel, handler);
   await startupMilestone('executor-create');
   const executorModule = await import(pathToFileURL(path.join(__dirname, 'executor.mjs')).href);
@@ -769,6 +828,8 @@ async function boot() {
   tray.setToolTip('小伴 PetPal');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: '打开小伴', click: showMain },
+    { label: '切换全屏', click: () => { showMain(); toggleMainFullscreen(); } },
+    { label: '退出全屏', click: () => { void setMainFullscreen(false).catch(() => {}); } },
     { label: '显示桌宠', click: showPet },
     { label: '隐藏桌宠', click: () => petWindow?.hide() },
     { type: 'separator' },
@@ -844,7 +905,7 @@ async function boot() {
             if (!opened && tab && !tab.disabled) { opened = true; tab.click(); }
             const panel = document.querySelector('.client-behavior-settings');
             const inputs = panel && [...panel.querySelectorAll('input[role="switch"]')];
-            if (inputs?.length === 5 && !panel.querySelector('[role="alert"]') && panel.getAttribute('aria-busy') === 'false') {
+            if (inputs?.length === 6 && !panel.querySelector('[role="alert"]') && panel.getAttribute('aria-busy') === 'false') {
               if (!inputs.find(input => input.getAttribute('aria-label') === '开机自启')?.disabled) return reject(new Error('Development UI must disable system autostart'));
               panel.scrollIntoView({ block: 'start' });
               return resolve({ switches: inputs.map(input => ({ label: input.getAttribute('aria-label'), checked: input.checked, disabled: input.disabled })), realBridge: true });
