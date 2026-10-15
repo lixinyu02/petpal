@@ -129,6 +129,7 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false, pre
     mainWindowState: () => ({ fullscreen: false }), setMainFullscreen: async () => {}, toggleMainFullscreen() {}, applyMainStartupFullscreen() {},
     createCentralServer: () => ({ load: async () => {} }), createCentralServerHandlers: () => ({}),
     safeStorage: { isEncryptionAvailable: () => false }, createOfficialAccountHandlers: () => ({}),
+    initializeAppProxy: async () => {}, createAppProxyHandlers: () => ({}),
     officialAuthModuleStub: { OfficialAuth: class { constructor(options) { this.options = options; } async close() {} } },
     officialAccountsModuleStub: { OfficialAccounts: class { constructor(options) { this.auth = options.auth; } async init() {} async close() { await this.auth.close(); } } },
     serverModule: { createPetServer: async () => backendStub },
@@ -154,7 +155,7 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false, pre
   vm.runInContext(`let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
     let pendingMainReveal = false, mainWindowCreated = false;
     let mainStartupFullscreenPending = false, mainFullscreenChange = null;
-    let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor, appPreferences, centralServer, officialAccounts;
+    let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor, appPreferences, centralServer, officialAccounts, appProxy;
     let startupDiagnostics, startupPhase = 'electron-ready', startupFailed = false;
     const root = ${JSON.stringify(f.root)}, __dirname = ${JSON.stringify(f.root)}, iconPath = 'fixture-icon';
     ${['getStartupDiagnostics', 'startupMilestone', 'handleStartupFailure', 'rendererFailure', 'createMain', 'showPet', 'applyPetWindowPreferences'].map(declaration).join('\n')}

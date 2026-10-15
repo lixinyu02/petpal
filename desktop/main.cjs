@@ -14,13 +14,14 @@ const { createAppPreferencesHandlers, verifyPreferencesSessionConnection } = req
 const { createCentralServer } = require('./central-server.cjs');
 const { createCentralServerHandlers } = require('./central-server-ipc.cjs');
 const { createOfficialAccountHandlers } = require('./official-account-ipc.cjs');
+const { createAppProxyHandlers } = require('./app-proxy-ipc.cjs');
 const { spawn } = require('node:child_process');
 
 let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
 let pendingMainReveal = false, mainWindowCreated = false;
 let mainStartupFullscreenPending = false, mainFullscreenChange = null;
 let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor;
-let appPreferences, centralServer, officialAccounts;
+let appPreferences, centralServer, officialAccounts, appProxy, appProxyAuthentication;
 let startupDiagnostics, startupPhase = 'electron-ready', startupFailed = false;
 const root = path.resolve(__dirname, '..');
 const iconPath = path.join(__dirname, 'assets', 'icon.png');
@@ -1047,7 +1048,37 @@ async function listenDesktopBackend(server, maximumAttempts = 20) {
   throw new Error('未能分配浏览器可访问的本机端口，请重新启动小伴。');
 }
 
+async function initializeAppProxy() {
+  const [{createAppProxyNetwork},{AppProxyManager,resolveBundledMihomo},{setAppProxyRuntime}] = await Promise.all([
+    import(pathToFileURL(path.join(__dirname,'app-proxy-network.mjs')).href),
+    import(pathToFileURL(path.join(__dirname,'app-proxy.mjs')).href),
+    import(pathToFileURL(path.join(root,'server/app-proxy-context.mjs')).href),
+  ]);
+  const network=createAppProxyNetwork({applyProxy:async config=>{
+    await session.defaultSession.setProxy(config);
+    await session.defaultSession.closeAllConnections();
+  }});
+  network.install();
+  const connection={
+    async enable(options){const previous=appProxyAuthentication;appProxyAuthentication=new URL(options.url);try{await network.enable(options);setAppProxyRuntime(options.url);}catch(error){appProxyAuthentication=previous;throw error;}},
+    async disable(options){await network.disable(options);setAppProxyRuntime(null);appProxyAuthentication=null;},
+    async close(){try{await network.close();}finally{setAppProxyRuntime(null);appProxyAuthentication=null;}},
+  };
+  app.on('login',(event,contents,_details,auth,callback)=>{
+    const current=appProxyAuthentication;
+    if(current&&auth.isProxy&&auth.host==='127.0.0.1'&&Number(auth.port)===Number(current.port)&&contents?.session===session.defaultSession){
+      event.preventDefault();callback(current.username,current.password);
+    }
+  });
+  appProxy=new AppProxyManager({directory:path.join(app.getPath('userData'),'app-proxy'),network:connection,
+    resolveCore:()=>resolveBundledMihomo({root,resourcesPath:process.resourcesPath,packaged:app.isPackaged})});
+  try{await appProxy.load();if(appProxy.status().configured&&appProxy.status().autoStart)await appProxy.start();}
+  catch{appProxy.state='error';appProxy.error='应用代理暂不可用，其他功能可继续使用。';}
+}
+
 async function boot() {
+  await startupMilestone('app-proxy');
+  await initializeAppProxy();
   const { createPetServer } = await import(pathToFileURL(path.join(root, 'server', 'app.mjs')).href);
   await startupMilestone('service-settings');
   const serviceSettings = await readDesktopServiceSettings(app.getPath('userData'));
@@ -1089,6 +1120,18 @@ async function boot() {
   await startupMilestone('backend-listen');
   const port = await listenDesktopBackend(backend.server);
   origin = `http://127.0.0.1:${port}`;
+  for(const [channel,handler] of Object.entries(createAppProxyHandlers({manager:appProxy,origin,
+    isAllowed:event=>isTrusted(event)&&event.sender===mainWindow?.webContents&&!quitting,
+    readConnection:event=>event.sender.executeJavaScript(`(() => { try { const value = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); return value && { url: value.url === '' ? location.origin : value.url, token: value.token }; } catch { return null; } })()`),
+    verifyConnection:async connection=>{await backend.hosting.assertOwnerSession(connection.token);return verifyPreferencesSessionConnection(connection);},
+    openConfigFile:async()=>{
+      const selected=await dialog.showOpenDialog(mainWindow,{title:'导入 Clash YAML 配置',properties:['openFile'],filters:[{name:'Clash YAML',extensions:['yaml','yml']}]});
+      if(selected.canceled||selected.filePaths.length!==1)return null;
+      const file=selected.filePaths[0],info=await fs.lstat(file);
+      if(!info.isFile()||info.isSymbolicLink()||info.size>4*1024*1024)throw new Error('Invalid proxy configuration file');
+      return fs.readFile(file,'utf8');
+    },
+  })))ipcMain.handle(channel,handler);
   centralServer = createCentralServer({ userData: app.getPath('userData'), hosting: backend.hosting, reservedPorts: [port] });
   await centralServer.load();
   for (const [channel, handler] of Object.entries(createCentralServerHandlers(centralServer, {
@@ -1181,6 +1224,12 @@ async function boot() {
     app.quit(); return;
   }
   if (process.argv.includes('--smoke-test')) {
+    if(process.argv.includes('--smoke-app-proxy')){
+      await startupMilestone('smoke-app-proxy');
+      const result=await require('./app-proxy-smoke.cjs')({mainWindow,loginSmokeMain,origin,session:session.defaultSession,directory:process.env.PETPAL_SMOKE_DIR});
+      console.log(JSON.stringify({event:'app-proxy-smoke',...result}));
+      await startupMilestone('smoke-complete');app.quit();return;
+    }
     if (process.argv.includes('--smoke-central-server')) {
       await startupMilestone('smoke-central-server');
       const centralSmoke = require('./central-server-smoke.cjs');
@@ -1380,7 +1429,7 @@ else {
     tray?.destroy(); tray = null;
     (async () => {
       const centralOutcome = await Promise.allSettled([centralServer?.close()]);
-      const outcomes = await Promise.allSettled([officialAccounts?.close(), appPreferences?.close(), executor?.close(), remoteHttp?.close(), updates?.close({ preserveHandoff: Boolean(pendingUpdate) }), backend?.close()]);
+      const outcomes = await Promise.allSettled([appProxy?.close(), officialAccounts?.close(), appPreferences?.close(), executor?.close(), remoteHttp?.close(), updates?.close({ preserveHandoff: Boolean(pendingUpdate) }), backend?.close()]);
       const failed = [...centralOutcome, ...outcomes].find(outcome => outcome.status === 'rejected');
       if (failed) throw failed.reason;
       if (pendingUpdate) await launchPreparedUpdate(pendingUpdate);

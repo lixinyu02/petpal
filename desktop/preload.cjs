@@ -50,6 +50,12 @@ function officialAccountCall(action, value) {
   return ipcRenderer.invoke(`petpal:official-account:${action}`, connection, value);
 }
 
+function appProxyCall(action, value) {
+  let connection = null;
+  try { const saved = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); if (saved) connection = { url: saved.url === '' ? location.origin : saved.url, token: saved.token }; } catch { /* logged out */ }
+  return ipcRenderer.invoke(`petpal:app-proxy:${action}`, connection, value);
+}
+
 contextBridge.exposeInMainWorld('petpal', Object.freeze({
   connection: () => ipcRenderer.invoke('petpal:connection'),
   showPet: () => ipcRenderer.invoke('petpal:show-pet'),
@@ -80,6 +86,15 @@ contextBridge.exposeInMainWorld('petpal', Object.freeze({
     logout: () => officialAccountCall('logout'),
     refresh: () => officialAccountCall('refresh'),
     resumeUsage: () => officialAccountCall('resumeUsage'),
+  }),
+  appProxy: Object.freeze({
+    status: () => appProxyCall('status'),
+    importFile: () => appProxyCall('importFile'),
+    importText: input => appProxyCall('importText', input),
+    start: () => appProxyCall('start'),
+    stop: () => appProxyCall('stop'),
+    preferences: input => appProxyCall('preferences', input),
+    select: input => appProxyCall('select', input),
   }),
   remoteRequest,
   remoteAbort: id => ipcRenderer.invoke('petpal:remote:abort', id),

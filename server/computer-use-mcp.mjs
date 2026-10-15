@@ -8,6 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { normalizeComputerUseContent } from './dynamic-tool-output.mjs';
 import { COMPUTER_USE_MCP_VERSION, COMPUTER_USE_PROFILES, COMPUTER_USE_PROFILE_TOOLS, COMPUTER_USE_TOOL_NAMES } from './computer-use-tool-names.mjs';
+import { getAppProxyEnvironment } from './app-proxy-context.mjs';
 
 export { COMPUTER_USE_MCP_VERSION, COMPUTER_USE_PROFILES, COMPUTER_USE_PROFILE_TOOLS, COMPUTER_USE_TOOL_NAMES };
 const failure = (status, message, code = 'computer_use_error') => Object.assign(new Error(message), { status, code });
@@ -54,7 +55,7 @@ function validateConfig(value) {
   return value;
 }
 
-/** Keep the real login/desktop context; never pass model, account or proxy credentials. */
+/** Keep the real desktop context; exclude model/account and host proxy secrets. */
 export function isolatedComputerUseEnvironment(source, { profile, auditLog, nativeModulePath, electron = Boolean(process.versions.electron) } = {}) {
   const allowed = /^(?:path|systemroot|windir|systemdrive|comspec|pathext|programfiles(?:\(x86\))?|programw6432|programdata|appdata|localappdata|home|userprofile|homedrive|homepath|username|user|logname|shell|temp|tmp|tmpdir|lang|lc_[a-z_]+|display|wayland_display|xauthority|xdg_runtime_dir|xdg_session_type|xdg_current_desktop|xdg_session_desktop|dbus_session_bus_address|at_spi_bus_address)$/i;
   const env = Object.fromEntries(Object.entries(source).filter(([key, value]) => allowed.test(key) && typeof value === 'string' && !value.startsWith('()')));
@@ -66,7 +67,7 @@ export function isolatedComputerUseEnvironment(source, { profile, auditLog, nati
   env.COMPUTER_USE_BROWSER_DOM = 'false';
   if (nativeModulePath) env.COMPUTER_USE_NATIVE_PATH = nativeModulePath;
   if (electron) env.ELECTRON_RUN_AS_NODE = '1';
-  return env;
+  return Object.assign(env, getAppProxyEnvironment());
 }
 
 /** Filesystem-only executable check; never runs a health or input command. */

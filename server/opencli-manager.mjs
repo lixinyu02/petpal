@@ -204,7 +204,7 @@ export class OpenCliManager {
       await resolveOpenCliQueryBundle(this.packageJsonPath); check(); await this._safeDirectory(true); check();
       const env = openCliEnvironment(this.scopeDir, this.env);
       await mkdir(env.HOME, { recursive: true, mode: 0o700 }); check();
-      // No model/account credentials, NODE_OPTIONS, OpenCLI settings or proxies are inherited.
+      // Host credentials/options/proxies are excluded; only the controlled app proxy is optional.
       const child = this.launch(this.runtime, [workerPath], { cwd: this.scopeDir, env, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); operation.child = child;
       const stdout = [], stderr = []; let outputBytes = 0, errorBytes = 0;
       const finished = new Promise((resolve, reject) => {

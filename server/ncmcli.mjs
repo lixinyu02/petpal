@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { getAppProxyEnvironment } from './app-proxy-context.mjs';
 import {createHash,randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
@@ -38,11 +39,11 @@ export function validateNcmCliCall(value){
   return{action:'run',args:[...value.args]};
 }
 
-/** Provider secrets, alternate loaders, proxies and host music state are excluded. */
-export function ncmCliEnvironment(profile,source=process.env){
+/** Provider secrets, alternate loaders, host proxies and music state are excluded. */
+export function ncmCliEnvironment(profile,source=process.env,{includeAppProxy=true}={}){
   const allowed=/^(?:path|systemroot|windir|systemdrive|comspec|pathext|lang|lc_[a-z_]+|display|wayland_display|xdg_runtime_dir|dbus_session_bus_address)$/i;
   const env=Object.fromEntries(Object.entries(source).filter(([key,value])=>allowed.test(key)&&typeof value==='string'));
-  return Object.assign(env,{HOME:profile,USERPROFILE:profile,APPDATA:path.join(profile,'AppData','Roaming'),LOCALAPPDATA:path.join(profile,'AppData','Local'),XDG_CONFIG_HOME:path.join(profile,'.config'),XDG_DATA_HOME:path.join(profile,'.local','share'),TEMP:path.join(profile,'tmp'),TMP:path.join(profile,'tmp'),TMPDIR:path.join(profile,'tmp'),ELECTRON_RUN_AS_NODE:'1',NO_COLOR:'1'});
+  return Object.assign(env,{HOME:profile,USERPROFILE:profile,APPDATA:path.join(profile,'AppData','Roaming'),LOCALAPPDATA:path.join(profile,'AppData','Local'),XDG_CONFIG_HOME:path.join(profile,'.config'),XDG_DATA_HOME:path.join(profile,'.local','share'),TEMP:path.join(profile,'tmp'),TMP:path.join(profile,'tmp'),TMPDIR:path.join(profile,'tmp'),ELECTRON_RUN_AS_NODE:'1',NO_COLOR:'1'},includeAppProxy?getAppProxyEnvironment():{});
 }
 
 export function redactNcmCliOutput(value){
@@ -180,7 +181,9 @@ export class NcmCliManager{
   status(options={}){return this._operation(operation=>this._status(operation),options);}
   async _prepare(operation){
     const runtime=await this._runtime(operation);await this._ensure(operation);
-    const launcher=path.join(this.root,'launch.mjs'),environment=ncmCliEnvironment(this.profile,this.env);
+    // A user may run this launcher much later; never persist a core generation's
+    // ephemeral proxy credentials in it. Manager-run commands inherit live env.
+    const launcher=path.join(this.root,'launch.mjs'),environment=ncmCliEnvironment(this.profile,this.env,{includeAppProxy:false});
     const candidates=[path.join(this.runtimeDirectory,'node_modules','@music163','ncm-cli','package.json'),...(runtime?[runtime.packageJsonPath||path.join(path.dirname(path.dirname(runtime.entry)),'package.json')]:[])];
     const script=`import {spawn} from 'node:child_process';\nimport {lstat,readFile,realpath} from 'node:fs/promises';\nimport path from 'node:path';\nconst command=process.argv[2];\nif(!['configure','login'].includes(command))throw new Error('Choose configure or login');\nconst candidates=${JSON.stringify(candidates)};\nconst canonical=p=>process.platform==='win32'?path.resolve(p).toLowerCase():path.resolve(p);\nasync function check(file,directory=false){let cursor=path.parse(file).root;const parts=path.relative(cursor,file).split(path.sep).filter(Boolean);for(let i=0;i<=parts.length;i++){if(i)cursor=path.join(cursor,parts[i-1]);const info=await lstat(cursor);if(info.isSymbolicLink()||((i<parts.length||directory)?!info.isDirectory():!info.isFile())||canonical(await realpath(cursor))!==canonical(cursor))throw new Error('Runtime path must not use links');}}\nlet entry;for(const metadataPath of candidates){try{await check(metadataPath);const metadata=JSON.parse(await readFile(metadataPath,'utf8'));if(metadata.name!==${JSON.stringify(NCMCLI_PACKAGE)}||metadata.version!==${JSON.stringify(NCMCLI_VERSION)}||metadata.bin?.['ncm-cli']!=='dist/index.js')throw new Error('Install official pinned CLI first');entry=path.join(path.dirname(metadataPath),'dist/index.js');await check(entry);break;}catch(error){if(error.code!=='ENOENT')throw error;}}\nif(!entry)throw new Error('请先由用户运行 install 脚本，再打开配置或登录向导。');\nconst child=spawn(process.execPath,[entry,command],{env:${JSON.stringify(environment)},cwd:${JSON.stringify(this.profile)},shell:false,stdio:'inherit',windowsHide:false});\nchild.on('error',()=>{console.error('无法启动网易云配置向导');process.exitCode=1;});\nchild.on('exit',code=>{process.exitCode=code??1;});\n`;
     const quote=value=>`'${value.replaceAll("'","'\\''")}'`,windows=value=>value.replaceAll('%','%%');

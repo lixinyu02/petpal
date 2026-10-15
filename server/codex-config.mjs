@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, chmod, unlink } from 'node:fs/promises';
 import { normalizeBaseUrl, normalizeReasoningEffort } from './providers.mjs';
 import { materializeAgentSkills } from './agent-skills.mjs';
+import { getAppProxyEnvironment } from './app-proxy-context.mjs';
 
 const failure = (status, message) => Object.assign(new Error(message), { status });
 export const CODEX_TOOL_VERSION = 'petpal-ncmcli-v1';
@@ -147,7 +148,7 @@ export function isolatedCodexEnvironment(config, home, source = process.env) {
   env.CODEX_HOME = home;
   env.ELECTRON_RUN_AS_NODE = '1';
   if (config.apiKey) env[CODEX_KEY_ENV] = config.apiKey;
-  return env;
+  return Object.assign(env, getAppProxyEnvironment());
 }
 
 export async function prepareCodexRuntime(config, dataDir) {

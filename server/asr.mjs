@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 import { normalizeVoiceUrl } from './voice.mjs';
+import { createAppProxyWebSocketAgent } from './app-proxy-context.mjs';
 
 export const ASR_AUDIO = Object.freeze({ format: 'pcm_f32le', sampleRate: 24000, channels: 1, maxFrameBytes: 96000, maxSeconds: 60 });
 const MAX_TEXT = 16000, MAX_MESSAGE = 65536, MAX_FRAMES = 2400;
@@ -41,7 +42,7 @@ export function validateAsrAudio(bytes) {
 }
 
 /** One shared upstream slot; all capabilities remain bound to the creating login. */
-export function createAsrService({ store, authorizeSession, webSocketFactory = url => new WebSocket(url, { perMessageDeflate: false, maxPayload: MAX_MESSAGE, handshakeTimeout: connectTimeoutMs }), fetchImpl = globalThis.fetch, now = Date.now,
+export function createAsrService({ store, authorizeSession, webSocketFactory = (url, options) => new WebSocket(url, options), fetchImpl = globalThis.fetch, now = Date.now,
   connectTimeoutMs = 8000, attachTimeoutMs = 8000, idleTimeoutMs = 8000, endTimeoutMs = 30000, timeoutMs = 120000,
   authPollMs = 1000, drainTimeoutMs = 5000, closeTimeoutMs = 5000, errorCloseTimeoutMs = 500, terminalCacheMs = 5000, testTimeoutMs = 5000, rateLimit = 30 } = {}) {
   const state = store.state;
@@ -62,6 +63,7 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = u
   };
   const releaseSocket = session => {
     clear(session, 'closeTimer');
+    session.proxyAgent?.destroy(); session.proxyAgent = null;
     if (slot === session) slot = null;
     session.socketClosed = true;
     session.resolveSocketDone();
@@ -165,7 +167,9 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = u
     session.totalTimer = timer(() => finish(session, failure(504, '识别请求超时，请重新开始。', 'session_timeout')), timeoutMs);
     const url = new URL(`${state.asrConfig.baseUrl}/ws/asr`); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     try {
-      session.ws = webSocketFactory(url.toString());
+      session.proxyAgent = createAppProxyWebSocketAgent(url);
+      session.ws = webSocketFactory(url.toString(), { perMessageDeflate: false, maxPayload: MAX_MESSAGE, handshakeTimeout: connectTimeoutMs,
+        ...(session.proxyAgent ? { agent: session.proxyAgent } : {}) });
       session.ws.addEventListener('open', () => {
         if (session.terminal) { closeSocket(session); return; }
         try { current(session); session.ws.send('{}'); session.ready = true; clear(session, 'connectTimer'); renewIdle(session); pump(session); }

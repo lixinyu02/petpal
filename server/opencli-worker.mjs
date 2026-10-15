@@ -3,10 +3,12 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { openCliQueryPolicy, resolveOpenCliQueryBundle, validateOpenCliQuery, OPENCLI_VERSION } from './opencli-sites.mjs';
 import { runWeatherQuery } from './opencli-weather-adapters.mjs';
+import { configureAppProxyWorker } from './app-proxy-context.mjs';
 
 // This process never imports the CLI entry, HOME adapters, plugins or user hooks.
-let deadline, networkController;
+let deadline, networkController, appProxy;
 try {
+  appProxy = await configureAppProxyWorker();
   let input = '';
   for await (const chunk of process.stdin) {
     input += chunk.toString('utf8');
@@ -83,4 +85,4 @@ try {
   networkController?.abort(error);
   process.stderr.write(String(error?.message || 'OpenCLI 查询失败。').slice(0, 1200) + '\n');
   process.exitCode = 1;
-} finally { clearTimeout(deadline); }
+} finally { clearTimeout(deadline); await appProxy?.close(); }

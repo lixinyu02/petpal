@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
+import { getAppProxyEnvironment } from './app-proxy-context.mjs';
 
 const failure = (status, message, code = 'music_mcp_error') => Object.assign(new Error(message), { status, code });
 const aborted = () => Object.assign(failure(499, '音乐 MCP 操作已停止。', 'cancelled'), { name: 'AbortError' });
@@ -61,7 +62,7 @@ function boundedValue(value, depth = 0) {
   for (const item of Object.values(value)) boundedValue(item, depth + 1);
 }
 
-/** No API tokens, proxies, global Python modules, or central account environment reach Python. */
+/** No host API tokens, host proxies, global modules or central login reach Python. */
 export function isolatedMusicMcpEnvironment(source, { profile, dependenciesDirectory, qqSourceDirectory, config, player }) {
   const allowed = /^(?:path|systemroot|windir|systemdrive|comspec|pathext|programfiles(?:\(x86\))?|programdata|lang|lc_[a-z_]+)$/i;
   const env = Object.fromEntries(Object.entries(source).filter(([key, value]) => allowed.test(key) && typeof value === 'string'));
@@ -75,7 +76,7 @@ export function isolatedMusicMcpEnvironment(source, { profile, dependenciesDirec
   env.PYTHONNOUSERSITE = '1'; env.PYTHONUTF8 = player === 'netease' ? '0' : '1'; env.PYTHONIOENCODING = 'utf-8'; env.PYTHONUNBUFFERED = '1'; env.PYTHONDONTWRITEBYTECODE = '1';
   env.PIP_CONFIG_FILE = process.platform === 'win32' ? 'NUL' : '/dev/null';
   if (player === 'netease') { env.CLOUDMUSIC_CDP_PORT = String(config.cdpPort); if (config.cloudmusicExecutable) env.CLOUDMUSIC_EXE = config.cloudmusicExecutable; }
-  return env;
+  return Object.assign(env, getAppProxyEnvironment());
 }
 
 /** Fixed upstream stdio clients. Reading configuration/status never starts either client. */

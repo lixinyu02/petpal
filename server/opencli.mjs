@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { getAppProxyEnvironment } from './app-proxy-context.mjs';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -95,7 +96,7 @@ export function openCliEnvironment(dataDir, inherited = process.env) {
     XDG_CONFIG_HOME: path.join(childHome, '.config'), XDG_CACHE_HOME: path.join(childHome, '.cache'),
     APPDATA: path.join(childHome, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(childHome, 'AppData', 'Local'),
     CI: '1', ELECTRON_RUN_AS_NODE: '1', NO_COLOR: '1' });
-  return env;
+  return Object.assign(env, getAppProxyEnvironment());
 }
 
 async function portBusy(port = PORT) {
