@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "version": "1.19.32",
+  "repository": "https://github.com/MetaCubeX/mihomo",
+  "releaseUrl": "https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.32",
+  "sourceCommit": "88dcbf7f1614a67c3b36b848ee3592dfa92ada36",
+  "license": {
+    "name": "LICENSE",
+    "spdx": "GPL-3.0",
+    "url": "https://raw.githubusercontent.com/MetaCubeX/mihomo/88dcbf7f1614a67c3b36b848ee3592dfa92ada36/LICENSE",
+    "bytes": 35149,
+    "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  "sources": [
+    {
+      "name": "mihomo-88dcbf7f1614a67c3b36b848ee3592dfa92ada36.tar.gz",
+      "url": "https://codeload.github.com/MetaCubeX/mihomo/tar.gz/88dcbf7f1614a67c3b36b848ee3592dfa92ada36",
+      "bytes": 1269330,
+      "sha256": "77643ec763a92b330a0b4a44870f78ee05c08792897e7f5e40a3654415c5f077"
+    },
+    {
+      "name": "vendor.tar.gz",
+      "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/vendor.tar.gz",
+      "bytes": 17606440,
+      "sha256": "0e605b54a4e2508c57f7bf64ae30d98833b3d2e0c1b399dfffa75248f6e84441"
+    }
+  ],
+  "targets": {
+    "win32-x64": {
+      "platform": "win32",
+      "arch": "x64",
+      "archive": {
+        "name": "mihomo-windows-amd64-compatible-v1.19.32.zip",
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-windows-amd64-compatible-v1.19.32.zip",
+        "format": "zip",
+        "member": "mihomo-windows-amd64-compatible.exe",
+        "bytes": 22525067,
+        "sha256": "974a4d7ad69aed27aa2e8f91d61113573c14dadb14562c63e58effabf59816f0"
+      },
+      "executable": {
+        "name": "mihomo.exe",
+        "format": "PE",
+        "machine": 34404,
+        "bytes": 61276672,
+        "sha256": "04f8d7fc2b314771e1ecbf15951d59f0e1cb7914503c88cfb6972ff6a824e314"
+      }
+    },
+    "win32-arm64": {
+      "platform": "win32",
+      "arch": "arm64",
+      "archive": {
+        "name": "mihomo-windows-arm64-v1.19.32.zip",
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-windows-arm64-v1.19.32.zip",
+        "format": "zip",
+        "member": "mihomo-windows-arm64.exe",
+        "bytes": 20194736,
+        "sha256": "7a4f6e58af9a120920935f2150cf642d945085fdb3e753314505b334234e1d1e"
+      },
+      "executable": {
+        "name": "mihomo.exe",
+        "format": "PE",
+        "machine": 43620,
+        "bytes": 55891456,
+        "sha256": "7211487d8e4092cf6cf6fbbdbc10a10fbde462847e36fb8a43479b0e4cad4b33"
+      }
+    },
+    "linux-x64": {
+      "platform": "linux",
+      "arch": "x64",
+      "archive": {
+        "name": "mihomo-linux-amd64-compatible-v1.19.32.gz",
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-linux-amd64-compatible-v1.19.32.gz",
+        "format": "gzip",
+        "bytes": 22877876,
+        "sha256": "ba3ce607747a07f948fc35780e108a4a7c7f552a38b9bd4d115f313ebcb89c20"
+      },
+      "executable": {
+        "name": "mihomo",
+        "format": "ELF",
+        "machine": 62,
+        "bytes": 62054526,
+        "sha256": "7a0d59da2e678d56c899a3db996a2ad8963286c4f3634b0451435db248f13fa1"
+      }
+    },
+    "linux-arm64": {
+      "platform": "linux",
+      "arch": "arm64",
+      "archive": {
+        "name": "mihomo-linux-arm64-v1.19.32.gz",
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-linux-arm64-v1.19.32.gz",
+        "format": "gzip",
+        "bytes": 20809592,
+        "sha256": "9dd862e28b46ff7d775f169cceebc28deccaa0a9e804237d421cd2571e0caba0"
+      },
+      "executable": {
+        "name": "mihomo",
+        "format": "ELF",
+        "machine": 183,
+        "bytes": 57409662,
+        "sha256": "c80df2ca5159567804da883401e0118908fc1155e05df2baf3dbd4d3ecfc3754"
+      }
+    }
+  }
+}

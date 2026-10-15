@@ -1,4 +1,5 @@
 * text=auto
+desktop/native/mihomo/** -text -whitespace
 *.sh text eol=lf
 # Unified-diff context lines preserve one space for an empty source line.
 server/native/computer-use/patches/*.patch text eol=lf whitespace=-blank-at-eol

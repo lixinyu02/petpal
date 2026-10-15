@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "project": "MetaCubeX/mihomo",
+  "version": "1.19.32",
+  "sourceCommit": "88dcbf7f1614a67c3b36b848ee3592dfa92ada36",
+  "sourceUrl": "https://github.com/MetaCubeX/mihomo/tree/88dcbf7f1614a67c3b36b848ee3592dfa92ada36",
+  "license": "GPL-3.0",
+  "upstreamModified": false,
+  "retrievedAt": "2026-10-15",
+  "distribution": "Unmodified official executable, separate child process; x64 uses the upstream GOAMD64=v1 compatible build.",
+  "licenseFile": {
+    "path": "LICENSE",
+    "bytes": 35149,
+    "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+  },
+  "integrity": "manifest.json pins official archive bytes and GitHub release-asset SHA-256 digests, independently measured extracted executable SHA-256 and machine architecture, and an immutable-commit source archive with the matching official vendor archive.",
+  "changes": [
+    "No upstream source or executable modifications.",
+    "PetPal renames the extracted executable to mihomo.exe or mihomo for a stable application-private path.",
+    "PetPal supplies its own process launcher and restricted application-only proxy configuration."
+  ]
+}

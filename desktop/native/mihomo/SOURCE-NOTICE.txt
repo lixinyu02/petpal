@@ -1,0 +1,55 @@
+Mihomo v1.19.32 - third-party proxy core
+======================================
+
+Upstream: https://github.com/MetaCubeX/mihomo
+Release: https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.32
+Corresponding source commit: 88dcbf7f1614a67c3b36b848ee3592dfa92ada36
+License: GNU General Public License, version 3 (GPL-3.0).
+The unmodified upstream license is included in LICENSE.
+
+PetPal distributes the unmodified official upstream executable as a separate
+application-private process. The extracted file is named mihomo.exe (Windows)
+or mihomo (Linux). This does not change the executable's contents. PetPal is
+not affiliated with or endorsed by MetaCubeX. PetPal's own name is unchanged.
+All upstream copyright and license notices remain in the corresponding source.
+
+This component comes WITHOUT ANY WARRANTY, to the extent permitted by law.
+You may copy, redistribute and modify it under the accompanying GPL-3.0 terms.
+This notice does not assign a license or copyright ownership to PetPal itself.
+
+Offline corresponding source
+----------------------------
+This payload includes source/mihomo-88dcbf7f1614a67c3b36b848ee3592dfa92ada36.tar.gz
+and source/vendor.tar.gz. Both are available locally without a network request.
+The first is the entire upstream repository at the exact source commit above,
+including Makefile, .github/workflows/build.yml, go.mod, go.sum and LICENSE.
+The second is the unmodified vendor archive from the matching official release,
+including dependency source and licenses. Exact byte counts, SHA-256 digests,
+download URLs and executable architecture are recorded in manifest.json and
+the per-platform audit.json. These source archives are copied with every
+desktop payload; a release must retain them beside the distributed core.
+
+To inspect or rebuild: extract the source archive to a new directory, extract
+vendor.tar.gz in the repository root, then follow the included upstream
+Makefile and .github/workflows/build.yml. Use the Go toolchain required by the
+upstream workflow; Go is a separate general-purpose build tool. The official
+release also supplies toolchain.tar.gz if that particular toolchain is needed:
+https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/toolchain.tar.gz
+
+The upstream release uses CGO_ENABLED=0, the with_gvisor build tag, trimpath
+and version/build-time linker values. Windows/Linux x64 compatible builds use
+GOAMD64=v1; ARM64 uses GOARCH=arm64. Build flags and dependencies are preserved
+in the included upstream source, rather than redefined by PetPal. A rebuild
+may differ in timestamps or compiler output; the shipped original executable
+is checked against its own fixed digest.
+
+Source fallback URLs:
+https://codeload.github.com/MetaCubeX/mihomo/tar.gz/88dcbf7f1614a67c3b36b848ee3592dfa92ada36
+https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/vendor.tar.gz
+
+Core updates
+------------
+PetPal does not expose the core's self-update API. Core changes are versioned
+with PetPal and must pass the fixed archive/executable/source integrity checks
+before distribution. The core is never fetched from a mutable latest URL when
+a user starts PetPal. User proxy node credentials are not part of this payload.
