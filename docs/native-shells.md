@@ -13,7 +13,7 @@ npm run desktop:linux
 
 打包脚本使用 `desktop/electron-builder.yml`，包含共享 Web 构建、完整后端、生产 npm 依赖、主进程和 preload。输出在 `releases/desktop/`。Windows 已构建 x64 portable；Ubuntu x64 / ARM64 的独立 portable tar.gz 构建见 `docs/linux-packaging.md` 与 `scripts/linux-package.mjs`。Linux 原生构建时另有 AppImage、deb 配置；这些配置并不代表已经生成或验收对应格式。桌宠透明窗口在 X11 下支持更稳定，Wayland 合成器可能限制全局置顶或位置控制。
 
-桌面包包含平台原生 Codex 0.143.0，并调用真实 `codex app-server`，运行桌面包无需另外安装 Node。目标机器仍需通过 Codex CLI 的官方流程完成登录；应用会显示 CLI / 登录错误。可设置 `PETPAL_WORKSPACE` 指定允许的默认工作区，默认使用 Electron `userData/workspace` 下独立创建的工作目录。仅采用 CLI 支持的认证流程；应用不读取或显示现有凭据。
+桌面包包含平台原生 Codex 0.143.0，并调用真实 `codex app-server`，运行桌面包无需另外安装 Node。新增的官方账号入口位于「连接与设置 → 模型连接 → 使用 ChatGPT 登录」；连接本机服务并登录小伴后，在系统浏览器完成官方授权，即可选择该账号当前目录中的模型用于 Chat 和 Agent。旧的 API 连接和 host 模式继续保留。账号隔离、套餐用量显示与授权边界见 [官方账号说明](official-account.md)。可设置 `PETPAL_WORKSPACE` 指定允许的默认工作区，默认使用 Electron `userData/workspace` 下独立创建的工作目录。新增登录不会读取宿主 `~/.codex/auth.json` 或修改全局 Codex 配置。
 
 首页可在二次元伙伴与 Three.js 三维小猫之间切换，默认二次元伙伴。`?chat=1` 打开聊天 / Codex 双模式工作区，`?pet=1` 为 300×340 的透明桌宠视图。主窗口和桌宠同源，通过 localStorage 的 `petpal.companionKind` 及 storage 事件同步选择，每个视图只保留一个角色渲染器。二次元伙伴为自有 WebGL 2D 网格动画，当前不是 Cubism `.moc3` 运行时；相关研究见 `docs/avatar-research.md`。桌宠顶部拖动区域由 `-webkit-app-region: drag` 提供，交互按钮为 `no-drag`。托盘可显示 / 隐藏桌宠以及打开主窗口。渲染进程无 Node 权限、无通用 shell / 文件 / IPC 接口；外部页面不能获取本地连接令牌。
 

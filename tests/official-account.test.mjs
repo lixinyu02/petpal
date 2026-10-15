@@ -263,6 +263,15 @@ test('an older in-flight successful request counts real tokens without clearing 
   const resumed = (await f.manager.resumeUsage('alice')).usage; assert.equal(resumed.state, 'unverified'); assert.equal(resumed.checkedAt, usage.checkedAt); assert.equal(resumed.totalTokens, 15);
 });
 
+test('usage retry rechecks the current native session after asynchronous identity lookup', async t => {
+  const f = await fixture(t, { onFetch: url => url.endsWith('/responses') ? Response.json({ error: { code: 'subscription_sharing_usage_limit_exceeded' } }, { status: 429 }) : undefined });
+  const provider = await f.provider(); await f.post(provider);
+  let checks = 0;
+  await assert.rejects(f.manager.resumeUsage('alice', { authorize: async () => { if (++checks > 1) throw new Error('Session changed'); } }), /Session changed/);
+  assert.equal((await f.manager.status('alice')).usage.state, 'limit-reached');
+  assert.equal((await f.post(provider)).status, 429);
+});
+
 for (const [code, expected, status] of [['subscription_sharing_usage_limit_exceeded', 'limit-reached', 429], ['subscription_sharing_usage_unavailable', 'temporarily-unavailable', 503], ['subscription_sharing_user_not_eligible', 'not-eligible', 403]]) {
   test(`streamed ${code} updates usage without fabricating successful request or tokens`, async t => {
     const failure = event('response.output_text.delta', { delta: 'partial reply' }) + event('response.failed', { response: { status: 'failed', error: { code, message: 'PRIVATE refresh secret' }, usage: { input_tokens: 999, output_tokens: 999, total_tokens: 1998 } } });

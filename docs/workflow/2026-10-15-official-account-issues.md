@@ -8,13 +8,13 @@
 
 - Goal: 桌面官方 ChatGPT 登录、个人官方模型及 Chat/Agent 接入。
 - Ordering rule: Complete issues in sequence.
-- Current status: issue-3 pending
+- Current status: implementation and native entry verified; real user consent/inference pending
 
 ## Issue List
 
 - [x] issue-1 官方授权与私有运行时
 - [x] issue-2 个人模型、Chat/Agent 与界面接入
-- [ ] issue-3 原生验收与使用说明
+- [x] issue-3 原生验收与使用说明
 
 ## issue-1
 
@@ -45,6 +45,6 @@
 - 范围: Windows/Ubuntu 原生、发布清单覆盖与使用/边界说明
 - 依赖: issue-2
 - 验收标准: 原生入口可使用，官方真实登录和推理按实际完成情况记录，不误报已验
-- 状态: todo
-- 验证方式: 原生截图/收据、官方登录页面及用户实际授权后的模型请求
-- commit: pending
+- 状态: done
+- 验证方式: Windows x64 and Ubuntu 24.04 WSLg x64 Electron 39.8.10 source clients passed real IPC/login-gate/settings smoke; native screenshots inspected. Linux source/dependency hashes matched; independent private-store probe 0700/0600. Related 145 tests and later 60 UI/App tests passed; build passed. Windows live consent window expired without authorization, so real official models/inference/allowance are explicitly unverified. See acceptance.md.
+- commit: fix(issue-3): guard usage retries and verify native account entry

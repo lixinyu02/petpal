@@ -469,6 +469,71 @@ async function loginSmokeMain() {
   return { ...guest, ...authenticated };
 }
 
+async function smokeOfficialAccount({ loginGate, guestDenied }) {
+  if (!process.env.PETPAL_SMOKE_PROFILE || !guestDenied) throw new Error('Official account smoke requires an isolated profile and a denied guest');
+  const status = await mainWindow.webContents.executeJavaScript(`(async () => {
+    const account = window.petpal.officialAccount;
+    if (!account || !['status','start','cancel','select','logout','refresh','resumeUsage'].every(key => typeof account[key] === 'function')) throw new Error('Official native bridge unavailable');
+    const value = await account.status();
+    if (!value.supported || value.state !== 'signed-out' || value.profiles.length || value.models.length || value.usage?.state !== 'unverified') throw new Error('Fresh official profile is not isolated');
+    await account.cancel(); await account.logout();
+    let resumeDenied = false; try { await account.resumeUsage(); } catch { resumeDenied = true; }
+    const resumed = await account.status();
+    if (!resumeDenied || resumed.usage?.state !== 'unverified' || resumed.usage.completedRequests !== 0 || resumed.usage.checkedAt !== null) throw new Error('Signed-out usage retry accepted or fabricated an upstream check');
+    return value;
+  })()`);
+  await mainWindow.loadURL(`${origin}/?chat=1&settings=1`);
+  const ui = await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject) => {
+    const deadline = Date.now()+20000;
+    const check = () => {
+      const panel = document.querySelector('.official-account-settings');
+      const login = panel && [...panel.querySelectorAll('button')].find(button => button.textContent.trim() === '使用 ChatGPT 登录');
+      if (login && !login.disabled && !panel.querySelector('[role="alert"]') && panel.getAttribute('aria-busy') !== 'true') {
+        panel.scrollIntoView({block:'start'});
+        return resolve({nativeSettingsVisible:true,signInEnabled:true,unauthorizedModelsAbsent:!panel.querySelector('.official-account-models')});
+      }
+      if (Date.now() >= deadline) return reject(new Error('Official native account settings did not become ready'));
+      setTimeout(check,50);
+    };check();
+  })`);
+  await mainWindow.webContents.executeJavaScript(`(async()=>{await document.fonts.ready;await Promise.all(document.getAnimations().filter(animation=>animation.effect?.getComputedTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{})));await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));})()`);
+  const result = {event:'official-account-native-smoke',platform:process.platform,arch:process.arch,electronVersion:process.versions.electron,packaged:app.isPackaged,
+    loginGate,guestDenied,status,ui,realIpc:true,officialConsentCompleted:false,officialInferenceCompleted:false};
+  if (process.env.PETPAL_SMOKE_DIR) {
+    await fs.mkdir(process.env.PETPAL_SMOKE_DIR,{recursive:true});
+    await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR,'official-account.png'),(await mainWindow.webContents.capturePage()).toPNG());
+    await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR,'official-result.json'),JSON.stringify(result,null,2));
+  }
+  console.log(JSON.stringify(result));
+}
+
+async function liveOfficialAccount() {
+  // Only the isolated native acceptance path can open this optional live flow.
+  // The person must approve in OpenAI's browser UI; no credential import occurs.
+  if (!process.env.PETPAL_SMOKE_PROFILE) throw new Error('Live official acceptance requires an isolated profile');
+  await clickSmokeButton('.official-account-settings', '使用 ChatGPT 登录');
+  console.log(JSON.stringify({event:'official-account-live-awaiting-consent'}));
+  const deadline = Date.now()+210000;
+  let signedIn = false, tested = false, result;
+  while (Date.now()<deadline) {
+    const status = await mainWindow.webContents.executeJavaScript('window.petpal.officialAccount.status()');
+    signedIn = status.state === 'signed-in' && status.planUsageEnabled;
+    if (signedIn && status.models.length) {
+      const response = await fetch(`${origin}/api/providers/${encodeURIComponent(status.models[0].id)}/test`,{method:'POST',headers:{Authorization:`Bearer ${backend.token}`,'Content-Type':'application/json'},body:'{}'});
+      tested = response.ok && (await response.json()).ok === true;
+      const updated = await mainWindow.webContents.executeJavaScript('window.petpal.officialAccount.status()');
+      result = {event:'official-account-live-result',signedIn,modelsCount:status.models.length,inferenceCompleted:tested,usage:updated.usage};
+      break;
+    }
+    if (status.error || signedIn && status.modelsError) break;
+    await new Promise(resolve=>setTimeout(resolve,1000));
+  }
+  result ??= {event:'official-account-live-result',signedIn,inferenceCompleted:false,reason:'Official consent or model discovery was not completed in the acceptance window'};
+  if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR,'official-live-result.json'),JSON.stringify(result,null,2));
+  console.log(JSON.stringify(result));
+  // Keep the reviewable source client open for the person to continue using it.
+}
+
 async function clickSmokeButton(container, label) {
   return mainWindow.webContents.executeJavaScript(`(() => {
     const button = [...document.querySelectorAll(${JSON.stringify(container + ' button')})].find(item => item.textContent.trim() === ${JSON.stringify(label)});
@@ -981,7 +1046,16 @@ async function boot() {
       app.quit(); return;
     }
     await startupMilestone('smoke-login');
+    const officialSmoke = process.argv.includes('--smoke-official-account');
+    const officialGuestDenied = officialSmoke && await mainWindow.webContents.executeJavaScript('(async()=>{try{await window.petpal.officialAccount.status();return false;}catch{return true;}})()');
     const loginGate = await loginSmokeMain();
+    if (officialSmoke) {
+      await startupMilestone('smoke-official-account');
+      await smokeOfficialAccount({loginGate,guestDenied:officialGuestDenied});
+      await startupMilestone('smoke-complete');
+      if (process.argv.includes('--official-account-live')) { await liveOfficialAccount(); return; }
+      app.quit(); return;
+    }
     const health = await fetch(`${origin}/api/health`).then(r => r.json());
     const bridge = await mainWindow.webContents.executeJavaScript('window.petpal.connection().then(c => ({url: c.url, hasToken: !!c.token}))');
     await startupMilestone('smoke-executor');

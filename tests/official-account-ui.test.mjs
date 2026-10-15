@@ -111,10 +111,10 @@ test('usage cache polls only while the signed-in settings page is visible and re
   f.setHidden(true);assert.equal(f.timerCount,0);f.fireTimers();await f.flush();assert.equal(f.calls.length,before+1);
   f.setHidden(false);assert.equal(f.timerCount,1);f.click('退出官方账号');await f.flush();assert.equal(f.timerCount,0);assert.doesNotMatch(f.text(),/官方额度与用量/);
 });
-test('limited usage resumes as unverified instead of inventing recovered quota; ineligible accounts reauthorize',async t=>{
+test('limited usage resumes as unverified; ineligible accounts can choose another account without repeated OAuth',async t=>{
   const f=fixture({value:{...signedIn,usage:{...usage,state:'limit-reached'}}});t.after(()=>f.close());await f.flush();assert.match(f.text(),/套餐额度已受限/);
   f.click('额度恢复后重试');await f.flush();assert.deepEqual(f.calls.at(-1),{action:'resumeUsage'});assert.match(f.text(),/尚未验证/);assert.match(f.text(),/3 次请求/);assert.doesNotMatch(f.text(),/最近验证可用/);
-  const blocked=fixture({value:{...signedIn,usage:{...usage,state:'not-eligible'}}});t.after(()=>blocked.close());await blocked.flush();assert.match(blocked.text(),/需要重新授权/);assert.equal(blocked.find('button',props=>text(props.children)==='额度恢复后重试'),undefined);blocked.click('重新授权');await blocked.flush();assert.deepEqual(JSON.parse(JSON.stringify(blocked.calls.at(-1))),{action:'start',input:{profileId:'profile-one'}});
+  const blocked=fixture({value:{...signedIn,usage:{...usage,state:'not-eligible'}}});t.after(()=>blocked.close());await blocked.flush();assert.match(blocked.text(),/账号或工作区暂不具备使用资格/);assert.equal(blocked.find('button',props=>text(props.children)==='额度恢复后重试'),undefined);assert.equal(blocked.find('button',props=>text(props.children)==='重新授权'),undefined);assert.equal(blocked.calls.filter(call=>call.action==='start').length,0);blocked.click('添加官方账号');await blocked.flush();assert.deepEqual(blocked.calls.at(-1),{action:'start',input:undefined});
 });
 test('usage rejects negative or unbounded counters and malformed times rather than showing false quota',async t=>{
   const f=fixture();t.after(()=>f.close());await f.flush();

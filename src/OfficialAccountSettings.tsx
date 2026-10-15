@@ -2,7 +2,7 @@ import {useEffect,useId,useSyncExternalStore} from 'react';
 import {CheckCircle2,ExternalLink,Loader2,LogOut,RefreshCw,UserRound,X} from 'lucide-react';
 import {nativeOfficialAccount,officialAccountIsLocal,officialAccountSnapshot,performOfficialAccount,readOfficialAccount,subscribeOfficialAccount,type OfficialAccountAction} from './platform/official-account';
 import './official-account.css';
-const usageLabels={unverified:'尚未验证',available:'最近验证可用','limit-reached':'套餐额度已受限','temporarily-unavailable':'暂时不可用','not-eligible':'需要重新授权'};
+const usageLabels={unverified:'尚未验证',available:'最近验证可用','limit-reached':'套餐额度已受限','temporarily-unavailable':'暂时不可用','not-eligible':'账号或工作区暂不具备使用资格'};
 const usageNumbers=new Intl.NumberFormat('zh-CN');
 
 export default function OfficialAccountSettings({connected,onConnect}:{connected:boolean;onConnect():void}){
@@ -11,7 +11,7 @@ export default function OfficialAccountSettings({connected,onConnect}:{connected
   const status=snapshot.status,busy=!!snapshot.busy,pending=status?.state==='signing-in'||snapshot.busy==='start';
   const signedIn=status?.state==='signed-in'||!!status?.profiles.some(profile=>profile.id===status.activeProfileId&&profile.signedIn);
   const active=status?.profiles.find(profile=>profile.id===status.activeProfileId),enabled=connected&&local&&!!bridge;
-  const usage=status?.usage,needsConsent=!status?.planUsageEnabled||!!status?.error||usage?.state==='not-eligible';
+  const usage=status?.usage,needsConsent=!status?.planUsageEnabled||!!status?.error;
   useEffect(()=>{if(enabled)void readOfficialAccount().catch(()=>{});},[enabled,snapshot.scope]);
   useEffect(()=>{
     if(!enabled||!signedIn||pending||!usage)return;

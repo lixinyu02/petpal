@@ -271,9 +271,11 @@ export class OfficialAccounts {
     return { ...publicAuth(state), usage: matches ? { ...scope.usage } : emptyUsage(), models: matches ? scope.models.map(model => ({ ...model })) : [], modelsLoading: !!scope.refresh, modelsError: scope.error || '', modelsCheckedAt: scope.checkedAt };
   }
   async refresh(userId) { await this._refresh(userId, true).catch(() => {}); return this.status(userId); }
-  async resumeUsage(userId) {
+  async resumeUsage(userId, { authorize } = {}) {
+    await authorize?.();
     if (this.closed) throw failure('官方模型连接已关闭。', 503);
     const scope = this._scope(userId), state = await this.auth.status(userId);
+    await authorize?.();
     if (!activeProfile(state) || activeProfile(state).id !== scope.profileId || state.revision && state.revision !== scope.revision) throw failure('请先登录当前官方账号。', 401);
     // This is an explicit retry choice, never evidence that allowance reset.
     scope.usage = { ...scope.usage, state: 'unverified' }; this._notify(userId); return this.status(userId);

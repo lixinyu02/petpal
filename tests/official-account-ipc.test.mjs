@@ -106,6 +106,8 @@ test('usage exposes only bounded observed telemetry and resuming it requires a f
   const changed = fixture({ verify: async () => ({ instanceId: 'local-instance', userId: ++checks > 1 ? 'other' : 'ordinary-user' }) });
   await assert.rejects(changed.call('resumeUsage'), /登录已变化/);
   assert.equal(changed.calls.some(call => call[0] === 'resumeUsage'), false);
+  const failed = fixture(); failed.accounts.resumeUsage = async () => { throw new Error('private-runtime-detail'); };
+  await assert.rejects(failed.call('resumeUsage'), error => /操作未完成/.test(error.message) && !error.message.includes('private-runtime-detail'));
 });
 
 test('real preload exposes a fixed official API and captures only the current connection on every call', async () => {

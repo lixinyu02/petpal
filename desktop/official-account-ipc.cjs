@@ -88,7 +88,7 @@ function createOfficialAccountHandlers({ auth, accounts, origin, isAllowed, read
     resumeUsage: async (guard, input) => {
       if (input !== undefined) throw fail('INPUT', '请使用客户端的额度重试入口。');
       await guard.authorize();
-      accounts.resumeUsage(guard.userId);
+      await accounts.resumeUsage(guard.userId, { authorize: guard.authorize });
       return accounts.status(guard.userId);
     },
     start: async (guard, input) => {
