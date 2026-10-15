@@ -35,6 +35,6 @@ Android 客户端可在手机本机保存 ChatGPT 官方授权，读取当前账
 
 `scripts/build-android.ps1` / `.sh` 会准备并校验固定版本的三种 Android 核心、许可和完整对应源码；APK 构建缺少它们时明确失败。生成的 `jniLibs` 和资源不进入 Git；来源、哈希与获取脚本保留。详见 `android/mihomo/manifest.json` 与 `SOURCE-NOTICE.txt`。
 
-本次测试记录见 [验收说明](workflow/2026-10-15-android-official-account-acceptance.md)。模拟器和合成上游测试不等于小米 ARM64 真机授权或真实套餐推理成功。正式下载与更新清单需另行发布，不能用调试测试包冒充正式版。
+本次测试记录见 [验收说明](workflow/2026-10-15-android-official-account-acceptance.md)。[0.9.12 已正式发布](https://github.com/lixinyu02/petpal/releases/tag/v0.9.12)，服务器下载与签名升级清单已同步；APK 沿用上一正式版的开发证书签名，支持覆盖更新。模拟器和合成上游测试仍不等于小米 ARM64 真机授权或真实套餐推理成功。
 
 官方参考：[SIWC 登录](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)、[模型与推理](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)。

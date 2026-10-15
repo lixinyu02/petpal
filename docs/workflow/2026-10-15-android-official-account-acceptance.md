@@ -3,6 +3,7 @@
 - Date: 2026-10-16
 - Version: 0.9.12 / Android versionCode 22
 - Implementation: `11d6b0c`
+- Release source: `88bc8ca842e776eb7d6a5e80b3b98e3847823e09`
 - Scope: Android 本机官方账号、应用内代理、共享后端，以及四端正式客户端。
 
 ## 功能与测试
@@ -36,4 +37,12 @@ Android 使用系统浏览器完成 SIWC、原生 Keystore 保存凭据；官方
 
 ## 发布
 
-GitHub 正式版本目标为 [v0.9.12](https://github.com/lixinyu02/petpal/releases/tag/v0.9.12)，服务器优先下载及两源升级清单使用相同六包哈希，签名更新序列为 14。最终上线状态记录在对应 issues 与发布回执中。
+已于 2026-10-16（Asia/Shanghai）正式发布 [v0.9.12](https://github.com/lixinyu02/petpal/releases/tag/v0.9.12)，非草稿、非预览、GitHub latest。标签固定到发布源 `88bc8ca`，六个安装包与四个配套文件全部齐全。
+
+本机大包上传遇到连接超时及 HTTP 408，失败记录和未完成资产对账均保留，未把部分上传标为成功。后改用独立分支 `release-transfer-v0.9.12` 的受限字节转发工作流；[run 38778129853](https://github.com/lixinyu02/petpal/actions/runs/38778129853) 首次运行成功，只从固定 HTTPS 镜像读取六包、核 SHA 后上传，不执行安装包、不重新构建或签名、不自行发布。十个资产共 1,616,688,523 字节完成 GitHub API/CDN 整体读取与落盘哈希验证；独立验收将日志、工作流源码、固定计划、根门禁与资产 ID/大小/摘要绑定，正式发布后再次核实 latest、标签及同一资产集合。
+
+中央网页和后端已上线 0.9.12，本机及公网健康、匿名手机 relay 的 401 门禁通过。首次切换的业务哈希断言发现旧会话规范化差异：仅 16 个 Agent 会话补齐 `queueRevision: 0` 并更新对应 revision。对切换前备份执行纯内存规范化后，与当前业务字段哈希完全一致，二次规范化没有变化；消息、账号、权限、模型配置和附件保持。保留原失败回执及独立解释，没有回写旧业务数据。维护标记已清除，守护进程实际恢复监控，隧道和 Caddy 未改动。
+
+服务器目录只展示最新正式客户端，优先提供同站下载，GitHub 为备用。5 个签名更新地址及 6 个正式下载地址共 11 条 HTTPS 流、2,824,089,175 字节完成全量 SHA 核验；额外提供给转发工作流的 Windows ZIP 有单独完整证明。两源签名升级序列均为 14、覆盖五个目标，Android versionCode 22；继续使用已有信任锚。Web ZIP 保留在发布资产中，按既有设计不列入原生客户端下载选择器。
+
+Chrome 验收确认切换后登录会话保持，设置页版本为 0.9.12，下载页仅提供最新正式版并标明服务器直连。最终本地回执位于 `evidence/release-0912-github-final/` 与 `.data/release-0.9.12/prepared/receipts/`，不发布真实运行数据。
