@@ -187,7 +187,7 @@ class PetOfficialAccountRuntime implements AutoCloseable {
     /** This is the only connection creation point; no cookies or browser headers. */
     protected HttpURLConnection open(URI uri, boolean official) throws Exception {
         if (official && !java.util.Arrays.asList(AUTHORIZE, TOKEN, REVOKE, JWKS, MODELS, RESPONSES).contains(uri.toString())) throw failure();
-        HttpURLConnection connection = PetNetwork.open(uri.toURL()); connection.setInstanceFollowRedirects(false); connection.setUseCaches(false); connection.setConnectTimeout(15000); connection.setReadTimeout(15000); connection.setRequestProperty("Cookie", ""); connection.setRequestProperty("Accept-Encoding", "identity"); connection.setRequestProperty("User-Agent", "PetPal-Android/0.9.11"); return connection;
+        HttpURLConnection connection = PetNetwork.open(uri.toURL()); connection.setInstanceFollowRedirects(false); connection.setUseCaches(false); connection.setConnectTimeout(15000); connection.setReadTimeout(15000); connection.setRequestProperty("Cookie", ""); connection.setRequestProperty("Accept-Encoding", "identity"); connection.setRequestProperty("User-Agent", "PetPal-Android/0.9.12"); return connection;
     }
     private static byte[] bytes(InputStream input, int maximum) throws Exception { if (input == null) return new byte[0]; ByteArrayOutputStream out = new ByteArrayOutputStream(); byte[] buffer = new byte[8192]; for (int count; (count = input.read(buffer)) != -1;) { if (out.size() + count > maximum) throw failure(); out.write(buffer, 0, count); } return out.toByteArray(); }
     private JSONObject json(URI uri, String bearer, byte[] body, String contentType, int timeout, boolean official, Scope value, boolean requireCurrent) throws Exception {
