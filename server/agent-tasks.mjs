@@ -17,7 +17,7 @@ const content = (value, images = []) => {
 const attachments = normalizeAttachmentIds;
 const publicEntry = entry => ({ id: entry.id, submissionId: entry.submissionId, revision: entry.revision, content: entry.content, attachmentIds: [...entry.attachmentIds], permissions: { ...entry.permissions }, providerId: entry.providerId, model: entry.model, ...(entry.reviewModel ? { reviewModel: entry.reviewModel } : {}), effort: entry.effort, hostId: entry.hostId ?? 'central', hostName: entry.hostName ?? '中央服务器', ...(entry.projectDirectory ? { projectDirectory: entry.projectDirectory } : {}), createdAt: entry.createdAt });
 const receipt = entry => ({ submissionId: entry.submissionId, entryId: entry.entryId, status: entry.status, ...(entry.error ? { error: entry.error } : {}) });
-const publicRun = run => run ? { ...Object.fromEntries(['id', 'submissionId', 'status', 'turnId', 'permissions', 'providerId', 'model', 'reviewModel', 'effort', 'startedAt', 'finishedAt', 'message', 'error', 'projectDirectory', 'approvalReview'].filter(key => run[key] !== undefined).map(key => [key, structuredClone(run[key])])), hostId: run.hostId ?? 'central', hostName: run.hostName ?? '中央服务器' } : null;
+const publicRun = run => run ? { ...Object.fromEntries(['id', 'submissionId', 'status', 'turnId', 'permissions', 'providerId', 'model', 'reviewModel', 'effort', 'startedAt', 'finishedAt', 'message', 'error', 'errorCode', 'projectDirectory', 'approvalReview'].filter(key => run[key] !== undefined).map(key => [key, structuredClone(run[key])])), hostId: run.hostId ?? 'central', hostName: run.hostName ?? '中央服务器' } : null;
 
 /** A restart is an explicit pause boundary, never permission to replay work. */
 export function restoreAgentState(conversation) {
@@ -32,6 +32,8 @@ export function restoreAgentState(conversation) {
   let changed = false;
   if (agent.queueRevision === undefined) { agent.queueRevision = 0; changed = true; }
   else if (!Number.isSafeInteger(agent.queueRevision) || agent.queueRevision < 0) throw new Error('本地 Agent 队列版本无效。');
+  if (agent.contextGeneration !== undefined && (!Number.isSafeInteger(agent.contextGeneration) || agent.contextGeneration < 0)) throw new Error('本地 Agent 上下文代次无效。');
+  if (agent.contextNotice !== undefined && (typeof agent.contextNotice !== 'string' || agent.contextNotice.length > 500)) throw new Error('本地 Agent 上下文修复说明无效。');
   for (const entry of agent.queue) {
     if (!object(entry) || !identifier(entry.id) || queueIds.has(entry.id) || !identifier(entry.submissionId) || entry.conversationId !== conversation.id || !Number.isSafeInteger(entry.revision) || entry.revision < 1 || !object(entry.auth) || entry.auth.userId !== conversation.userId || typeof entry.auth.sessionHash !== 'string' || typeof entry.auth.bootstrap !== 'boolean' || !Number.isSafeInteger(entry.auth.generation) || entry.auth.generation < 0) throw new Error('本地 Agent 任务归属无效。');
     content(entry.content, attachments(entry.attachmentIds)); normalizeAgentPermissions(entry.permissions);
@@ -48,6 +50,7 @@ export function restoreAgentState(conversation) {
   for (const item of agent.submissions) if (item.status === 'queued' && !agent.queue.some(entry => entry.id === item.entryId && entry.submissionId === item.submissionId)) throw new Error('本地 Agent 提交记录缺少队列任务。');
   if (agent.run !== null && (!object(agent.run) || !identifier(agent.run.id) || !['running', 'stopping', 'completed', 'cancelled', 'error', 'unknown'].includes(agent.run.status) || !agent.submissions.some(item => item.entryId === agent.run.id && item.submissionId === agent.run.submissionId))) throw new Error('本地 Agent 运行记录无效。');
   if (agent.run) { normalizeAgentPermissions(agent.run.permissions); validateStoredProjectDirectory(agent.run.projectDirectory); if (agent.run.approvalReview !== undefined && !validApprovalReview(agent.run.approvalReview)) throw new Error('本地 Agent 审查状态无效。'); }
+  if (agent.run?.errorCode !== undefined && agent.run.errorCode !== 'thread_context_missing') throw new Error('本地 Agent 错误分类无效。');
   if (agent.queue.length && !agent.paused) { agent.paused = true; changed = true; }
   if (agent.run && ['running', 'stopping'].includes(agent.run.status)) {
     Object.assign(agent.run, { status: agent.run.hostId && agent.run.hostId !== 'central' ? 'unknown' : 'error', finishedAt: now(), error: '服务已重启，先前任务不会自动重试；远程执行状态需要重新确认。' });
@@ -62,6 +65,7 @@ export function restoreAgentState(conversation) {
 }
 
 const recoveryMessage = '用户已确认原任务已停止，未自动重派；待执行队列仍保持暂停。';
+const contextRepairMessage = 'CLI 记忆已重置，网页历史已保留；请主动发送要继续的任务，并补充需要的上下文。';
 const uncertain = agent => agent.submissions.some(item => item.status === 'uncertain');
 const recoveryTarget = (conversation, runId) => {
   const agent = conversation.agent;
@@ -80,7 +84,7 @@ export function createAgentRecoveryPersistence(store) {
     if (!conversation) throw failure(404, 'Agent 会话已删除。');
     return conversation;
   };
-  const apply = (conversation, change) => {
+  const applyRecovery = (conversation, change) => {
     const agent = conversation.agent;
     if (!agent) return;
     const record = agent.submissions.find(item => item.entryId === change.runId);
@@ -91,8 +95,21 @@ export function createAgentRecoveryPersistence(store) {
     agent.paused = true; agent.revision = Math.max(agent.revision, change.revision);
     conversation.updatedAt = conversation.updatedAt > change.at ? conversation.updatedAt : change.at;
   };
+  const applyContextReset = (conversation, change) => {
+    // Every subsequent native thread inherits this generation. Only snapshots
+    // from before the repair lose their old thread binding.
+    if ((conversation.agent?.contextGeneration ?? 0) >= change.generation) return;
+    const agent = conversation.agent ??= empty();
+    for (const key of Object.keys(conversation)) if (key.startsWith('thread')) delete conversation[key];
+    conversation.codexRevision = change.codexRevision;
+    Object.assign(agent, { contextGeneration: change.generation, contextNotice: contextRepairMessage, paused: false, revision: Math.max(agent.revision, change.revision) });
+    if (agent.run && agent.run.id === change.previousRunId && agent.run.errorCode === 'thread_context_missing') { delete agent.run.errorCode; delete agent.run.error; agent.run.message = contextRepairMessage; }
+    conversation.updatedAt = conversation.updatedAt > change.at ? conversation.updatedAt : change.at;
+  };
+  const apply = (conversation, change) => change.kind === 'context-reset' ? applyContextReset(conversation, change) : applyRecovery(conversation, change);
   const validate = action => {
-    if (!object(action) || typeof action.validate !== 'function' || !identifier(action.conversationId) || !identifier(action.userId) || !identifier(action.runId) || !Number.isSafeInteger(action.revision) || action.revision < 0) throw failure(400, 'Agent 状态确认持久化参数无效。');
+    if (!object(action) || ![undefined, 'recover', 'context-reset'].includes(action.kind) || typeof action.validate !== 'function' || !identifier(action.conversationId) || !identifier(action.userId) || !Number.isSafeInteger(action.revision) || action.revision < 0 ||
+        (action.kind === 'context-reset' ? !Number.isSafeInteger(action.generation) || action.generation < 1 || typeof action.codexRevision !== 'string' || !/^[a-f0-9-]{36}$/.test(action.codexRevision) : !identifier(action.runId))) throw failure(400, 'Agent 状态确认持久化参数无效。');
     action.validate();
   };
   return {
@@ -106,9 +123,10 @@ export function createAgentRecoveryPersistence(store) {
       }
       if (!action) return;
       validate(action);
-      const conversation = lookup(snapshot, action), { agent, run } = recoveryTarget(conversation, action.runId);
+      const conversation = lookup(snapshot, action);
+      const { agent, run } = action.kind === 'context-reset' ? { agent: conversation.agent ?? empty(), run: conversation.agent?.run } : recoveryTarget(conversation, action.runId);
       if (agent.revision !== action.revision) throw failure(409, 'Agent 状态已变化，请刷新后再确认。', 'agent_revision_conflict');
-      const change = { userId: action.userId, runId: action.runId, unknownRun: Boolean(run), revision: action.revision + 1, at: now() };
+      const change = { userId: action.userId, revision: action.revision + 1, at: now(), ...(action.kind === 'context-reset' ? { kind: 'context-reset', generation: action.generation, codexRevision: action.codexRevision, previousRunId: run?.id } : { runId: action.runId, unknownRun: Boolean(run) }) };
       apply(conversation, change); prepared.set(snapshot, { action, change });
     },
     beforeCommit(snapshot) { const pending = prepared.get(snapshot); if (pending) validate(pending.action); },
@@ -126,7 +144,7 @@ export function createAgentRecoveryPersistence(store) {
 }
 
 /** Persistent receipts and short per-conversation locks own task lifetime, not HTTP. */
-export function createAgentTasks({ store, active, approvals, getBridge, authorize, authorizeRemoval = authorize, resolveModel, resolveReview = () => ({}), getReviewConfig = () => undefined, resolveHost = (_userId, hostId) => ({ hostId, hostName: '中央服务器' }), resolveProject = (_userId, _hostId, value) => value ? { projectDirectory: normalizeProjectDirectory(value), projectAccess: 'workspace' } : {}, resolveImages = async () => [], redact = value => value }) {
+export function createAgentTasks({ store, active, approvals, getBridge, authorize, authorizeRemoval = authorize, authorizeContextRepair = authorizeRemoval, getConfigRevision = () => store.state.codexConfig?.revision, resolveModel, resolveReview = () => ({}), getReviewConfig = () => undefined, resolveHost = (_userId, hostId) => ({ hostId, hostName: '中央服务器' }), resolveProject = (_userId, _hostId, value) => value ? { projectDirectory: normalizeProjectDirectory(value), projectAccess: 'workspace' } : {}, resolveImages = async () => [], redact = value => value }) {
   const locks = new Map(), generations = new Map(), removed = new Set(), knownReviewThreads = new Map();
   let closed = false;
   const data = conversation => conversation.agent ??= empty();
@@ -152,7 +170,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
   };
   const projection = conversation => {
     const agent = conversation.agent ?? empty();
-    return { revision: agent.revision, queueRevision: agent.queueRevision ?? 0, paused: agent.paused, queue: agent.queue.map(publicEntry), run: publicRun(agent.run),
+    return { revision: agent.revision, queueRevision: agent.queueRevision ?? 0, paused: agent.paused, queue: agent.queue.map(publicEntry), run: publicRun(agent.run), contextRepairNeeded: agent.run?.errorCode === 'thread_context_missing', ...(agent.contextNotice ? { contextNotice: agent.contextNotice } : {}),
       submissions: agent.submissions.slice(-10).map(item => ({ ...receipt(item), content: item.content, attachmentIds: [...(item.attachmentIds ?? [])], ...(item.projectDirectory ? { projectDirectory: item.projectDirectory } : {}), createdAt: item.createdAt })),
       approvals: [...approvals].filter(([, value]) => value.conversationId === conversation.id && !value.task.controller.signal.aborted).map(([id, value]) => ({ id, kind: value.kind || '操作请求', description: value.description || 'Agent 请求确认。' })) };
   };
@@ -248,6 +266,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
           assistant.status = error.code === 'execution_unknown' ? 'error' : cancelled ? 'cancelled' : 'error';
           assistant.error = persistenceError ? '保存回复失败，队列已暂停。' : String(redact(error.message || 'Agent 任务失败。')).slice(0, 500);
           Object.assign(agent.run, { status: error.code === 'execution_unknown' ? 'unknown' : assistant.status, error: assistant.error }); agent.paused = true;
+          if (error.code === 'thread_context_missing') agent.run.errorCode = 'thread_context_missing';
         } else {
           if (result?.threadId) { conversation.threadId = result.threadId; conversation.threadCodexRevision = entry.codexRevision; conversation.threadHostId = entry.hostId ?? 'central'; if (entry.reviewFingerprint) { conversation.threadReviewFingerprint = entry.reviewFingerprint; knownReviewThreads.set(conversation.id, result.threadId); } else { delete conversation.threadReviewFingerprint; knownReviewThreads.delete(conversation.id); } if (entry.projectDirectory) conversation.threadProjectDirectory = entry.projectDirectory; else delete conversation.threadProjectDirectory; }
           if (!assistant.content && result?.text) assistant.content = String(redact(result.text)).slice(0, 2 * 1024 * 1024);
@@ -394,6 +413,25 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
       await store.save({ agentRecovery: { conversationId: conversation.id, userId: auth.userId, runId: body.runId, revision: body.revision, validate } });
     });
   }
+  async function resetContext(conversation, body, auth) {
+    return lock(conversation, async () => {
+      if (!object(body) || Object.keys(body).some(key => !['revision', 'confirmed'].includes(key)) || !Number.isSafeInteger(body.revision) || body.revision < 0 || body.confirmed !== true) throw failure(400, '修复会话需要当前 revision 和 confirmed:true。');
+      const configRevision = getConfigRevision(), generation = (conversation.agent?.contextGeneration ?? 0) + 1;
+      const validate = () => {
+        if (auth.userId !== conversation.userId) throw failure(404, 'Agent 会话不存在。');
+        check({ conversationId: conversation.id, auth: { ...auth, generation: epoch(auth) } }, authorizeContextRepair);
+        const agent = conversation.agent ?? empty();
+        if (active.has(conversation.id) || agent.queue.length || ['running', 'stopping', 'unknown'].includes(agent.run?.status) || uncertain(agent) || agent.submissions.some(item => item.status === 'dispatching')) throw failure(409, '请先停止执行、清空队列并确认所有未知任务，再修复会话。');
+        if (agent.revision !== body.revision || (agent.contextGeneration ?? 0) + 1 !== generation) throw failure(409, 'Agent 状态已变化，请刷新后再修复。', 'agent_revision_conflict');
+        if (getConfigRevision() !== configRevision) throw failure(409, 'Agent 配置正在变化，请刷新后再修复。', 'agent_config_conflict');
+      };
+      validate();
+      await store.save({ agentRecovery: { kind: 'context-reset', conversationId: conversation.id, userId: auth.userId, revision: body.revision, generation, codexRevision: configRevision, validate } });
+      knownReviewThreads.delete(conversation.id);
+      // A reset never submits, resumes or kicks a task. Only the user's next
+      // explicit submission can create work under the current permissions.
+    });
+  }
   async function stop(conversation, { clear = false } = {}) {
     if (clear) { removed.add(conversation.id); knownReviewThreads.delete(conversation.id); }
     const agent = data(conversation); agent.paused = true;
@@ -425,5 +463,5 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     for (const conversation of store.state.conversations) if (conversation.agent && !conversation.agent.paused && (conversation.agent.queue.length || ['running', 'stopping'].includes(conversation.agent.run?.status))) { conversation.agent.paused = true; bump(conversation); }
     await Promise.allSettled([...locks.values()]); await store.save();
   }
-  return { snapshot: projection, submit, edit, reorder, resume, recover, stop, revoke, kick, close, hasPending: () => store.state.conversations.some(conversation => conversation.agent?.queue.length) };
+  return { snapshot: projection, submit, edit, reorder, resume, recover, resetContext, stop, revoke, kick, close, hasPending: () => store.state.conversations.some(conversation => conversation.agent?.queue.length) };
 }

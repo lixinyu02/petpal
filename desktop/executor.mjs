@@ -2,7 +2,7 @@ import path from 'node:path';
 import { hostname } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, unlink } from 'node:fs/promises';
-import { CodexBridge, resolveCodexCommand } from '../server/codex.mjs';
+import { CodexBridge, resolveCodexCommand, THREAD_CONTEXT_MISSING_MESSAGE } from '../server/codex.mjs';
 import { createDesktopTools } from '../server/desktop-tools.mjs';
 import { withAutomationTools } from '../server/automation-tools.mjs';
 import { normalizeAgentPermissions } from '../server/agent-permissions.mjs';
@@ -576,6 +576,7 @@ export class DesktopExecutor {
     if (run.stopping || run.controller.signal.aborted) await this._event(ctx, run, 'stopped', {});
     else if (failure) await this._event(ctx, run, 'error', { message: /^project_directory_(?:invalid|unavailable|forbidden)$/.test(failure.code || '')
       ? '项目目录不可用或超出账号工作区权限，请在执行电脑确认现有目录与访问授权；本次任务未自动改用其他目录。'
+      : failure.code === 'thread_context_missing' ? THREAD_CONTEXT_MISSING_MESSAGE
       : '执行电脑未能完成任务，请检查该电脑的 Codex 与网络状态。' });
     else {
       if (!identifier(result?.threadId)) throw invalid();

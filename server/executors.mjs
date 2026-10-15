@@ -9,6 +9,9 @@ import { canAccessExecutionHost } from './user-roles.mjs';
 
 const failure = (status, message, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 const unknown = () => failure(409, '执行电脑已断开，任务执行状态未知；队列已暂停，不会自动重试。', 'execution_unknown');
+// Keep the existing message-only event compatible with old strict central servers.
+// Only the fixed, sanitized desktop marker enables the optional repair hint.
+const missingContext = 'CLI 会话上下文已丢失，请保留聊天记录并重置 Agent 上下文。';
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const uuid = value => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
 const text = (value, maximum = 256) => typeof value === 'string' && value.length > 0 && value.length <= maximum && !/[\x00-\x1f\x7f]/.test(value);
@@ -261,7 +264,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
     run.sequence = body.sequence; run.eventHash = digest;
     if (event === 'started') { run.started = true; clearTimeout(run.ackTimer); }
     else if (event === 'complete') settle(run, run.stopping ? Object.assign(new Error('任务已停止。'),{name:'AbortError'}) : null, redact(data));
-    else if (event === 'error') settle(run, failure(502, String(redact(data.message)).slice(0,500)));
+    else if (event === 'error') settle(run, failure(data.message === missingContext ? 409 : 502, String(redact(data.message)).slice(0,500), data.message === missingContext ? 'thread_context_missing' : undefined));
     else if (event === 'stopped') settle(run, Object.assign(new Error('执行电脑已确认任务停止。'),{name:'AbortError'}));
     else if (event === 'command-result') {
       const pending = run.pending.get(data.commandId);

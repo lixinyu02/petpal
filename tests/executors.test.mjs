@@ -27,6 +27,14 @@ function fixture(t, options={}) {
   return {manager,registration,begin,auth,valid,config,store,userId,otherUserId,entry};
 }
 
+test('only the sanitized missing-context marker offers repair; generic remote errors stay generic',async t=>{
+  for(const [message,code] of [['CLI 会话上下文已丢失，请保留聊天记录并重置 Agent 上下文。','thread_context_missing'],['No rollout found for thread id: raw remote diagnostics',undefined],['prefix CLI 会话上下文已丢失，请保留聊天记录并重置 Agent 上下文。',undefined],['CLI 会话上下文已丢失，请保留聊天记录并重置 Agent 上下文。 suffix',undefined]]){
+    const f=fixture(t),registered=await f.registration(),run=await f.begin(registered);
+    run.event('started');const rejected=assert.rejects(run.completion,error=>{assert.equal(error.code,code);return true;});
+    run.event('error',{message});await rejected;
+  }
+});
+
 test('only an explicit remote steer unsupported receipt remains safe to enqueue; arbitrary failures stay uncertain',async t=>{
   for(const [code,expected] of [['steer_unsupported','steer_unsupported'],['turn_not_active','turn_not_active'],['method not found','command_delivery_uncertain'],['steer_delivery_uncertain','command_delivery_uncertain']]){
     const f=fixture(t),registered=await f.registration(),run=await f.begin(registered);run.event('started');

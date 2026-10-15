@@ -273,6 +273,14 @@ test('default run omits project fields while malformed directory pairs never con
   assert.equal(Object.hasOwn(received,'projectDirectory'),false);assert.equal(Object.hasOwn(received,'projectAccess'),false);
 });
 
+test('missing CLI context uses a sanitized legacy-compatible error receipt and never retries', async t => {
+  let runs=0;
+  const f=await protocolFixture(t,{bridgeFactory:()=>({async run(){runs++;throw Object.assign(new Error('private rollout path and Authorization: secret'),{code:'thread_context_missing'});},async close(){}})});
+  const ctx=f.manager.current;await f.manager._command(ctx,runCommand());await ctx.run.done;
+  assert.equal(runs,1);const error=f.events.at(-1);assert.equal(error.event,'error');
+  assert.deepEqual(error.data,{message:'CLI 会话上下文已丢失，请保留聊天记录并重置 Agent 上下文。'});
+});
+
 test('directory validation failures have a safe specific receipt and never fall back to another directory', async t => {
   let runs=0;
   const f=await protocolFixture(t,{bridgeFactory:()=>({async run(){runs++;throw Object.assign(new Error('private host path and diagnostics'),{code:'project_directory_forbidden'});},async close(){}})});

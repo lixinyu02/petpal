@@ -22,3 +22,6 @@
 .agent-queue .agent-recovery-notice{font-size:12px;line-height:1.75;padding:6px 0;color:var(--green)}
 .agent-queue .agent-recovery-open:disabled,.agent-queue .agent-recovery-actions>button:disabled{opacity:.4;cursor:default}
 @media(max-width:650px){.agent-queue .agent-recovery-open,.agent-queue .agent-recovery-links>button,.agent-queue .agent-recovery-actions>button{min-height:44px}.agent-queue .agent-recovery-confirm label{min-height:44px;align-items:center}.agent-queue .agent-recovery-confirm input{margin-top:0}}
+.agent-context-repair{padding:6px 0;font-size:12px;line-height:1.7;color:inherit}
+.agent-context-repair>p,.agent-context-repair .agent-recovery-confirm>p{margin:0 0 7px;overflow-wrap:anywhere}
+.agent-context-repair .agent-context-blocked{margin:5px 0 0;opacity:.7}

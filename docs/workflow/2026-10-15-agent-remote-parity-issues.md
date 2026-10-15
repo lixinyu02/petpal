@@ -8,13 +8,13 @@
 
 - Goal: 补齐 Agent 排队调序、确定未送达引导回退、失联解除、会话修复和人工提问/审批。
 - Ordering rule: Complete issues in sequence.
-- Current status: issue-2 completed; issue-3 ready
+- Current status: issue-3 completed; issue-4 ready
 
 ## Issue List
 
 - [x] issue-1 队列调序与确定性引导回退
 - [x] issue-2 未知执行状态的人工解除
-- [ ] issue-3 保留历史的 CLI 会话修复
+- [x] issue-3 保留历史的 CLI 会话修复
 - [ ] issue-4 原生用户提问与审批恢复
 
 ## issue-1
@@ -37,7 +37,7 @@
 - 验收标准: 无 active、归属/CAS/状态校验；只解除指定未知任务，绝不自动重派
 - 状态: completed
 - 验证方式: 新后端11/11、相关既有88/88、队列/恢复UI39/39、相关App UI64/64；root独立API/队列/组织回归61/61。Chrome实测未勾选不可确认、成功后2条队列仍暂停且合成执行次数保持1，无新任务；截图evidence/agent-parity-recovery.png。自审覆盖save失败/并行save、rename同revision及迟到旧事件。
-- commit: 本 issue 提交（见 Git 历史）
+- commit: 2714b6f
 
 ## issue-3
 
@@ -46,9 +46,9 @@
 - 范围: 精确 resume 丢失分类、无活动任务的人工上下文修复、当前配置复验、提示与输入保留
 - 依赖: issue-2
 - 验收标准: 清旧绑定并持久化后才能继续；历史保留、不自动发任务，撤权/未知/队列/竞态仍拒绝
-- 状态: todo
-- 验证方式: 后端事务/权限/CAS 回归，合成 CLI 错误与 Chrome 操作
-- commit: pending
+- 状态: completed
+- 验证方式: 新后端12/12、既有89/89，新UI28/28、队列/恢复39/39、App UI64/64；root上下文+恢复51/51、原生/relay92/92及额外分类54/54。TypeScript/Vite通过；Chrome重建后历史及未发草稿保留，执行次数仍1；截图evidence/agent-parity-context.png。自审确认未自动重发，旧快照不复活绑定。
+- commit: 本 issue 提交（见 Git 历史）
 
 ## issue-4
 
@@ -60,7 +60,3 @@
 - 状态: todo
 - 验证方式: 本机/远端协议、权限与敏感输入测试，真实内置 CLI 合成上游，Chrome 交互及最终构建/扫描
 - commit: pending
-
-
-
-

@@ -29,6 +29,7 @@ const diagnostics = {
   timeout: {message:'request timed out'+privateDiagnostic},
   disconnected: {message:'provider rejected request'+privateDiagnostic,codexErrorInfo:{responseStreamDisconnected:{httpStatusCode:null}}},
   generic: {message:'provider rejected request'+privateDiagnostic},
+  rollout: {message:'No rollout found for thread id: fake-thread'+privateDiagnostic},
 };
 function complete(threadId,turnId,status='completed') {
   notify('turn/completed',{threadId,turn:{id:turnId,status}});
@@ -58,7 +59,12 @@ createInterface({input:process.stdin}).on('line',line=>{
    reply(m,{account:mode==='unauth'?null:{type:'chatgpt',email:'private@example.com',accessToken:'do-not-expose'},requiresOpenaiAuth:true});return;
  }
  if(m.method==='thread/start'){reply(m,{thread:{id:'thread-'+(++threadNumber)}});return;}
- if(m.method==='thread/resume'){reply(m,{thread:{id:p.threadId}});return;}
+ if(m.method==='thread/resume'){
+   if(mode==='resume-missing'){send({id:m.id,error:{code:-32600,message:'No rollout found for thread id: '+p.threadId+privateDiagnostic}});return;}
+   if(mode==='resume-network'){send({id:m.id,error:{code:-32600,message:'connection reset by peer'+privateDiagnostic}});return;}
+   if(mode==='resume-near-missing'){send({id:m.id,error:{code:-32600,message:'No rollout found for thread identity'+privateDiagnostic}});return;}
+   reply(m,{thread:{id:p.threadId}});return;
+ }
  if(m.method==='turn/steer'){
    const content=p.input.find(item=>item.type==='text')?.text;
    if(content==='steer-fail'){send({id:m.id,error:{code:-32600,message:'private provider details'}});return;}
@@ -129,6 +135,33 @@ async function setup(t, mode = 'normal', apiMode = false) {
   const receipt = async () => { await bridge._rpc('fixture/receipt', {}); return messages(); };
   return { bridge, messages, receipt };
 }
+
+test('only an exact pre-turn missing rollout produces a context repair hint without retrying', async t => {
+  const { bridge, messages } = await setup(t, 'resume-missing');
+  await assert.rejects(bridge.run({ conversationId: 'missing-context', threadId: 'gone-thread', prompt: 'do not replay' }), error => {
+    assert.equal(error.code, 'thread_context_missing'); assert.equal(error.status, 409);
+    assert.doesNotMatch(error.message, /gone-thread|Authorization|private|raw-provider/); return true;
+  });
+  const before = await messages(); assert.equal(before.filter(item => item.method === 'thread/resume').length, 1);
+  assert.equal(before.filter(item => ['thread/start','turn/start'].includes(item.method)).length, 0);
+  const next = await bridge.run({ conversationId: 'missing-context', prompt: 'explicit new context' });
+  assert.equal(next.text, '你好，小猫！');
+  assert.equal((await messages()).filter(item => item.method === 'turn/start').length, 1);
+});
+
+test('resume network failure remains a network error and never retries or claims missing context', async t => {
+  const { bridge, messages } = await setup(t, 'resume-network');
+  await assert.rejects(bridge.run({ threadId: 'existing-thread', prompt: 'do not replay' }), error => {
+    assert.equal(error.code, undefined); assert.match(error.message, /模型连接中断/); return true;
+  });
+  assert.equal((await messages()).filter(item => ['thread/start','turn/start'].includes(item.method)).length, 0);
+});
+
+test('missing-rollout words in turn errors or near-match resume errors never offer context repair', async t => {
+  const f = await setup(t), near = await setup(t, 'resume-near-missing');
+  await Promise.all([f.bridge.run({ prompt: 'diagnostic:rollout:rpc' }), near.bridge.run({ threadId: 'near-thread', prompt: 'do not replay' })]
+    .map(promise => assert.rejects(promise,error => { assert.equal(error.code,undefined); assert.doesNotMatch(error.message,/private|Authorization/); return true; })));
+});
 
 test('initialization is shared, account status excludes identity and secrets', { timeout: 10_000 }, async (t) => {
   const { bridge, messages } = await setup(t);

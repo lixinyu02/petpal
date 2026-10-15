@@ -48,9 +48,11 @@ const safeText = (value) => String(value ?? '')
   .replace(/(Bearer\s+)[^\s"']+/gi, '$1[已隐藏]')
   .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*[=:]\s*["']?)[^\s"',;]+/gi, '$1[已隐藏]');
 
+export const THREAD_CONTEXT_MISSING_MESSAGE = 'CLI 会话上下文已丢失，请保留聊天记录并重置 Agent 上下文。';
 function protocolError(method, error, apiMode = false) {
   if (method === 'turn/steer' && error?.code === -32601) return Object.assign(new Error('当前执行端不支持运行中引导，消息可转入待执行队列。'), { code:'steer_unsupported', status:409, [unsupportedSteer]:true });
   const source = String(error?.message ?? '');
+  if (method === 'thread/resume' && /^No rollout found for thread id(?:\s|:)/.test(source)) return Object.assign(new Error(THREAD_CONTEXT_MISSING_MESSAGE), { code: 'thread_context_missing', status: 409 });
   const info = error?.codexErrorInfo;
   const httpStatus = error?.httpStatusCode ?? info?.httpStatusCode ?? info?.httpConnectionFailed?.httpStatusCode ?? info?.responseStreamConnectionFailed?.httpStatusCode ?? info?.responseStreamDisconnected?.httpStatusCode;
   const disconnected = info && typeof info === 'object' && ['responseStreamDisconnected', 'responseStreamConnectionFailed', 'responseTooManyFailedAttempts'].some(key => Object.hasOwn(info, key));

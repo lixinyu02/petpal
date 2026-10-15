@@ -383,6 +383,8 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     },
     authorize: entry => { const expiresAt = authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId ?? 'central', entry.projectDirectory, entry.permissions, entry); return expiresAt; },
     authorizeRemoval: entry => authorizeAgentIdentity(entry.auth).expiresAt,
+    authorizeContextRepair: entry => { const identity = authorizeAgentIdentity(entry.auth); requireCodex(identity.user); return identity.expiresAt; },
+    getConfigRevision: () => state.codexConfig.revision,
   });
   const authorizeAutomation = (userId, spec, { online, dispatch = false }) => {
     const user = state.users.find(item => item.id === userId);
@@ -1060,6 +1062,11 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.post('/api/conversations/:id/agent/recover', async (req, res) => {
     const conversation = agentConversation(req, true);
     await agentTasks.recover(conversation, req.body, agentAuth(req)); requireCurrentAuth(req);
+    res.json({ conversation: visibleConversation(conversation) });
+  });
+  app.post('/api/conversations/:id/agent/context/reset', async (req, res) => {
+    const conversation = agentConversation(req, true); requireCodex(req.user);
+    await agentTasks.resetContext(conversation, req.body, agentAuth(req)); requireCurrentAuth(req); requireCodex(req.user);
     res.json({ conversation: visibleConversation(conversation) });
   });
   for (const kind of ['submit', 'steer']) app.post(`/api/conversations/:id/agent/${kind}`, async (req, res) => {
