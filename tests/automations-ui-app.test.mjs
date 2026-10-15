@@ -163,7 +163,7 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
   };
   const deferredChildren=['AutomationsView','DownloadsView','UpdatesSettings','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','OfficialAccountSettings','ClientBehaviorSettings','CentralServerSettings'];
-  for(const name of [...deferredChildren,'BrandMark','CompanionOptions','ChatMessages','ChatScrollDock','ConversationHistory','AgentQueue','CatV2','WorkspaceDisclosure'])modules[`./${name}`]=component(name);
+  for(const name of [...deferredChildren,'BrandMark','CompanionOptions','ChatMessages','ChatScrollDock','ConversationHistory','AgentQueue','AgentUserInput','CatV2','WorkspaceDisclosure'])modules[`./${name}`]=component(name);
   const module={exports:{}},context={module,exports:module.exports,require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);if(deferredChildren.some(child=>name===`./${child}`))lazyLoads.push(name);return modules[name];},
     window,document,location:{search,origin:'https://fixture.invalid',assign:path=>navigations.push(path)},URL,URLSearchParams,AbortController,DOMException,crypto:{randomUUID:()=>`fixture-submission-${requests.length}`},
     setTimeout(callback){const id=++timerId;timers.set(id,callback);return id;},clearTimeout:id=>timers.delete(id)};
@@ -577,6 +577,34 @@ test('actual App shows native guardian progress without inventing an interactive
   assert.match(f.text(),/自动审查中/);assert.equal(f.find('div',props=>props.className==='approval'),undefined);
   assert.equal(f.component('AgentPermissions').props.reviewProgress.status,'inProgress');
   assert.ok(f.requests.every(item=>item.method==='GET'));
+});
+
+test('App renders deadline-expired approvals without actionable decisions',async t=>{
+  const original=approvalConversation();original.agent.approvals[0].expiresAt=new Date(Date.now()-1000).toISOString();
+  const f=workspaceFixture({canUseCodex:true,initialConversations:[original],search:`?chat=1&mode=codex&conversation=${original.id}`,handleAgentControl:true});t.after(()=>f.close());await f.ready();
+  assert.match(f.text(),/确认已过期，本次操作未放行/);assert.equal(f.find('button',props=>text(props.children)==='允许本次'),undefined);assert.equal(f.find('button',props=>text(props.children)==='拒绝'),undefined);assert.equal(f.requests.some(item=>item.method==='POST'),false);
+});
+
+test('App decline-only approvals omit acceptance while preserving the explicit negative action',async t=>{
+  const original=approvalConversation();Object.assign(original.agent.approvals[0],{canAccept:false,requestedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+60000).toISOString()});
+  const f=workspaceFixture({canUseCodex:true,initialConversations:[original],search:`?chat=1&mode=codex&conversation=${original.id}`,handleAgentControl:true});t.after(()=>f.close());await f.ready();
+  assert.equal(f.find('button',props=>text(props.children)==='允许本次'),undefined);assert.ok(f.find('button',props=>text(props.children)==='拒绝'));await f.click('拒绝');await f.ready();assert.deepEqual(f.requests.find(item=>item.path==='/codex/approvals/approval-ui-one').body,{decision:'decline'});
+});
+
+test('a captured approval accept handler rechecks the latest metadata after a readonly refresh',async t=>{
+  const original=approvalConversation(),f=workspaceFixture({canUseCodex:true,initialConversations:[original],search:`?chat=1&mode=codex&conversation=${original.id}`,handleAgentControl:true});t.after(()=>f.close());await f.ready();
+  const handler=f.find('button',props=>text(props.children)==='允许本次').props.onClick;
+  const changed=structuredClone(original);changed.agent.revision++;changed.agent.approvals[0].canAccept=false;const read=f.delayNext(`/conversations/${original.id}`),refresh=f.component('AgentQueue').props.refresh();await read.started;read.release(changed);await refresh;await f.ready();assert.equal(f.find('button',props=>text(props.children)==='允许本次'),undefined);
+  await handler();assert.equal(f.requests.filter(item=>item.path==='/codex/approvals/approval-ui-one').length,0);
+});
+
+test('App passes owned question snapshots, shares approval locking, and refreshes without changing composer text or images',async t=>{
+  const original=approvalConversation();original.agent.userInputs=[{id:'live-question',requestedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+60000).toISOString(),questions:[{id:'choice',header:'方案',question:'选择方案',isOther:true,isSecret:false,options:[{label:'方案 A',description:'使用 A'}]}]}];
+  const f=workspaceFixture({canUseCodex:true,initialConversations:[original],search:`?chat=1&mode=codex&conversation=${original.id}`,attachmentItems:[{id:'unsent-image',status:'ready'}],handleAgentControl:true});t.after(()=>f.close());await f.ready();f.typeDraft('保留尚未发送的任务');
+  const questions=f.component('AgentUserInput').props;assert.equal(questions.conversationId,original.id);assert.equal(questions.active,true);assert.deepEqual(Array.from(questions.requests),original.agent.userInputs);assert.match(f.text(),/查看问题/);
+  questions.interactionLock.current=true;questions.onBusyChange(true);f.render();assert.equal(f.find('button',props=>text(props.children)==='允许本次').props.disabled,true);
+  await questions.refresh();await f.ready();assert.equal(f.find('textarea',props=>props['aria-label']==='消息').props.value,'保留尚未发送的任务');assert.equal(f.attachments.items[0].id,'unsent-image');assert.equal(f.attachments.clearCount,0);assert.equal(f.requests.some(item=>item.method==='POST'),false);
+  questions.interactionLock.current=false;questions.onBusyChange(false);f.render();
 });
 
 test('project filter changes preserve the selected conversation, unsent text and image drafts',async t=>{

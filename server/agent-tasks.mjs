@@ -3,6 +3,7 @@ import { normalizeAgentPermissions } from './agent-permissions.mjs';
 import { normalizeAttachmentIds } from './attachments.mjs';
 import { normalizeProjectDirectory, validateProjectDirectoryText, validateStoredProjectDirectory } from './project-directory.mjs';
 import { validApprovalReview } from './approval-review.mjs';
+import { approvalMetadata } from './agent-user-inputs.mjs';
 
 const failure = (status, message, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 const now = () => new Date().toISOString();
@@ -101,15 +102,20 @@ export function createAgentRecoveryPersistence(store) {
     if ((conversation.agent?.contextGeneration ?? 0) >= change.generation) return;
     const agent = conversation.agent ??= empty();
     for (const key of Object.keys(conversation)) if (key.startsWith('thread')) delete conversation[key];
+    if (change.kind === 'private-context') {
+      Object.assign(agent, { contextGeneration: change.generation, contextNotice: '本轮使用了私密回答，下一轮会建立新的 CLI 记忆；网页历史保留。', revision: Math.max(agent.revision, change.revision) });
+      conversation.updatedAt = conversation.updatedAt > change.at ? conversation.updatedAt : change.at;
+      return;
+    }
     conversation.codexRevision = change.codexRevision;
     Object.assign(agent, { contextGeneration: change.generation, contextNotice: contextRepairMessage, paused: false, revision: Math.max(agent.revision, change.revision) });
     if (agent.run && agent.run.id === change.previousRunId && agent.run.errorCode === 'thread_context_missing') { delete agent.run.errorCode; delete agent.run.error; agent.run.message = contextRepairMessage; }
     conversation.updatedAt = conversation.updatedAt > change.at ? conversation.updatedAt : change.at;
   };
-  const apply = (conversation, change) => change.kind === 'context-reset' ? applyContextReset(conversation, change) : applyRecovery(conversation, change);
+  const apply = (conversation, change) => ['context-reset','private-context'].includes(change.kind) ? applyContextReset(conversation, change) : applyRecovery(conversation, change);
   const validate = action => {
-    if (!object(action) || ![undefined, 'recover', 'context-reset'].includes(action.kind) || typeof action.validate !== 'function' || !identifier(action.conversationId) || !identifier(action.userId) || !Number.isSafeInteger(action.revision) || action.revision < 0 ||
-        (action.kind === 'context-reset' ? !Number.isSafeInteger(action.generation) || action.generation < 1 || typeof action.codexRevision !== 'string' || !/^[a-f0-9-]{36}$/.test(action.codexRevision) : !identifier(action.runId))) throw failure(400, 'Agent 状态确认持久化参数无效。');
+    if (!object(action) || ![undefined, 'recover', 'context-reset', 'private-context'].includes(action.kind) || typeof action.validate !== 'function' || !identifier(action.conversationId) || !identifier(action.userId) || !Number.isSafeInteger(action.revision) || action.revision < 0 ||
+        (['context-reset','private-context'].includes(action.kind) ? !Number.isSafeInteger(action.generation) || action.generation < 1 || action.kind === 'context-reset' && (typeof action.codexRevision !== 'string' || !/^[a-f0-9-]{36}$/.test(action.codexRevision)) : !identifier(action.runId))) throw failure(400, 'Agent 状态确认持久化参数无效。');
     action.validate();
   };
   return {
@@ -124,9 +130,10 @@ export function createAgentRecoveryPersistence(store) {
       if (!action) return;
       validate(action);
       const conversation = lookup(snapshot, action);
-      const { agent, run } = action.kind === 'context-reset' ? { agent: conversation.agent ?? empty(), run: conversation.agent?.run } : recoveryTarget(conversation, action.runId);
+      const context = ['context-reset','private-context'].includes(action.kind);
+      const { agent, run } = context ? { agent: conversation.agent ?? empty(), run: conversation.agent?.run } : recoveryTarget(conversation, action.runId);
       if (agent.revision !== action.revision) throw failure(409, 'Agent 状态已变化，请刷新后再确认。', 'agent_revision_conflict');
-      const change = { userId: action.userId, revision: action.revision + 1, at: now(), ...(action.kind === 'context-reset' ? { kind: 'context-reset', generation: action.generation, codexRevision: action.codexRevision, previousRunId: run?.id } : { runId: action.runId, unknownRun: Boolean(run) }) };
+      const change = { userId: action.userId, revision: action.revision + 1, at: now(), ...(context ? { kind: action.kind, generation: action.generation, codexRevision: action.codexRevision, previousRunId: run?.id } : { runId: action.runId, unknownRun: Boolean(run) }) };
       apply(conversation, change); prepared.set(snapshot, { action, change });
     },
     beforeCommit(snapshot) { const pending = prepared.get(snapshot); if (pending) validate(pending.action); },
@@ -144,7 +151,7 @@ export function createAgentRecoveryPersistence(store) {
 }
 
 /** Persistent receipts and short per-conversation locks own task lifetime, not HTTP. */
-export function createAgentTasks({ store, active, approvals, getBridge, authorize, authorizeRemoval = authorize, authorizeContextRepair = authorizeRemoval, getConfigRevision = () => store.state.codexConfig?.revision, resolveModel, resolveReview = () => ({}), getReviewConfig = () => undefined, resolveHost = (_userId, hostId) => ({ hostId, hostName: '中央服务器' }), resolveProject = (_userId, _hostId, value) => value ? { projectDirectory: normalizeProjectDirectory(value), projectAccess: 'workspace' } : {}, resolveImages = async () => [], redact = value => value }) {
+export function createAgentTasks({ store, active, approvals, userInputs, getBridge, authorize, authorizeRemoval = authorize, authorizeContextRepair = authorizeRemoval, getConfigRevision = () => store.state.codexConfig?.revision, resolveModel, resolveReview = () => ({}), getReviewConfig = () => undefined, resolveHost = (_userId, hostId) => ({ hostId, hostName: '中央服务器' }), resolveProject = (_userId, _hostId, value) => value ? { projectDirectory: normalizeProjectDirectory(value), projectAccess: 'workspace' } : {}, resolveImages = async () => [], redact = value => value }) {
   const locks = new Map(), generations = new Map(), removed = new Set(), knownReviewThreads = new Map();
   let closed = false;
   const data = conversation => conversation.agent ??= empty();
@@ -172,7 +179,8 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     const agent = conversation.agent ?? empty();
     return { revision: agent.revision, queueRevision: agent.queueRevision ?? 0, paused: agent.paused, queue: agent.queue.map(publicEntry), run: publicRun(agent.run), contextRepairNeeded: agent.run?.errorCode === 'thread_context_missing', ...(agent.contextNotice ? { contextNotice: agent.contextNotice } : {}),
       submissions: agent.submissions.slice(-10).map(item => ({ ...receipt(item), content: item.content, attachmentIds: [...(item.attachmentIds ?? [])], ...(item.projectDirectory ? { projectDirectory: item.projectDirectory } : {}), createdAt: item.createdAt })),
-      approvals: [...approvals].filter(([, value]) => value.conversationId === conversation.id && !value.task.controller.signal.aborted).map(([id, value]) => ({ id, kind: value.kind || '操作请求', description: value.description || 'Agent 请求确认。' })) };
+      userInputs: userInputs?.snapshot(conversation.id) ?? [],
+      approvals: [...approvals].filter(([, value]) => value.conversationId === conversation.id && !value.task.controller.signal.aborted && (!value.expiresAt || Date.parse(value.expiresAt) > Date.now())).map(([id, value]) => ({ id, kind: value.kind || '操作请求', description: value.description || 'Agent 请求确认。', ...approvalMetadata(value) })) };
   };
   const request = (body, kind) => {
     const allowed = ['submissionId', 'content', 'attachmentIds', 'permissions', 'providerId', 'hostId', 'projectDirectory', ...(kind === 'steer' ? ['expectedTurnId'] : [])];
@@ -214,7 +222,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     const record = { submissionId: entry.submissionId, entryId: entry.id, fingerprint, status: 'dispatching', content: entry.content, attachmentIds: [...entry.attachmentIds], createdAt: entry.createdAt, ...(entry.projectDirectory ? { projectDirectory: entry.projectDirectory } : {}) };
     agent.submissions.push(record); return record;
   };
-  const clearApprovals = task => { for (const id of task.approvalIds) if (approvals.get(id)?.task === task) approvals.delete(id); };
+  const clearApprovals = task => { for (const id of task.approvalIds) if (approvals.get(id)?.task === task) approvals.delete(id); userInputs?.clear(task); };
 
   async function execute(conversation, entry, task, userMessage, assistant) {
     const agent = data(conversation), record = agent.submissions.find(item => item.entryId === entry.id);
@@ -226,11 +234,13 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     const onEvent = (event, value) => {
       if (task.controller.signal.aborted || active.get(conversation.id) !== task) return;
       const safe = redact(value);
-      if (event === 'thread' && typeof safe.threadId === 'string') { conversation.threadId = safe.threadId; conversation.threadCodexRevision = entry.codexRevision; conversation.threadHostId = entry.hostId ?? 'central'; if (entry.reviewFingerprint) { conversation.threadReviewFingerprint = entry.reviewFingerprint; knownReviewThreads.set(conversation.id, safe.threadId); } else { delete conversation.threadReviewFingerprint; knownReviewThreads.delete(conversation.id); } if (entry.projectDirectory) conversation.threadProjectDirectory = entry.projectDirectory; else delete conversation.threadProjectDirectory; persistEvent(); }
+      if (event === 'thread' && !task.sensitiveInput && typeof safe.threadId === 'string') { conversation.threadId = safe.threadId; conversation.threadCodexRevision = entry.codexRevision; conversation.threadHostId = entry.hostId ?? 'central'; if (entry.reviewFingerprint) { conversation.threadReviewFingerprint = entry.reviewFingerprint; knownReviewThreads.set(conversation.id, safe.threadId); } else { delete conversation.threadReviewFingerprint; knownReviewThreads.delete(conversation.id); } if (entry.projectDirectory) conversation.threadProjectDirectory = entry.projectDirectory; else delete conversation.threadProjectDirectory; persistEvent(); }
       if (event === 'turn' && typeof safe.turnId === 'string') { agent.run.turnId = safe.turnId; bump(conversation); persistEvent(); }
       if (event === 'status') { agent.run.message = String(safe.message || safe.text || safe.state || '').slice(0, 500); if (validApprovalReview(safe.approvalReview)) agent.run.approvalReview = structuredClone(safe.approvalReview); bump(conversation); }
-      if (event === 'approval' && typeof safe.id === 'string') { approvals.set(safe.id, { userId: entry.auth.userId, conversationId: conversation.id, task, kind: safe.kind, description: safe.description }); task.approvalIds.add(safe.id); bump(conversation); }
+      if (event === 'approval' && typeof safe.id === 'string') { approvals.set(safe.id, { userId: entry.auth.userId, conversationId: conversation.id, task, kind: safe.kind, description: safe.description, ...approvalMetadata(safe) }); task.approvalIds.add(safe.id); bump(conversation); }
       if (event === 'approval-resolved' && typeof safe.id === 'string' && approvals.get(safe.id)?.task === task) { approvals.delete(safe.id); task.approvalIds.delete(safe.id); bump(conversation); }
+      if (event === 'user-input' && userInputs?.receive(task, entry.auth.userId, conversation.id, safe)) bump(conversation);
+      if (event === 'user-input-resolved' && userInputs?.resolve(task, safe.id)) bump(conversation);
       if (event === 'delta' && typeof safe.text === 'string') {
         if (assistant.content.length + safe.text.length > 2 * 1024 * 1024) { task.controller.abort(failure(502, 'Agent 回复超过长度限制。')); return; }
         assistant.content = String(redact(assistant.content + safe.text)); bump(conversation);
@@ -268,7 +278,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
           Object.assign(agent.run, { status: error.code === 'execution_unknown' ? 'unknown' : assistant.status, error: assistant.error }); agent.paused = true;
           if (error.code === 'thread_context_missing') agent.run.errorCode = 'thread_context_missing';
         } else {
-          if (result?.threadId) { conversation.threadId = result.threadId; conversation.threadCodexRevision = entry.codexRevision; conversation.threadHostId = entry.hostId ?? 'central'; if (entry.reviewFingerprint) { conversation.threadReviewFingerprint = entry.reviewFingerprint; knownReviewThreads.set(conversation.id, result.threadId); } else { delete conversation.threadReviewFingerprint; knownReviewThreads.delete(conversation.id); } if (entry.projectDirectory) conversation.threadProjectDirectory = entry.projectDirectory; else delete conversation.threadProjectDirectory; }
+          if (result?.threadId && !task.sensitiveInput) { conversation.threadId = result.threadId; conversation.threadCodexRevision = entry.codexRevision; conversation.threadHostId = entry.hostId ?? 'central'; if (entry.reviewFingerprint) { conversation.threadReviewFingerprint = entry.reviewFingerprint; knownReviewThreads.set(conversation.id, result.threadId); } else { delete conversation.threadReviewFingerprint; knownReviewThreads.delete(conversation.id); } if (entry.projectDirectory) conversation.threadProjectDirectory = entry.projectDirectory; else delete conversation.threadProjectDirectory; }
           if (!assistant.content && result?.text) assistant.content = String(redact(result.text)).slice(0, 2 * 1024 * 1024);
           assistant.status = 'complete'; agent.run.status = 'completed';
         }
@@ -432,6 +442,24 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
       // explicit submission can create work under the current permissions.
     });
   }
+  async function protectPrivateInput(conversation, task) {
+    return lock(conversation, async () => {
+      const auth = task.agentEntry?.auth ?? { userId: task.userId, sessionHash: task.sessionHash, bootstrap: task.bootstrap };
+      const generation = (conversation.agent?.contextGeneration ?? 0) + 1;
+      const validate = () => {
+        if (active.get(conversation.id) !== task || task.controller.signal.aborted || task.userId !== conversation.userId) throw failure(409, '原任务已结束，私密回答没有发送。');
+        if (task.agentEntry) check(task.agentEntry);
+        else check({ conversationId: conversation.id, auth: { ...auth, generation: epoch(auth) } }, authorizeContextRepair);
+        if ((conversation.agent?.contextGeneration ?? 0) + 1 !== generation) throw failure(409, '任务上下文已变化，私密回答没有发送。');
+      };
+      if (task.privateInputProtected) { if (active.get(conversation.id) !== task || task.controller.signal.aborted) throw failure(409, '原任务已结束。'); return; }
+      validate(); task.sensitiveInput = true;
+      try {
+        await store.save({ agentRecovery: { kind: 'private-context', conversationId: conversation.id, userId: conversation.userId, revision: data(conversation).revision, generation, validate } });
+      } catch { throw failure(500, '无法保存私密上下文保护，本次回答未发送；请停止任务后重试。'); }
+      knownReviewThreads.delete(conversation.id); task.privateInputProtected = true;
+    });
+  }
   async function stop(conversation, { clear = false } = {}) {
     if (clear) { removed.add(conversation.id); knownReviewThreads.delete(conversation.id); }
     const agent = data(conversation); agent.paused = true;
@@ -463,5 +491,5 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     for (const conversation of store.state.conversations) if (conversation.agent && !conversation.agent.paused && (conversation.agent.queue.length || ['running', 'stopping'].includes(conversation.agent.run?.status))) { conversation.agent.paused = true; bump(conversation); }
     await Promise.allSettled([...locks.values()]); await store.save();
   }
-  return { snapshot: projection, submit, edit, reorder, resume, recover, resetContext, stop, revoke, kick, close, hasPending: () => store.state.conversations.some(conversation => conversation.agent?.queue.length) };
+  return { snapshot: projection, submit, edit, reorder, resume, recover, resetContext, protectPrivateInput, stop, revoke, kick, close, hasPending: () => store.state.conversations.some(conversation => conversation.agent?.queue.length) };
 }

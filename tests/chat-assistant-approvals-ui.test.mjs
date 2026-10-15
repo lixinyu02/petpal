@@ -16,10 +16,10 @@ const clone=value=>structuredClone(value);
 const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return{promise,resolve};};
 
 /** Execute the real background-task effects and approval event handlers, with controllable HTTP delivery. */
-function fixture({hasApproval=true,review,failInitialRead=false,messages=[]}={}){
+function fixture({hasApproval=true,review,failInitialRead=false,messages=[],userInputs=[]}={}){
   let index=0,tree,dirty=false,epoch=1,mounted=true,lateUpdates=0,timerId=0;
   const hooks=[],effects=[],timers=new Map(),requests=[],failures=[],delays=[];
-  const child={id:'child-agent',mode:'codex',messages:clone(messages),agent:{revision:1,queue:[],paused:false,run:{id:'run-one',status:'running',permissions:{access:'full-access',approval:'review'},approvalReview:review},approvals:hasApproval?[{id:'approval-one',kind:'desktopTool',description:'将 Fixture PC 系统音量调到 45%'}]:[]}};
+  const child={id:'child-agent',mode:'codex',messages:clone(messages),agent:{revision:1,queue:[],paused:false,run:{id:'run-one',status:'running',permissions:{access:'full-access',approval:'review'},approvalReview:review},userInputs:clone(userInputs),approvals:hasApproval?[{id:'approval-one',kind:'desktopTool',description:'将 Fixture PC 系统音量调到 45%'}]:[]}};
   const task={id:'task-one',conversationId:child.id,hostId:'fixture-pc',hostName:'Fixture PC',status:'running',message:'处理电脑操作'};
   const props={conversationId:'foreground-chat',tasks:[task],onUpdate(){}};
   const same=(left,right)=>left&&right&&left.length===right.length&&left.every((entry,at)=>Object.is(entry,right[at]));
@@ -47,7 +47,7 @@ function fixture({hasApproval=true,review,failInitialRead=false,messages=[]}={})
     return value;
   }};
   const modules={'./platform/visible-poll.mjs':{createVisiblePoll},react,'react/jsx-runtime':{jsx:element,jsxs:element},'react-dom':{createPortal:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
-    './api':api,'./AgentPermissions':{__esModule:true,default:Symbol('AgentPermissions'),defaultAgentPermissions:{access:'read-only',approval:'ask'}},
+    './api':api,'./AgentPermissions':{__esModule:true,default:Symbol('AgentPermissions'),defaultAgentPermissions:{access:'read-only',approval:'ask'}},'./AgentUserInput':{__esModule:true,default:Symbol('AgentUserInput')},
     './WorkspaceControls':{ExecutionHostPicker:Symbol('ExecutionHostPicker'),ModelPicker:Symbol('ModelPicker')},'./ProjectDirectory':{__esModule:true,default:Symbol('ProjectDirectory')},
     './chat-assistant-preferences.mjs':preferences,'./project-directory-preferences.mjs':directories,'./approval-review-ui.mjs':reviewUi,'./conversation-message-reuse.mjs':messageReuse,'./platform/ui-motion.ts':{useUiEntrance:()=>({current:null})}};
   vm.runInNewContext(source,{module,exports:module.exports,AbortController,setTimeout(callback,delay){const id=++timerId;timers.set(id,{callback,delay});return id;},clearTimeout:id=>timers.delete(id),require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);return modules[name];}});
@@ -56,7 +56,7 @@ function fixture({hasApproval=true,review,failInitialRead=false,messages=[]}={})
   const flush=async()=>{for(let tick=0;tick<10;tick++){await new Promise(resolve=>setImmediate(resolve));if(dirty&&mounted)render();}};
   if(failInitialRead)failures.push({path:`/conversations/${child.id}`,method:'GET',error:new Error('Fixture child read unavailable')});
   render();
-  return{requests,child,props,find,render,flush,text:()=>text(tree),get lateUpdates(){return lateUpdates;},
+  return{requests,child,props,find,render,flush,text:()=>text(tree),get lateUpdates(){return lateUpdates;},get questionProps(){return find(modules['./AgentUserInput'].default)?.props;},
     get snapshot(){return hooks.find(hook=>hook?.value&&Object.hasOwn(hook.value,child.id))?.value[child.id];},
     tick(delay){const entry=[...timers].find(([,timer])=>timer.delay===delay);assert.ok(entry,`Missing ${delay}ms poll timer`);timers.delete(entry[0]);entry[1].callback();render();},
     click(label){const button=find('button',props=>text(props.children)===label);assert.ok(button,`Missing ${label}`);button.props.onClick();render();},
@@ -162,4 +162,43 @@ test('manual child read cannot install a late snapshot after the session epoch c
   f.child.messages[1].content='late manually refreshed response';f.child.agent.revision=99;
   const read=f.delayNext(`/conversations/${f.child.id}`);f.click('刷新审批状态');await read.started;f.changeSession();read.release();await f.flush();
   assert.strictEqual(f.snapshot,before);assert.equal(f.lateUpdates,0);assert.equal(f.snapshot.agent.revision,1);
+});
+
+const question=()=>({id:'background-question',requestedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+60000).toISOString(),questions:[{id:'choice',header:'执行方式',question:'选择处理方式',isOther:true,isSecret:false,options:[{label:'只检查',description:'不修改文件'}]}]});
+
+test('background questions expose an answer jump and reuse the owned child form without navigating the foreground',async t=>{
+  const pending=question(),f=fixture({hasApproval:false,userInputs:[pending],messages:history()});t.after(()=>f.close());await f.flush();
+  assert.match(f.text(),/等待回答/);assert.ok(f.find('button',props=>text(props.children)==='回答 (1)'));const input=f.questionProps;assert.ok(input);assert.equal(input.conversationId,f.child.id);assert.equal(input.active,true);assert.deepEqual(input.requests,[pending]);
+  const before=f.requests.length,child=await input.refresh();await f.flush();assert.equal(child.id,f.child.id);assert.deepEqual(f.requests.slice(before).map(item=>({path:item.path,method:item.method})),[{path:'/conversations/child-agent',method:'GET'}]);assert.equal(f.props.conversationId,'foreground-chat');assert.equal(f.snapshot.messages[0].content,'请检查项目状态');assert.equal(f.requests.some(item=>item.method==='POST'),false);
+  f.click('回答 (1)');assert.equal(f.find('details').props.open,true);
+});
+
+test('child question requests retain delivery uncertainty and share the approval synchronous lock',async t=>{
+  const pending={...question(),deliveryUncertain:true},f=fixture({userInputs:[pending]});t.after(()=>f.close());await f.flush();const input=f.questionProps,accept=f.find('button',props=>text(props.children)==='允许本次').props.onClick;
+  assert.equal(input.requests[0].deliveryUncertain,true);input.interactionLock.current=true;input.onBusyChange(true);f.render();assert.equal(f.find('button',props=>text(props.children)==='允许本次').props.disabled,true);accept();await f.flush();assert.equal(f.requests.some(item=>item.method==='POST'),false);
+  input.interactionLock.current=false;input.onBusyChange(false);f.render();assert.equal(f.find('button',props=>text(props.children)==='允许本次').props.disabled,false);
+});
+
+test('stopped child tasks deactivate the question form while preserving the foreground conversation',async t=>{
+  const f=fixture({hasApproval:false,userInputs:[question()]});t.after(()=>f.close());await f.flush();assert.equal(f.questionProps.active,true);f.props.tasks=[{...f.props.tasks[0],status:'cancelled'}];f.render();assert.equal(f.questionProps.active,false);assert.doesNotMatch(f.text(),/回答 \(1\)/);assert.equal(f.props.conversationId,'foreground-chat');assert.equal(f.requests.some(item=>item.method==='POST'),false);
+});
+
+for(const boundary of ['parent','host','session'])test(`a captured child question refresh cannot cross the ${boundary} binding`,async t=>{
+  const f=fixture({hasApproval:false,userInputs:[question()]});t.after(()=>f.close());await f.flush();const refresh=f.questionProps.refresh,reads=f.requests.length;
+  if(boundary==='parent')f.changeParent();else if(boundary==='host'){f.props.tasks=[{...f.props.tasks[0],hostId:'different-pc'}];f.render();}else f.changeSession();
+  await assert.rejects(refresh(),/后台任务已变化/);assert.equal(f.requests.length,reads);assert.equal(f.lateUpdates,0);
+});
+
+test('a late question refresh cannot install old child output after its host binding changes',async t=>{
+  const f=fixture({hasApproval:false,userInputs:[question()],messages:history()});t.after(()=>f.close());await f.flush();const before=f.snapshot,delay=f.delayNext(`/conversations/${f.child.id}`),pending=f.questionProps.refresh();await delay.started;
+  f.props.tasks=[{...f.props.tasks[0],hostId:'different-pc'}];f.render();const late=clone(f.child);late.messages[1].content='old target secret';delay.release(late);await assert.rejects(pending,/回执与当前请求不一致/);await f.flush();assert.strictEqual(f.snapshot,before);assert.equal(f.lateUpdates,0);assert.doesNotMatch(f.text(),/old target secret/);
+});
+
+test('background decline-only and expired approval snapshots remove acceptance and expired actions',async t=>{
+  const negative=fixture();t.after(()=>negative.close());await negative.flush();negative.child.agent.approvals[0].canAccept=false;negative.child.agent.approvals[0].expiresAt=new Date(Date.now()+60000).toISOString();negative.tick(3000);await negative.flush();assert.equal(negative.find('button',props=>text(props.children)==='允许本次'),undefined);assert.ok(negative.find('button',props=>text(props.children)==='拒绝'));negative.click('拒绝');await negative.flush();assert.deepEqual(negative.requests.find(item=>item.method==='POST').body,{decision:'decline'});
+  const expired=fixture();t.after(()=>expired.close());await expired.flush();expired.child.agent.approvals[0].expiresAt=new Date(Date.now()-1000).toISOString();expired.tick(3000);await expired.flush();assert.match(expired.text(),/确认已过期，本次操作未放行/);assert.equal(expired.find('button',props=>text(props.children)==='允许本次'),undefined);assert.equal(expired.find('button',props=>text(props.children)==='拒绝'),undefined);assert.equal(expired.requests.some(item=>item.method==='POST'),false);
+});
+
+test('captured background acceptance rechecks the latest approval metadata and current task state',async t=>{
+  const f=fixture();t.after(()=>f.close());await f.flush();const accept=f.find('button',props=>text(props.children)==='允许本次').props.onClick;f.child.agent.approvals[0].canAccept=false;f.tick(3000);await f.flush();accept();await f.flush();assert.equal(f.requests.some(item=>item.method==='POST'),false);
 });

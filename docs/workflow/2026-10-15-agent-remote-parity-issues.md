@@ -8,14 +8,14 @@
 
 - Goal: 补齐 Agent 排队调序、确定未送达引导回退、失联解除、会话修复和人工提问/审批。
 - Ordering rule: Complete issues in sequence.
-- Current status: issue-3 completed; issue-4 ready
+- Current status: all issues completed
 
 ## Issue List
 
 - [x] issue-1 队列调序与确定性引导回退
 - [x] issue-2 未知执行状态的人工解除
 - [x] issue-3 保留历史的 CLI 会话修复
-- [ ] issue-4 原生用户提问与审批恢复
+- [x] issue-4 原生用户提问与审批恢复
 
 ## issue-1
 
@@ -48,7 +48,7 @@
 - 验收标准: 清旧绑定并持久化后才能继续；历史保留、不自动发任务，撤权/未知/队列/竞态仍拒绝
 - 状态: completed
 - 验证方式: 新后端12/12、既有89/89，新UI28/28、队列/恢复39/39、App UI64/64；root上下文+恢复51/51、原生/relay92/92及额外分类54/54。TypeScript/Vite通过；Chrome重建后历史及未发草稿保留，执行次数仍1；截图evidence/agent-parity-context.png。自审确认未自动重发，旧快照不复活绑定。
-- commit: 本 issue 提交（见 Git 历史）
+- commit: ee7507e
 
 ## issue-4
 
@@ -57,6 +57,6 @@
 - 范围: bounded schema、原生 registry、答题 API/快照/卡片、远程能力协商、合法审批决策及到期/resolved
 - 依赖: issue-3
 - 验收标准: 刷新可回答；不自动代答；答案不持久化泄漏；旧执行端有明确边界；超时/停止/作用域变更取消
-- 状态: todo
-- 验证方式: 本机/远端协议、权限与敏感输入测试，真实内置 CLI 合成上游，Chrome 交互及最终构建/扫描
-- commit: pending
+- 状态: completed
+- 验证方式: 最终Windows相关698项：697通过、1既有长时测试跳过；真实CLI回答/跳过/停止/超时4/4；Ubuntu新协议48/48与私密屏障19/19；Chrome刷新、412×960交互、单次回答任务完成通过；tsc/Vite/公开index扫描通过。自审补齐私密答案发送前持久化屏障，保存失败不发送，跨进程不复用私密线程。详见2026-10-15-agent-remote-parity-verification.md。
+- commit: 本 issue 提交（见 Git 历史）

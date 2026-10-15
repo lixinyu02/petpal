@@ -43,6 +43,8 @@ turn/steer 仅对可信 JSON-RPC method-not-found(-32601) 分类 steer_unsupport
 
 远程执行端通过 userInput 能力协商，旧端不接收不支持的答题命令；新事件和命令均严格校验并保留作用域。内置 CLI 0.143 的 features 列表已确认 default_mode_request_user_input（默认关闭）；仅在已验证的内置/API CLI 路径启用该功能，保留外部/未知 CLI 的兼容边界。审批始终遵循原请求可接受的拒绝/取消动作，未知权限形式不放行；补 requestedAt/expiresAt 和 resolved 的旧流式入口清理。
 
+集成自审补充：私密回答的遮盖值只保留在内存，不能让下一次 CLI 进程或重启后的服务器恢复含有私密答案的旧线程。中央答题入口必须先通过 contextGeneration 事务清除 thread* 绑定并成功落盘，才把私密答案送到原任务；本轮任务的迟到 thread 事件和完成结果不得重新绑定。保护保存失败则不发送答案。下一次用户明确提交建立新 CLI 记忆，网页历史保留，不回放旧动作。
+
 ## Impact
 
 server/codex、agent-tasks、app、executors/remote-codex，desktop executor，新提问 schema/组件，AgentQueue/App/API 类型与包源必需清单、受影响单元/集成和真实 CLI 测试。版本兼容字段以缺省值迁移，所有新操作均要求当前登录。

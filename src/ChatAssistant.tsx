@@ -1,13 +1,14 @@
 import {memo,useCallback,useEffect,useId,useLayoutEffect,useRef,useState,type CSSProperties} from 'react';
 import {createPortal} from 'react-dom';
 import {ArrowUpRight,Check,ChevronDown,Loader2,Monitor,Settings2,ShieldCheck,Square,Terminal,X} from 'lucide-react';
-import {api,getSessionEpoch,isSessionChanged,type AgentHost,type AgentPermissions as Permissions,type AssistantTask,type ChatAssistantConfig,type Conversation,type Provider,type State,type User} from './api';
+import {api,getSessionEpoch,isSessionChanged,type AgentApproval,type AgentHost,type AgentPermissions as Permissions,type AssistantTask,type ChatAssistantConfig,type Conversation,type Provider,type State,type User} from './api';
 import {chatAssistantDefaultIssue,chatAssistantForHost,chatAssistantTargetIssue,restoreChatAssistantPreferences,saveChatAssistantPreferences,snapshotChatAssistant,type ChatAssistantPreferences} from './chat-assistant-preferences.mjs';
 import {reuseConversationMessages} from './conversation-message-reuse.mjs';
 import AgentPermissions,{defaultAgentPermissions} from './AgentPermissions';
 import {approvalReviewLabel} from './approval-review-ui.mjs';
 import {ExecutionHostPicker,ModelPicker} from './WorkspaceControls';
 import ProjectDirectory from './ProjectDirectory';
+import AgentUserInput from './AgentUserInput';
 import {projectDirectoryIssue} from './project-directory-preferences.mjs';
 import {useUiEntrance} from './platform/ui-motion.ts';
 import {createVisiblePoll} from './platform/visible-poll.mjs';
@@ -192,17 +193,24 @@ export function ChatAssistantControls({assistant,allowed,user,providers,reviewPr
 
 /** Refresh background tasks without making the foreground conversation busy. */
 const noAssistantTasks:AssistantTask[]=[];
+const approvalExpired=(approval:AgentApproval)=>approval.expiresAt!==undefined&&(!Number.isFinite(Date.parse(approval.expiresAt))||Date.parse(approval.expiresAt)<=Date.now());
 export const ChatAssistantTasks=memo(function ChatAssistantTasks({conversationId,tasks=noAssistantTasks,onUpdate}:{conversationId?:string;tasks?:AssistantTask[];onUpdate(conversation:Conversation):void}) {
   const [cancelling,setCancelling]=useState(''),[error,setError]=useState('');
   const [children,setChildren]=useState<Record<string,Conversation>>({}),[expanded,setExpanded]=useState(false),[approvalPending,setApprovalPending]=useState('');
   const [approvalReadError,setApprovalReadError]=useState(''),[approvalRefreshing,setApprovalRefreshing]=useState('');
+  const [inputPending,setInputPending]=useState(''),[interactionClock,setInteractionClock]=useState(Date.now),[focusRequest,setFocusRequest]=useState(0);
+  const tasksRef=useRef(tasks),childrenRef=useRef(children),taskPanel=useRef<HTMLDivElement>(null);tasksRef.current=tasks;childrenRef.current=children;
   const [approvalDecisions,setApprovalDecisions]=useState<Record<string,'pending'|'consumed'|'uncertain'>>({});
   const approvalDecisionsRef=useRef<Record<string,'pending'|'consumed'|'uncertain'>>({}),approvalLock=useRef(false),approvalReadLock=useRef(false),alive=useRef(true);
   const context=useRef(conversationId);context.current=conversationId;
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const running=tasks.some(task=>['deciding','queued','running'].includes(task.status)),last=tasks.at(-1),epoch=getSessionEpoch();
   const childIds=tasks.slice(-8).filter(task=>expanded||['queued','running'].includes(task.status)).map(task=>task.conversationId).filter((id):id is string=>!!id).join(',');
-  useEffect(()=>{setError('');setApprovalReadError('');setCancelling('');setChildren({});setExpanded(false);setApprovalPending('');setApprovalRefreshing('');approvalDecisionsRef.current={};setApprovalDecisions({});},[conversationId]);
+  useEffect(()=>{setError('');setApprovalReadError('');setCancelling('');setChildren({});setExpanded(false);setApprovalPending('');setApprovalRefreshing('');setInputPending('');approvalDecisionsRef.current={};setApprovalDecisions({});},[conversationId,epoch]);
+  useEffect(()=>{setInputPending(value=>tasks.some(task=>task.conversationId===value&&['queued','running'].includes(task.status))?value:'');},[childIds,conversationId,epoch,running]);
+  useEffect(()=>{if(focusRequest&&expanded){const target=taskPanel.current?.querySelector<HTMLElement>('.agent-user-input');target?.scrollIntoView({block:'nearest'});target?.focus({preventScroll:true});}},[focusRequest,expanded]);
+  const interactionDeadlines=Object.values(children).flatMap(child=>[...(child.agent?.approvals||[]).map(item=>item.expiresAt||''),...(child.agent?.userInputs||[]).map(item=>item.expiresAt)]).join(',');
+  useEffect(()=>{const times=interactionDeadlines.split(',').map(value=>Date.parse(value)).filter(value=>Number.isFinite(value)&&value>Date.now());if(!times.length)return;const timer=setTimeout(()=>setInteractionClock(Date.now()),Math.min(2147483647,Math.max(1,Math.min(...times)-Date.now()+1)));return()=>clearTimeout(timer);},[interactionDeadlines,interactionClock]);
   useEffect(()=>{
     if(!conversationId||!running)return;
     const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined;
@@ -242,10 +250,18 @@ export const ChatAssistantTasks=memo(function ChatAssistantTasks({conversationId
   }
   const current=()=>alive.current&&epoch===getSessionEpoch()&&context.current===conversationId;
   async function readChild(id:string){
+    if(!current()||!tasksRef.current.some(task=>task.conversationId===id))throw new Error('后台任务已变化。');
     const next=await api<Conversation>(`/conversations/${encodeURIComponent(id)}`);
     if(next.id!==id)throw new Error('后台任务回执与当前请求不一致。');
-    if(current())setChildren(previous=>({...previous,[id]:reuseConversationMessages(previous[id],next)}));
+    if(current()&&tasksRef.current.some(task=>task.conversationId===id))setChildren(previous=>({...previous,[id]:reuseConversationMessages(previous[id],next)}));
     return next;
+  }
+  const taskCurrent=(task:Pick<AssistantTask,'id'|'conversationId'|'hostId'>)=>current()&&tasksRef.current.some(item=>item.id===task.id&&item.conversationId===task.conversationId&&item.hostId===task.hostId);
+  async function readTaskChild(task:Pick<AssistantTask,'id'|'conversationId'|'hostId'>){
+    if(!task.conversationId||!taskCurrent(task))throw new Error('后台任务已变化。');
+    const next=await api<Conversation>(`/conversations/${encodeURIComponent(task.conversationId)}`);
+    if(next.id!==task.conversationId||!taskCurrent(task))throw new Error('后台任务回执与当前请求不一致。');
+    setChildren(previous=>({...previous,[next.id]:reuseConversationMessages(previous[next.id],next)}));return next;
   }
   async function refreshApprovalState(childId?:string){
     if(approvalLock.current||approvalReadLock.current||!current())return;
@@ -264,6 +280,8 @@ export const ChatAssistantTasks=memo(function ChatAssistantTasks({conversationId
   async function approve(child:Conversation,approvalId:string,decision:string){
     const key=approvalKey(child.id,approvalId);
     if(approvalLock.current||approvalReadLock.current||approvalDecisionsRef.current[key]||!current())return;
+    const latest=childrenRef.current[child.id]?.agent?.approvals.find(item=>item.id===approvalId);
+    if(!latest||approvalExpired(latest)||decision==='accept'&&latest.canAccept===false||!tasksRef.current.some(task=>task.conversationId===child.id&&['queued','running'].includes(task.status)))return;
     approvalLock.current=true;setApprovalPending(approvalId);recordApprovalDecision(key,'pending');setError('');
     try{
       await api(`/codex/approvals/${encodeURIComponent(approvalId)}`,{method:'POST',body:JSON.stringify({decision})});
@@ -277,20 +295,23 @@ export const ChatAssistantTasks=memo(function ChatAssistantTasks({conversationId
   }
   if(!last)return null;
   const visibleApprovals=(child?:Conversation)=>child?.agent?.approvals.filter(item=>approvalDecisions[approvalKey(child.id,item.id)]!=='consumed')||[];
-  const pendingApprovals=tasks.filter(task=>['queued','running'].includes(task.status)).flatMap(task=>visibleApprovals(task.conversationId?children[task.conversationId]:undefined)).length;
+  const pendingApprovals=tasks.filter(task=>['queued','running'].includes(task.status)).flatMap(task=>visibleApprovals(task.conversationId?children[task.conversationId]:undefined)).filter(item=>!approvalExpired(item)).length;
+  const visibleInputs=(task:AssistantTask)=>['queued','running'].includes(task.status)&&cancelling!==task.id&&task.conversationId&&children[task.conversationId]?.agent?.run?.status==='running'?(children[task.conversationId]?.agent?.userInputs||[]).filter(item=>Number.isFinite(Date.parse(item.expiresAt))&&Date.parse(item.expiresAt)>Date.now()):[];
+  const pendingInputs=tasks.flatMap(visibleInputs).length;
   const reviewing=tasks.some(task=>['queued','running'].includes(task.status)&&task.conversationId&&children[task.conversationId]?.agent?.run?.approvalReview?.status==='inProgress');
   const taskIcon=(task:AssistantTask)=>['deciding','queued','running'].includes(task.status)?<Loader2 size={13} className="spin"/>:task.status==='completed'?<Check size={13}/>:<Terminal size={13}/>;
   const canCancel=(task:AssistantTask)=>['deciding','queued','running','unknown'].includes(task.status);
-  return <div className="chat-assistant-tasks" aria-label="后台 Agent 任务">
-    <div className="chat-assistant-task-latest" role="status"><span className={`assistant-task-state is-${last.status}`}>{pendingApprovals>0?<ShieldCheck size={13}/>:taskIcon(last)}{pendingApprovals>0?'等待确认':reviewing?'自动审查中':taskLabels[last.status]}</span><span className="assistant-task-label" title={`${last.hostName} · ${last.message}`}>{last.hostName} · 后台 Agent</span>{pendingApprovals>0&&<button type="button" onClick={()=>setExpanded(true)} className="assistant-task-approval-jump">确认 ({pendingApprovals})</button>}{canCancel(last)&&<button type="button" disabled={!!cancelling} onClick={()=>void cancel(last)} aria-label="取消后台 Agent 任务">{cancelling===last.id?<Loader2 size={12} className="spin"/>:<Square size={11}/>}取消</button>}</div>
+  return <div ref={taskPanel} className={`chat-assistant-tasks${pendingInputs?' has-user-input':''}`} aria-label="后台 Agent 任务">
+    <div className="chat-assistant-task-latest" role="status"><span className={`assistant-task-state is-${last.status}`}>{pendingApprovals>0?<ShieldCheck size={13}/>:taskIcon(last)}{pendingInputs>0?'等待回答':pendingApprovals>0?'等待确认':reviewing?'自动审查中':taskLabels[last.status]}</span><span className="assistant-task-label" title={`${last.hostName} · ${last.message}`}>{last.hostName} · 后台 Agent</span>{pendingInputs>0&&<button type="button" onClick={()=>{setExpanded(true);setFocusRequest(value=>value+1);}} className="assistant-task-approval-jump">回答 ({pendingInputs})</button>}{pendingApprovals>0&&<button type="button" onClick={()=>setExpanded(true)} className="assistant-task-approval-jump">确认 ({pendingApprovals})</button>}{canCancel(last)&&<button type="button" disabled={!!cancelling} onClick={()=>void cancel(last)} aria-label="取消后台 Agent 任务">{cancelling===last.id?<Loader2 size={12} className="spin"/>:<Square size={11}/>}取消</button>}</div>
     <details className="chat-assistant-task-details" open={expanded} onToggle={event=>setExpanded(event.currentTarget.open)}><summary>任务详情<ChevronDown size={12}/></summary><div>{tasks.slice(-8).reverse().map(task=>{
-      const child=task.conversationId?children[task.conversationId]:undefined;
-      return <section className="chat-assistant-task-entry" key={task.id}><p><strong>{visibleApprovals(child).length?'等待确认':child?.agent?.run?.approvalReview?.status==='inProgress'?'自动审查中':taskLabels[task.status]} · {task.hostName}</strong><span>{task.message||'后台 Agent 正在处理任务。'}</span>{task.projectDirectory&&<span>项目：{task.projectDirectory}</span>}{approvalReviewLabel(child?.agent?.run?.approvalReview)&&<span role="status">{approvalReviewLabel(child?.agent?.run?.approvalReview)}{child?.agent?.run?.approvalReview?.rationale&&<>：{child.agent.run.approvalReview.rationale}</>}</span>}</p>
+      const child=task.conversationId?children[task.conversationId]:undefined,binding={id:task.id,conversationId:task.conversationId,hostId:task.hostId};
+      return <section className="chat-assistant-task-entry" key={task.id}><p><strong>{visibleInputs(task).length?'等待回答':visibleApprovals(child).filter(item=>!approvalExpired(item)).length?'等待确认':child?.agent?.run?.approvalReview?.status==='inProgress'?'自动审查中':taskLabels[task.status]} · {task.hostName}</strong><span>{task.message||'后台 Agent 正在处理任务。'}</span>{task.projectDirectory&&<span>项目：{task.projectDirectory}</span>}{approvalReviewLabel(child?.agent?.run?.approvalReview)&&<span role="status">{approvalReviewLabel(child?.agent?.run?.approvalReview)}{child?.agent?.run?.approvalReview?.rationale&&<>：{child.agent.run.approvalReview.rationale}</>}</span>}</p>
         <div className="assistant-task-actions">{task.conversationId&&<a href={`/?chat=1&mode=codex&conversation=${encodeURIComponent(task.conversationId)}`}>查看 Agent<ArrowUpRight size={12}/></a>}{canCancel(task)&&task.id!==last.id&&<button type="button" disabled={!!cancelling} onClick={()=>void cancel(task)}>取消任务</button>}</div>
-        {['queued','running'].includes(task.status)&&child&&visibleApprovals(child).map(approval=><div className="assistant-task-approval" key={approval.id}><strong><ShieldCheck size={13}/>Agent 等待确认</strong><p>{approval.description}</p>{approvalDecisions[approvalKey(child.id,approval.id)]==='uncertain'?<><p role="status">确认结果尚未收到，请先刷新审批状态；不会自动重复提交。</p><button type="button" disabled={!!approvalPending||!!approvalRefreshing} onClick={()=>void refreshApprovalState(child.id)}>{approvalRefreshing===child.id?'正在刷新…':'刷新审批状态'}</button></>:<div><button type="button" disabled={!!approvalPending||!!approvalRefreshing} onClick={()=>void approve(child,approval.id,'decline')}>拒绝</button><button type="button" disabled={!!approvalPending||!!approvalRefreshing} onClick={()=>void approve(child,approval.id,'accept')}>{approvalPending===approval.id?'正在提交…':'允许本次'}</button></div>}</div>)}
+        {['queued','running'].includes(task.status)&&child&&visibleApprovals(child).map(approval=><div className="assistant-task-approval" key={approval.id}><strong><ShieldCheck size={13}/>Agent 等待确认</strong><p>{approval.description}</p>{approvalExpired(approval)?<p role="status">确认已过期，本次操作未放行。</p>:approvalDecisions[approvalKey(child.id,approval.id)]==='uncertain'?<><p role="status">确认结果尚未收到，请先刷新审批状态；不会自动重复提交。</p><button type="button" disabled={!!approvalPending||!!approvalRefreshing||!!inputPending} onClick={()=>void refreshApprovalState(child.id)}>{approvalRefreshing===child.id?'正在刷新…':'刷新审批状态'}</button></>:<div><button type="button" disabled={!!approvalPending||!!approvalRefreshing||!!inputPending} onClick={()=>void approve(child,approval.id,'decline')}>拒绝</button>{approval.canAccept!==false&&<button type="button" disabled={!!approvalPending||!!approvalRefreshing||!!inputPending} onClick={()=>void approve(child,approval.id,'accept')}>{approvalPending===approval.id?'正在提交…':'允许本次'}</button>}</div>}</div>)}
+        {child&&<AgentUserInput key={`${conversationId}:${epoch}:${task.id}:${task.hostId}:${child.id}:${child.agent?.run?.id||''}`} conversationId={child.id} requests={child.agent?.userInputs||[]} active={['queued','running'].includes(task.status)&&child.agent?.run?.status==='running'&&cancelling!==task.id} refresh={()=>readTaskChild(binding)} interactionLock={approvalLock} onBusyChange={value=>{if(taskCurrent(binding))setInputPending(value?child.id:'');}} disabled={!!approvalPending||!!approvalRefreshing||!!inputPending}/>}
       </section>;
     })}</div></details>
     {error&&<p className="chat-assistant-note is-error" role="alert">{error}</p>}
-    {approvalReadError&&<div className="assistant-task-actions" role="status"><span>{approvalReadError}</span><button type="button" disabled={!!approvalPending||!!approvalRefreshing} onClick={()=>void refreshApprovalState()}>{approvalRefreshing==='all'?'正在刷新…':'刷新审批状态'}</button></div>}
+    {approvalReadError&&<div className="assistant-task-actions" role="status"><span>{approvalReadError}</span><button type="button" disabled={!!approvalPending||!!approvalRefreshing||!!inputPending} onClick={()=>void refreshApprovalState()}>{approvalRefreshing==='all'?'正在刷新…':'刷新审批状态'}</button></div>}
   </div>;
 });

@@ -31,7 +31,7 @@ function fixture(local,scope='service:alice',defaultHostId='alice-pc'){
     './api':{getSessionEpoch:()=>epoch,isSessionChanged:()=>false,api:async path=>{apiCalls.push(path);throw Error('Review settings must not execute API calls');}},
     './chat-assistant-preferences.mjs':preferences,'./project-directory-preferences.mjs':projectPreferences,'./approval-review-ui.mjs':reviewUi,
     './conversation-message-reuse.mjs':messageReuse,
-    './AgentPermissions':{__esModule:true,default:Symbol('AgentPermissions'),defaultAgentPermissions:{access:'read-only',approval:'ask'}},
+    './AgentPermissions':{__esModule:true,default:Symbol('AgentPermissions'),defaultAgentPermissions:{access:'read-only',approval:'ask'}},'./AgentUserInput':{__esModule:true,default:Symbol('AgentUserInput')},
     './WorkspaceControls':{},'./ProjectDirectory':{},'./platform/ui-motion.ts':{},
   };
   const module={exports:{}};

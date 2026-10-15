@@ -4,6 +4,14 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 const syntheticSecrets = new Map([
+  ['tests/agent-context-repair-api.test.mjs', new Set(['synthetic-context-key-only'])],
+  ['tests/agent-queue-api.test.mjs', new Set(['synthetic-queue-only-key'])],
+  ['tests/agent-recovery-api.test.mjs', new Set(['synthetic-recovery-only'])],
+  ['tests/agent-user-input-api.test.mjs', new Set(['only-the-selected-agent-receives-this'])],
+  ['tests/agent-user-inputs.test.mjs', new Set(['private-input-answer'])],
+  ['tests/codex-user-input-real.test.mjs', new Set(['isolated-question-key'])],
+  ['tests/codex-user-input.test.mjs', new Set(['synthetic-private-answer-429e', 'synthetic-private-only'])],
+  ['tests/remote-user-input.test.mjs', new Set(['synthetic-central-key', 'synthetic-model-key', 'Synthetic-Personal-Secret-987'])],
   ['tests/accounts-settings-ui.test.mjs', new Set(['synthetic-password'])],
   ['tests/app-preferences-ipc.test.mjs', new Set(['private credential'])],
   ['tests/app-proxy-context.test.mjs', new Set(['private_generated_proxy_password_123'])],

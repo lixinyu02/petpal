@@ -15,6 +15,7 @@ import { createUpdateService } from './updates.mjs';
 import { createCosyVoiceService, safeCosyVoiceError, REFERENCE_LIMIT } from './cosyvoice.mjs';
 import { createAsrService, safeAsrError, ASR_AUDIO } from './asr.mjs';
 import { createAgentTasks } from './agent-tasks.mjs';
+import { createAgentUserInputs, approvalMetadata } from './agent-user-inputs.mjs';
 import { normalizeAgentPermissions } from './agent-permissions.mjs';
 import { createAttachmentService, normalizeAttachmentIds, IMAGE_LIMIT } from './attachments.mjs';
 import { createDownloadsCatalog } from './downloads.mjs';
@@ -374,7 +375,21 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const issued = auth.bootstrap ? 0 : Date.parse(state.sessions.find(session => session.tokenHash === auth.sessionHash).createdAt);
     return { ...identity, sourceCreatedAt: Number.isFinite(issued) ? issued : 0 };
   } });
-  const agentTasks = createAgentTasks({ store, active, approvals, getBridge: entry => entry?.hostId && entry.hostId !== 'central' ? new RemoteCodexBridge(executors, entry) : getAgentBridge(entry), redact: redactCodex, resolveModel: resolveAgentModel, resolveReview: resolveAgentReview, getReviewConfig: getAgentReviewConfig, resolveImages: imageAttachments.images, resolveHost: executors.target,
+  const agentUserInputs = createAgentUserInputs({ active, changed: value => {
+    const conversation = state.conversations.find(item => item.id === value.conversationId && item.userId === value.userId);
+    if (conversation?.mode === 'codex') {
+      conversation.agent ??= { revision: 0, queueRevision: 0, paused: false, queue: [], run: null, submissions: [] };
+      conversation.agent.revision++; conversation.updatedAt = now();
+    }
+  }, protectPrivateInput: async (task, conversationId) => {
+    const conversation = state.conversations.find(item => item.id === conversationId && item.userId === task.userId);
+    if (!conversation) throw failure(404, '原任务会话已结束，私密回答没有发送。');
+    await agentTasks.protectPrivateInput(conversation, task);
+  }, authorize: task => {
+    if (task.agentEntry) authorizeAgentEntry(task.agentEntry);
+    else { const identity = authorizeAgentIdentity({ userId: task.userId, sessionHash: task.sessionHash, bootstrap: task.bootstrap }); requireCodex(identity.user); }
+  } });
+  const agentTasks = createAgentTasks({ store, active, approvals, userInputs: agentUserInputs, getBridge: entry => entry?.hostId && entry.hostId !== 'central' ? new RemoteCodexBridge(executors, entry) : getAgentBridge(entry), redact: redactCodex, resolveModel: resolveAgentModel, resolveReview: resolveAgentReview, getReviewConfig: getAgentReviewConfig, resolveImages: imageAttachments.images, resolveHost: executors.target,
     resolveProject: (userId, hostId, value) => {
       const host = executors.hostFor(userId, hostId), projectDirectory = normalizeProjectDirectory(value, host.platform);
       if (!projectDirectory) return {};
@@ -1041,12 +1056,21 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     } finally { probes.delete(probe); finish(); }
   });
   app.post('/api/codex/approvals/:id', async (req, res) => {
-    requireCodex(req.user);
+    requireCurrentAuth(req); requireCodex(req.user);
     const approval = approvals.get(req.params.id);
     if (!approval || approval.userId !== req.user.id || active.get(approval.conversationId) !== approval.task || approval.task.controller.signal.aborted) throw failure(404, '审批请求不存在或已过期。');
     if (!['accept', 'decline'].includes(req.body?.decision)) throw failure(400, '审批决定无效。');
+    if (approval.expiresAt && Date.parse(approval.expiresAt) <= Date.now()) throw failure(404, '审批请求已过期，请刷新任务状态。');
+    if (req.body.decision === 'accept' && approval.canAccept === false) throw failure(409, '当前请求不支持单次批准。');
     try { const result = await (approval.task.bridge ?? bridge).approve(req.params.id, req.body.decision); approvals.delete(req.params.id); res.json(result); }
     catch (error) { throw failure(409, error.message); }
+  });
+
+  app.post('/api/codex/user-inputs/:id', async (req, res) => {
+    requireCurrentAuth(req); requireCodex(req.user);
+    const result = await agentUserInputs.reply(req.params.id, req.body, req.user.id, () => { requireCurrentAuth(req); requireCodex(req.user); });
+    requireCurrentAuth(req); requireCodex(req.user);
+    res.json(result);
   });
 
   const agentConversation = (req, removing = false) => {
@@ -1123,7 +1147,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const controller = new AbortController();
     let finish;
     const done = new Promise(resolve => { finish = resolve; });
-    const task = { controller, done, mode: conversation.mode, userId: req.user.id, sessionHash: req.sessionHash, providerId: provider?.id ?? null, approvalIds: new Set(),
+    const task = { controller, done, mode: conversation.mode, userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap, providerId: provider?.id ?? null, approvalIds: new Set(), ...(conversation.mode === 'codex' ? { bridge } : {}),
       ...(collaborationOptions ? { assistantProviderId: collaborationOptions.providerId,
         ...(collaborationOptions.permissions.approval === 'review' ? { assistantReviewProviderId: collaborationOptions.permissions.reviewProviderId } : {}) } : {}) };
     active.set(conversation.id, task);
@@ -1140,11 +1164,14 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       }
     };
     const onEvent = (event, data) => {
-      if (controller.signal.aborted) return;
-      if (event === 'thread') { conversation.threadId = data.threadId; conversation.threadCodexRevision = state.codexConfig.revision; conversation.threadHostId = 'central'; conversation.agentHostId = 'central'; return; }
+      if (controller.signal.aborted || active.get(conversation.id) !== task) return;
+      if (event === 'thread' && !task.sensitiveInput) { conversation.threadId = data.threadId; conversation.threadCodexRevision = state.codexConfig.revision; conversation.threadHostId = 'central'; conversation.agentHostId = 'central'; return; }
       if (event === 'approval' && typeof data?.id === 'string') {
-        approvals.set(data.id, { userId: req.user.id, conversationId: conversation.id, task, kind: data.kind, description: data.description }); task.approvalIds.add(data.id);
+        approvals.set(data.id, { userId: req.user.id, conversationId: conversation.id, task, kind: data.kind, description: data.description, ...approvalMetadata(data) }); task.approvalIds.add(data.id);
       }
+      if (event === 'approval-resolved' && approvals.get(data?.id)?.task === task) { approvals.delete(data.id); task.approvalIds.delete(data.id); }
+      if (event === 'user-input') agentUserInputs.receive(task, req.user.id, conversation.id, data);
+      if (event === 'user-input-resolved') agentUserInputs.resolve(task, data?.id);
       if (event === 'delta') {
         if (typeof data?.text !== 'string') return;
         if (assistant.content.length + data.text.length > 2 * 1024 * 1024) { controller.abort(new Error('回复超过 2 MiB 限制。')); return; }
@@ -1154,7 +1181,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
           store.save().catch(error => { persistenceError = error; controller.abort(new Error('保存会话失败，已停止生成。')); });
         }
       }
-      if (['delta', 'status', 'approval'].includes(event)) send(event, data);
+      if (['delta', 'status', 'approval', 'approval-resolved', 'user-input', 'user-input-resolved'].includes(event)) send(event, data);
     };
     res.on('close', () => { if (!res.writableEnded) controller.abort(new DOMException('客户端已断开连接。', 'AbortError')); });
     try {
@@ -1194,7 +1221,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
           } } : {}) });
       if (collaboration) await chatAssistant.finishDecision(collaboration.record);
       controller.signal.throwIfAborted();
-      if (result.threadId) { conversation.threadId = result.threadId; conversation.threadCodexRevision = state.codexConfig.revision; conversation.threadHostId = 'central'; conversation.agentHostId = 'central'; }
+      if (result.threadId && !task.sensitiveInput) { conversation.threadId = result.threadId; conversation.threadCodexRevision = state.codexConfig.revision; conversation.threadHostId = 'central'; conversation.agentHostId = 'central'; }
       if (!assistant.content && result.text) { assistant.content = result.text; send('delta', { text: result.text }); }
       assistant.status = 'complete'; conversation.updatedAt = now();
       await store.save(); send('done', { conversation: visibleConversation(conversation), assistantMessageId: assistant.id });
@@ -1211,6 +1238,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     } finally {
       clearInterval(heartbeat); active.delete(conversation.id); finish();
       for (const id of task.approvalIds) if (approvals.get(id)?.task === task) approvals.delete(id);
+      agentUserInputs.clear(task);
       if (!res.writableEnded) res.end();
       if (conversation.mode === 'codex') agentTasks.kick(conversation);
     }

@@ -62,7 +62,7 @@ function fixture({reduced=false,hidden=false}={}){
     './chat-assistant-preferences.mjs':assistantPreferences,'./project-directory-preferences.mjs':projectPreferences,
     './approval-review-ui.mjs':approvalReviewUi,
     './conversation-message-reuse.mjs':messageReuse,
-    './AgentPermissions':{__esModule:true,default:Symbol('AgentPermissions'),defaultAgentPermissions:permissions},
+    './AgentPermissions':{__esModule:true,default:Symbol('AgentPermissions'),defaultAgentPermissions:permissions},'./AgentUserInput':{__esModule:true,default:Symbol('AgentUserInput')},
     './WorkspaceControls':controls,'./ProjectDirectory':{__esModule:true,default:Symbol('ProjectDirectory')},
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
   };

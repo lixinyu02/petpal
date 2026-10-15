@@ -3,7 +3,7 @@ import { access, mkdir, readFile, realpath, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 import { createRequire } from 'node:module';
 import { prepareCodexRuntime, publicCodexConfig, normalizeCodexReviewConfig, codexReviewFingerprint } from './codex-config.mjs';
@@ -15,6 +15,7 @@ import { resolveProjectDirectory } from './project-directory.mjs';
 import { isAutomationTool } from './automation-tools.mjs';
 import { validateSystemAudioCommand } from './system-controls.mjs';
 import { APPROVAL_REVIEW_STATUSES, approvalReviewCapability } from './approval-review.mjs';
+import { normalizeUserInputQuestions, normalizeUserInputAnswer, userInputAnswerSecrets } from './user-input.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -29,6 +30,15 @@ const abortError = () => Object.assign(new Error('Codex 任务已停止'), { nam
 const turnInactive = () => Object.assign(new Error('要引导的 Agent 任务已结束或已切换。'), { code: 'turn_not_active', status: 409 });
 const steerUncertain = () => Object.assign(new Error('无法确认引导是否已送达，请检查当前任务后再试；不会自动重复发送。'), { code: 'steer_delivery_uncertain', status: 409 });
 const unsupportedSteer = Symbol('native-steer-method-not-found');
+const interactiveError = (message = '提问请求不存在或已过期，请刷新任务状态。', code = 'user_input_expired') => Object.assign(new Error(message), { status: 409, code });
+const validRpcId = value => Number.isSafeInteger(value) || typeof value === 'string' && value.length > 0 && value.length <= 200;
+const nativeDecisions = params => {
+  if (params.kind !== undefined && params.kind !== 'writeStdin') return null;
+  const values = params.availableDecisions ?? (params.kind === 'writeStdin' ? ['accept', 'cancel'] : ['accept', 'decline']);
+  if (!Array.isArray(values) || values.length > 16) return null;
+  const negative = params.kind === 'writeStdin' ? (values.includes('cancel') ? 'cancel' : null) : values.includes('decline') ? 'decline' : values.includes('cancel') ? 'cancel' : null;
+  return negative ? { canAccept: values.includes('accept'), negative } : null;
+};
 
 // Paths are resolved from authorized uploads by the service, never from raw HTTP
 // input. This final protocol boundary still rejects remote URLs and malformed paths.
@@ -158,9 +168,11 @@ export async function resolveCodexCommand(command) {
 
 /** Owns one real Codex app-server process and its bounded dynamic-tool callbacks. */
 export class CodexBridge {
-  constructor({ workspaceRoot, command, config, dataDir, desktopTools, approvalTimeoutMs = 300000, transportFetch } = {}) {
+  constructor({ workspaceRoot, command, config, dataDir, desktopTools, approvalTimeoutMs = 300000, userInputTimeoutMs = 300000, transportFetch } = {}) {
     if (!Number.isInteger(approvalTimeoutMs) || approvalTimeoutMs < 1 || approvalTimeoutMs > 300000) throw new Error('审批有效期无效。');
     this.approvalTimeoutMs = approvalTimeoutMs;
+    if (!Number.isInteger(userInputTimeoutMs) || userInputTimeoutMs < 1 || userInputTimeoutMs > 300000) throw new Error('提问有效期无效。');
+    this.userInputTimeoutMs = userInputTimeoutMs;
     if (transportFetch !== undefined && typeof transportFetch !== 'function') throw new Error('Codex transport fetch 无效。');
     this.transportFetch = transportFetch;
     this.workspaceRoot = path.resolve(workspaceRoot || path.join(homedir(), '.petpal', 'workspace'));
@@ -187,6 +199,9 @@ export class CodexBridge {
     this.resuming = new Set();
     this.conversations = new Set();
     this.approvals = new Map();
+    this.userInputs = new Map();
+    this.userInputReceipts = new Map();
+    this.threadSecrets = new Map();
     this.sequence = 0;
     this.lastError = null;
     this.identity = null;
@@ -197,7 +212,7 @@ export class CodexBridge {
     const base = {
       workspaceRoot: this.workspaceRoot, sandbox: 'read-only', approvalPolicy: 'on-request',
       permissions: defaultAgentPermissions(), permissionControls: { access: [...AGENT_ACCESS], approval: [...AGENT_APPROVAL] }, supportsSteer: true,
-      activeRuns: this.runs.size, pendingApprovals: this.approvals.size,
+      activeRuns: this.runs.size, pendingApprovals: this.approvals.size, pendingUserInputs: this.userInputs.size,
       ...(this.config ? { ...publicCodexConfig(this.config), credentialConfigured: Boolean(this.config.apiKey), apiVerified: false, executionMode: 'sandboxed-cli' } : {}),
     };
     try {
@@ -235,6 +250,12 @@ export class CodexBridge {
     await Promise.allSettled([...this.dynamicTasks]);
     if (this.closed) throw new Error('Codex 后台已关闭');
     const executable = await resolveCodexCommand(this.command);
+    let enableUserInput = false;
+    if (this.apiMode && !executable.args.length) {
+      const bundled = await resolveBundledCodex().catch(() => null);
+      const metadata = bundled && await readFile(require.resolve('@openai/codex/package.json'), 'utf8').then(JSON.parse).catch(() => null);
+      enableUserInput = metadata?.version === '0.143.0' && bundled.file === executable.file;
+    }
     if (this.closed) throw new Error('Codex 后台已关闭');
     let transport;
     let runtime;
@@ -257,6 +278,7 @@ export class CodexBridge {
         'app-server', '--listen', 'stdio://',
         '-c', 'sandbox_mode="read-only"', '-c', 'approval_policy="on-request"', '-c', 'approvals_reviewer="user"',
         ...(this.apiMode ? ['-c', 'features.shell_tool=true', '-c', 'features.unified_exec=true'] : []),
+        ...(enableUserInput ? ['-c', 'features.default_mode_request_user_input=true'] : []),
       ], {
         cwd: this.workspaceRoot, stdio: ['pipe', 'pipe', 'pipe'], shell: false,
         windowsHide: true, detached: process.platform !== 'win32',
@@ -367,14 +389,14 @@ export class CodexBridge {
         }
         const review = { status: params.review.status, source: 'native' };
         for (const [key, value] of Object.entries({ reviewId: params.reviewId, targetItemId: params.targetItemId, rationale: params.review.rationale, riskLevel: params.review.riskLevel, userAuthorization: params.review.userAuthorization })) {
-          if (typeof value === 'string' && value.trim()) review[key] = safeText(this._redact(value)).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, key === 'rationale' ? 2000 : 256);
+          if (typeof value === 'string' && value.trim()) review[key] = safeText(this._redact(value, run)).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').slice(0, key === 'rationale' ? 2000 : 256);
         }
         run.approvalReview = review;
         this._emit(run, 'status', { state: review.status === 'inProgress' ? 'reviewing' : 'working', message: review.status === 'inProgress' ? '正在替你审查操作' : review.status === 'approved' ? '自动审查已允许本次操作' : review.status === 'timedOut' ? '自动审查超时，操作未放行' : review.status === 'aborted' ? '自动审查已取消' : '自动审查未放行，请查看原因', approvalReview: review });
         break;
       }
       case 'guardianWarning':
-        if (!run.aborted && run.permissions.approval === 'review') this._emit(run, 'status', { state: 'reviewing', message: `自动审查提示：${safeText(this._redact(params.message)).slice(0, 800)}` });
+        if (!run.aborted && run.permissions.approval === 'review') this._emit(run, 'status', { state: 'reviewing', message: `自动审查提示：${safeText(this._redact(params.message, run)).slice(0, 800)}` });
         break;
       case 'turn/started':
         this._recordTurn(run, params.turn.id);
@@ -404,14 +426,17 @@ export class CodexBridge {
         for (const [id, approval] of this.approvals) {
           if (approval.run === run && approval.rpcId === params.requestId) this._removeApproval(id);
         }
-        this._emit(run, 'status', { state: 'working', message: '审批请求已处理' });
+        for (const [id, request] of this.userInputs) {
+          if (request.run === run && request.child === this.child && request.rpcId === params.requestId) this._removeUserInput(id);
+        }
         break;
       case 'error':
         if (params.willRetry) this._emit(run, 'status', { state: 'retrying', message: 'Codex 连接暂时异常，正在重试' });
         else run.failure = protocolError('turn', params.error, this.apiMode);
         break;
       case 'turn/completed':
-        if (params.turn?.status === 'interrupted' || run.aborted) this._finish(run, abortError());
+        if (run.userInputFailure) this._finish(run, run.userInputFailure);
+        else if (params.turn?.status === 'interrupted' || run.aborted) this._finish(run, abortError());
         else if (params.turn?.status !== 'completed' || run.failure) this._finish(run, run.failure || protocolError('turn', params.turn?.error, this.apiMode));
         else this._finish(run);
         break;
@@ -422,13 +447,19 @@ export class CodexBridge {
     const params = message.params ?? {};
     const run = this.runs.get(params.threadId);
     const kind = APPROVAL_METHODS.get(message.method);
-    if (!run || run.settled || run.aborted || (run.turnId && params.turnId !== run.turnId)) {
+    if (!validRpcId(message.id) || !run || run.settled || run.finishing || run.aborted || run.child !== this.child || (run.turnId && params.turnId !== run.turnId)) {
       this._send({ id: message.id, error: { code: -32000, message: 'No active PetPal turn for this request' } });
       return;
     }
     if (message.method === 'item/tool/call') { this._dynamicTool(message, run); return; }
+    if (message.method === 'item/tool/requestUserInput') { this._requestUserInput(message, run); return; }
+    const decisions = kind ? nativeDecisions(params) : null;
+    if (kind && !decisions) {
+      this._send({ id: message.id, error: { code: -32602, message: 'No supported one-shot decision for this approval request' } });
+      this._emit(run, 'status', { state: 'blocked', message: '当前审批没有可安全使用的单次决定，未放行操作。' }); return;
+    }
     if (kind && run.permissions.approval === 'auto') {
-      this._send({ id: message.id, result: { decision: 'decline' } });
+      this._send({ id: message.id, result: { decision: decisions.negative } });
       this._emit(run, 'status', { state: 'blocked', message: '自动运行不会额外提权，已拒绝超出当前授权范围的请求' });
       return;
     }
@@ -444,11 +475,12 @@ export class CodexBridge {
       ? Boolean(params.command || item?.command || params.networkApprovalContext?.host)
       : Boolean(params.grantRoot || (Array.isArray(item?.changes) && item.changes.length));
     if (!reviewable) {
-      this._send({ id: message.id, result: { decision: 'decline' } });
+      this._send({ id: message.id, result: { decision: decisions.negative } });
       this._emit(run, 'status', { state: 'blocked', message: 'Codex 未提供可供确认的操作内容，已拒绝本次请求' });
       return;
     }
     const details = [params.reason];
+    if (params.kind === 'writeStdin') details.push('向正在执行的终端发送输入；输入内容不显示在审批中。');
     if (params.networkApprovalContext) details.push(`网络访问：${params.networkApprovalContext.protocol || ''}://${params.networkApprovalContext.host || ''}`);
     if (params.command || item?.command) details.push(`命令：${params.command || item.command}`);
     if (params.cwd) details.push(`目录：${params.cwd}`);
@@ -458,9 +490,77 @@ export class CodexBridge {
     }
     const description = safeText(details.filter(Boolean).join('\n') || (kind === 'command' ? 'Codex 请求执行一项操作' : 'Codex 请求修改文件'));
     const id = randomUUID();
-    this._createApproval(id, { rpcId: message.id, run });
-    this._emit(run, 'approval', { id, kind, description });
-    this._emit(run, 'status', { state: 'waiting', message: '等待你确认操作（5 分钟内有效）' });
+    const approval = this._createApproval(id, { rpcId: message.id, run, negative: decisions.negative, canAccept: decisions.canAccept });
+    this._emit(run, 'approval', { id, kind, description, canAccept: approval.canAccept, requestedAt: approval.requestedAt, expiresAt: approval.expiresAt });
+    if (this.approvals.has(id)) this._emit(run, 'status', { state: 'waiting', message: '等待你确认操作（5 分钟内有效）' });
+  }
+
+  _requestUserInput(message, run) {
+    const p = message.params;
+    if (!p || typeof p !== 'object' || Array.isArray(p) || Object.keys(p).some(key => !['threadId', 'turnId', 'itemId', 'questions', 'autoResolutionMs'].includes(key)) ||
+        typeof p.turnId !== 'string' || !p.turnId || p.turnId.length > 200 || typeof p.itemId !== 'string' || !p.itemId || p.itemId.length > 200 ||
+        (p.autoResolutionMs !== undefined && p.autoResolutionMs !== null && (!Number.isSafeInteger(p.autoResolutionMs) || p.autoResolutionMs < 0))) {
+      this._send({ id: message.id, error: { code: -32602, message: 'Invalid bounded user-input request' } }); return;
+    }
+    let questions;
+    try { questions = normalizeUserInputQuestions(this._redactValue(normalizeUserInputQuestions(p.questions), undefined, run)); }
+    catch { this._send({ id: message.id, error: { code: -32602, message: 'Invalid bounded user-input questions' } }); return; }
+    const repeated = [...this.userInputs.values()].find(request => request.child === this.child && request.rpcId === message.id);
+    if (repeated) {
+      this._send({ id: message.id, error: { code: -32600, message: 'Duplicate active user-input RPC id' } });
+      this._finish(run, interactiveError('执行端重复了正在等待的提问请求，已停止本轮任务。')); return;
+    }
+    if (this.userInputs.size >= 256 || this.userInputReceipts.size >= 512 || [...this.userInputs.values()].filter(request => request.run === run).length >= 8 || [...this.userInputReceipts.values()].filter(request => request.run === run).length >= 128) {
+      this._send({ id: message.id, error: { code: -32000, message: 'Too many pending user-input requests' } }); return;
+    }
+    const id = randomUUID(), requested = Date.now(), duration = Math.min(this.userInputTimeoutMs, p.autoResolutionMs ?? this.userInputTimeoutMs);
+    this._recordTurn(run, p.turnId);
+    if (run.settled || run.finishing || run.aborted || run.child !== this.child) { this._send({ id: message.id, error: { code: -32000, message: 'User-input turn ended before registration' } }); return; }
+    const request = { id, rpcId: message.id, run, child: this.child, turnId: p.turnId, itemId: p.itemId, questions, requestedAt: new Date(requested).toISOString(), expiresAt: new Date(requested + duration).toISOString() };
+    request.timeout = setTimeout(() => {
+      if (this.userInputs.get(id) !== request) return;
+      this._removeUserInput(id);
+      if (run.settled || run.finishing || request.child !== this.child) return;
+      try { this._send({ id: request.rpcId, error: { code: -32000, message: 'User-input request expired without an answer' } }); } catch {}
+      run.userInputFailure = interactiveError('等待回答已超时，本轮任务已停止；没有自动回答或跳过。', 'user_input_timeout');
+      run.requestController.abort();
+      void this._interrupt(run);
+    }, duration);
+    request.timeout.unref?.(); this.userInputs.set(id, request);
+    this._emit(run, 'user-input', { id, questions, requestedAt: request.requestedAt, expiresAt: request.expiresAt });
+    if (this.userInputs.has(id)) this._emit(run, 'status', { state: 'waiting', message: 'Agent 正在等待你的回答。' });
+  }
+
+  _removeUserInput(id) {
+    const request = this.userInputs.get(id); if (!request) return;
+    clearTimeout(request.timeout); this.userInputs.delete(id);
+    this._emit(request.run, 'user-input-resolved', { id }); return request;
+  }
+
+  replyUserInput(id, body) {
+    const pending = this.userInputs.get(id), receipt = this.userInputReceipts.get(id), request = pending ?? receipt;
+    const run = request?.run;
+    if (!request || !run || run.settled || run.finishing || run.aborted || request.child !== this.child || this.runs.get(run.threadId) !== run || run.turnId && request.turnId !== run.turnId || pending && Date.now() >= Date.parse(pending.expiresAt)) throw interactiveError();
+    const answer = normalizeUserInputAnswer(request.questions, body);
+    const fingerprint = createHash('sha256').update(id).update(JSON.stringify(answer)).digest('hex');
+    if (receipt) {
+      if (receipt.fingerprint !== fingerprint) throw interactiveError('这条提问已经提交过不同回答，请刷新任务。', 'user_input_answer_conflict');
+      if (receipt.uncertain) throw interactiveError('回答是否送达尚不确定，请查看任务，不要重复提交。', 'user_input_delivery_uncertain');
+      return { ok: true };
+    }
+    const secrets = userInputAnswerSecrets(request.questions, answer);
+    const existingSecrets = this.threadSecrets.get(run.threadId) ?? new Set();
+    const allSecrets = new Set([...this.threadSecrets.values()].flatMap(values => [...values]));
+    for (const secret of secrets) allSecrets.add(secret);
+    if (allSecrets.size > 512 || [...allSecrets].reduce((total, secret) => total + secret.length, 0) > 262144) throw interactiveError('当前会话的私密回答已达到内存保护上限，请停止任务后重新建立连接。');
+    for (const secret of secrets) existingSecrets.add(secret);
+    if (existingSecrets.size) this.threadSecrets.set(run.threadId, existingSecrets);
+    const completed = { ...request, fingerprint, uncertain: false }; delete completed.timeout;
+    this.userInputReceipts.set(id, completed);
+    try { this._send({ id: request.rpcId, result: answer }); }
+    catch { completed.uncertain = true; throw interactiveError('回答是否送达尚不确定，请查看任务，不要重复提交。', 'user_input_delivery_uncertain'); }
+    finally { this._removeUserInput(id); }
+    return { ok: true };
   }
 
   _removeApproval(id) {
@@ -473,40 +573,49 @@ export class CodexBridge {
   }
 
   _createApproval(id, approval) {
+    const requested = Date.now();
+    approval.requestedAt = new Date(requested).toISOString(); approval.expiresAt = new Date(requested + this.approvalTimeoutMs).toISOString(); approval.canAccept ??= true; approval.negative ??= 'decline';
     approval.timeout = setTimeout(() => {
       if (this.approvals.get(id) !== approval) return;
       this._removeApproval(id);
       const { run } = approval;
       if (run.settled || run.aborted || run.finishing || run.child !== this.child) return;
       if (approval.dynamic) this._replyDynamic(approval.dynamic, false, { error: '确认已超时，本次操作未执行；需要时请重新提交任务。' });
-      else { try { this._send({ id: approval.rpcId, result: { decision: 'decline' } }); } catch {} }
+      else { try { this._send({ id: approval.rpcId, result: { decision: approval.negative } }); } catch {} }
       this._emit(run, 'status', { state: 'working', message: '确认已超时，本次操作已拒绝' });
     }, this.approvalTimeoutMs);
     approval.timeout.unref?.();
     this.approvals.set(id, approval);
+    return approval;
   }
 
-  _redact(value) {
+  _redact(value, run) {
     let text = String(value ?? '');
-    for (const key of [this.config?.apiKey, this.transport?.apiKey, ...[...this.runs.values()].map(run => run.reviewConfig?.apiKey)]) if (key) text = text.split(key).join('[已隐藏]');
+    const secrets = [...(this.threadSecrets.get(run?.threadId) ?? [])];
+    const keys = [this.config?.apiKey, this.transport?.apiKey, ...[...this.runs.values()].map(run => run.reviewConfig?.apiKey), ...secrets].filter(Boolean).sort((a, b) => b.length - a.length);
+    const replacement = ['[已隐藏]', '[redacted]', '[hidden]', '●', '◆', ''].find(marker => keys.every(key => !marker.includes(key)));
+    for (const key of keys) text = text.split(key).join(replacement);
     return text;
   }
 
   _appendText(run, value = '', flush = false) {
     // Retain a suffix so a provider cannot leak its key by splitting it across
-    // stream events. Host mode keeps the original zero-buffer streaming behavior.
-    const keyLength = Math.max(this.config?.apiKey?.length ?? 0, run.reviewConfig?.apiKey?.length ?? 0);
-    const pending = this._redact((run.pendingText || '') + value);
+    // stream events. A private answer stays protected when this native thread
+    // resumes later, while plaintext remains only in this bridge's memory.
+    const keyLength = Math.max(this.config?.apiKey?.length ?? 0, this.transport?.apiKey?.length ?? 0, run.reviewConfig?.apiKey?.length ?? 0, ...[...(this.threadSecrets.get(run.threadId) ?? [])].map(secret => secret.length));
+    const pending = this._redact((run.pendingText || '') + value, run);
     const length = flush || !keyLength ? pending.length : Math.max(0, pending.length - keyLength + 1);
     const text = pending.slice(0, length);
     run.pendingText = pending.slice(length);
     if (text) { run.text += text; this._emit(run, 'delta', { text }); }
   }
 
-  _redactValue(value) {
-    if (typeof value === 'string') return this._redact(value);
-    if (Array.isArray(value)) return value.map(item => this._redactValue(item));
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, this._redactValue(item)]));
+  _redactValue(value, field, run) {
+    // Opaque control identities and clocks are not model prose. A short secret
+    // must not corrupt UUIDs or make a later question impossible to answer.
+    if (typeof value === 'string') return ['id', 'threadId', 'turnId', 'itemId', 'requestId', 'callId', 'requestedAt', 'expiresAt', 'state', 'status', 'kind', 'source', 'reviewId', 'targetItemId'].includes(field) ? value : this._redact(value, run);
+    if (Array.isArray(value)) return value.map(item => this._redactValue(item, undefined, run));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, this._redactValue(item, key, run)]));
     return value;
   }
 
@@ -526,7 +635,7 @@ export class CodexBridge {
       description = this.desktopTools.describe(call.name, call.arguments, { conversationId: run.conversationId, callId: call.callId, turnId: run.turnId });
       if (!description || typeof description.description !== 'string' || !description.description.trim() || typeof description.approvalRequired !== 'boolean') throw new Error('工具未提供可审阅的描述。');
       if (isAutomationTool(call.name) && description.description.length > 8000) throw new Error('自动化操作详情超过审批长度，请缩短完整指令。');
-    } catch (error) { this._replyDynamic(call, false, { error: safeText(this._redact(error.message)) }); return; }
+    } catch (error) { this._replyDynamic(call, false, { error: safeText(this._redact(error.message, run)) }); return; }
     // Only the fixed control-plane catalogue can declare read-only access.
     // A desktop tool cannot lower its full-access guard via its description.
     const automationAccess = isAutomationTool(call.name) && description.accessRequired === 'read-only';
@@ -545,9 +654,9 @@ export class CodexBridge {
     }
     if (description.approvalRequired && run.permissions.approval !== 'auto') {
       const id = randomUUID();
-      this._createApproval(id, { rpcId: message.id, run, dynamic: call });
-      this._emit(run, 'approval', { id, kind: automationAccess ? 'automation' : 'desktopTool', description: safeText(this._redact(description.description)).slice(0, 8000), ...(automationAccess ? { automation: { callId: call.callId, name: call.name, arguments: structuredClone(call.arguments) } } : {}) });
-      this._emit(run, 'status', { state: 'waiting', message: run.permissions.approval === 'review' ? '此桌面工具需要人工确认（5 分钟内有效）' : '等待你确认操作（5 分钟内有效）' });
+      const approval = this._createApproval(id, { rpcId: message.id, run, dynamic: call });
+      this._emit(run, 'approval', { id, kind: automationAccess ? 'automation' : 'desktopTool', description: safeText(this._redact(description.description, run)).slice(0, 8000), canAccept: true, requestedAt: approval.requestedAt, expiresAt: approval.expiresAt, ...(automationAccess ? { automation: { callId: call.callId, name: call.name, arguments: structuredClone(call.arguments) } } : {}) });
+      if (this.approvals.has(id)) this._emit(run, 'status', { state: 'waiting', message: run.permissions.approval === 'review' ? '此桌面工具需要人工确认（5 分钟内有效）' : '等待你确认操作（5 分钟内有效）' });
     } else this._executeDynamic(call);
   }
 
@@ -555,7 +664,7 @@ export class CodexBridge {
     if (call.replied) return;
     call.replied = true;
     let contentItems;
-    try { contentItems = dynamicToolContentItems(value, text => safeText(this._redact(text))); }
+    try { contentItems = dynamicToolContentItems(value, text => safeText(this._redact(text, call.run))); }
     catch (error) {
       const text = error?.code === 'output_limit' ? 'Computer Use 工具返回内容超过大小限制。'
         : error?.code === 'invalid_output' ? 'Computer Use 工具返回的文字或图片格式无效。'
@@ -579,7 +688,7 @@ export class CodexBridge {
       call.controller.signal.throwIfAborted();
       this._replyDynamic(call, result?.ok !== false, result ?? {});
     }).catch(error => {
-      this._replyDynamic(call, false, { error: call.controller.signal.aborted || run.aborted ? '操作已停止。' : safeText(this._redact(error.message)) });
+      this._replyDynamic(call, false, { error: call.controller.signal.aborted || run.aborted ? '操作已停止。' : safeText(this._redact(error.message, run)) });
     }).finally(() => { run.toolTasks.delete(task); this.dynamicTasks.delete(task); });
     run.toolTasks.add(task); this.dynamicTasks.add(task);
   }
@@ -587,19 +696,25 @@ export class CodexBridge {
   approve(id, decision) {
     if (!['accept', 'decline'].includes(decision)) throw new Error('审批结果只能是 accept 或 decline');
     const approval = this.approvals.get(id);
-    if (!approval || approval.run.settled || approval.run.aborted || approval.run.finishing || approval.run.child !== this.child) throw new Error('审批请求不存在或已过期');
+    if (!approval || approval.run.settled || approval.run.aborted || approval.run.finishing || approval.run.child !== this.child || Date.now() >= Date.parse(approval.expiresAt)) throw new Error('审批请求不存在或已过期');
+    if (decision === 'accept' && !approval.canAccept) throw new Error('当前请求不支持单次允许，请拒绝或取消操作。');
     this._removeApproval(id);
+    if (approval.run.settled || approval.run.aborted || approval.run.finishing || approval.run.child !== this.child) {
+      if (approval.dynamic) this._replyDynamic(approval.dynamic, false, { error: '确认期间任务已停止，操作未执行。' });
+      else if (approval.run.child === this.child) { try { this._send({ id: approval.rpcId, result: { decision: approval.negative } }); } catch {} }
+      throw new Error('审批请求已失效，操作未允许。');
+    }
     if (approval.dynamic) {
       if (decision === 'accept') this._executeDynamic(approval.dynamic);
       else this._replyDynamic(approval.dynamic, false, { error: '用户拒绝了本次操作。' });
-    } else this._send({ id: approval.rpcId, result: { decision } });
+    } else this._send({ id: approval.rpcId, result: { decision: decision === 'accept' ? 'accept' : approval.negative } });
     this._emit(approval.run, 'status', { state: 'working', message: decision === 'accept' ? '已允许本次操作' : '已拒绝本次操作' });
     return { ok: true };
   }
 
   _emit(run, type, data) {
     if (run.settled) return;
-    try { run.onEvent?.(type, this._redactValue(data)); } catch {
+    try { run.onEvent?.(type, this._redactValue(data, undefined, run)); } catch {
       if (!run.aborted) { run.aborted = true; this._interrupt(run); }
     }
   }
@@ -701,11 +816,16 @@ export class CodexBridge {
 
   async _interrupt(run) {
     if (run.interrupting || run.settled || run.finishing) return;
+    for (const [id, request] of this.userInputs) {
+      if (request.run !== run) continue;
+      this._removeUserInput(id);
+      if (request.child === this.child) { try { this._send({ id: request.rpcId, error: { code: -32000, message: 'User-input request cancelled without an answer' } }); } catch {} }
+    }
     // Resolve pending approval callbacks before interrupting so no modal can strand a turn.
     for (const [id, approval] of this.approvals) {
       if (approval.run !== run) continue;
       if (approval.dynamic) this._replyDynamic(approval.dynamic, false, { error: '操作已停止。' });
-      else { try { this._send({ id: approval.rpcId, result: { decision: 'decline' } }); } catch {} }
+      else { try { this._send({ id: approval.rpcId, result: { decision: approval.negative } }); } catch {} }
       this._removeApproval(id);
     }
     for (const call of run.dynamicCalls.values()) {
@@ -727,6 +847,12 @@ export class CodexBridge {
   _finish(run, error) {
     if (run.settled || run.finishing) return;
     run.finishing = true;
+    for (const [id, request] of this.userInputs) {
+      if (request.run !== run) continue;
+      this._removeUserInput(id);
+      if (request.child === this.child) { try { this._send({ id: request.rpcId, error: { code: -32000, message: 'Turn ended without a user-input answer' } }); } catch {} }
+    }
+    for (const [id, receipt] of this.userInputReceipts) if (receipt.run === run) this.userInputReceipts.delete(id);
     run.requestController?.abort();
     run.nativeReviews?.clear();
     if (run.approvalReview?.status === 'inProgress') {
@@ -815,6 +941,7 @@ export class CodexBridge {
       if (this.initializing) await this.initializing.catch(() => {});
       await Promise.all(this.terminations);
       await Promise.allSettled([...this.dynamicTasks]);
+      this.threadSecrets.clear();
     })();
     return this.closing;
   }

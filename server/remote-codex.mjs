@@ -4,4 +4,5 @@ export class RemoteCodexBridge {
   run(args) { return this.delegate.run(args); }
   steer(args) { return this.delegate.steer(args); }
   approve(id, decision) { return this.delegate.approve(id, decision); }
+  replyUserInput(id, body) { return this.delegate.replyUserInput(id, body); }
 }

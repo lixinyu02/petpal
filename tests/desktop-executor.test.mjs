@@ -200,17 +200,20 @@ test('a durable run receipt precedes execution; exact replay never starts a seco
 
 test('desktop negotiates review, automation and project-directory support only at the pre-connection 400 boundary', async t => {
   const modern = await protocolFixture(t);
-  assert.deepEqual(JSON.parse(modern.requests.find(item=>item.url.endsWith('/register')).init.body).capabilities,{projectDirectory:true,automations:true,approvalReview:true,independentReviewModel:true});
+  assert.deepEqual(JSON.parse(modern.requests.find(item=>item.url.endsWith('/register')).init.body).capabilities,{projectDirectory:true,automations:true,approvalReview:true,independentReviewModel:true,userInput:true});
   const bodies=[];
   const older = await protocolFixture(t,{onRegister:body=>{
     bodies.push(body);
     return body.capabilities ? Response.json({error:'unknown field'},{status:400}) : Response.json({hostId:'host-one',connectionId:'connection-one',leaseMs:30000,pollMs:20000});
   }});
-  assert.equal(older.manager.status().state,'online');assert.equal(bodies.length,5);
-  assert.deepEqual(bodies[0].capabilities,{projectDirectory:true,automations:true,approvalReview:true,independentReviewModel:true});assert.deepEqual(bodies[1].capabilities,{projectDirectory:true,automations:true,approvalReview:true});assert.deepEqual(bodies[2].capabilities,{projectDirectory:true,automations:true});assert.deepEqual(bodies[3].capabilities,{projectDirectory:true});assert.equal(Object.hasOwn(bodies[4],'capabilities'),false);
-  assert.deepEqual({...bodies[0],capabilities:undefined},{...bodies[4],capabilities:undefined});
+  assert.equal(older.manager.status().state,'online');assert.equal(bodies.length,6);
+  assert.deepEqual(bodies[0].capabilities,{projectDirectory:true,automations:true,approvalReview:true,independentReviewModel:true,userInput:true});assert.deepEqual(bodies[1].capabilities,{projectDirectory:true,automations:true,approvalReview:true,independentReviewModel:true});assert.deepEqual(bodies[2].capabilities,{projectDirectory:true,automations:true,approvalReview:true});assert.deepEqual(bodies[3].capabilities,{projectDirectory:true,automations:true});assert.deepEqual(bodies[4].capabilities,{projectDirectory:true});assert.equal(Object.hasOwn(bodies[5],'capabilities'),false);
+  assert.deepEqual({...bodies[0],capabilities:undefined},{...bodies[5],capabilities:undefined});
   assert.equal(older.manager.current.approvalReview,false);
   assert.equal(older.manager.current.independentReviewModel,false);
+  assert.equal(older.manager.current.userInput,false);
+  const unsolicited = await protocolFixture(t,{onRegister:body=>body.capabilities?.userInput ? Response.json({error:'unknown field'},{status:400}) : Response.json({hostId:'host-one',connectionId:'connection-one',leaseMs:30000,pollMs:20000,capabilities:{userInput:true}})});
+  assert.equal(unsolicited.manager.current.userInput,false);
   let attempts=0;
   older.manager.fetch=async()=>{attempts++;return Response.json({error:'bad request'},{status:400});};
   await assert.rejects(older.manager._register(older.manager.current),{status:400});assert.equal(attempts,1);

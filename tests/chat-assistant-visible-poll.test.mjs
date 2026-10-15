@@ -38,7 +38,7 @@ function fixture(context, initial = {}) {
     './api': { getSessionEpoch: () => epoch, isSessionChanged: error => error?.name === 'SessionChangedError', api(path, options = {}) { assert.equal(path, '/agent/hosts'); assert.equal(options.method, undefined, 'host polling cannot mutate or launch an Agent task'); const pending = deferred(); requests.push({ path, options, epoch, ...pending }); return pending.promise; } },
     './platform/visible-poll.mjs': { createVisiblePoll: options => createVisiblePoll({ ...options, setTimeoutFn: schedule, clearTimeoutFn: unschedule }) },
     './chat-assistant-preferences.mjs': preferences, './project-directory-preferences.mjs': directories, './approval-review-ui.mjs': reviewUi, './conversation-message-reuse.mjs': messageReuse,
-    './AgentPermissions': { __esModule: true, default: Symbol('AgentPermissions'), defaultAgentPermissions: { access: 'read-only', approval: 'ask' } },
+    './AgentPermissions': { __esModule: true, default: Symbol('AgentPermissions'), defaultAgentPermissions: { access: 'read-only', approval: 'ask' } },'./AgentUserInput':{__esModule:true,default:Symbol('AgentUserInput')},
     './WorkspaceControls': {}, './ProjectDirectory': {}, './platform/ui-motion.ts': {},
   };
   const module = { exports: {} };

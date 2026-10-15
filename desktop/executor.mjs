@@ -11,6 +11,7 @@ import { normalizeReasoningEffort } from '../server/providers.mjs';
 import { validateBrowserAction } from '../server/opencli.mjs';
 import { normalizeSiteOrigins } from '../server/opencli-browser-policies.mjs';
 import { normalizeProjectDirectory } from '../server/project-directory.mjs';
+import { normalizeUserInputQuestions, normalizeUserInputAnswer } from '../server/user-input.mjs';
 
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value);
@@ -22,6 +23,7 @@ const retryable = (error, registered) => error?.retryable === true || [408, 425,
 const RETRY_DELAYS = [1000, 2000, 4000, 8000, 15000, 30000];
 const imageExtensions = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 const DELTA_CHARS = 8000; // Even all-control-character JSON stays under the central 64 KiB character bound.
+const inputTimes = data => typeof data?.requestedAt === 'string' && data.requestedAt.length <= 40 && typeof data?.expiresAt === 'string' && data.expiresAt.length <= 40 && Number.isFinite(Date.parse(data.requestedAt)) && Number.isFinite(Date.parse(data.expiresAt)) && Date.parse(data.expiresAt) > Date.parse(data.requestedAt) && Date.parse(data.expiresAt) - Date.parse(data.requestedAt) <= 10 * 60 * 1000;
 const delay = (ms, signal) => new Promise(resolve => {
   const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); };
   const timer = setTimeout(done, ms); timer.unref?.(); signal.addEventListener('abort', done, { once: true }); if (signal.aborted) done();
@@ -347,13 +349,16 @@ export class DesktopExecutor {
     // Negotiate before a connection exists. A 400 is the only safe fallback;
     // authentication failures and uncertain delivery never replay registration.
     const offers = [
+      { projectDirectory: true, automations: true, approvalReview: true, independentReviewModel: true, userInput: true },
       { projectDirectory: true, automations: true, approvalReview: true, independentReviewModel: true },
       { projectDirectory: true, automations: true, approvalReview: true },
       { projectDirectory: true, automations: true }, { projectDirectory: true }, undefined,
     ];
+    let offeredUserInput = false;
     for (let position = 0; position < offers.length; position++) {
       try {
         registration = await this._json(ctx, '/api/agent/executors/register', { ...body, ...(offers[position] ? { capabilities: offers[position] } : {}) });
+        offeredUserInput = offers[position]?.userInput === true;
         break;
       } catch (error) {
         this._assert(ctx);
@@ -367,6 +372,7 @@ export class DesktopExecutor {
     ctx.automationTools = registration.capabilities?.automations === true;
     ctx.approvalReview = registration.capabilities?.approvalReview === true;
     ctx.independentReviewModel = ctx.approvalReview && registration.capabilities?.independentReviewModel === true;
+    ctx.userInput = offeredUserInput && registration.capabilities?.userInput === true;
     ctx.leaseMs = registration.leaseMs; ctx.pollMs = registration.pollMs;
     ctx.route = `/api/agent/executors/${ctx.connectionId}`;
   }
@@ -409,6 +415,7 @@ export class DesktopExecutor {
       run: ['id', 'type', 'runId', 'conversationId', 'prompt', 'threadId', 'projectDirectory', 'projectAccess', 'automationTools', 'permissions', 'model', 'reviewModel', 'effort', 'codexRevision', 'relayToken', 'attachments'],
       steer: ['id', 'type', 'runId', 'expectedTurnId', 'content', 'attachments'],
       approve: ['id', 'type', 'runId', 'approvalId', 'decision'], stop: ['id', 'type', 'runId'],
+      'user-input': ['id', 'type', 'runId', 'inputId', 'answer'],
     }[command.type];
     if (!allowed || Object.keys(command).some(key => !allowed.includes(key))) throw invalid();
     if (command.type === 'run') {
@@ -429,6 +436,7 @@ export class DesktopExecutor {
     }
     if (command.type === 'steer' && (!identifier(command.expectedTurnId) || typeof command.content !== 'string' || command.content.length > 32000)) throw invalid();
     if (command.type === 'approve' && (!identifier(command.approvalId) || !['accept', 'decline'].includes(command.decision))) throw invalid();
+    if (command.type === 'user-input' && (!identifier(command.inputId) || !object(command.answer) || Object.keys(command.answer).some(key => !['answers','skip'].includes(key)) || (Object.hasOwn(command.answer,'skip') ? command.answer.skip !== true || Object.keys(command.answer).length !== 1 : !object(command.answer.answers)))) throw invalid();
     if (['run', 'steer'].includes(command.type)) {
       if (!Array.isArray(command.attachments) || command.attachments.length > 4) throw invalid();
       for (const item of command.attachments) {
@@ -454,7 +462,7 @@ export class DesktopExecutor {
       const permissions = normalizeAgentPermissions(command.permissions);
       if (permissions.access === 'full-access' && ctx.account.agentAccess !== 'full' && !ctx.account.isOwner) throw invalid();
       const run = { id: command.runId, commandId: command.id, sequence: 0, pendingBytes: 0, outputBytes: 0, files: new Map(),
-        controller: new AbortController(), bridge: null, conversationId: command.conversationId, relayToken: command.relayToken, events: Promise.resolve(), stopping: false };
+        controller: new AbortController(), bridge: null, conversationId: command.conversationId, relayToken: command.relayToken, events: Promise.resolve(), userInputs: new Map(), stopping: false };
       ctx.run = run;
       run.done = this._run(ctx, run, command).catch(error => this._failed(ctx, error));
       return;
@@ -468,15 +476,29 @@ export class DesktopExecutor {
     try {
       if (!run.bridge || run.stopping || run.controller.signal.aborted) throw Object.assign(new Error('任务已停止。'), { code: 'turn_not_active' });
       if (command.type === 'approve') result = await run.bridge.approve(command.approvalId, command.decision);
+      else if (command.type === 'user-input') {
+        if (!ctx.userInput || typeof run.bridge.replyUserInput !== 'function') throw Object.assign(new Error('当前执行端不支持用户回答。'), { code:'user_input_unsupported' });
+        const input = run.userInputs.get(command.inputId);
+        if (!input) throw Object.assign(new Error('用户提问已失效。'), { code:'user_input_expired' });
+        const answer = normalizeUserInputAnswer(input.questions, command.answer), fingerprint = hash(JSON.stringify(answer));
+        if (input.fingerprint) { if (input.fingerprint !== fingerprint) throw Object.assign(new Error('回答已变化。'), { code:'user_input_conflict' }); result = await input.promise; }
+        else {
+          if (input.resolved || Date.parse(input.expiresAt) <= Date.now()) throw Object.assign(new Error('用户提问已过期。'), { code:'user_input_expired' });
+          input.fingerprint = fingerprint;
+          input.promise = Promise.resolve().then(() => run.bridge.replyUserInput(command.inputId, command.answer.skip === true ? {skip:true} : answer));
+          result = await input.promise;
+        }
+      }
       else {
         const images = await this._images(ctx, run, command.attachments); this._assert(ctx); run.controller.signal.throwIfAborted();
         result = await run.bridge.steer({ conversationId: run.conversationId, expectedTurnId: command.expectedTurnId, content: command.content, images });
       }
-      await this._event(ctx, run, 'command-result', { commandId: command.id, ok: true, ...(result?.turnId ? { turnId: result.turnId } : {}) });
+      await this._event(ctx, run, 'command-result', { commandId: command.id, ok: true, ...(command.type !== 'user-input' && result?.turnId ? { turnId: result.turnId } : {}) });
     } catch (error) {
       const unsupported = command.type === 'steer' && error?.code === 'steer_unsupported';
+      const inputCode = command.type === 'user-input' && ['user_input_expired','user_input_conflict','user_input_unsupported','user_input_invalid'].includes(error?.code) ? error.code : undefined;
       await this._event(ctx, run, 'command-result', { commandId: command.id, ok: false,
-        ...(error.code === 'turn_not_active' ? { code: 'turn_not_active' } : unsupported ? {code:'steer_unsupported'} : {}), message: error.code === 'turn_not_active' ? '当前运行已结束。' : unsupported ? '当前执行端不支持运行中引导。' : '无法确认操作已送达，请检查任务；不会自动重试。' });
+        ...(error.code === 'turn_not_active' ? { code: 'turn_not_active' } : unsupported ? {code:'steer_unsupported'} : inputCode ? {code:inputCode} : {}), message: error.code === 'turn_not_active' ? '当前运行已结束。' : unsupported ? '当前执行端不支持运行中引导。' : '无法确认操作已送达，请检查任务；不会自动重试。' });
     }
   }
 
@@ -552,7 +574,19 @@ export class DesktopExecutor {
         model: command.model, effort: command.effort || '', permissions: command.permissions, images, signal: run.controller.signal,
         onEvent: (event, data) => {
           if (ctx.controller.signal.aborted || run.controller.signal.aborted) return;
-          if (!['thread', 'turn', 'status', 'delta', 'approval', 'approval-resolved'].includes(event)) throw invalid();
+          if (!['thread', 'turn', 'status', 'delta', 'approval', 'approval-resolved', 'user-input', 'user-input-resolved'].includes(event)) throw invalid();
+          if (event === 'user-input' || event === 'user-input-resolved') {
+            if (!ctx.userInput) {
+              void this._event(ctx, run, 'status', { state:'blocked', message:'中央服务尚不支持用户提问，请升级服务后重试；不会代答或自动跳过。' });
+              run.controller.abort(); return;
+            }
+            if (!identifier(data?.id)) throw invalid();
+            if (event === 'user-input') {
+              if (!inputTimes(data) || run.userInputs.has(data.id) || run.userInputs.size >= 128) throw invalid();
+              data = { id:data.id, questions:normalizeUserInputQuestions(data.questions), requestedAt:data.requestedAt, expiresAt:data.expiresAt };
+              run.userInputs.set(data.id, { questions:data.questions, expiresAt:data.expiresAt, resolved:false });
+            } else { const input=run.userInputs.get(data.id); if (input) input.resolved=true; data={id:data.id}; }
+          }
           if (event === 'approval' && typeof data?.description === 'string' && data.description.length > 8000) {
             // Never offer an approval card with its review details silently truncated.
             void Promise.resolve(run.bridge.approve(data.id, 'decline')).catch(() => { run.controller.abort(); });
@@ -564,12 +598,14 @@ export class DesktopExecutor {
             for (let offset = 0; offset < data.text.length; offset += DELTA_CHARS) void this._event(ctx, run, event, { text: data.text.slice(offset, offset + DELTA_CHARS) });
           } else {
             if (event === 'status' && data.approvalReview && !ctx.approvalReview) { const { approvalReview, ...legacy } = data; data = legacy; }
+            if (event === 'approval' && !ctx.userInput) { const { requestedAt, expiresAt, canAccept, ...legacy } = data; data = legacy; }
             void this._event(ctx, run, event, data);
           }
         } });
     } catch (error) { failure = error; }
     finally {
       await run.bridge?.close();
+      run.userInputs.clear();
       await Promise.allSettled([...run.files.values()].map(file => unlink(file.path)));
     }
     if (ctx.controller.signal.aborted) { run.relayToken = ''; return; }

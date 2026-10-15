@@ -161,7 +161,7 @@ export function createChatAssistant({ store, agentTasks, authorize, resolveHost,
   function childOutcome(record,child) {
     const agent=agentTasks.snapshot(child),run=agent.run?.submissionId===record.id?agent.run:null;
     if(run){
-      const liveMessage=run.status==='stopping'?'后台 Agent 正在停止。':run.status==='running'&&agent.approvals?.length?'后台 Agent 等待你的确认。':run.status==='running'?run.message:'';
+      const liveMessage=run.status==='stopping'?'后台 Agent 正在停止。':run.status==='running'&&agent.userInputs?.length?'后台 Agent 等待你回答问题。':run.status==='running'&&agent.approvals?.length?'后台 Agent 等待你的确认。':run.status==='running'?run.message:'';
       return {status:run.status==='stopping'?'running':run.status,message:short(redact(run.error||liveMessage||({running:'后台 Agent 正在执行。',stopping:'后台 Agent 正在停止。',completed:'后台 Agent 已完成。',cancelled:'后台 Agent 已停止。',error:'后台 Agent 执行失败。',unknown:'执行状态未知；不会自动重试。'})[run.status])),run};
     }
     if(agent.queue?.some(item=>item.submissionId===record.id))return {status:'queued',message:agent.paused?'后台 Agent 队列已暂停。':'后台 Agent 等待执行。'};
