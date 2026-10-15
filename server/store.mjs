@@ -4,7 +4,7 @@ import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { defaultVoiceSettings } from './voice.mjs';
 import { normalizeReasoningEffort, normalizeSupportsImages } from './providers.mjs';
 import { validateStoredAttachments, normalizeAttachmentIds } from './attachments.mjs';
-import { restoreAgentState } from './agent-tasks.mjs';
+import { restoreAgentState, createAgentRecoveryPersistence } from './agent-tasks.mjs';
 import { validateExecutionHosts } from './executors.mjs';
 import { restoreAssistantTasks } from './chat-assistant.mjs';
 import { validateStoredNotifications } from './notifications.mjs';
@@ -110,6 +110,7 @@ export class JsonStore {
     if (validateStoredAutomations(state)) changed = true;
     if (validateStoredOrganization(state)) changed = true;
     this.organizationPersistence = createOrganizationPersistence(this);
+    this.agentRecoveryPersistence = createAgentRecoveryPersistence(this);
     this.#chatAssistantHosts = new Map(state.users.map(user => [user.id, (user.id === state.ownerId ? state.settings : user.settings).chatAssistantHostId]));
     if (identityMigrated && raw) {
       const backup = path.join(this.directory, `state.identity.backup-${createHash('sha256').update(raw).digest('hex').slice(0, 16)}.json`);
@@ -153,6 +154,7 @@ export class JsonStore {
       const snapshot = JSON.parse(captured);
       this.organizationPersistence?.prepare(snapshot, operation?.organization);
       this.#prepareChatAssistantHosts(snapshot, operation?.chatAssistantDefaultHost);
+      this.agentRecoveryPersistence?.prepare(snapshot, operation?.agentRecovery);
       this.notificationPersistence?.prepare(snapshot, operation);
       await this.automationPersistence?.prepare(snapshot, operation);
       const contents = `${JSON.stringify(snapshot, null, 2)}\n`;
@@ -162,10 +164,12 @@ export class JsonStore {
         try { await handle.writeFile(contents, 'utf8'); await handle.sync(); } finally { await handle.close(); }
         await chmod(temporary, 0o600).catch(error => { if (process.platform !== 'win32') throw error; });
         this.organizationPersistence?.beforeCommit(snapshot);
+        this.agentRecoveryPersistence?.beforeCommit(snapshot);
         await rename(temporary, this.file);
         // Only an atomically replaced file can become the public default.
         this.#commitChatAssistantHosts(snapshot);
         this.organizationPersistence?.commit(snapshot);
+        this.agentRecoveryPersistence?.commit(snapshot);
         this.automationPersistence?.commit(snapshot.automations, snapshot);
         this.notificationPersistence?.commit(snapshot.notifications);
       } finally { await unlink(temporary).catch(() => {}); }

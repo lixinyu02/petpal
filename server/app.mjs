@@ -1057,6 +1057,11 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     return conversation;
   };
   const agentAuth = req => ({ userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap });
+  app.post('/api/conversations/:id/agent/recover', async (req, res) => {
+    const conversation = agentConversation(req, true);
+    await agentTasks.recover(conversation, req.body, agentAuth(req)); requireCurrentAuth(req);
+    res.json({ conversation: visibleConversation(conversation) });
+  });
   for (const kind of ['submit', 'steer']) app.post(`/api/conversations/:id/agent/${kind}`, async (req, res) => {
     const conversation = agentConversation(req);
     imageAttachments.metadata(req.user.id, normalizeAttachmentIds(req.body.attachmentIds));
@@ -1090,6 +1095,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       requireCodex(req.user);
       executors.hostFor(req.user.id, 'central');
       if (conversation.agent?.run?.status === 'unknown') throw failure(409, '上次远程执行状态未知，本会话不会开始新任务。');
+      if (conversation.agent?.submissions?.some(item => item.status === 'uncertain')) throw failure(409, '仍有指令送达状态未知，请先检查并确认原任务已停止。', 'agent_execution_uncertain');
       if ([conversation.agentHostId, conversation.threadHostId, ...conversation.agent?.queue?.map(entry => entry.hostId) ?? []].some(hostId => hostId && hostId !== 'central')) throw failure(409, '这个会话包含桌面执行任务，请使用支持执行电脑选择的 Agent 客户端。');
       if (req.body.projectDirectory || conversation.agentProjectDirectory || conversation.threadProjectDirectory || conversation.agent?.queue?.some(entry => entry.projectDirectory)) throw failure(409, '这个会话包含项目目录，请使用支持项目目录的 Agent 客户端提交。');
       if (conversation.threadCodexRevision && conversation.threadCodexRevision !== state.codexConfig.revision) throw failure(409, '这个会话使用个人官方模型，请通过支持模型选择的 Agent 任务入口继续。');

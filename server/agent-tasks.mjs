@@ -61,6 +61,70 @@ export function restoreAgentState(conversation) {
   return changed;
 }
 
+const recoveryMessage = '用户已确认原任务已停止，未自动重派；待执行队列仍保持暂停。';
+const uncertain = agent => agent.submissions.some(item => item.status === 'uncertain');
+const recoveryTarget = (conversation, runId) => {
+  const agent = conversation.agent;
+  if (!agent || ['running', 'stopping'].includes(agent.run?.status)) throw failure(409, '当前任务尚未结束，不能确认停止状态。');
+  const record = agent.submissions.find(item => item.entryId === runId && item.status === 'uncertain');
+  const run = agent.run?.id === runId && agent.run.status === 'unknown' ? agent.run : undefined;
+  if (!record || run && run.submissionId !== record.submissionId) throw failure(409, '待确认的任务状态已变化，请刷新后检查。', 'agent_recovery_conflict');
+  return { agent, record, run };
+};
+
+/** Publish only durable recovery decisions; old background snapshots cannot undo them. */
+export function createAgentRecoveryPersistence(store) {
+  const committed = new Map(), prepared = new WeakMap();
+  const lookup = (snapshot, action) => {
+    const conversation = snapshot.conversations.find(item => item.id === action.conversationId && item.userId === action.userId);
+    if (!conversation) throw failure(404, 'Agent 会话已删除。');
+    return conversation;
+  };
+  const apply = (conversation, change) => {
+    const agent = conversation.agent;
+    if (!agent) return;
+    const record = agent.submissions.find(item => item.entryId === change.runId);
+    let changed = false;
+    if (record?.status === 'uncertain') { Object.assign(record, { status: 'cancelled', error: recoveryMessage }); changed = true; }
+    if (change.unknownRun && agent.run?.id === change.runId && agent.run.status === 'unknown') { Object.assign(agent.run, { status: 'cancelled', error: recoveryMessage, finishedAt: change.at }); changed = true; }
+    if (!changed) return;
+    agent.paused = true; agent.revision = Math.max(agent.revision, change.revision);
+    conversation.updatedAt = conversation.updatedAt > change.at ? conversation.updatedAt : change.at;
+  };
+  const validate = action => {
+    if (!object(action) || typeof action.validate !== 'function' || !identifier(action.conversationId) || !identifier(action.userId) || !identifier(action.runId) || !Number.isSafeInteger(action.revision) || action.revision < 0) throw failure(400, 'Agent 状态确认持久化参数无效。');
+    action.validate();
+  };
+  return {
+    prepare(snapshot, action) {
+      for (const conversation of snapshot.conversations) {
+        for (const change of committed.get(conversation.id) ?? []) {
+          // stop/revocation may produce the same numeric revision during the
+          // awaited rename. A confirmed target must never become unknown again.
+          if (conversation.userId === change.userId) apply(conversation, change);
+        }
+      }
+      if (!action) return;
+      validate(action);
+      const conversation = lookup(snapshot, action), { agent, run } = recoveryTarget(conversation, action.runId);
+      if (agent.revision !== action.revision) throw failure(409, 'Agent 状态已变化，请刷新后再确认。', 'agent_revision_conflict');
+      const change = { userId: action.userId, runId: action.runId, unknownRun: Boolean(run), revision: action.revision + 1, at: now() };
+      apply(conversation, change); prepared.set(snapshot, { action, change });
+    },
+    beforeCommit(snapshot) { const pending = prepared.get(snapshot); if (pending) validate(pending.action); },
+    commit(snapshot) {
+      const pending = prepared.get(snapshot);
+      if (!pending) return;
+      const { action, change } = pending;
+      const changes = committed.get(action.conversationId) ?? []; changes.push(change); committed.set(action.conversationId, changes);
+      const live = store.state.conversations.find(item => item.id === action.conversationId && item.userId === action.userId);
+      // Merge only the confirmed target, never an older queue or message body.
+      if (live) apply(live, change);
+      prepared.delete(snapshot);
+    },
+  };
+}
+
 /** Persistent receipts and short per-conversation locks own task lifetime, not HTTP. */
 export function createAgentTasks({ store, active, approvals, getBridge, authorize, authorizeRemoval = authorize, resolveModel, resolveReview = () => ({}), getReviewConfig = () => undefined, resolveHost = (_userId, hostId) => ({ hostId, hostName: '中央服务器' }), resolveProject = (_userId, _hostId, value) => value ? { projectDirectory: normalizeProjectDirectory(value), projectAccess: 'workspace' } : {}, resolveImages = async () => [], redact = value => value }) {
   const locks = new Map(), generations = new Map(), removed = new Set(), knownReviewThreads = new Map();
@@ -200,7 +264,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     if (closed) return;
     void lock(conversation, async () => {
       const agent = data(conversation);
-      if (closed || agent.paused || !agent.queue.length || active.has(conversation.id)) return;
+      if (closed || agent.paused || !agent.queue.length || active.has(conversation.id) || agent.run?.status === 'unknown' || uncertain(agent)) return;
       const entry = agent.queue[0], record = agent.submissions.find(item => item.entryId === entry.id);
       try { check(entry); }
       catch (error) { agent.paused = true; if (error.code !== 'executor_offline') { agent.queue.shift(); record.status = 'cancelled'; bumpQueue(conversation); } bump(conversation); await save(conversation); return; }
@@ -229,6 +293,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
       const previous = existing(agent, body.submissionId, fingerprint);
       if (previous) { await save(conversation); return receipt(previous); }
       if (agent.run?.status === 'unknown') throw failure(409, '上次远程执行状态未知，请先核对执行电脑；本会话不会自动开始新任务。');
+      if (uncertain(agent)) throw failure(409, '仍有指令送达状态未知，请先检查并确认原任务已停止。', 'agent_execution_uncertain');
       const entry = normalize(conversation, body, auth, kind, value);
       const task = active.get(conversation.id);
       if (kind === 'steer' && !task && agent.run?.turnId !== body.expectedTurnId) throw failure(409, '当前运行已变化，请刷新后再插入指令。', 'turn_not_active');
@@ -306,11 +371,28 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     await lock(conversation, async () => {
       const agent = data(conversation);
       if (agent.run?.status === 'unknown') throw failure(409, '上次执行状态未知，不能恢复队列。');
+      if (uncertain(agent)) throw failure(409, '仍有指令送达状态未知，不能恢复队列。', 'agent_execution_uncertain');
       for (const entry of agent.queue) { check({ ...entry, auth: { ...auth, generation: epoch(auth) } }); check(entry); }
       if (active.has(conversation.id)) throw failure(409, '请等待当前任务结束后再恢复队列。');
       agent.paused = false; bump(conversation); await save(conversation);
     });
     kick(conversation);
+  }
+  async function recover(conversation, body, auth) {
+    return lock(conversation, async () => {
+      if (!object(body) || Object.keys(body).some(key => !['runId', 'revision', 'confirmedStopped'].includes(key)) || !identifier(body.runId) || !Number.isSafeInteger(body.revision) || body.revision < 0 || body.confirmedStopped !== true) throw failure(400, '确认停止需要 runId、当前 revision 和 confirmedStopped:true。');
+      const validate = () => {
+        if (auth.userId !== conversation.userId) throw failure(404, 'Agent 会话不存在。');
+        check({ conversationId: conversation.id, auth: { ...auth, generation: epoch(auth) } }, authorizeRemoval);
+        if (active.has(conversation.id)) throw failure(409, '当前任务仍在执行，请等待结束后再确认。');
+        if (data(conversation).revision !== body.revision) throw failure(409, 'Agent 状态已变化，请刷新后再确认。', 'agent_revision_conflict');
+        recoveryTarget(conversation, body.runId);
+      };
+      validate();
+      // Keep live unknown until atomic replacement succeeds. Concurrent ordinary
+      // saves therefore cannot persist an uncommitted confirmation.
+      await store.save({ agentRecovery: { conversationId: conversation.id, userId: auth.userId, runId: body.runId, revision: body.revision, validate } });
+    });
   }
   async function stop(conversation, { clear = false } = {}) {
     if (clear) { removed.add(conversation.id); knownReviewThreads.delete(conversation.id); }
@@ -343,5 +425,5 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     for (const conversation of store.state.conversations) if (conversation.agent && !conversation.agent.paused && (conversation.agent.queue.length || ['running', 'stopping'].includes(conversation.agent.run?.status))) { conversation.agent.paused = true; bump(conversation); }
     await Promise.allSettled([...locks.values()]); await store.save();
   }
-  return { snapshot: projection, submit, edit, reorder, resume, stop, revoke, kick, close, hasPending: () => store.state.conversations.some(conversation => conversation.agent?.queue.length) };
+  return { snapshot: projection, submit, edit, reorder, resume, recover, stop, revoke, kick, close, hasPending: () => store.state.conversations.some(conversation => conversation.agent?.queue.length) };
 }
