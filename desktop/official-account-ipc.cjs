@@ -7,6 +7,12 @@ const publicError = Symbol('official-public-error');
 const fail = (code, message) => Object.assign(new Error(message), { code: `PETPAL_OFFICIAL_${code}`, [publicError]: true });
 const plain = value => value && typeof value === 'object' && !Array.isArray(value);
 const text = (value, max = 256) => typeof value === 'string' && value.length <= max && !/[\x00-\x1f\x7f]/.test(value);
+const timestamp = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && Number.isFinite(Date.parse(value)) ? value : null;
+function publicUsage(value) {
+  if (!plain(value) || !['unverified', 'available', 'limit-reached', 'temporarily-unavailable', 'not-eligible'].includes(value.state)) return undefined;
+  const counts = Object.fromEntries(['completedRequests', 'inputTokens', 'outputTokens', 'totalTokens'].map(key => [key, Number.isSafeInteger(value[key]) && value[key] >= 0 ? value[key] : 0]));
+  return { state: value.state, checkedAt: timestamp(value.checkedAt), lastModel: text(value.lastModel, 200) && value.lastModel ? value.lastModel : null, ...counts };
+}
 const sameToken = (a, b) => {
   const left = Buffer.from(a), right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
@@ -28,6 +34,9 @@ function officialPublicStatus(value) {
       id: item.id, model: item.model, displayName: text(item.displayName, 320) ? item.displayName : item.model,
       supportsImages: item.supportsImages === true,
     })) : [],
+    ...(publicUsage(value.usage) ? { usage: publicUsage(value.usage) } : {}),
+    ...(value.modelsLoading === true ? { modelsLoading: true } : {}),
+    ...(timestamp(value.modelsCheckedAt) ? { modelsCheckedAt: timestamp(value.modelsCheckedAt) } : {}),
     ...(value.error ? { error: '官方账号需要重新连接，请重试登录或刷新状态。' } : {}),
     ...(value.modelsError ? { modelsError: '暂时无法读取官方模型，请刷新重试。' } : {}),
   };
@@ -76,6 +85,12 @@ function createOfficialAccountHandlers({ auth, accounts, origin, isAllowed, read
   const operations = {
     status: (guard) => accounts.status(guard.userId),
     refresh: async guard => { await accounts.refresh(guard.userId); return accounts.status(guard.userId); },
+    resumeUsage: async (guard, input) => {
+      if (input !== undefined) throw fail('INPUT', '请使用客户端的额度重试入口。');
+      await guard.authorize();
+      accounts.resumeUsage(guard.userId);
+      return accounts.status(guard.userId);
+    },
     start: async (guard, input) => {
       if (input !== undefined && (!plain(input) || Object.keys(input).some(key => key !== 'profileId') || input.profileId !== undefined && (!text(input.profileId, 160) || !input.profileId)))
         throw fail('INPUT', '请选择有效的官方账号。');

@@ -30,9 +30,10 @@ export function validateExecutionHosts(state) {
 }
 
 /** Central coordinator. Sessions are credentials; client type is never authorization. */
-export function createExecutors({ store, authorizeSession, authorizeEntry, readAttachment, getConfig, getReviewConfig, automationTool, redact = value => value,
+export function createExecutors({ store, authorizeSession, authorizeEntry, readAttachment, getConfig, getConfigForUser, getReviewConfig, automationTool, redact = value => value,
   fetchImpl = fetch, leaseMs = 30000, pollMs = 20000, commandMs = 20000, stopMs = 10000, clock = Date.now } = {}) {
   const connections = new Map(), current = new Map();
+  const userConfig = userId => typeof getConfigForUser === 'function' ? getConfigForUser(userId) : getConfig();
   let closed = false, registration = Promise.resolve();
   const localHost = { id: 'central', name: '中央服务器', kind: 'central', platform: process.platform, online: true };
   const hostFor = (userId, id) => {
@@ -78,21 +79,24 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
   const checkRun = (run, { stopping = false } = {}) => {
     live(run.connection); authorizeEntry(run.entry);
     if (run.settled || (!stopping && run.stopping) || run.expiresAt <= clock()) throw failure(409, '执行凭据已失效。');
-    if (getConfig().revision !== run.entry.codexRevision) throw failure(409, '模型配置已变化。');
+    if (getConfig(run.entry)?.revision !== run.entry.codexRevision) throw failure(409, '模型配置已变化。');
   };
   const sweep = () => { for (const connection of connections.values()) { try { live(connection); } catch { offline(connection); } } };
   const timer = setInterval(sweep, Math.min(1000, leaseMs)); timer.unref();
   const list = userId => {
     sweep();
+    const config = userConfig(userId);
     return [...(canAccessExecutionHost(store.state, userId, 'central') ? [localHost] : []), ...store.state.executionHosts.filter(host => canAccessExecutionHost(store.state, userId, host.id)).map(host => ({ id: host.id, name: host.name, platform: host.platform, kind: 'desktop', online: current.has(host.id), isOwn: host.userId === userId, owner: Object.fromEntries(['id', 'username', 'displayName'].map(key => [key, store.state.users.find(user => user.id === host.userId)[key]])), lastSeenAt: current.has(host.id) ? connections.get(current.get(host.id)).lastSeenAt : host.lastSeenAt,
-      codex: { available: current.has(host.id), authenticated: current.has(host.id), configured: getConfig().mode === 'api' && Boolean(getConfig().model), supportsSteer: true, approvalReview: approvalReviewCapability(true, current.has(host.id) && connections.get(current.get(host.id)).capabilities.approvalReview === true, current.has(host.id) && connections.get(current.get(host.id)).capabilities.independentReviewModel === true), projectDirectory: current.has(host.id) && connections.get(current.get(host.id)).capabilities.projectDirectory === true, automations: Boolean(automationTool) && current.has(host.id) && connections.get(current.get(host.id)).capabilities.automations === true, mode: 'api', model: getConfig().model, executionMode: 'remote-cli' } }))];
+      codex: { available: current.has(host.id), authenticated: current.has(host.id), configured: config?.mode === 'api' && Boolean(config.model), supportsSteer: true, approvalReview: approvalReviewCapability(true, current.has(host.id) && connections.get(current.get(host.id)).capabilities.approvalReview === true, current.has(host.id) && connections.get(current.get(host.id)).capabilities.independentReviewModel === true), projectDirectory: current.has(host.id) && connections.get(current.get(host.id)).capabilities.projectDirectory === true, automations: Boolean(automationTool) && current.has(host.id) && connections.get(current.get(host.id)).capabilities.automations === true, mode: 'api', model: config?.model, executionMode: 'remote-cli' } }))];
   };
-  const target = (userId, id = 'central', projectDirectory, permissions) => {
+  const target = (userId, id = 'central', projectDirectory, permissions, entry) => {
     const host = hostFor(userId, id);
     const directory = normalizeProjectDirectory(projectDirectory, host.platform);
     if (id !== 'central') {
       const connection = live(connections.get(current.get(id)));
-      if (getConfig().mode !== 'api' || !getConfig().model) throw failure(409, '远程电脑执行需要中央配置 Responses API 模型。');
+      if (entry && (entry.auth?.userId !== userId || entry.hostId !== id)) throw failure(403, '任务执行电脑或账号不匹配。');
+      const config = entry ? getConfig(entry) : userConfig(userId);
+      if (config?.mode !== 'api' || !config.model) throw failure(409, '远程电脑执行需要可用的 Responses API 或本机官方账号模型。');
       if (directory && connection.capabilities.projectDirectory !== true) throw failure(409, '这台执行电脑尚不支持项目目录，请升级桌面客户端或使用默认目录。', 'executor_project_directory_unsupported');
       if (permissions?.approval === 'review' && connection.capabilities.approvalReview !== true) throw failure(409, '这台执行电脑尚不支持新版替我审批，请升级客户端或改为需要时询问。', 'executor_approval_review_unsupported');
       if (permissions?.approval === 'review' && permissions.reviewProviderId && connection.capabilities.independentReviewModel !== true) throw failure(409, '这台执行电脑尚不支持独立命令审查模型，请升级客户端。', 'executor_review_model_unsupported');
@@ -162,7 +166,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
     });
   };
   function bind(entry) {
-    target(entry.auth.userId, entry.hostId, entry.projectDirectory, entry.permissions);
+    target(entry.auth.userId, entry.hostId, entry.projectDirectory, entry.permissions, entry);
     const connection = live(connections.get(current.get(entry.hostId)));
     const projectDirectory = normalizeProjectDirectory(entry.projectDirectory, connection.host.platform);
     if (projectDirectory && !['full', 'workspace'].includes(entry.projectAccess)) throw failure(400, '项目目录授权无效。', 'project_directory_invalid');
@@ -171,7 +175,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
       hostId: entry.hostId, connectionId: connection.id,
       async run(args) {
         live(connection); authorizeEntry(entry);
-        target(entry.auth.userId, entry.hostId, projectDirectory, args.permissions ?? entry.permissions);
+        target(entry.auth.userId, entry.hostId, projectDirectory, args.permissions ?? entry.permissions, entry);
         if (args.projectDirectory !== undefined && normalizeProjectDirectory(args.projectDirectory, connection.host.platform) !== projectDirectory ||
             args.projectAccess !== undefined && args.projectAccess !== entry.projectAccess) throw failure(409, '任务项目目录或授权已变化，请重新提交。');
         if (connection.run) throw failure(409, '这台电脑正在执行其他任务，请稍后重试。');
@@ -320,7 +324,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
     const run = bearerRun(req.params.connectionId,req.params.runId,req.headers.authorization);
     if (!Buffer.isBuffer(req.body) || req.body.length > MODEL_REQUEST_BYTES || req.headers['content-encoding'] && req.headers['content-encoding'] !== 'identity') throw failure(400,'模型请求格式无效。');
     let body; try { body=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(req.body)); } catch { throw failure(400,'模型请求格式无效。'); }
-    const config=review ? run.reviewConfig : getConfig();
+    const config=review ? run.reviewConfig : getConfig(run.entry);
     if (review && (!config || run.entry.permissions?.approval !== 'review' || !run.entry.permissions.reviewProviderId)) throw failure(403,'此任务没有独立审查模型授权。');
     if (!object(body) || body.stream !== true || body.model !== (review ? run.entry.reviewModel : run.entry.model) || run.relays.size >= 2) throw failure(400,'模型请求不属于当前任务。');
     if(!config || !review && config.mode!=='api') throw failure(409,'中央 API 模型不可用。');

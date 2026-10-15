@@ -33,6 +33,7 @@ import { createNotificationService } from './notifications.mjs';
 import { createAutomationService } from './automations.mjs';
 import { executeAutomationTool, withAutomationTools } from './automation-tools.mjs';
 import { organizationPatch, organizationText, visibleProject } from './conversation-organization.mjs';
+import { createOfficialProviderScope, isOfficialProvider, publicOfficialProvider } from './official-providers.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const now = () => new Date().toISOString();
@@ -59,12 +60,14 @@ function safeCodexStatus(value) {
   return value && typeof value === 'object' ? value : { available: false, error: 'Codex 状态不可用。' };
 }
 
-export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, asrOptions, executorsOptions, automationOptions, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
+export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, officialAccounts, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, asrOptions, executorsOptions, automationOptions, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
   const codexPolicy = { allowedHttpOrigins: parseCodexHttpOrigins(codexHttpOrigins) };
   const store = await new JsonStore(dataDir).init();
   const accessToken = await store.token(token ?? process.env.PETPAL_TOKEN);
   const ownerTokenHash = tokenHash(accessToken);
   const state = store.state;
+  const officialProviders = createOfficialProviderScope(officialAccounts);
+  const officialBridges = new Map();
   const imageAttachments = await createAttachmentService({ store, dataDir });
   const legacyCodex = !state.codexConfig;
   state.codexConfig ??= defaultCodexConfig();
@@ -82,7 +85,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const task = active.get(call?.conversationId), entry = task?.agentEntry;
     const conversation = state.conversations.find(item => item.id === call?.conversationId);
     if (!entry || task.controller.signal.aborted || entry.hostId !== 'central' || conversation?.agent?.run?.id !== entry.id || conversation.agent.run.status !== 'running') throw failure(401, '自动化工具只允许当前实际 Agent 任务调用，请使用任务入口。');
-    authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId, entry.projectDirectory, entry.permissions);
+    authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId, entry.projectDirectory, entry.permissions, entry);
     return entry;
   };
   const localTools = withAutomationTools(desktopTools ?? createDesktopTools({ dataDir,musicMcpScope:`${state.instanceId}:${state.ownerId}`,scopeForConversation:id=>{const conversation=state.conversations.find(item=>item.id===id);return conversation?`${state.instanceId}:${conversation.userId}`:null;} }), {
@@ -92,15 +95,15 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const createBridge = config => (codexFactory ?? (options => new CodexBridge(options)))({ workspaceRoot, dataDir, config, desktopTools: localTools });
   let bridge = codex ?? createBridge(state.codexConfig);
   let configChanging = false, configSwap = null, codexReaders = 0, codexStatusProbe = null;
-  const readCodexStatus = async () => {
+  const readCodexStatus = async (selectedBridge = bridge) => {
     if (shuttingDown) throw failure(503, '服务正在退出。');
     if (configChanging) throw failure(409, 'Codex 配置正在切换，请稍后重试。');
     codexReaders++;
     try {
       // Share only an in-flight read of this bridge, never a user-shaped result
       // or a completed status that could hide a changed runtime/account.
-      if (!codexStatusProbe || codexStatusProbe.bridge !== bridge) {
-        const probe = { bridge, promise: null };
+      if (!codexStatusProbe || codexStatusProbe.bridge !== selectedBridge) {
+        const probe = { bridge: selectedBridge, promise: null };
         probe.promise = Promise.resolve().then(() => probe.bridge.status()).then(safeCodexStatus)
           .finally(() => { if (codexStatusProbe === probe) codexStatusProbe = null; });
         codexStatusProbe = probe;
@@ -110,7 +113,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   };
   const redactCodex = value => {
     if (typeof value === 'string') {
-      for (const key of new Set([state.codexConfig.apiKey, ...state.providers.map(provider => provider.apiKey)].filter(Boolean))) value = value.split(key).join('[已隐藏]');
+      for (const key of new Set([state.codexConfig.apiKey, ...state.providers.map(provider => provider.apiKey), ...officialProviders.secrets].filter(Boolean))) value = value.split(key).join('[已隐藏]');
       return value;
     }
     if (Array.isArray(value)) return value.map(redactCodex);
@@ -189,7 +192,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const isOwner = user => user.id === state.ownerId;
   const settingsFor = user => isOwner(user) ? state.settings : user.settings;
   const canUseProvider = (user, id) => isAdministrator(user) || user.providerIds.includes(id);
-  const visibleProvider = (provider, user) => ({ ...publicProvider(provider), editable: isAdministrator(user), testable: true });
+  const visibleProvider = (provider, user) => isOfficialProvider(provider) ? publicOfficialProvider(provider) : ({ ...publicProvider(provider), editable: isAdministrator(user), testable: true });
   const visibleUser = user => publicUser(user, state.ownerId);
   const managedUser = user => ({ ...visibleUser(user), disabled: user.disabled, providerIds: isAdministrator(user) ? state.providers.map(provider => provider.id) : [...user.providerIds], hasPassword: Boolean(user.password), createdAt: user.createdAt });
   const requireAdmin = user => { if (!isAdministrator(user)) throw failure(403, '仅管理员可管理账号和模型。'); };
@@ -216,17 +219,45 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     return { userId: user.id, sessionHash, bootstrap };
   };
   const conversationById = (id, user) => { const result = state.conversations.find(item => item.id === id && item.userId === user.id); if (!result) throw failure(404, '会话不存在。'); return result; };
-  const providerById = (id, user) => { const result = state.providers.find(item => item.id === id && canUseProvider(user, item.id)); if (!result) throw failure(404, '模型连接不存在或未获授权。'); return result; };
-  const eligibleProviders = user => state.providers.filter(provider => canUseProvider(user, provider.id) && state.codexConfig.mode === 'api' && state.codexConfig.baseUrl && provider.protocol === 'responses' && normalizeBaseUrl(provider.baseUrl, 'responses') === normalizeBaseUrl(state.codexConfig.baseUrl, 'responses')).map(provider => provider.id);
-  const reviewProviders = user => state.providers.filter(provider => canUseProvider(user, provider.id) && provider.protocol === 'responses').map(provider => provider.id);
+  const providersFor = user => [...state.providers.filter(provider => canUseProvider(user, provider.id)), ...officialProviders.forUser(user.id)];
+  const providerById = (id, user, { existing = false } = {}) => {
+    const result = providersFor(user).find(item => item.id === id) ?? (existing ? officialAccounts?.providerFor?.(user.id, id) : undefined);
+    if (!result) throw failure(404, '模型连接不存在或未获授权。');
+    if (isOfficialProvider(result) && result.apiKey) officialProviders.secrets.add(result.apiKey);
+    return result;
+  };
+  const eligibleProviders = user => providersFor(user).filter(provider => isOfficialProvider(provider) || state.codexConfig.mode === 'api' && state.codexConfig.baseUrl && provider.protocol === 'responses' && normalizeBaseUrl(provider.baseUrl, 'responses') === normalizeBaseUrl(state.codexConfig.baseUrl, 'responses')).map(provider => provider.id);
+  const reviewProviders = user => providersFor(user).filter(provider => provider.protocol === 'responses').map(provider => provider.id);
+  const agentConfigFor = (userId, providerId, { existing = false } = {}) => {
+    const provider = providerId && (officialProviders.forUser(userId).find(item => item.id === providerId) ?? (existing ? officialAccounts?.providerFor?.(userId, providerId) : undefined));
+    return provider ? officialProviders.config(provider, userId, state.codexConfig.revision) : state.codexConfig;
+  };
+  const getAgentConfig = entry => agentConfigFor(entry?.auth?.userId, entry?.providerId, { existing: true });
+  const getConfigForUser = userId => {
+    if (state.codexConfig.mode === 'api' && state.codexConfig.model && state.codexConfig.baseUrl) return state.codexConfig;
+    const provider = officialProviders.forUser(userId)[0];
+    return provider ? officialProviders.config(provider, userId, state.codexConfig.revision) : state.codexConfig;
+  };
+  const getAgentBridge = entry => {
+    const config = getAgentConfig(entry);
+    if (config === state.codexConfig) return bridge;
+    let scoped = officialBridges.get(config.revision);
+    if (!scoped) { scoped = { bridge: createBridge(config), userId: entry.auth.userId, providerId: entry.providerId }; officialBridges.set(config.revision, scoped); }
+    return scoped.bridge;
+  };
+  const statusScope = user => {
+    const configuredApi = state.codexConfig.mode === 'api' && state.codexConfig.model && state.codexConfig.baseUrl;
+    const provider = !configuredApi && officialProviders.forUser(user.id)[0];
+    return provider ? { bridge: getAgentBridge({ auth: { userId: user.id }, providerId: provider.id }), publicConfig: { ...publicCodexConfig(state.codexConfig), mode: 'api', baseUrl: 'https://api.openai.com/v1', model: provider.model, reasoningEffort: provider.reasoningEffort || '', hasApiKey: false, configured: true, source: 'official-account' } } : { bridge, publicConfig: publicCodexConfig(state.codexConfig) };
+  };
   const userCodexStatus = async user => {
     if (!visibleUser(user).canUseCodex) return { available: false, running: false, disabled: true, eligibleProviderIds: [], approvalReviewProviderIds: [], message: '此账号尚未获管理员授权使用 Agent。' };
-    const status = redactCodex(await readCodexStatus());
-    return { ...(isAdministrator(user) ? status : { available: status.available, running: status.running, authenticated: status.authenticated, configured: status.configured, error: status.error, message: status.message, ...(status.approvalReview ? { approvalReview: status.approvalReview } : {}) }), ...publicCodexConfig(state.codexConfig), eligibleProviderIds: eligibleProviders(user), approvalReviewProviderIds: reviewProviders(user) };
+    const scope = statusScope(user), status = redactCodex(await readCodexStatus(scope.bridge));
+    return { ...(isAdministrator(user) ? status : { available: status.available, running: status.running, authenticated: status.authenticated, configured: status.configured, error: status.error, message: status.message, ...(status.approvalReview ? { approvalReview: status.approvalReview } : {}) }), ...scope.publicConfig, eligibleProviderIds: eligibleProviders(user), approvalReviewProviderIds: reviewProviders(user) };
   };
   const userCodexMetadata = user => {
     if (!visibleUser(user).canUseCodex) return { available: false, running: false, disabled: true, eligibleProviderIds: [], approvalReviewProviderIds: [], message: '此账号尚未获管理员授权使用 Agent。' };
-    return { ...publicCodexConfig(state.codexConfig), available: false, running: false, authenticated: false,
+    return { ...statusScope(user).publicConfig, available: false, running: false, authenticated: false,
       pending: true, message: 'Agent 运行状态尚未检测，进入 Agent 后检查。',
       eligibleProviderIds: eligibleProviders(user), approvalReviewProviderIds: reviewProviders(user) };
   };
@@ -238,7 +269,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       const automationResults = new Set(state.automations.jobs.filter(job => job.userId === user.id).flatMap(job => job.runs.map(run => run.conversationId).filter(Boolean)));
       conversations = state.conversations.filter(item => item.userId === user.id && (!item.automationId || !automationResults.has(item.id))).map(visibleConversation);
     }
-    return { instanceId: state.instanceId, user: visibleUser(user), settings: settingsFor(user), providers: state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider => visibleProvider(provider, user)), projects: state.projects.filter(project => project.userId === user.id).map(visibleProject), conversations, codex: runtime === 'deferred' ? userCodexMetadata(user) : await userCodexStatus(user) };
+    return { instanceId: state.instanceId, user: visibleUser(user), settings: settingsFor(user), providers: providersFor(user).map(provider => visibleProvider(provider, user)), projects: state.projects.filter(project => project.userId === user.id).map(visibleProject), conversations, codex: runtime === 'deferred' ? userCodexMetadata(user) : await userCodexStatus(user) };
   };
   const assertAvailable = id => {
     if (!state.conversations.some(item => item.id === id)) throw failure(404, '会话不存在。');
@@ -250,10 +281,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const related = [conversation, ...state.conversations.filter(item => item.backgroundParentId === conversation.id && item.userId === conversation.userId)];
     if (related.some(item => active.has(item.id) || item.agent?.queue?.length || ['running', 'stopping', 'unknown'].includes(item.agent?.run?.status) || item.agent?.submissions?.some(entry => ['queued', 'running', 'dispatching', 'uncertain'].includes(entry.status))) || conversation.assistantTasks?.some(item => ['deciding', 'queued', 'running', 'unknown'].includes(item.status))) throw failure(409, '这个会话仍有执行中、排队或状态未知的任务，请先停止任务并确认执行电脑已结束，再删除。');
   };
-  const stopTasks = async predicate => {
+  const stopTasks = async (predicate, options) => {
     asr.revoke(predicate);
     executors.revoke(predicate);
-    const agentStopped = agentTasks.revoke(predicate);
+    const agentStopped = agentTasks.revoke(predicate, options);
     const notificationsStopped = notifications.revoke(predicate);
     const stoppedProbes = [...probes].filter(predicate);
     for (const probe of stoppedProbes) probe.controller.abort(new DOMException('账号权限已变更。', 'AbortError'));
@@ -261,7 +292,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     for (const task of tasks) task.controller.abort(new DOMException('登录或模型权限已撤销。', 'AbortError'));
     await Promise.all([agentStopped, notificationsStopped, chatAssistant.revoke(predicate), ...[...tasks, ...stoppedProbes].map(task => task.done)]);
   };
-  const resolveAgentModel = (userId, providerId) => {
+  const resolveAgentModel = (userId, providerId, { existing = false } = {}) => {
     const user = state.users.find(item => item.id === userId); if (!user) throw failure(401, '账号不可用。');
     if (configChanging) throw failure(409, 'Agent 配置正在切换。');
     const config = state.codexConfig;
@@ -269,19 +300,19 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       if (!isAdministrator(user)) throw failure(403, '请选择管理员已分配给此账号的 Agent 模型。');
       return { model: config.model || '', effort: config.reasoningEffort || '', codexRevision: config.revision };
     }
-    const provider = providerById(providerId, user);
-    if (!eligibleProviders(user).includes(provider.id)) throw failure(400, 'Agent 模型必须来自当前同一 Responses 服务；其他连接仍可用于 Chat。');
-    return { model: provider.model, effort: provider.reasoningEffort || '', codexRevision: config.revision };
+    const provider = providerById(providerId, user, { existing });
+    if (!isOfficialProvider(provider) && !eligibleProviders(user).includes(provider.id)) throw failure(400, 'Agent 模型必须来自当前同一 Responses 服务；其他连接仍可用于 Chat。');
+    return { model: provider.model, effort: provider.reasoningEffort || '', codexRevision: agentConfigFor(user.id, provider.id, { existing }).revision };
   };
   // Persist only an opaque configuration fingerprint. Provider credentials are
   // resolved again at dispatch and every native reviewer request.
-  const resolveAgentReview = (userId, value) => {
+  const resolveAgentReview = (userId, value, { existing = false } = {}) => {
     const permissions = normalizeAgentPermissions(value);
     if (permissions.approval !== 'review' || !permissions.reviewProviderId) return {};
     const user = state.users.find(item => item.id === userId);
     if (!user || user.disabled) throw failure(401, '账号不可用。');
-    const provider = providerById(permissions.reviewProviderId, user);
-    if (state.codexConfig.mode !== 'api') throw failure(400, '独立命令审查模型需要 Responses API 模式。');
+    const provider = providerById(permissions.reviewProviderId, user, { existing });
+    if (state.codexConfig.mode !== 'api' && !officialProviders.forUser(userId).length && !(existing && officialAccounts)) throw failure(400, '独立命令审查模型需要 Responses API 模式。');
     if (provider.protocol !== 'responses') throw failure(400, '命令审查模型需要 Responses 连接。');
     const reviewFingerprint = createHash('sha256').update(JSON.stringify({ providerId: provider.id, protocol: provider.protocol, baseUrl: normalizeBaseUrl(provider.baseUrl, 'responses'), model: provider.model, apiKey: provider.apiKey || '', effort: provider.reasoningEffort || '' })).digest('hex');
     return { reviewModel: provider.model, reviewFingerprint };
@@ -313,17 +344,18 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       if (!conversation || conversation.mode !== 'codex' || conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Agent 会话已删除或配置已变化，请新建会话。');
       assertAvailable(conversation.id);
       imageAttachments.metadata(user.id, entry.attachmentIds);
-      assertImageSupport(entry.providerId ? providerById(entry.providerId, user) : state.codexConfig, [...conversation.messages, entry]);
-      const current = resolveAgentModel(user.id, entry.providerId);
+      assertImageSupport(entry.providerId ? providerById(entry.providerId, user, { existing: true }) : state.codexConfig, [...conversation.messages, entry]);
+      const current = resolveAgentModel(user.id, entry.providerId, { existing: true });
       if (entry.codexRevision !== current.codexRevision || entry.model !== current.model || entry.effort !== current.effort) throw failure(409, 'Agent 模型配置已变化，请重新提交。');
-      const review = resolveAgentReview(user.id, entry.permissions);
+      if (entry.permissions.approval === 'review' && entry.permissions.reviewProviderId && getAgentConfig(entry).mode !== 'api') throw failure(400, '独立命令审查模型需要所选 Agent 使用 Responses API 模式。');
+      const review = resolveAgentReview(user.id, entry.permissions, { existing: true });
       if (entry.reviewModel !== review.reviewModel || entry.reviewFingerprint !== review.reviewFingerprint) throw failure(409, '命令审查模型配置已变化，请重新提交。', 'review_config_changed');
       return expiresAt;
   };
   const getAgentReviewConfig = entry => {
     authorizeAgentEntry(entry);
     if (entry.permissions.approval !== 'review' || !entry.permissions.reviewProviderId) return undefined;
-    const user = state.users.find(item => item.id === entry.auth.userId), provider = providerById(entry.permissions.reviewProviderId, user);
+    const user = state.users.find(item => item.id === entry.auth.userId), provider = providerById(entry.permissions.reviewProviderId, user, { existing: true });
     return { model: provider.model, baseUrl: normalizeBaseUrl(provider.baseUrl, 'responses'), apiKey: provider.apiKey || '', providerId: provider.id, reasoningEffort: provider.reasoningEffort || '' };
   };
   const authorizeExecutorSession = auth => {
@@ -333,7 +365,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (!user || user.disabled || (!bootstrap && !session)) throw failure(401, '执行电脑登录已结束。');
     requireCodex(user);
   };
-  const executors = createExecutors({ ...executorsOptions, store, authorizeSession: authorizeExecutorSession, authorizeEntry: authorizeAgentEntry, readAttachment: imageAttachments.read, getConfig: () => state.codexConfig, getReviewConfig: getAgentReviewConfig, redact: redactCodex,
+  const executors = createExecutors({ ...executorsOptions, store, authorizeSession: authorizeExecutorSession, authorizeEntry: authorizeAgentEntry, readAttachment: imageAttachments.read, getConfig: getAgentConfig, getConfigForUser, getReviewConfig: getAgentReviewConfig, redact: redactCodex,
     automationTool: (name, args, call) => { authorizeAgentEntry(call.entry); return executeAutomationTool(automations, call.entry, name, args, call); },
   });
   const notifications = createNotificationService({ store, authorize: auth => {
@@ -342,21 +374,22 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const issued = auth.bootstrap ? 0 : Date.parse(state.sessions.find(session => session.tokenHash === auth.sessionHash).createdAt);
     return { ...identity, sourceCreatedAt: Number.isFinite(issued) ? issued : 0 };
   } });
-  const agentTasks = createAgentTasks({ store, active, approvals, getBridge: entry => entry?.hostId && entry.hostId !== 'central' ? new RemoteCodexBridge(executors, entry) : bridge, redact: redactCodex, resolveModel: resolveAgentModel, resolveReview: resolveAgentReview, getReviewConfig: getAgentReviewConfig, resolveImages: imageAttachments.images, resolveHost: executors.target,
+  const agentTasks = createAgentTasks({ store, active, approvals, getBridge: entry => entry?.hostId && entry.hostId !== 'central' ? new RemoteCodexBridge(executors, entry) : getAgentBridge(entry), redact: redactCodex, resolveModel: resolveAgentModel, resolveReview: resolveAgentReview, getReviewConfig: getAgentReviewConfig, resolveImages: imageAttachments.images, resolveHost: executors.target,
     resolveProject: (userId, hostId, value) => {
       const host = executors.hostFor(userId, hostId), projectDirectory = normalizeProjectDirectory(value, host.platform);
       if (!projectDirectory) return {};
       executors.target(userId, hostId, projectDirectory);
       return { projectDirectory, projectAccess: 'full' };
     },
-    authorize: entry => { const expiresAt = authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId ?? 'central', entry.projectDirectory, entry.permissions); return expiresAt; },
+    authorize: entry => { const expiresAt = authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId ?? 'central', entry.projectDirectory, entry.permissions, entry); return expiresAt; },
     authorizeRemoval: entry => authorizeAgentIdentity(entry.auth).expiresAt,
   });
   const authorizeAutomation = (userId, spec, { online, dispatch = false }) => {
     const user = state.users.find(item => item.id === userId);
     if (!user || user.disabled) throw failure(401, '自动化账号已失效。');
     requirePermissions(user, spec.permissions);
-    if (state.codexConfig.mode !== 'api' || !state.codexConfig.model) throw failure(409, '自动化需要配置可用的 Responses Agent 模型。');
+    const config = agentConfigFor(userId, spec.providerId);
+    if (config.mode !== 'api' || !config.model) throw failure(409, '自动化需要配置可用的 Responses Agent 模型。');
     resolveAgentModel(userId, spec.providerId);
     resolveAgentReview(userId, spec.permissions);
     const host = executors.hostFor(userId, spec.hostId);
@@ -441,6 +474,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       requirePermissions(user, options.permissions);
       if (!state.conversations.includes(conversation) || conversation.userId !== user.id || conversation.mode !== 'chat') throw failure(404, '后台任务所属聊天不存在。');
       resolveAgentModel(user.id, options.providerId);
+      if (options.permissions.approval === 'review' && options.permissions.reviewProviderId && agentConfigFor(user.id, options.providerId).mode !== 'api') throw failure(400, '独立命令审查模型需要所选 Agent 使用 Responses API 模式。');
       resolveAgentReview(user.id, options.permissions);
       executors.hostFor(user.id, options.hostId);
       const host = executors.list(user.id).find(host => host.id === options.hostId);
@@ -825,6 +859,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     requireAdmin(req.user);
     const body = req.body ?? {};
     const existing = body.id === undefined ? undefined : providerById(string(body.id, '连接 ID', 128), req.user);
+    if (isOfficialProvider(existing)) throw failure(400, '官方模型由本人官方账号管理，不能修改为 API 连接。');
     if (!existing && state.providers.length >= 32) throw failure(400, '最多保存 32 个模型连接。');
     const protocol = body.protocol ?? existing?.protocol;
     if (!['chat-completions', 'responses'].includes(protocol)) throw failure(400, '协议必须是 chat-completions 或 responses。');
@@ -846,6 +881,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.delete('/api/providers/:id', async (req, res) => {
     requireAdmin(req.user);
     const provider = providerById(req.params.id, req.user);
+    if (isOfficialProvider(provider)) throw failure(400, '请在官方账号设置中退出或切换账号。');
     if ([...active.values()].some(task => task.providerId === provider.id || task.reviewProviderId === provider.id)) throw failure(409, '此模型正在回复或审查，请先停止。');
     state.providers.splice(state.providers.indexOf(provider), 1);
     const affected = new Set(state.users.filter(user => !isOwner(user) && user.providerIds.includes(provider.id)).map(user => user.id));
@@ -1051,6 +1087,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       if (conversation.agent?.run?.status === 'unknown') throw failure(409, '上次远程执行状态未知，本会话不会开始新任务。');
       if ([conversation.agentHostId, conversation.threadHostId, ...conversation.agent?.queue?.map(entry => entry.hostId) ?? []].some(hostId => hostId && hostId !== 'central')) throw failure(409, '这个会话包含桌面执行任务，请使用支持执行电脑选择的 Agent 客户端。');
       if (req.body.projectDirectory || conversation.agentProjectDirectory || conversation.threadProjectDirectory || conversation.agent?.queue?.some(entry => entry.projectDirectory)) throw failure(409, '这个会话包含项目目录，请使用支持项目目录的 Agent 客户端提交。');
+      if (conversation.threadCodexRevision && conversation.threadCodexRevision !== state.codexConfig.revision) throw failure(409, '这个会话使用个人官方模型，请通过支持模型选择的 Agent 任务入口继续。');
       if (configChanging) throw failure(409, 'Codex 配置正在切换，请稍后重试。');
       if (conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Codex 配置已变化；为避免跨接口或凭据恢复旧任务，请新建工作会话。');
     }
@@ -1068,7 +1105,9 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const controller = new AbortController();
     let finish;
     const done = new Promise(resolve => { finish = resolve; });
-    const task = { controller, done, mode: conversation.mode, userId: req.user.id, sessionHash: req.sessionHash, providerId: provider?.id ?? null, approvalIds: new Set() };
+    const task = { controller, done, mode: conversation.mode, userId: req.user.id, sessionHash: req.sessionHash, providerId: provider?.id ?? null, approvalIds: new Set(),
+      ...(collaborationOptions ? { assistantProviderId: collaborationOptions.providerId,
+        ...(collaborationOptions.permissions.approval === 'review' ? { assistantReviewProviderId: collaborationOptions.permissions.reviewProviderId } : {}) } : {}) };
     active.set(conversation.id, task);
     const user = { id: randomUUID(), role: 'user', content, ...(attachmentIds.length ? { attachmentIds } : {}), status: 'complete', createdAt: now() };
     const assistant = { id: randomUUID(), role: 'assistant', content: '', status: 'streaming', createdAt: now(), ...(provider ? { model: provider.model } : {}) };
@@ -1084,7 +1123,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     };
     const onEvent = (event, data) => {
       if (controller.signal.aborted) return;
-      if (event === 'thread') { conversation.threadId = data.threadId; conversation.threadHostId = 'central'; conversation.agentHostId = 'central'; return; }
+      if (event === 'thread') { conversation.threadId = data.threadId; conversation.threadCodexRevision = state.codexConfig.revision; conversation.threadHostId = 'central'; conversation.agentHostId = 'central'; return; }
       if (event === 'approval' && typeof data?.id === 'string') {
         approvals.set(data.id, { userId: req.user.id, conversationId: conversation.id, task, kind: data.kind, description: data.description }); task.approvalIds.add(data.id);
       }
@@ -1137,7 +1176,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
           } } : {}) });
       if (collaboration) await chatAssistant.finishDecision(collaboration.record);
       controller.signal.throwIfAborted();
-      if (result.threadId) { conversation.threadId = result.threadId; conversation.threadHostId = 'central'; conversation.agentHostId = 'central'; }
+      if (result.threadId) { conversation.threadId = result.threadId; conversation.threadCodexRevision = state.codexConfig.revision; conversation.threadHostId = 'central'; conversation.agentHostId = 'central'; }
       if (!assistant.content && result.text) { assistant.content = result.text; send('delta', { text: result.text }); }
       assistant.status = 'complete'; conversation.updatedAt = now();
       await store.save(); send('done', { conversation: visibleConversation(conversation), assistantMessageId: assistant.id });
@@ -1259,7 +1298,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     for (const probe of probes) probe.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     for (const task of active.values()) task.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     if (configSwap) await configSwap.catch(() => {});
-    const results = await Promise.allSettled([notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), codexStatusProbe?.promise.catch(() => {}), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
+    const results = await Promise.allSettled([notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), ...[...officialBridges.values()].map(item => item.bridge.close()), codexStatusProbe?.promise.catch(() => {}), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
     let saveError;
     try { await store.queue; } catch (error) { saveError = error; }
     finally { for (const listener of closingListeners) listener.closeAllConnections(); await httpClosed; }
@@ -1268,5 +1307,17 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (saveError) throw saveError;
   })();
   if (automationOptions?.autoStart !== false) await automations.start();
-  return { server, token: accessToken, close, updates, hosting, automations };
+  const officialAccountChanged = async (userId, { identityChanged = false, previousProviderIds = [] } = {}) => {
+    if (!officialAccounts || shuttingDown) return;
+    officialProviders.forUser(userId);
+    if (!identityChanged) return;
+    const revoked = new Set(previousProviderIds);
+    // Identity transitions must not end unrelated API work, executor sessions,
+    // or the small companion's login. Only this account's old capabilities end.
+    const matches = task => task.userId === userId && [task.providerId, task.reviewProviderId, task.assistantProviderId, task.assistantReviewProviderId].some(id => revoked.has(id));
+    const closing = [...officialBridges.entries()].filter(([, value]) => value.userId === userId);
+    for (const [revision] of closing) officialBridges.delete(revision);
+    await Promise.all([stopTasks(matches, { invalidateSession: false }), ...closing.map(([, value]) => value.bridge.close())]);
+  };
+  return { server, token: accessToken, close, updates, hosting, automations, officialAccountChanged };
 }

@@ -48,6 +48,43 @@ test('registration validates fields, platform and persisted ownership',async t=>
   const corrupt=structuredClone(f.store.state);corrupt.executionHosts[0].userId='foreign';assert.throws(()=>validateExecutionHosts(corrupt));
 });
 
+test('personal official configuration supports remote execution without sharing its gateway credentials',async t=>{
+  const personal={mode:'api',model:'official-model',revision:randomUUID(),baseUrl:'http://127.0.0.1:43219/v1',apiKey:'private-personal-gateway-secret'};
+  const hostConfig={mode:'host',revision:randomUUID()}, upstream=[];
+  let owner, active=true, visible=true;
+  const f=fixture(t,{
+    getConfig:entry=>entry?.auth.userId===owner && active ? personal : hostConfig,
+    getConfigForUser:userId=>userId===owner && active && visible ? personal : hostConfig,
+    fetchImpl:async(url,init)=>{upstream.push({url,init});return new Response('event: response.completed\ndata: {"type":"response.completed","response":{"id":"official-fixture","status":"completed","output":[]}}\n\n',{headers:{'Content-Type':'text/event-stream'}});},
+  });
+  owner=f.userId;
+  const registered=await f.registration(),other=await f.manager.register({...f.auth,userId:f.otherUserId},{deviceId:randomUUID(),name:'Other PC',platform:'linux',arch:'x64'});
+  assert.equal(f.manager.list(owner)[0].codex.configured,true);
+  assert.equal(f.manager.list(f.otherUserId)[0].codex.configured,false);
+  assert.throws(()=>f.manager.target(f.otherUserId,other.hostId),{status:409});
+  assert.throws(()=>f.manager.target(f.otherUserId,registered.hostId),{status:403});
+  const item={...f.entry(registered.hostId),model:personal.model,codexRevision:personal.revision};
+  const controller=new AbortController(),bridge=f.manager.bind(item);
+  const completion=bridge.run({conversationId:item.conversationId,prompt:'official remote fixture',signal:controller.signal});completion.catch(()=>{});
+  const command=(await f.manager.poll(registered.connectionId,f.auth)).commands[0];
+  assert.equal(command.model,personal.model);
+  assert.doesNotMatch(JSON.stringify(command)+JSON.stringify(f.manager.list(owner)),/private-personal-gateway-secret|43219|apiKey/);
+  f.manager.events(registered.connectionId,f.auth,{runId:item.id,sequence:1,event:'started',data:{}});
+  const req={params:{connectionId:registered.connectionId,runId:item.id},headers:{authorization:`Bearer ${command.relayToken}`},body:Buffer.from(JSON.stringify({model:personal.model,stream:true,input:'hello'}))};
+  const res=()=>Object.assign(new EventEmitter(),{writableEnded:false,headersSent:false,status(){return this;},set(){this.headersSent=true;return this;},json(){return this;},write(){return true;},end(){this.writableEnded=true;},destroy(){this.writableEnded=true;}});
+  visible=false; // A temporary catalog failure hides choices for new tasks.
+  assert.throws(()=>f.manager.target(owner,registered.hostId),{status:409});
+  assert.doesNotThrow(()=>f.manager.target(owner,registered.hostId,undefined,undefined,item));
+  await f.manager.relay(req,res()); // The already authorized run keeps its grant.
+  assert.equal(upstream[0].url,personal.baseUrl+'/responses');
+  assert.equal(upstream[0].init.headers.Authorization,'Bearer '+personal.apiKey);
+  active=false;
+  await assert.rejects(f.manager.relay(req,res()),{status:409});
+  assert.equal(upstream.length,1);
+  controller.abort();
+  await assert.rejects(completion);
+});
+
 test('review capability follows the live connection and old clients cannot receive review tasks',async t=>{
   const f=fixture(t),deviceId=randomUUID();
   const modern=await f.registration({deviceId,capabilities:{projectDirectory:true,approvalReview:true}});

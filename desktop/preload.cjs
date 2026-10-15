@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld('petpal', Object.freeze({
     select: profileId => officialAccountCall('select', profileId),
     logout: () => officialAccountCall('logout'),
     refresh: () => officialAccountCall('refresh'),
+    resumeUsage: () => officialAccountCall('resumeUsage'),
   }),
   remoteRequest,
   remoteAbort: id => ipcRenderer.invoke('petpal:remote:abort', id),

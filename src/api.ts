@@ -20,7 +20,7 @@ export type AutomationCatalog = {allowAgentCreate:boolean;automations:Automation
 export type User = { id:string; username:string; displayName:string; role:'user'|'admin'; isAdmin:boolean; isOwner:boolean; canUseCodex:boolean; agentAccess:AgentAccess };
 export type ManagedUser = User & { disabled:boolean; providerIds:string[]; hasPassword:boolean };
 export type ReasoningEffort = '' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
-export type Provider = { id: string; name: string; protocol: 'chat-completions' | 'responses'; baseUrl: string; model: string; reasoningEffort?:ReasoningEffort; hasApiKey: boolean; editable?:boolean; testable?:boolean; supportsImages?:boolean };
+export type Provider = { id: string; name: string; protocol: 'chat-completions' | 'responses'; baseUrl: string; model: string; reasoningEffort?:ReasoningEffort; hasApiKey: boolean; editable?:boolean; testable?:boolean; supportsImages?:boolean; source?:'official-account' };
 export type Attachment = {id:string;mimeType:string;name:string;size:number;width:number;height:number};
 export type DownloadPackage = {
   id:string;platform:'android'|'windows'|'ubuntu';arch:'universal'|'x64'|'arm64';version:string;channel:'stable'|'preview';
@@ -64,8 +64,13 @@ export type StreamEvent = { type: string; data: Record<string, any> };
 export type Identity = {instanceId:string;userId:string};
 export type NativeExecutorStatus = {state:'disconnected'|'connecting'|'reconnecting'|'online'|'error';hostId?:string;name:string;platform:string;arch:string;error?:string;retryable?:boolean;retryAt?:number};
 export type NativeExecutor = {connect(input:Connection & Identity):Promise<NativeExecutorStatus>;disconnect():Promise<void>;status():Promise<NativeExecutorStatus>};
+export type OfficialAccountModel = {id:string;model:string;displayName:string;supportsImages:boolean};
+export type OfficialAccountProfile = {id:string;email:string;label:string;signedIn:boolean;planUsageEnabled:boolean};
+export type OfficialAccountUsage = {state:'unverified'|'available'|'limit-reached'|'temporarily-unavailable'|'not-eligible';checkedAt:string|null;lastModel:string|null;completedRequests:number;inputTokens:number;outputTokens:number;totalTokens:number};
+export type OfficialAccountStatus = {supported:true;state:'signed-out'|'signing-in'|'signed-in';activeProfileId:string|null;planUsageEnabled:boolean;profiles:OfficialAccountProfile[];models:OfficialAccountModel[];modelsLoading?:boolean;error?:string;modelsError?:string;usage?:OfficialAccountUsage};
+export type OfficialAccountBridge = {status():Promise<OfficialAccountStatus>;start(input?:{profileId?:string}):Promise<OfficialAccountStatus>;cancel():Promise<OfficialAccountStatus>;select(profileId:string):Promise<OfficialAccountStatus>;logout():Promise<OfficialAccountStatus>;refresh():Promise<OfficialAccountStatus>;resumeUsage?():Promise<OfficialAccountStatus>};
 declare global {
-  interface Window { petpal?: { connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; remoteAck?(id:string,sequence:number):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; preferences?:PreferencesBridge; centralServer?:CentralServerBridge; updates?:DesktopUpdates; executor?:NativeExecutor; musicMcp?:DesktopMusicMcp }; }
+  interface Window { petpal?: { connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; remoteAck?(id:string,sequence:number):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; preferences?:PreferencesBridge; centralServer?:CentralServerBridge; updates?:DesktopUpdates; executor?:NativeExecutor; musicMcp?:DesktopMusicMcp; officialAccount?:OfficialAccountBridge }; }
 }
 const requests = createRequestScope();
 const listeners = new Set<()=>void>();

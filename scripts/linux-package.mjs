@@ -28,6 +28,7 @@ requiredApplicationSource.push('server/executors.mjs', 'server/remote-codex.mjs'
 requiredApplicationSource.push('server/conversation-organization.mjs', 'server/chat-assistant.mjs', 'server/automation-schema.mjs', 'server/automation-tools.mjs', 'server/automations.mjs');
 requiredApplicationSource.push('desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs');
 requiredApplicationSource.push('desktop/official-auth.mjs', 'desktop/official-account.mjs', 'desktop/official-account-ipc.cjs');
+requiredApplicationSource.push('server/official-providers.mjs');
 requiredApplicationSource.push('server/native/codex-review/models-0.143.0.json', 'server/native/codex-review/LICENSE', 'server/native/codex-review/PROVENANCE.json', 'server/native/codex-review/SHA256SUMS');
 requiredApplicationSource.push('server/approval-review.mjs', 'server/system-controls.mjs', 'server/native/system-windows.ps1');
 requiredApplicationSource.push('desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs');

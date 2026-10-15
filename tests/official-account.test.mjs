@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { OfficialAccounts, officialRequestBody } from '../desktop/official-account.mjs';
+import { streamProvider } from '../server/providers.mjs';
+import { CodexBridge, resolveBundledCodex } from '../server/codex.mjs';
+import { defaultCodexConfig, patchCodexConfig } from '../server/codex-config.mjs';
 
 const terminal = 'event: response.completed\ndata: {"type":"response.completed","response":{"status":"completed","output":[]}}\n\n';
 const listed = (slug = 'official-one', extra = {}) => ({ slug, display_name: `官方 ${slug}`, visibility: 'list', input_modalities: ['text', 'image'], ...extra });
@@ -71,18 +77,88 @@ test('responses uses fixed public endpoint, bounded fields, developer input and 
   assert.equal(call.url, 'https://api.openai.com/v1/responses'); assert.equal(call.init.redirect, 'error'); assert.equal(call.init.headers.Authorization, 'Bearer access-secret-alice');
   assert.equal(body.input[0].role, 'developer'); assert.equal(body.store, false); assert.equal(body.stream, true); assert.equal(body.instructions, 'persona');
   for (const field of ['temperature', 'top_p', 'max_output_tokens', 'previous_response_id', 'metadata', 'prompt_cache_key', 'client_metadata']) assert.equal(Object.hasOwn(body, field), false);
-  assert.deepEqual(body.tools, [{ type: 'namespace', name: 'petpal', tools: [{ type: 'function', name: 'run_agent', parameters: { type: 'object' }, strict: true }] }]);
+  assert.equal(body.tools[0].type, 'namespace'); assert.equal(body.tools[0].name, 'petpal'); assert.match(body.tools[0].description, /PetPal/);
+  assert.deepEqual(body.tools[0].tools, [{ type: 'function', name: 'run_agent', parameters: { type: 'object' }, strict: true }]);
   assert.equal(call.init.headers.Cookie, undefined);
 });
 
 test('existing namespaces survive; hosted tools and malformed tool choices are rejected', () => {
   const models = [{ model: 'one' }], make = tools => ({ model: 'one', input: [], tools });
-  const namespace = { type: 'namespace', name: 'functions', tools: [{ type: 'custom', name: 'apply_patch', format: { type: 'text' } }] };
+  const namespace = { type: 'namespace', name: 'functions', description: 'Caller-owned namespace', tools: [{ type: 'custom', name: 'apply_patch', format: { type: 'text' } }] };
   assert.deepEqual(officialRequestBody(make([namespace]), models).tools, [namespace]);
   for (const tool of [{ type: 'web_search' }, { type: 'mcp', server_url: 'https://untrusted.invalid' }, { type: 'tool_search' }, { type: 'namespace', name: 'x', tools: [{ type: 'mcp' }] }]) assert.throws(() => officialRequestBody(make([tool]), models), /工具/);
   assert.throws(() => officialRequestBody({ ...make([]), tool_choice: { type: 'web_search' } }, models), /工具/);
   assert.throws(() => officialRequestBody({ ...make([]), tool_choice: { type: 'allowed_tools', mode: 'auto', tools: [{ type: 'mcp', server_url: 'https://untrusted.invalid' }] } }, models), /工具/);
   assert.throws(() => officialRequestBody(make([{ type: 'function', name: 'same' }, { type: 'function', name: 'same' }]), models), /重复/);
+});
+
+const event = (type, value) => `event: ${type}\ndata: ${JSON.stringify({ type, ...value })}\n\n`;
+function toolResponse(name, args, namespace = 'petpal') {
+  const item = { id: 'fc_official_fixture', type: 'function_call', call_id: 'call_official_fixture', name, namespace, arguments: JSON.stringify(args), status: 'completed' };
+  return event('response.created', { response: { id: 'resp_tool_fixture', status: 'in_progress', output: [] } }) + event('response.output_item.added', { output_index: 0, item: { ...item, arguments: '', status: 'in_progress' } }) + event('response.function_call_arguments.delta', { item_id: item.id, output_index: 0, delta: item.arguments }) + event('response.function_call_arguments.done', { item_id: item.id, output_index: 0, arguments: item.arguments }) + event('response.output_item.done', { output_index: 0, item }) + event('response.completed', { response: { id: 'resp_tool_fixture', status: 'completed', output: [item] } });
+}
+function messageResponse(text) {
+  const item = { id: 'msg_official_fixture', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] };
+  return event('response.created', { response: { id: 'resp_message_fixture', status: 'in_progress', output: [] } }) + event('response.output_item.added', { output_index: 0, item: { ...item, content: [], status: 'in_progress' } }) + event('response.content_part.added', { item_id: item.id, output_index: 0, content_index: 0, part: { type: 'output_text', text: '', annotations: [] } }) + event('response.output_text.delta', { item_id: item.id, output_index: 0, content_index: 0, delta: text }) + event('response.output_text.done', { item_id: item.id, output_index: 0, content_index: 0, text }) + event('response.content_part.done', { item_id: item.id, output_index: 0, content_index: 0, part: item.content[0] }) + event('response.output_item.done', { output_index: 0, item }) + event('response.completed', { response: { id: 'resp_message_fixture', status: 'completed', output: [item] } });
+}
+
+test('synthetic namespaces project only flat function/custom calls and preserve all IDs and caller-owned history', async t => {
+  const models = [{ model: 'one' }], tools = [{ type: 'namespace', name: 'petpal', description: 'Original namespace', tools: [{ type: 'function', name: 'original' }] }, { type: 'function', name: 'run_agent' }, { type: 'custom', name: 'apply_patch' }];
+  const input = [{ type: 'function_call', id: 'fc1', call_id: 'call1', name: 'run_agent', arguments: '{}' }, { type: 'function_call_output', call_id: 'call1', output: '{"queued":true}' }, { type: 'custom_tool_call', id: 'ct1', call_id: 'call2', name: 'apply_patch', input: 'patch bytes' }, { type: 'custom_tool_call_output', call_id: 'call2', output: 'denied' }, { type: 'function_call', id: 'fc2', call_id: 'call3', namespace: 'petpal', name: 'original', arguments: '{}' }];
+  const body = officialRequestBody({ model: 'one', input, tools }, models);
+  assert.equal(body.tools[1].name, 'petpal_'); assert.equal(body.input[0].namespace, 'petpal_'); assert.equal(body.input[2].namespace, 'petpal_');
+  assert.deepEqual(body.input[1], input[1]); assert.deepEqual(body.input[3], input[3]); assert.deepEqual(body.input[4], input[4]);
+  assert.equal(Object.hasOwn(input[0], 'namespace'), false);
+  const f = await fixture(t, { onFetch: url => url.endsWith('/responses') ? new Response(toolResponse('original', {}, 'petpal'), { headers: { 'content-type': 'text/event-stream' } }) : undefined });
+  const p = await f.provider(), response = await f.post(p, { model: p.model, input: [], tools }); assert.match(await response.text(), /"namespace":"petpal"/);
+});
+
+test('real Chat provider dispatches run_agent once and sends full namespaced tool history back through official gateway', async t => {
+  const requests = [], dispatched = [], reasoning = { id: 'rs_fixture', type: 'reasoning', summary: [], encrypted_content: 'fixture-encrypted-reasoning' };
+  const f = await fixture(t, { onFetch: (url, init) => {
+    if (!url.endsWith('/responses')) return;
+    const body = JSON.parse(init.body); requests.push(body); assert.equal(body.store, false); assert.equal(body.stream, true); assert.equal(body.previous_response_id, undefined);
+    assert.equal(body.tools[0].type, 'namespace'); assert.equal(body.tools[0].name, 'petpal'); assert.match(body.tools[0].description, /PetPal/);
+    if (requests.length === 1) {
+      assert.deepEqual(body.include, ['reasoning.encrypted_content']);
+      const call = { id: 'fc_chat_fixture', type: 'function_call', call_id: 'call_chat_fixture', namespace: 'petpal', name: 'run_agent', arguments: JSON.stringify({ task: '在预选电脑打开音乐。' }), status: 'completed' };
+      return new Response(event('response.completed', { response: { id: 'resp_chat_fixture', status: 'completed', output: [reasoning, call] } }), { headers: { 'content-type': 'text/event-stream' } });
+    }
+    assert.equal(body.tool_choice, 'none'); assert.equal(body.input.length, 6); assert.deepEqual(body.input.slice(0, 3), [{ role: 'user', content: '之前的问题' }, { role: 'assistant', content: '之前的回复' }, { role: 'user', content: '打开音乐' }]);
+    assert.deepEqual(body.input[3], reasoning); assert.equal(body.input[4].namespace, 'petpal'); assert.equal(body.input[4].call_id, 'call_chat_fixture');
+    assert.deepEqual(body.input[5], { type: 'function_call_output', call_id: 'call_chat_fixture', output: JSON.stringify({ status: 'queued', hostName: '预选电脑' }) });
+    return new Response(messageResponse('任务已经交给预选电脑。'), { headers: { 'content-type': 'text/event-stream' } });
+  } });
+  const provider = await f.provider();
+  const result = await streamProvider({ provider, persona: 'Fixture companion', messages: [{ role: 'user', content: '之前的问题' }, { role: 'assistant', content: '之前的回复' }, { role: 'user', content: '打开音乐' }], onToolCall: async args => { dispatched.push(args); return { status: 'queued', hostName: '预选电脑' }; } });
+  assert.equal(result.text, '任务已经交给预选电脑。'); assert.deepEqual(dispatched, [{ task: '在预选电脑打开音乐。' }]); assert.equal(requests.length, 2);
+});
+
+test('bundled Codex executes a namespaced official function once, keeps history and emits no unsupported hosted tool', { timeout: 45000 }, async t => {
+  const requests = [], errors = []; let executed = 0;
+  const f = await fixture(t, { models: [listed('gpt-5.4')], onFetch: (url, init) => {
+    if (!url.endsWith('/responses')) return;
+    try {
+      const body = JSON.parse(init.body); requests.push(body);
+      assert.equal(body.store, false); assert.equal(body.stream, true); assert.equal(body.previous_response_id, undefined);
+      assert.ok(body.tools.every(item => item.type === 'namespace')); assert.ok(body.tools.every(item => typeof item.description === 'string' && item.description));
+      assert.doesNotMatch(JSON.stringify(body.tools), /"type":"(?:tool_search|mcp|computer_use_preview|image_generation|code_interpreter|file_search)"/);
+      const output = body.input.find(item => item.type === 'function_call_output' && item.call_id === 'call_official_fixture');
+      if (output) {
+        assert.match(JSON.stringify(output.output), /mock-execution/);
+        const call = body.input.find(item => item.type === 'function_call' && item.call_id === output.call_id); assert.equal(call.name, 'petpal_probe'); assert.equal(call.namespace, 'petpal');
+        return new Response(messageResponse('官方协议本地模拟工具完成。'), { headers: { 'content-type': 'text/event-stream' } });
+      }
+      return new Response(toolResponse('petpal_probe', { value: 'fixture' }), { headers: { 'content-type': 'text/event-stream' } });
+    } catch (error) { errors.push(error); throw error; }
+  } });
+  const provider = await f.provider(), directory = await mkdtemp(path.join(os.tmpdir(), 'petpal-official-cli-'));
+  const config = patchCodexConfig(defaultCodexConfig(), { mode: 'api', baseUrl: provider.baseUrl, model: provider.model, apiKey: provider.apiKey });
+  const command = await resolveBundledCodex(); assert.ok(command?.file);
+  const bridge = new CodexBridge({ dataDir: directory, config, command: command.file, desktopTools: { specs: [{ type: 'function', name: 'petpal_probe', description: 'Fixture-only local operation with no actual desktop effects.', inputSchema: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'], additionalProperties: false } }], describe: () => ({ description: 'Fixture only', approvalRequired: false }), execute: async (name, args) => { assert.equal(name, 'petpal_probe'); assert.deepEqual(args, { value: 'fixture' }); executed++; return { ok: true, source: 'mock-execution' }; } } });
+  t.after(async () => { await bridge.close(); assert.ok(directory.startsWith(path.join(os.tmpdir(), 'petpal-official-cli-'))); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  const result = await bridge.run({ prompt: 'Call the fixture tool and summarize.', permissions: { access: 'full-access', approval: 'auto' } });
+  assert.equal(result.text, '官方协议本地模拟工具完成。'); assert.equal(executed, 1); assert.equal(requests.length, 2); assert.equal(errors.length, 0, errors[0]?.message);
 });
 
 test('private gateway rejects origin, unrecognized model, caller identity, bad secret, paths and HTTP methods', async t => {
@@ -126,6 +202,86 @@ test('ordinary refresh and pending-login cancellation preserve current profile s
   f.manager.fetch = originalFetch; await f.manager.refresh('alice'); assert.equal(f.manager.providers('alice')[0].apiKey, p.apiKey); assert.equal(requestSignal.aborted, false);
   upstreamController.enqueue(new TextEncoder().encode(terminal)); upstreamController.close(); assert.match(await reading, /response.completed/);
   assert.equal(f.changes.some(item => item.change.identityChanged), false);
+});
+
+test('a transient catalog failure hides new choices but private same-identity grants can finish multi-step work', async t => {
+  const f = await fixture(t), provider = await f.provider(), originalFetch = f.manager.fetch;
+  assert.deepEqual(f.manager.providerFor('alice', provider.id), provider); assert.equal(f.manager.providerFor('bob', provider.id), undefined);
+  const copy = f.manager.providerFor('alice', provider.id); copy.model = 'mutated'; assert.equal(f.manager.providerFor('alice', provider.id).model, provider.model);
+  f.manager.fetch = async (url, init) => { if (url.endsWith('/models')) throw new Error('transient catalog outage'); return originalFetch(url, init); };
+  const status = await f.manager.refresh('alice'); assert.deepEqual(status.models, []); assert.deepEqual(f.manager.providers('alice'), []); assert.match(status.modelsError, /连接失败/);
+  const continuation = f.manager.providerFor('alice', provider.id); assert.deepEqual(continuation, provider);
+  const response = await f.post(continuation); assert.equal(response.status, 200); assert.equal(await response.text(), terminal);
+  assert.equal((await f.post(provider, { model: 'never-granted', input: [] })).status, 400); assert.equal(f.manager.providerFor('alice', 'unknown-provider'), undefined);
+  f.manager.fetch = originalFetch; const state = f.signed('alice', 'different-profile', 'different-revision'); await f.manager.changed('alice', state);
+  assert.equal(f.manager.providerFor('alice', provider.id), undefined); assert.equal((await f.post(provider)).status, 401);
+  await f.manager.close(); assert.equal(f.manager.providerFor('alice', f.manager.providers('alice')[0]?.id), undefined);
+});
+
+test('official usage starts unverified and counts only sanitized completed-request token usage per identity', async t => {
+  const complete = usage => event('response.completed', { response: { status: 'completed', output: [], usage } });
+  let payload = complete({ input_tokens: 100, output_tokens: 20, total_tokens: 120 });
+  const f = await fixture(t, { onFetch: url => url.endsWith('/responses') ? new Response(payload, { headers: { 'content-type': 'text/event-stream', 'x-ratelimit-remaining-tokens': '999999', 'x-ratelimit-reset-tokens': '5h' } }) : undefined });
+  const provider = await f.provider(), initial = (await f.manager.status('alice')).usage;
+  assert.deepEqual(initial, { state: 'unverified', checkedAt: null, lastModel: null, completedRequests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+  await (await f.post(provider)).text(); const first = (await f.manager.status('alice')).usage;
+  assert.equal(first.state, 'available'); assert.equal(first.lastModel, provider.model); assert.ok(Number.isFinite(Date.parse(first.checkedAt))); assert.equal(first.completedRequests, 1); assert.equal(first.inputTokens, 100); assert.equal(first.outputTokens, 20); assert.equal(first.totalTokens, 120);
+  assert.doesNotMatch(JSON.stringify(first), /percent|remaining|reset|999999|access-secret|apiKey/);
+  assert.deepEqual((await f.manager.refresh('alice')).usage, first);
+  payload = complete({ input_tokens: -1, output_tokens: 0.5, total_tokens: '300' }) + complete({ input_tokens: 999, output_tokens: 999, total_tokens: 999 });
+  await (await f.post(provider)).text(); const second = (await f.manager.status('alice')).usage;
+  assert.equal(second.completedRequests, 2); assert.equal(second.inputTokens, 100); assert.equal(second.outputTokens, 20); assert.equal(second.totalTokens, 120);
+  f.signed('bob'); assert.deepEqual((await f.manager.status('bob')).usage, initial);
+  const state = f.signed('alice', 'new-profile', 'new-revision'); await f.manager.changed('alice', state); assert.deepEqual((await f.manager.status('alice')).usage, initial);
+});
+
+test('usage-limit HTTP errors preserve the safe code, pause subsequent inference and require explicit resume', async t => {
+  let failed = true;
+  const f = await fixture(t, { onFetch: url => url.endsWith('/responses') && failed ? Response.json({ error: { code: 'subscription_sharing_usage_limit_exceeded', message: 'PRIVATE-upstream-token access-secret-alice' } }, { status: 429 }) : undefined });
+  const provider = await f.provider(), response = await f.post(provider); assert.equal(response.status, 429); const error = await response.json();
+  assert.equal(error.error.code, 'subscription_sharing_usage_limit_exceeded'); assert.doesNotMatch(JSON.stringify(error), /PRIVATE-|access-secret/);
+  const limited = (await f.manager.status('alice')).usage; assert.equal(limited.state, 'limit-reached'); assert.equal(limited.completedRequests, 0); assert.equal(limited.lastModel, provider.model); assert.ok(limited.checkedAt);
+  const calls = f.calls.filter(item => item.url.endsWith('/responses')).length, accesses = f.accesses.length;
+  assert.equal((await f.post(provider)).status, 429); assert.equal(f.calls.filter(item => item.url.endsWith('/responses')).length, calls); assert.equal(f.accesses.length, accesses);
+  assert.equal((await f.manager.refresh('alice')).usage.state, 'limit-reached');
+  const resumed = await f.manager.resumeUsage('alice'); assert.equal(resumed.usage.state, 'unverified'); assert.equal(resumed.usage.checkedAt, limited.checkedAt); assert.equal(resumed.usage.completedRequests, 0); assert.equal(f.calls.filter(item => item.url.endsWith('/responses')).length, calls);
+  failed = false; await (await f.post(provider)).text(); assert.equal((await f.manager.status('alice')).usage.state, 'available');
+});
+
+test('an older in-flight successful request counts real tokens without clearing a newer usage pause', async t => {
+  let controller, requests = 0;
+  const f = await fixture(t, { onFetch: url => {
+    if (!url.endsWith('/responses')) return;
+    if (++requests === 1) return new Response(new ReadableStream({ start(source) { controller = source; source.enqueue(new TextEncoder().encode(event('response.output_text.delta', { delta: 'older request' }))); } }), { headers: { 'content-type': 'text/event-stream' } });
+    return Response.json({ error: { code: 'subscription_sharing_usage_limit_exceeded' } }, { status: 429 });
+  } });
+  const provider = await f.provider(), older = await f.post(provider), reading = older.text();
+  assert.equal((await f.post(provider)).status, 429); assert.equal((await f.manager.status('alice')).usage.state, 'limit-reached');
+  controller.enqueue(new TextEncoder().encode(event('response.completed', { response: { status: 'completed', output: [], usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 } } }))); controller.close(); await reading;
+  const usage = (await f.manager.status('alice')).usage; assert.equal(usage.state, 'limit-reached'); assert.equal(usage.completedRequests, 1); assert.equal(usage.totalTokens, 15);
+  assert.equal((await f.post(provider)).status, 429); assert.equal(requests, 2);
+  const resumed = (await f.manager.resumeUsage('alice')).usage; assert.equal(resumed.state, 'unverified'); assert.equal(resumed.checkedAt, usage.checkedAt); assert.equal(resumed.totalTokens, 15);
+});
+
+for (const [code, expected, status] of [['subscription_sharing_usage_limit_exceeded', 'limit-reached', 429], ['subscription_sharing_usage_unavailable', 'temporarily-unavailable', 503], ['subscription_sharing_user_not_eligible', 'not-eligible', 403]]) {
+  test(`streamed ${code} updates usage without fabricating successful request or tokens`, async t => {
+    const failure = event('response.output_text.delta', { delta: 'partial reply' }) + event('response.failed', { response: { status: 'failed', error: { code, message: 'PRIVATE refresh secret' }, usage: { input_tokens: 999, output_tokens: 999, total_tokens: 1998 } } });
+    const f = await fixture(t, { onFetch: url => url.endsWith('/responses') ? new Response(failure, { headers: { 'content-type': 'text/event-stream' } }) : undefined });
+    const provider = await f.provider(), response = await f.post(provider); assert.equal(response.status, 200); const value = await response.text(); assert.match(value, new RegExp(code)); assert.doesNotMatch(value, /PRIVATE|1998|response.completed/);
+    const usage = (await f.manager.status('alice')).usage; assert.equal(usage.state, expected); assert.equal(usage.completedRequests, 0); assert.equal(usage.totalTokens, 0); assert.ok(usage.checkedAt);
+    const before = f.calls.length; const next = await f.post(provider);
+    if (expected === 'temporarily-unavailable') { assert.equal(next.status, 200); await next.text(); assert.equal(f.calls.length, before + 1); }
+    else { assert.equal(next.status, status); await next.text(); assert.equal(f.calls.length, before); }
+  });
+}
+
+test('EOF, incomplete response and unrelated HTTP failures do not manufacture quota verification or token usage', async t => {
+  let value = event('response.output_text.delta', { delta: 'unfinished' });
+  const f = await fixture(t, { onFetch: url => url.endsWith('/responses') ? new Response(value, { headers: { 'content-type': 'text/event-stream' } }) : undefined });
+  const provider = await f.provider(); await (await f.post(provider)).text(); const initial = (await f.manager.status('alice')).usage; assert.equal(initial.state, 'unverified'); assert.equal(initial.checkedAt, null); assert.equal(initial.completedRequests, 0);
+  value = event('response.incomplete', { response: { status: 'incomplete', usage: { total_tokens: 10 } } }); await (await f.post(provider)).text(); assert.deepEqual((await f.manager.status('alice')).usage, initial);
+  const fetchImpl = f.manager.fetch; f.manager.fetch = async (url, init) => url.endsWith('/responses') ? Response.json({ error: { code: 'unrelated_error', message: 'PRIVATE diagnostics' } }, { status: 503 }) : fetchImpl(url, init);
+  const failed = await f.post(provider); assert.equal(failed.status, 503); assert.doesNotMatch(await failed.text(), /PRIVATE|unrelated_error/); assert.deepEqual((await f.manager.status('alice')).usage, initial);
 });
 
 test('401 before SSE retries at most once using force-refreshed access, never forwards error secrets', async t => {

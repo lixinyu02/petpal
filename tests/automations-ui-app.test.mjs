@@ -30,11 +30,11 @@ const text=tree=>Array.isArray(tree)?tree.map(text).join(''):tree==null||typeof 
 
 /** Execute App's real effects and navigation handlers. Only child UIs, browser surfaces
  * and network are isolated; notification and history decisions stay in App.tsx. */
-function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],initialProjects=[],organizationResponse,registeredAutomationIds=[],search='?chat=1',failAgentSubmit=false,handleAgentControl=false,globalReviewCapability,hostReviewCapability,extraProviders=[],approvalReviewProviderIds,assistantSnapshot,startupGate=null,hydrationGate=null,deferredCodex=false,centralCodex}={}){
+function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],storage,deniedGetter=false,touch=false,native=false,desktop=false,holdStream=false,attachmentItems=[],attachmentUploading=false,initialConversations=[],initialProjects=[],organizationResponse,registeredAutomationIds=[],search='?chat=1',failAgentSubmit=false,handleAgentControl=false,globalReviewCapability,hostReviewCapability,extraProviders=[],approvalReviewProviderIds,assistantSnapshot,startupGate=null,hydrationGate=null,deferredCodex=false,centralCodex,officialSession}={}){
   const permissions={access:'read-only',approval:'ask'},identity={instanceId:'fixture-service',userId:'fixture-user'};
   const state={instanceId:identity.instanceId,user:{id:identity.userId,username:'fixture',displayName:'Fixture',role:isAdmin?'admin':'user',isAdmin,isOwner:false,canUseCodex,agentAccess:canUseCodex?'full':'none'},
     settings:{petName:'Fixture companion',persona:'Fixture',companionKind:'anime',defaultProviderId:'model'},
-    providers:[{id:'model',name:'Fixture model',model:'fixture-model',protocol:'responses',supportsImages:true},...extraProviders],conversations:[],codex:{available:!deferredCodex,pending:deferredCodex,eligibleProviderIds:['model'],approvalReviewProviderIds,approvalReview:globalReviewCapability}};
+    providers:[{id:'model',name:'Fixture model',model:'fixture-model',protocol:'responses',supportsImages:true},...extraProviders],conversations:[],codex:{available:!deferredCodex,pending:deferredCodex,eligibleProviderIds:['model',...extraProviders.filter(provider=>provider.source==='official-account').map(provider=>provider.id)],approvalReviewProviderIds,approvalReview:globalReviewCapability}};
   const hosts=[{id:'central',name:'Fixture server',kind:'central',platform:'linux',online:true,...(centralCodex?{codex:centralCodex}:{})},
     {id:'pc-one',name:'Fixture PC one',kind:'desktop',platform:'win32',online:true,isOwn:!foreignHostIds.includes('pc-one'),codex:{available:true,approvalReview:hostReviewCapability}},
     {id:'pc-two',name:'Fixture PC two',kind:'desktop',platform:'linux',online:true,isOwn:!foreignHostIds.includes('pc-two'),codex:{available:true}}];
@@ -42,7 +42,7 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
   let notificationSnapshot={navigation:null},notificationTakes=0;
   let index=0,tree,timerId=0,getterReads=0,createdConversations=initialConversations.length,createdProjects=initialProjects.length,sessionEpoch=1,disposed=false,lateStateWrites=0;
   Object.assign(window,{matchMedia:query=>({matches:query==='(pointer: coarse)'&&touch,addEventListener(){},removeEventListener(){}})});
-  if(desktop)window.petpal={};
+  if(desktop)window.petpal={...(officialSession?{officialAccount:{}}:{})};
   const readStorage=()=>{getterReads++;if(deniedGetter)throw new DOMException('Storage is blocked','SecurityError');return storage;};
   Object.defineProperty(window,'localStorage',{get:readStorage});
   document.hidden=false;
@@ -81,6 +81,8 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
         if(path==='/state?runtime=deferred'&&startupGate)await startupGate.promise;
         return response({...state,projects:backendProjects,conversations:publicConversations()});
       }
+      if(path==='/bootstrap')return response({...state,projects:[],conversations:[],codex:{...state.codex,available:false,authenticated:false,pending:true}});
+      if(path==='/settings'&&method==='PATCH'){state.settings={...state.settings,...body};return response(state.settings);}
       if(path==='/agent/hosts')return response({hosts});
       if(path==='/conversations'&&options.method==='POST'){
         const conversation={id:`fixture-chat-${++createdConversations}`,mode:body.mode,providerId:body.providerId,title:'Fixture chat',messages:[],projectId:body.projectId??null,archivedAt:null};
@@ -142,6 +144,7 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
   const attachments={items:[...attachmentItems],uploading:attachmentUploading,error:'',clearCount:0,clear(){attachments.items=[];attachments.uploading=false;attachments.clearCount++;},inputRef:{current:null}};
   const speech={enabled:false,playing:false,active:false,pending:false,supported:false,stop(){},prepare(){},speak(){},speakIfEnabled(){}};
   const modules={
+    ...(officialSession?{'./platform/official-account':officialSession}:{}),
     './platform/visible-poll.mjs':{createVisiblePoll:options=>createVisiblePoll({...options,setTimeoutFn:callback=>{const id=++timerId;timers.set(id,callback);return id;},clearTimeoutFn:id=>timers.delete(id)})},
     react,'react/jsx-runtime':{jsx:element,jsxs:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     '@capacitor/core':{Capacitor:{isNativePlatform:()=>native}},'./api':api,'./WorkspaceControls':controls,'./composer-keyboard.mjs':{composerKeyAction},
@@ -159,7 +162,7 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
     './platform/task-notification-session':{taskNotificationSession:{subscribe(){},snapshot:()=>notificationSnapshot,takeNavigation(){notificationTakes++;const previous=notificationSnapshot.navigation;notificationSnapshot={navigation:null};return previous;}}},'./desktop-settings.mjs':{reasoningEfforts},
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
   };
-  const deferredChildren=['AutomationsView','DownloadsView','UpdatesSettings','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','ClientBehaviorSettings','CentralServerSettings'];
+  const deferredChildren=['AutomationsView','DownloadsView','UpdatesSettings','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','OfficialAccountSettings','ClientBehaviorSettings','CentralServerSettings'];
   for(const name of [...deferredChildren,'BrandMark','CompanionOptions','ChatMessages','ChatScrollDock','ConversationHistory','AgentQueue','CatV2','WorkspaceDisclosure'])modules[`./${name}`]=component(name);
   const module={exports:{}},context={module,exports:module.exports,require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);if(deferredChildren.some(child=>name===`./${child}`))lazyLoads.push(name);return modules[name];},
     window,document,location:{search,origin:'https://fixture.invalid',assign:path=>navigations.push(path)},URL,URLSearchParams,AbortController,DOMException,crypto:{randomUUID:()=>`fixture-submission-${requests.length}`},
@@ -230,6 +233,45 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
     async close(){if(disposed)return;disposed=true;for(const hook of hooks)hook?.cleanup?.();await flush();assert.equal(timers.size,0,'effect cleanup must release every fixture timer');},
   };
 }
+
+function officialSessionFixture({local=true,defaultRequest=0}={}){
+  const listeners=new Set();let reads=0,snapshot={busy:'',error:'',defaultRequest,status:{state:'signed-in',activeProfileId:'official-profile',planUsageEnabled:true,models:[{id:'official-model',model:'official-one',displayName:'Official one',supportsImages:true}]}};
+  return{officialAccountIsLocal:()=>local,nativeOfficialAccount:()=>({}),officialAccountSnapshot:()=>snapshot,
+    subscribeOfficialAccount(listener){listeners.add(listener);return()=>listeners.delete(listener);},
+    async readOfficialAccount(){reads++;for(const listener of listeners)listener();return snapshot.status;},
+    change(patch){snapshot={...snapshot,...patch};for(const listener of listeners)listener();},get reads(){return reads;},get listeners(){return listeners.size;}};
+}
+const officialProvider={id:'official-model',name:'ChatGPT · Official one',model:'official-one',protocol:'responses',supportsImages:true,source:'official-account',editable:false};
+
+test('official native warmup is deferred, local only and preserves a deliberate API default on restart',async t=>{
+  const session=officialSessionFixture(),f=workspaceFixture({desktop:true,canUseCodex:true,extraProviders:[officialProvider],officialSession:session});t.after(()=>f.close());
+  await f.ready();assert.equal(session.reads,0,'native status must not delay the initial workspace');assert.equal(f.component('ModelPicker').props.value,'model');
+  f.fireTimers();await f.ready();assert.equal(session.reads,1);assert.equal(f.requests.filter(request=>request.path==='/bootstrap').length,1);assert.equal(f.requests.filter(request=>request.path==='/settings').length,0);assert.equal(f.component('ModelPicker').props.value,'model');
+  const central=officialSessionFixture({local:false}),remote=workspaceFixture({desktop:true,canUseCodex:true,officialSession:central});t.after(()=>remote.close());await remote.ready();remote.fireTimers();await remote.ready();assert.equal(central.reads,0);assert.equal(remote.requests.filter(request=>request.path==='/bootstrap').length,0);
+});
+
+test('new official login changes only future Chat and Agent defaults while an existing conversation stays intact',async t=>{
+  const conversation={id:'existing-api-chat',mode:'chat',providerId:'model',title:'Preserved chat',messages:[{id:'old-message',role:'assistant',content:'Keep the existing reply',status:'complete'}]};
+  const session=officialSessionFixture(),f=workspaceFixture({desktop:true,canUseCodex:true,extraProviders:[officialProvider],officialSession:session,initialConversations:[conversation]});t.after(()=>f.close());
+  await f.ready();f.selectHistory(conversation.id);f.typeDraft('Keep this unfinished message');f.fireTimers();await f.ready();
+  session.change({defaultRequest:1});await f.ready();
+  assert.deepEqual(f.requests.filter(request=>request.path==='/settings').map(request=>request.body),[{defaultProviderId:'official-model'}]);
+  assert.equal(f.selectedId,conversation.id);assert.equal(f.component('ModelPicker').props.value,'model');assert.equal(f.find('textarea',props=>props['aria-label']==='消息').props.value,'Keep this unfinished message');assert.equal(f.history()[0].messages[0].content,'Keep the existing reply');
+  f.typeDraft('');f.newChat();assert.equal(f.component('ModelPicker').props.value,'official-model');f.enterAgent();assert.equal(f.component('ModelPicker').props.value,'official-model');
+  session.change({});await f.ready();assert.equal(f.requests.filter(request=>request.path==='/settings').length,1,'ordinary later status cannot repeatedly reset defaults');
+});
+
+test('official catalog synchronization does not replace an active Chat stream or its pending messages',async t=>{
+  const session=officialSessionFixture(),f=workspaceFixture({desktop:true,canUseCodex:true,extraProviders:[officialProvider],officialSession:session,holdStream:true});t.after(()=>f.close());
+  await f.ready();f.fireTimers();await f.ready();f.typeDraft('Keep streaming');const submitting=f.submit();await f.ready();const id=f.selectedId;
+  session.change({defaultRequest:1});await f.ready();assert.equal(f.selectedId,id);assert.equal(f.streams[0].signal.aborted,false);assert.equal(f.history().find(item=>item.id===id).messages.at(-1).status,'streaming');assert.equal(f.component('ModelPicker').props.value,'model');
+  f.streams[0].complete();await submitting;await f.ready();assert.equal(f.history().find(item=>item.id===id).messages.at(-1).content,'Fixture reply');
+});
+
+test('late official bootstrap cannot update a switched account',async t=>{
+  const session=officialSessionFixture({defaultRequest:1}),f=workspaceFixture({desktop:true,canUseCodex:true,extraProviders:[officialProvider],officialSession:session});t.after(()=>f.close());
+  await f.ready();const delayed=f.delayNext('/bootstrap');f.fireTimers();await delayed.started;f.changeSession();delayed.release();await f.ready();assert.equal(f.requests.filter(request=>request.path==='/settings').length,0);assert.equal(f.component('ModelPicker').props.value,'model');
+});
 
 const conversation = (id, extra = {}) => ({ id, title: id, mode: 'chat', providerId: 'model', messages: [], ...extra });
 

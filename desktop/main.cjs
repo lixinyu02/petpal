@@ -122,7 +122,7 @@ function queuePortableUpdate(prepared) {
 
 function secureWindow(win) {
   win.webContents.setWindowOpenHandler(({ url }) => {
-    const helpLinks = new Set(['https://www.google.com/chrome/', 'https://github.com/jackwener/opencli', 'https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk']);
+    const helpLinks = new Set(['https://www.google.com/chrome/', 'https://github.com/jackwener/opencli', 'https://chromewebstore.google.com/detail/opencli/ildkmabpimmkaediidaifkhjpohdnifk', 'https://chatgpt.com/settings/usage']);
     if (win === mainWindow && (helpLinks.has(url) || isPetPalReleaseUrl(url))) void shell.openExternal(url).catch(() => {});
     return { action: 'deny' };
   });
@@ -854,10 +854,10 @@ async function boot() {
   const officialAuth = new OfficialAuth({ directory: path.join(app.getPath('userData'), 'official-accounts'),
     openExternal: url => shell.openExternal(url),
     ...(protectedStorage ? { encrypt: value => safeStorage.encryptString(value), decrypt: value => safeStorage.decryptString(value) } : {}),
-    onChange: (userId, status) => { void Promise.resolve(officialAccounts?.changed(userId, status)).catch(() => {}); },
+    onChange: (userId, status) => { try { void Promise.resolve(officialAccounts?.changed(userId, status)).catch(() => {}); } catch {} },
   });
   officialAccounts = new OfficialAccounts({ auth: officialAuth,
-    onChange: (userId, change) => { void Promise.resolve(backend?.officialAccountChanged?.(userId, change)).catch(() => {}); },
+    onChange: (userId, change) => { try { void Promise.resolve(backend?.officialAccountChanged?.(userId, change)).catch(() => {}); } catch {} },
   });
   let officialAccountUnavailable = false;
   try { await officialAccounts.init(); }

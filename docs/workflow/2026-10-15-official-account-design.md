@@ -26,6 +26,8 @@ Windows/Ubuntu 已内置 Codex，但目前 host 模式继承系统登录，API �
 
 ## Impact
 
+用户追加要求在页面更新官方额度。已核对 SIWC 官方 tracking-usage、cookbook 和 errors-and-recovery：没有公开的套餐剩余百分比查询 API，不能借用 Codex 托管认证或组织 API 账单替代。界面显示每次官方响应验证的可用/限额状态、更新时间、本次连接已完成请求的实际 Token 统计，并打开官方 Usage 页面管理总套餐用量。配额错误暂停后续推理，明确操作“额度恢复后重试”只解锁下一次验证，不伪称查询过余额。未知值保持未知，不推算套餐重置时间。
+
 新增官方 auth/storage/gateway、桌面 IPC 与设置组件；扩展后端个人 Provider resolver、Agent 按任务模型配置和打包清单。旧客户端及未注入该功能的 Web/Android/中央服务器保持原行为。
 
 ## Risks

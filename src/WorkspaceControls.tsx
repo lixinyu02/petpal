@@ -29,8 +29,8 @@ export function ModelPicker({ providers, value, onChange, disabled = false, labe
   const id = useId(), listId = `${id}-models`, searchId = `${id}-search`;
   const choices = useMemo<ModelChoice[]>(() => [
     ...(fallbackOption ? [{ id: '', name: fallbackOption.label, description: fallbackOption.description || '使用执行主机上的 Codex 配置', search: `${fallbackOption.label} ${fallbackOption.description || ''}`.toLocaleLowerCase() }] : []),
-    ...providers.map(provider => ({ id: provider.id, name: provider.name, description: provider.model, protocol: protocolLabel(provider.protocol), effort: effortLabel(provider.reasoningEffort), textOnly: provider.supportsImages === false,
-      search: `${provider.name} ${provider.model} ${protocolLabel(provider.protocol)} ${effortLabel(provider.reasoningEffort)}`.toLocaleLowerCase() })),
+    ...providers.map(provider => ({ id: provider.id, name: provider.name, description: provider.model, protocol: provider.source==='official-account'?'ChatGPT 官方账号':protocolLabel(provider.protocol), effort: effortLabel(provider.reasoningEffort), textOnly: provider.supportsImages === false,
+      search: `${provider.name} ${provider.model} ${provider.source==='official-account'?'ChatGPT 官方账号 套餐':protocolLabel(provider.protocol)} ${effortLabel(provider.reasoningEffort)}`.toLocaleLowerCase() })),
   ], [providers, fallbackOption?.label, fallbackOption?.description]);
   const filtered = useMemo(() => choices.filter(choice => choice.search.includes(query.trim().toLocaleLowerCase())), [choices, query]);
   const selected = choices.find(choice => choice.id === value), active = filtered[activeIndex];

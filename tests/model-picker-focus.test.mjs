@@ -115,6 +115,14 @@ test('mouse activation on a narrow Ubuntu window retains focused search and real
   assert.equal(f.document.activeElement.name, 'trigger');
 });
 
+test('official account models display their source and can be found without confusing them with API connections',t=>{
+  const f=pickerFixture({available:[...providers,{id:'official',name:'ChatGPT · 官方模型',model:'official-one',protocol:'responses',source:'official-account',supportsImages:true}]});t.after(()=>f.close());
+  f.click();f.type('官方账号');
+  const options=nodes(f.find('div',props=>props.role==='listbox')).filter(node=>node.props?.role==='option');assert.equal(options.length,1);
+  const content=tree=>Array.isArray(tree)?tree.map(content).join(''):tree&&typeof tree==='object'?content(tree.props?.children):typeof tree==='string'?tree:'';
+  assert.match(content(options[0]),/ChatGPT 官方账号/);assert.match(content(options[0]),/official-one/);
+});
+
 test('keyboard activation preserves focused search, arrow navigation and Enter selection', t => {
   const f = pickerFixture(); t.after(() => f.close());
   f.triggerKey('ArrowDown');

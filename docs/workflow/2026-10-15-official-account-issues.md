@@ -8,12 +8,12 @@
 
 - Goal: 桌面官方 ChatGPT 登录、个人官方模型及 Chat/Agent 接入。
 - Ordering rule: Complete issues in sequence.
-- Current status: issue-2 pending
+- Current status: issue-3 pending
 
 ## Issue List
 
 - [x] issue-1 官方授权与私有运行时
-- [ ] issue-2 个人模型、Chat/Agent 与界面接入
+- [x] issue-2 个人模型、Chat/Agent 与界面接入
 - [ ] issue-3 原生验收与使用说明
 
 ## issue-1
@@ -31,12 +31,12 @@
 
 - ID: issue-2
 - 标题: 个人模型、Chat/Agent 与界面接入
-- 范围: scoped Provider、按任务 Agent 配置、模型选择和登录设置
+- 范围: scoped Provider、按任务 Agent 配置、模型选择和登录设置，以及用户追加的官方用量状态页面
 - 依赖: issue-1
 - 验收标准: 两模式采用官方当前目录；普通用户可管理本人官方账号；不共享他人凭据或回退第三方；原功能保留
-- 状态: todo
-- 验证方式: API/relay/UI 回归与 build
-- commit: pending
+- 状态: done
+- 验证方式: 562/562 targeted auth/gateway/IPC/API/Chat/Agent/relay/review/automation/UI/default/session/package regressions passed; production build passed. Real bundled Codex 0.143 executed a local synthetic official-protocol tool loop. Official quota has no public balance API: page shows observed request state/tokens and links official Usage; live consent/inference still pending.
+- commit: feat(issue-2): connect personal official models and usage to Chat and Agent
 
 ## issue-3
 

@@ -58,6 +58,7 @@ const DesktopAssistantSettings = lazy(() => import('./DesktopAssistantSettings')
 const MusicMcpSettings = lazy(() => import('./MusicMcpSettings'));
 const ComputerUseSettings = lazy(() => import('./ComputerUseSettings'));
 const OpenCliSettings = lazy(() => import('./OpenCliSettings'));
+const OfficialAccountSettings = lazy(() => import('./OfficialAccountSettings'));
 const settingsLoading = <div className="loading-view" role="status"><Loader2 className="spin" aria-hidden="true"/>正在打开设置…</div>;
 
 const emptyState: State = { settings: { petName: '小伴', companionKind: 'anime', persona: '你是用户温柔、机灵的个人 AI 伙伴。用自然简洁的中文回应，认真倾听；不知道的事情坦诚说明。' }, providers: [], conversations: [], codex: {} };
@@ -188,6 +189,8 @@ export default function App() {
   const activeAgentProvider=state.providers.find(item=>item.id===activeProviderId);
   const agentSupportsImages=activeAgentProvider?.supportsImages!==false;
   const canSendAgent=!!selectedHost?.online&&!!selectedCodex.available&&!hostsError&&!agentUnknown&&!projectIssue;
+  const officialWorkspace=useRef({state,conversationId:conversation?.id,draft,attachments:attachments.items.length,working,hostBusy,unconfirmed});
+  officialWorkspace.current={state,conversationId:conversation?.id,draft,attachments:attachments.items.length,working,hostBusy,unconfirmed};
   const approvalConversationRef=useRef(conversation?.id);approvalConversationRef.current=conversation?.id;
   const approvalKey=(id:string,conversationId=conversation?.id||'')=>`${conversationId}:${id}`;
   const shownApprovals=(currentMode==='codex'?conversation?.agent?.approvals||[]:approvals).filter(item=>approvalDecisions[approvalKey(item.id)]!=='consumed');
@@ -266,6 +269,52 @@ export default function App() {
     // Once a default has been presented, retain it if that computer disconnects.
     if(!agentHostId&&!lockedHostId&&selectedHostId&&agentHosts.some(host=>host.id===selectedHostId))setAgentHostId(selectedHostId);
   },[agentHostId,lockedHostId,selectedHostId,agentHosts]);
+  useEffect(()=>{
+    if(!ready||!connected||!state.user||!window.petpal?.officialAccount||petOnly)return;
+    let alive=true,unsubscribe:(()=>void)|undefined,lastSignature='',handledDefault=0,updating=false,requested=false;
+    const isCurrent=()=>alive&&getSessionEpoch()===accountEpoch;
+    // Authentication and directory IO begin after the first usable workspace.
+    // Loading this native-only module never delays bootstrap or Web/Android.
+    const timer=setTimeout(()=>{void import('./platform/official-account').then(session=>{
+      if(!isCurrent()||!session.officialAccountIsLocal()||!session.nativeOfficialAccount())return;
+      const synchronize=async()=>{
+        requested=true;if(updating)return;updating=true;
+        try{while(requested&&isCurrent()){
+          requested=false;const snapshot=session.officialAccountSnapshot(),status=snapshot.status;
+          if(snapshot.busy||snapshot.error||!status||status.state==='signing-in'||status.modelsLoading)continue;
+          const signature=JSON.stringify([status.activeProfileId,status.planUsageEnabled,status.models]);
+          if(signature===lastSignature&&snapshot.defaultRequest<=handledDefault)continue;
+          const next=await api<State>('/bootstrap');
+          if(!isCurrent()||session.officialAccountSnapshot()!==snapshot)continue;
+          const latest=officialWorkspace.current;
+          if(next.instanceId!==latest.state.instanceId||next.user?.id!==latest.state.user?.id)throw new SessionChangedError();
+          const prefer=status.models.length&&snapshot.defaultRequest>handledDefault;
+          let changedDefault=false;
+          if(prefer&&!status.models.some(model=>model.id===next.settings.defaultProviderId)){
+            const chosen=status.models[0].id;
+            await api('/settings',{method:'PATCH',body:JSON.stringify({defaultProviderId:chosen})});
+            if(!isCurrent()||session.officialAccountSnapshot()!==snapshot)continue;
+            next.settings={...next.settings,defaultProviderId:chosen};changedDefault=true;
+          }
+          if(!isCurrent())continue;
+          setState(previous=>{
+            // Catalog refresh must not replace streaming messages, queues,
+            // project organization, or a newer native runtime health result.
+            const {available,running,authenticated,pending,error,message,...metadata}=next.codex;
+            return{...previous,providers:next.providers,settings:{...previous.settings,defaultProviderId:next.settings.defaultProviderId},codex:{...previous.codex,...metadata}};
+          });
+          const emptyWorkspace=!latest.conversationId&&!latest.draft.trim()&&!latest.attachments&&!latest.working&&!latest.hostBusy&&!latest.unconfirmed;
+          setProviderId(previous=>changedDefault&&emptyWorkspace?next.settings.defaultProviderId||'':next.providers.some(provider=>provider.id===previous)?previous:next.settings.defaultProviderId||next.providers[0]?.id||'');
+          setAgentProviderId(previous=>changedDefault&&emptyWorkspace&&next.codex.eligibleProviderIds?.includes(next.settings.defaultProviderId||'')?next.settings.defaultProviderId!:next.codex.eligibleProviderIds?.includes(previous)?previous:(next.user?.isAdmin||next.user?.isOwner)?'':next.codex.eligibleProviderIds?.[0]||'');
+          lastSignature=signature;handledDefault=snapshot.defaultRequest;setHostRefresh(value=>value+1);
+        }}catch(error){if(isCurrent()&&!isSessionChanged(error))setNotice('官方账号状态已更新，模型列表暂未同步，请在模型设置中刷新。');}
+        finally{updating=false;}
+      };
+      unsubscribe=session.subscribeOfficialAccount(()=>{void synchronize();});
+      void session.readOfficialAccount().catch(()=>{});
+    }).catch(()=>{});},750);
+    return()=>{alive=false;clearTimeout(timer);unsubscribe?.();};
+  },[ready,connected,hostScope,accountEpoch,petOnly]);
   useEffect(()=>{
     if(!connected||!state.user?.canUseCodex||!hostScope||petOnly)return;
     let first=true;
@@ -367,7 +416,7 @@ export default function App() {
   function startNewChat(nextMode:'chat'|'codex') {
     stopPresentation();
     cacheAutomationConversation(null);
-    attachments.clear();setPermissions({...defaultAgentPermissions});setAgentProviderId((state.user?.isAdmin||state.user?.isOwner)?'':state.codex.eligibleProviderIds?.[0]||'');agentSubmissionRef.current=null;
+    attachments.clear();setPermissions({...defaultAgentPermissions});setAgentProviderId(state.providers.some(provider=>provider.id===state.settings.defaultProviderId&&provider.source==='official-account')&&state.codex.eligibleProviderIds?.includes(state.settings.defaultProviderId||'')?state.settings.defaultProviderId!:(state.user?.isAdmin||state.user?.isOwner)?'':state.codex.eligibleProviderIds?.[0]||'');agentSubmissionRef.current=null;
     setSelected(null); setHistoryArchived(false); setMode(nextMode === 'codex' && !state.user?.canUseCodex ? 'chat' : nextMode); setProviderId(state.settings.defaultProviderId || state.providers[0]?.id || ''); setView('chat'); setDraft(''); setError(''); setMobileNav(false); setApprovals([]);
   }
   function selectChat(c: Conversation) {
@@ -804,7 +853,7 @@ function SettingsView({ state, connected, refresh, notice, connect, initialTab, 
     {tab === 'assistant' && canManageMusicMcp && <div className="settings-section desktop-assistant"><MusicMcpSettings connected={connected} user={state.user}/><ComputerUseSettings connected={connected} user={state.user}/><OpenCliSettings connected={connected} user={state.user} onPrepareBrowser={onPrepareBrowser} prepareBrowserDisabled={prepareBrowserDisabled}/></div>}
     {tab === 'voice' && <VoiceSettings key={`${getSessionEpoch()}:${voiceScope}`} connected={connected} scope={voiceScope}/>}
     {tab === 'accounts' && <AccountsSettings connected={connected} user={state.user} providers={state.providers} connect={connect}/>}
-    {tab === 'models' && <div className="settings-section"><div className="section-title"><div><h2>我的模型</h2><p>支持 OpenAI 及兼容接口，API Key 仅由后端保存。</p></div>{(state.user?.isAdmin||state.user?.isOwner) && <button className="primary-button" disabled={!connected} onClick={() => { setEditing({ name: '', protocol: 'responses', baseUrl: 'https://api.openai.com/v1', model: '', reasoningEffort: '', apiKey: '' }); setError(''); }}><Plus size={16} aria-hidden="true"/>添加连接</button>}</div><div className="default-model-setting"><label>新对话默认模型<select aria-label="默认模型" value={defaultProviderId} disabled={!connected || busy} onChange={e=>setDefaultProviderId(e.target.value)}><option value="">使用第一个可用模型</option>{state.providers.map(p=><option value={p.id} key={p.id}>{p.name} · {p.model}</option>)}</select></label><button className="secondary-button" disabled={!connected || busy} onClick={saveDefault}>保存默认模型</button></div>{!state.providers.length ? <div className="empty-models"><span><Plug size={29} aria-hidden="true"/></span><h3>给小伴连接一个大脑</h3><p>{(state.user?.isAdmin||state.user?.isOwner) ? '准备服务地址、模型名称和 API Key，就可以开始对话。' : '请联系主机管理员为这个账号分配模型。'}</p><div className="protocol-labels"><code>Chat Completions</code><code>Responses</code></div></div> : <div className="provider-list">{state.providers.map(p => <div className="provider-row" key={p.id}><span className="provider-icon"><Plug size={19} aria-hidden="true"/></span><div className="provider-details"><strong>{p.name}</strong><span>{p.model} <i>·</i> {p.protocol === 'responses' ? 'Responses' : 'Chat Completions'} <i>·</i> 推理 {p.reasoningEffort || '服务默认'}</span><small title={p.baseUrl}>{p.baseUrl}</small></div><div className="provider-actions"><button className="secondary-button" disabled={!!testing || p.testable === false} onClick={() => testProvider(p)}>{testing === p.id ? <Loader2 size={14} className="spin" aria-hidden="true"/> : <Link2 size={14} aria-hidden="true"/>}测试</button>{p.editable && <><button className="icon-button" aria-label={`编辑 ${p.name}`} onClick={() => { setEditing({ ...p, reasoningEffort: p.reasoningEffort ?? '', apiKey: '' }); setError(''); }}><Pencil size={16} aria-hidden="true"/></button><button className="icon-button" aria-label={`删除 ${p.name}`} onClick={() => setRemoveId(p.id)}><Trash2 size={16} aria-hidden="true"/></button></>}</div></div>)}</div>}<div className="info-note"><ShieldCheck size={18} aria-hidden="true"/><p>小伴不会把 API Key 发给聊天页面。连接测试会发出一条简短请求，可能产生少量模型费用。</p></div></div>}
+    {tab === 'models' && <div className="settings-section">{window.petpal?.officialAccount&&<OfficialAccountSettings connected={connected} onConnect={connect}/>}<div className="section-title"><div><h2>我的模型</h2><p>支持 OpenAI 及兼容接口，API Key 仅由后端保存。</p></div>{(state.user?.isAdmin||state.user?.isOwner) && <button className="primary-button" disabled={!connected} onClick={() => { setEditing({ name: '', protocol: 'responses', baseUrl: 'https://api.openai.com/v1', model: '', reasoningEffort: '', apiKey: '' }); setError(''); }}><Plus size={16} aria-hidden="true"/>添加连接</button>}</div><div className="default-model-setting"><label>新对话默认模型<select aria-label="默认模型" value={defaultProviderId} disabled={!connected || busy} onChange={e=>setDefaultProviderId(e.target.value)}><option value="">使用第一个可用模型</option>{state.providers.map(p=><option value={p.id} key={p.id}>{p.name} · {p.model}</option>)}</select></label><button className="secondary-button" disabled={!connected || busy} onClick={saveDefault}>保存默认模型</button></div>{!state.providers.length ? <div className="empty-models"><span><Plug size={29} aria-hidden="true"/></span><h3>给小伴连接一个大脑</h3><p>{(state.user?.isAdmin||state.user?.isOwner) ? '准备服务地址、模型名称和 API Key，就可以开始对话。' : '请联系主机管理员为这个账号分配模型。'}</p><div className="protocol-labels"><code>Chat Completions</code><code>Responses</code></div></div> : <div className="provider-list">{state.providers.map(p => <div className="provider-row" key={p.id}><span className="provider-icon"><Plug size={19} aria-hidden="true"/></span><div className="provider-details"><strong>{p.name}</strong><span>{p.model} <i>·</i> {p.source==='official-account'?'官方账号 · 套餐模型':p.protocol === 'responses' ? 'Responses' : 'Chat Completions'} <i>·</i> 推理 {p.reasoningEffort || '服务默认'}</span><small title={p.source==='official-account'?undefined:p.baseUrl}>{p.source==='official-account'?'此电脑上的 ChatGPT 官方账号':p.baseUrl}</small></div><div className="provider-actions"><button className="secondary-button" disabled={!!testing || p.testable === false} onClick={() => testProvider(p)}>{testing === p.id ? <Loader2 size={14} className="spin" aria-hidden="true"/> : <Link2 size={14} aria-hidden="true"/>}测试</button>{p.editable && p.source!=='official-account' && <><button className="icon-button" aria-label={`编辑 ${p.name}`} onClick={() => { setEditing({ ...p, reasoningEffort: p.reasoningEffort ?? '', apiKey: '' }); setError(''); }}><Pencil size={16} aria-hidden="true"/></button><button className="icon-button" aria-label={`删除 ${p.name}`} onClick={() => setRemoveId(p.id)}><Trash2 size={16} aria-hidden="true"/></button></>}</div></div>)}</div>}<div className="info-note"><ShieldCheck size={18} aria-hidden="true"/><p>登录信息与 API Key 不会发给聊天页面。连接测试会发送一条简短请求，使用对应模型额度。</p></div></div>}
     {tab === 'pet' && <form className="settings-section pet-settings" onSubmit={savePet}><div className="pet-settings-preview"><Cat interactive={false}/><span>独一无二的小伙伴</span></div><div className="pet-settings-form"><h2>认识你的小伴</h2><CompanionOptions/><label>伙伴的名字<input value={petName} maxLength={30} required onChange={e => setPetName(e.target.value)}/></label><label>性格与相处方式<textarea rows={7} value={persona} maxLength={4000} onChange={e => setPersona(e.target.value)}/></label><p className="field-help">作为陪伴聊天的系统提示词使用，下一条消息生效。</p><button className="primary-button" disabled={busy || !connected}><Check size={16} aria-hidden="true"/>保存个性</button></div></form>}
     {tab === 'desktop' && <><div className="settings-section">
       <div className="section-title"><div><h2>你的设备</h2><p>电脑客户端登录同一账号后，可由 Web、Android 或其他电脑选择执行任务。</p></div><span className="device-badge">{window.petpal ? '桌面应用' : Capacitor.isNativePlatform() ? 'Android' : 'Web 浏览器'}</span></div>

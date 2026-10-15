@@ -13,7 +13,7 @@ const deferred = () => { let resolve; const promise = new Promise(yes => { resol
 function fixture({ verify, operation, unavailable } = {}) {
   let current = { ...selected }, allowed = true;
   const calls = [], event = {}, auth = {};
-  const accounts = { async status(userId) { calls.push(['status', userId]); return status; }, async refresh(userId) { calls.push(['refresh', userId]); } };
+  const accounts = { async status(userId) { calls.push(['status', userId]); return status; }, async refresh(userId) { calls.push(['refresh', userId]); }, resumeUsage(userId) { calls.push(['resumeUsage', userId]); } };
   for (const action of ['start', 'cancel', 'select', 'logout']) auth[action] = async (...args) => {
     calls.push([action, ...args]); const options = args.at(-1); await operation?.(action, options); await options.authorize();
   };
@@ -27,7 +27,7 @@ function fixture({ verify, operation, unavailable } = {}) {
 }
 
 test('official management only accepts a currently logged-in trusted main frame on its embedded local service', async () => {
-  for (const action of ['status', 'start', 'refresh', 'cancel', 'select', 'logout']) {
+  for (const action of ['status', 'start', 'refresh', 'cancel', 'select', 'logout', 'resumeUsage']) {
     const f = fixture();
     await assert.rejects(f.call(action, undefined, null), /先登录/);
     await assert.rejects(f.call(action, undefined, selected, {}), /可信主窗口/);
@@ -94,13 +94,27 @@ test('public account status whitelists display fields and strips all private cre
   assert.throws(() => officialPublicStatus({ state: 'unknown' }), /无法读取/);
 });
 
+test('usage exposes only bounded observed telemetry and resuming it requires a fresh local authorization', async () => {
+  const raw = { state: 'limit-reached', checkedAt: '2026-10-15T08:00:00.000Z', lastModel: 'official-model', completedRequests: 3, inputTokens: 120, outputTokens: 10, totalTokens: 130 };
+  const result = officialPublicStatus({ ...status, usage: { ...raw, refreshToken: 'private-secret', remainingPercent: 99, resetsAt: 100 } });
+  assert.deepEqual(result.usage, raw); assert.doesNotMatch(JSON.stringify(result), /private-secret|remainingPercent|resetsAt/);
+  const invalid = officialPublicStatus({ ...status, usage: { ...raw, checkedAt: 'private-secret', totalTokens: -1 } });
+  assert.equal(invalid.usage.checkedAt, null); assert.equal(invalid.usage.totalTokens, 0);
+  const f = fixture(); await f.call('resumeUsage'); assert.ok(f.calls.some(call => call[0] === 'resumeUsage' && call[1] === 'ordinary-user'));
+  await assert.rejects(f.call('resumeUsage', { userId: 'other' }), /重试入口/);
+  let checks = 0;
+  const changed = fixture({ verify: async () => ({ instanceId: 'local-instance', userId: ++checks > 1 ? 'other' : 'ordinary-user' }) });
+  await assert.rejects(changed.call('resumeUsage'), /登录已变化/);
+  assert.equal(changed.calls.some(call => call[0] === 'resumeUsage'), false);
+});
+
 test('real preload exposes a fixed official API and captures only the current connection on every call', async () => {
   let bridge, saved = selected; const calls = [];
   vm.runInNewContext(await readFile(new URL('../desktop/preload.cjs', import.meta.url), 'utf8'), {
     require: name => { assert.equal(name, 'electron'); return { contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } }, ipcRenderer: { invoke: async (...args) => { calls.push(args); } } }; },
     sessionStorage: { getItem: () => saved ? JSON.stringify(saved) : null }, location: { origin: selected.url },
   });
-  assert.deepEqual(Object.keys(bridge.officialAccount), ['status', 'start', 'cancel', 'select', 'logout', 'refresh']);
+  assert.deepEqual(Object.keys(bridge.officialAccount), ['status', 'start', 'cancel', 'select', 'logout', 'refresh', 'resumeUsage']);
   assert.equal(Object.isFrozen(bridge.officialAccount), true);
   await bridge.officialAccount.start(); saved = { url: '', token: 'next-session' }; await bridge.officialAccount.select('profile-one');
   saved = null; await bridge.officialAccount.logout();
