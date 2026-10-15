@@ -5,6 +5,8 @@ asarUnpack:
   - node_modules/**
   - server/native/**
   - server/opencli*.mjs
+  - server/app-proxy*.mjs
+afterPack: scripts/mihomo-after-pack.cjs
 directories:
   output: releases/desktop
 files:
@@ -18,6 +20,9 @@ files:
   - desktop/startup-diagnostics.cjs
   - desktop/app-preferences.cjs
   - desktop/app-preferences-ipc.cjs
+  - desktop/app-proxy*.mjs
+  - desktop/app-proxy*.cjs
+  - desktop/native/mihomo/**
   - desktop/official-auth.mjs
   - desktop/official-account.mjs
   - desktop/official-account-ipc.cjs

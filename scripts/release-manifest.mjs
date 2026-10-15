@@ -9,10 +9,12 @@ const releaseDir = path.join(root, 'releases');
 const metadata = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const version = metadata.version;
 const desktopOnly = process.argv.includes('--desktop-only');
+const windowsArm64 = process.argv.includes('--windows-arm64');
 if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('A stable numeric project version is required.');
 const inputs = [
   ['source', `PetPal-${version}-source.zip`, 'Source archive; rebuild using the lockfile'],
   ['windows-x64', `desktop/PetPal-${version}-Windows-x64.exe`, 'Portable application; packaged CLI and native window smoke passed'],
+  ...(windowsArm64 ? [['windows-arm64', `desktop/PetPal-${version}-Windows-arm64.exe`, 'Portable application; Windows ARM64 native smoke and package readback passed']] : []),
   ...(!desktopOnly ? [['android', `android/PetPal-${version}-Android-debug.apk`, 'Development-signed APK; device runtime not verified']] : []),
   ['ubuntu-x64', `ubuntu/PetPal-${version}-Ubuntu-x64.tar.gz`, 'Portable archive; ELF/integrity audit passed; target runtime not verified'],
   ['ubuntu-arm64', `ubuntu/PetPal-${version}-Ubuntu-arm64.tar.gz`, 'Portable archive; ELF/integrity audit passed; target runtime not verified'],
@@ -27,6 +29,7 @@ for (const [platform, file, acceptance] of inputs) {
 for (const [file, evidencePath] of [
   [`PetPal-${version}-source.zip`, 'evidence/source-package.json'],
   [`desktop/PetPal-${version}-Windows-x64.exe`, 'evidence/native/windows-final.json'],
+  ...(windowsArm64 ? [[`desktop/PetPal-${version}-Windows-arm64.exe`, 'evidence/native/windows-arm64-final.json']] : []),
   ...(!desktopOnly ? [[`android/PetPal-${version}-Android-debug.apk`, 'evidence/native/android-final.json']] : []),
   [`ubuntu/PetPal-${version}-Ubuntu-x64.tar.gz`, 'evidence/linux-package-x64-independent.json'],
   [`ubuntu/PetPal-${version}-Ubuntu-arm64.tar.gz`, 'evidence/linux-package-arm64-independent.json'],
@@ -50,12 +53,14 @@ for (const [file, evidencePath] of [
     const complete = JSON.parse(await readFile(path.join(root, `evidence/linux-package-${arch}-allfiles-${series}.json`), 'utf8'));
     if (complete.version !== version || complete.ok !== true || !Array.isArray(complete.failures) || complete.failures.length || complete.archiveSha256 !== artifact.sha256 || complete.archiveBytes !== artifact.bytes || complete.byteIdenticalFiles !== complete.archiveFiles || complete.stagedFiles !== complete.archiveFiles || !complete.archiveFiles) throw new Error(`Linux all-file readback did not pass: ${file}`);
   }
-  if (artifact.platform === 'windows-x64') {
+  if (artifact.platform.startsWith('windows-')) {
+    const arch = artifact.platform.slice('windows-'.length);
     const smoke = evidence.portableSmoke;
     if (smoke?.uiReady !== true || smoke.health?.ok !== true || smoke.health?.version !== version || smoke.codex?.available !== true || evidence.ownedProcessesRemaining !== 0 || smoke.electronVersion !== metadata.devDependencies.electron || smoke.desktopTools?.opencli?.available !== true || smoke.desktopTools.opencli.version !== metadata.dependencies['@jackwener/opencli']) throw new Error('Windows final smoke did not pass');
     const series = version.split('.').slice(0, 2).join('.');
-    const bytesReceipt = JSON.parse(await readFile(path.join(root, `evidence/native/windows-${series}-asar-verification.json`), 'utf8'));
+    const bytesReceipt = JSON.parse(await readFile(path.join(root, `evidence/native/windows-${arch === 'arm64' ? 'arm64-' : ''}${series}-asar-verification.json`), 'utf8'));
     if (bytesReceipt.version !== version || bytesReceipt.sha256?.toLowerCase() !== artifact.sha256 || bytesReceipt.bytes !== artifact.bytes || bytesReceipt.nativeHelperCompared !== true || bytesReceipt.opencliVersion?.trim() !== metadata.dependencies['@jackwener/opencli'] || !(bytesReceipt.filesCompared > 0) || !(bytesReceipt.opencliDependencyPackages?.length > 0)) throw new Error('Windows final executable readback did not pass');
+    if (arch === 'arm64' && (evidence.arch !== arch || bytesReceipt.arch !== arch || bytesReceipt.computerUseAudit?.arch !== arch || bytesReceipt.computerUseAudit?.native?.machine !== 0xaa64)) throw new Error('Windows ARM64 native architecture acceptance did not pass');
   }
 }
 const retainedArtifacts = [];

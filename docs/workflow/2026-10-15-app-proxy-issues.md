@@ -8,13 +8,13 @@
 
 - Goal: Windows/Ubuntu x64/ARM64 内置 Clash 兼容内核与本应用代理、架构下载入口。
 - Ordering rule: Complete issues in sequence.
-- Current status: issue-2 done; issue-3 next
+- Current status: complete
 
 ## Issue List
 
 - [x] issue-1 固定内核资产、私有运行时与网络路由
 - [x] issue-2 原生启停配置与设置界面接入
-- [ ] issue-3 架构打包、下载分发与实际验收
+- [x] issue-3 架构打包、下载分发与实际验收
 
 ## issue-1
 
@@ -45,6 +45,6 @@
 - 范围: 包源清单、Windows ARM64、Ubuntu 双架构、下载架构选择、使用/许可/边界文档
 - 依赖: issue-2
 - 验收标准: 包内核/CLI/原生模块架构一致；下载不会误选架构；实际已验和未验分清；保留原分发源
-- 状态: todo
-- 验证方式: 相关回归、生产构建、Chrome 页面、实际内核/包校验
-- commit: pending
+- 状态: done
+- 验证方式: 171/171 整合回归、15/15 Linux 参数/原子发布相关回归、17/17 公开源码扫描器回归及索引扫描通过，生产构建与 Chrome 下载选择/412×960 几何验收通过。Windows x64/ARM64 EXE+ZIP、Ubuntu x64/ARM64 tar.gz 已生成到私有目录，目标内核/CLI/Computer Use/源码许可独立读回通过；Windows x64 完整目录与最终 EXE、最终 Ubuntu x64 tar 在 WSLg 中均通过真实应用代理转发/启停/权限/私网绕过。ARM64 无实机；无真实订阅/出口测试；长 TEMP 便携启动仍未通过，ZIP 优先。详见 acceptance 文档。未覆盖线上正式包、未发布 GitHub/更新清单。自审完成。
+- commit: feat(issue-3): package proxy targets and add architecture-aware downloads

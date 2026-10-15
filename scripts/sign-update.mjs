@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { parseStableVersion, validateUpdateRepository, validateGitHubAssetUrl, verifyUpdateEnvelope, UPDATE_FILE_LIMIT, UPDATE_MANIFEST_LIMIT } from '../server/updates.mjs';
 import { validateServerManifestUrl, validateServerAssetUrl } from '../server/update-source.mjs';
 
-const FORMATS = Object.freeze({ 'windows-x64': ['portable-exe', '.exe'], 'ubuntu-x64': ['tar.gz', '.tar.gz'], 'ubuntu-arm64': ['tar.gz', '.tar.gz'], android: ['apk', '.apk'], web: ['web-zip', '.zip'] });
+const FORMATS = Object.freeze({ 'windows-x64': ['portable-exe', '.exe'], 'windows-arm64': ['portable-exe', '.exe'], 'ubuntu-x64': ['tar.gz', '.tar.gz'], 'ubuntu-arm64': ['tar.gz', '.tar.gz'], android: ['apk', '.apk'], web: ['web-zip', '.zip'] });
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
 const fields = (value, allowed) => record(value) && Object.keys(value).every(key => allowed.includes(key));
 const usage = `离线签名更新清单工具（GitHub Releases / 服务器，Node.js 22+）
@@ -75,7 +75,7 @@ function validateConfig(config, now) {
   if (source === 'github' && config.manifestUrl) throw new Error('GitHub 发布配置不能包含服务器清单地址。');
   if (!Number.isSafeInteger(config.sequence) || config.sequence < 1) throw new Error('sequence 必须是递增的正安全整数。');
   if (typeof config.expiresAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(config.expiresAt) || !Number.isFinite(Date.parse(config.expiresAt)) || Date.parse(config.expiresAt) <= now) throw new Error('expiresAt 必须是未来的 UTC ISO 时间。');
-  if (!Array.isArray(config.artifacts) || !config.artifacts.length || config.artifacts.length > 5) throw new Error('artifacts 必须包含 1 到 5 个平台文件。');
+  if (!Array.isArray(config.artifacts) || !config.artifacts.length || config.artifacts.length > 6) throw new Error('artifacts 必须包含 1 到 6 个平台文件。');
   const targets = new Set(), names = new Set();
   for (const item of config.artifacts) {
     if (!fields(item, ['target', 'file', 'version', 'versionCode', 'notes']) || typeof item.target !== 'string' || !Object.hasOwn(FORMATS, item.target) || targets.has(item.target)) throw new Error('发布平台无效或重复。');

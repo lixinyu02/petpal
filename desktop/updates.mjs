@@ -5,7 +5,7 @@ import path from 'node:path';
 import { validateServerManifestUrl, validateServerAssetUrl, validateServerRedirect } from '../server/update-source.mjs';
 
 export const MAX_UPDATE_BYTES = 2 * 1024 * 1024 * 1024;
-const SUPPORTED = new Set(['windows-x64', 'ubuntu-x64', 'ubuntu-arm64']);
+const SUPPORTED = new Set(['windows-x64', 'windows-arm64', 'ubuntu-x64', 'ubuntu-arm64']);
 const abortError = () => Object.assign(new Error('更新操作已取消'), { name: 'AbortError' });
 const assertActive = (signal) => { if (signal?.aborted) throw abortError(); };
 const publicRelease = (release) => release ? Object.fromEntries(['id', 'target', 'version', 'bytes', 'sha256', 'format', 'notes'].map(key => [key, release[key]])) : undefined;
@@ -45,7 +45,7 @@ export function validateDesktopAssetUrl(value, repository, { cdn = false } = {})
 function validateRelease(release, target, currentVersion, config) {
   if (!release || typeof release !== 'object' || !/^[\w][\w.-]{0,127}$/.test(release.id || '') || release.target !== target || !SUPPORTED.has(target)) throw new Error('更新发布项与本机平台不匹配');
   if (!newer(release.version, currentVersion)) throw new Error('更新版本必须高于当前版本');
-  const format = target === 'windows-x64' ? 'portable-exe' : 'tar.gz';
+  const format = target.startsWith('windows-') ? 'portable-exe' : 'tar.gz';
   if (release.format !== format || !Number.isSafeInteger(release.bytes) || release.bytes < 1 || release.bytes > MAX_UPDATE_BYTES || !/^[a-f0-9]{64}$/i.test(release.sha256 || '')) throw new Error('更新文件格式、大小或校验值无效');
   if (!config?.configured || !sameSourceBinding(release, config)) throw new Error('更新源已变化，请重新检查');
   const source = updateSource(release.source);

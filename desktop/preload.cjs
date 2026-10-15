@@ -57,6 +57,7 @@ function appProxyCall(action, value) {
 }
 
 contextBridge.exposeInMainWorld('petpal', Object.freeze({
+  runtime: Object.freeze({ platform:typeof process !== 'undefined' && typeof process.platform === 'string' ? process.platform : '', arch:typeof process !== 'undefined' && typeof process.arch === 'string' ? process.arch : '' }),
   connection: () => ipcRenderer.invoke('petpal:connection'),
   showPet: () => ipcRenderer.invoke('petpal:show-pet'),
   showMain: () => ipcRenderer.invoke('petpal:show-main'),

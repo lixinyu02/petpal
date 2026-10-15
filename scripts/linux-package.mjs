@@ -13,7 +13,9 @@ import builderUtil from 'builder-util';
 import semver from 'semver';
 import yauzl from 'yauzl';
 import {filterComputerUseNative,auditComputerUsePackage} from './computer-use-package.mjs';
-import { copyClientPayload } from './client-payload.mjs';
+import { copyClientPayload, APP_PROXY_PRODUCTION_DEPENDENCIES, readMihomoClientPolicy, auditMihomoClientPayload,
+  parseLinuxPackageArguments, assertLinuxPackageTargetsAvailable, publishLinuxPackageArchive } from './client-payload.mjs';
+import { prepareMihomo } from './mihomo-package.mjs';
 
 const { build, Platform } = electronBuilder;
 const { Arch } = builderUtil;
@@ -29,6 +31,9 @@ requiredApplicationSource.push('server/conversation-organization.mjs', 'server/c
 requiredApplicationSource.push('desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs');
 requiredApplicationSource.push('desktop/official-auth.mjs', 'desktop/official-account.mjs', 'desktop/official-account-ipc.cjs');
 requiredApplicationSource.push('server/official-providers.mjs');
+requiredApplicationSource.push('desktop/app-proxy.mjs', 'desktop/app-proxy-network.mjs', 'desktop/app-proxy-ipc.cjs', 'desktop/app-proxy-smoke.cjs',
+  'desktop/native/mihomo/manifest.json', 'desktop/native/mihomo/LICENSE', 'desktop/native/mihomo/PROVENANCE.json', 'desktop/native/mihomo/SOURCE-NOTICE.txt',
+  'server/app-proxy-network.mjs', 'server/app-proxy-context.mjs');
 requiredApplicationSource.push('server/native/codex-review/models-0.143.0.json', 'server/native/codex-review/LICENSE', 'server/native/codex-review/PROVENANCE.json', 'server/native/codex-review/SHA256SUMS');
 requiredApplicationSource.push('server/approval-review.mjs', 'server/system-controls.mjs', 'server/native/system-windows.ps1');
 requiredApplicationSource.push('desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs');
@@ -54,6 +59,7 @@ function assertNoOptionalNcmCliDependency(pkg, location) {
   }
 }
 assertNoOptionalNcmCliDependency(metadata, 'package.json');
+for (const [name, version] of Object.entries(APP_PROXY_PRODUCTION_DEPENDENCIES)) if (metadata.dependencies?.[name] !== version) throw Error(`App proxy production dependency must be pinned: ${name}`);
 const opencliPrefix = 'node_modules/@jackwener/opencli';
 const requiredOpencliFiles = ['package.json', 'LICENSE', 'cli-manifest.json', 'dist/src/main.js', 'dist/src/daemon.js', 'dist/src/browser/base-page.js',
   'dist/src/execution.js', 'dist/src/registry.js', 'dist/src/errors.js',
@@ -66,15 +72,15 @@ const requiredOpencliFiles = ['package.json', 'LICENSE', 'cli-manifest.json', 'd
   'clis/tieba/hot.js', 'clis/tieba/search.js', 'clis/tieba/read.js',
   'clis/bilibili/search.js', 'clis/bilibili/hot.js', 'clis/bilibili/ranking.js', 'clis/bilibili/video.js', 'clis/bilibili/comments.js', 'clis/bilibili/history.js', 'clis/bilibili/utils.js'];
 if (![electronVersion, codexVersion, opencliVersion].every(version => /^\d+\.\d+\.\d+$/.test(version))) throw new Error('Electron, Codex and OpenCLI versions must be exact.');
-const requested = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
-const architectures = requested.length ? requested : ['x64', 'arm64'];
-if (architectures.some(arch => !['x64', 'arm64'].includes(arch))) throw new Error('Architectures must be x64 or arm64.');
-const outputRoot = path.join(root, 'releases', 'ubuntu');
-const cache = path.join(outputRoot, '.cache');
+const { architectures, outputRoot, customOutput } = parseLinuxPackageArguments(process.argv.slice(2), root);
+if (!process.argv.includes('--download-only') && !process.argv.includes('--dir-only')) await assertLinuxPackageTargetsAvailable(outputRoot, metadata.version, architectures);
+// Verified immutable downloads are shared; new review builds do not duplicate
+// existing archives or write into the formal output's staging/receipt paths.
+const cache = path.join(root, 'releases', 'ubuntu', '.cache');
 const runId = new Date().toISOString().replace(/[:.]/g, '-');
 const staging = path.join(outputRoot, '.stage', runId);
 const source = path.join(staging, 'source');
-const evidenceDir = path.join(root, 'evidence');
+const evidenceDir = customOutput ? path.join(outputRoot, 'evidence') : path.join(root, 'evidence');
 await Promise.all([mkdir(cache, { recursive: true }), mkdir(source, { recursive: true }), mkdir(evidenceDir, { recursive: true })]);
 const progress = { startedAt: new Date().toISOString(), pid: process.pid, hostPlatform: process.platform, architectures, phase: 'source', artifacts: [] };
 async function report(phase) {
@@ -237,6 +243,7 @@ async function preserveOpencliMetadata(appRoot, sourceAudit) {
 }
 
 try {
+  const mihomoPolicy = await readMihomoClientPolicy(root);
   // Snapshot only application source and production package content, never user data.
   await copyClientPayload(root, source);
   await cp(path.join(root, 'NOTICE'), path.join(source, 'NOTICE'));
@@ -279,8 +286,9 @@ try {
       download(`https://github.com/electron/electron/releases/download/v${electronVersion}/${electronName}`, electronZip, 'sha256', electronSha256),
       download(info.dist.tarball, codexTgz, 'sha512', codexSha512, 'base64'),
     ]);
+    const mihomo = await prepareMihomo(root, { platform: 'linux', arch });
     await writeFile(path.join(cache, `codex-${info.version}-integrity.json`), `${JSON.stringify({ registryUrl, version: info.version, tarball: info.dist.tarball, integrity: info.dist.integrity, sha256: await digest(codexTgz) }, null, 2)}\n`);
-    return { arch, electronZip, electronSha256, codexTgz, codexIntegrity: info.dist.integrity };
+    return { arch, electronZip, electronSha256, codexTgz, codexIntegrity: info.dist.integrity, mihomo };
   }));
   if (process.argv.includes('--download-only')) { await report('complete-download-integrity-only'); process.exit(0); }
   for (const input of inputs) {
@@ -325,7 +333,7 @@ try {
       appId: 'com.petpal.desktop', productName: 'PetPal', asar: false, electronVersion, electronDist: runtime,
       npmRebuild: false, nodeGypRebuild: false, buildDependenciesFromSource: false,
       removePackageScripts: false, removePackageKeywords: false,
-      directories: { output: builderOutput }, files: ['dist/**', 'server/**', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'desktop/updates.mjs', 'desktop/assets/**', 'package.json', 'NOTICE'],
+      directories: { output: builderOutput }, files: ['dist/**', 'server/**', ...requiredApplicationSource.filter(file => file.startsWith('desktop/')), 'desktop/assets/**', 'package.json', 'NOTICE'],
       linux: { executableName: 'petpal', category: 'Utility' },
     } });
     const unpacked = path.join(builderOutput, arch === 'x64' ? 'linux-unpacked' : `linux-${arch}-unpacked`);
@@ -337,6 +345,13 @@ try {
     if (packagedCodex.sha256 !== nativeAudit.sha256) throw new Error('Builder changed native Codex binary');
     await elf(path.join(portable, 'petpal'), arch);
     const packagedApp = path.join(portable, 'resources', 'app');
+    const mihomoDirectory = path.join(portable, 'resources', 'mihomo');
+    await cp(input.mihomo.payloadDirectory, mihomoDirectory, { recursive: true });
+    const mihomoAudit = await auditMihomoClientPayload(mihomoDirectory, mihomoPolicy, { arch });
+    for (const [name, version] of Object.entries(APP_PROXY_PRODUCTION_DEPENDENCIES)) {
+      const pkg = JSON.parse(await readFile(path.join(packagedApp, 'node_modules', name, 'package.json'), 'utf8'));
+      if (pkg.name !== name || pkg.version !== version) throw Error(`App proxy production dependency missing or changed: ${name}`);
+    }
     await auditNcmcliPackaging(packagedApp, await allFiles(packagedApp));
     for(const file of archSourceReceipt.filter(item=>item.path.startsWith('server/native/computer-use/'))){if(await digest(path.join(packagedApp,file.path))!==file.sha256)throw Error('Computer Use native provenance payload mismatch');}
     await cp(path.join(appRoot,'node_modules','@zavora-ai','computer-use-mcp','package.json'),path.join(packagedApp,'node_modules','@zavora-ai','computer-use-mcp','package.json'));
@@ -356,7 +371,7 @@ try {
     const opencliAudit = await auditOpencli(path.join(portable, 'resources', 'app'), opencliSource);
     opencliAudit.preservedMetadata = preservedMetadata;
     if (process.argv.includes('--dir-only')) {
-      progress.artifacts.push({ arch, baselineDirectory: path.relative(root, portable).replaceAll('\\', '/'), electronMachine: electronAudit.machine, codexMachine: nativeAudit.machine, nativeHelpers: nativeHelpers.length, runtimeVerified: false });
+      progress.artifacts.push({ arch, baselineDirectory: path.relative(root, portable).replaceAll('\\', '/'), electronMachine: electronAudit.machine, codexMachine: nativeAudit.machine, nativeHelpers: nativeHelpers.length, mihomo: mihomoAudit, runtimeVerified: false });
       await report(`baseline-dir-audited-${arch}`); continue;
     }
     await writeFile(path.join(portable, 'start-petpal.sh'), '#!/bin/sh\nset -eu\nHERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$HERE/petpal" "$@"\n');
@@ -366,14 +381,14 @@ try {
     const files = await allFiles(portable);
     if (files.some(file => /\.exe$|\.dll$|codex-win32-|codex-darwin-/i.test(file))) throw new Error('Portable artifact contains wrong-platform executable');
     const manifestFile = path.join(portable, 'BUILD-MANIFEST.json');
-    const manifestValue = { app: metadata.version, platform: 'linux', arch, crossPackagedOn: process.platform, runtimeVerified: false, electronVersion, codexVersion, opencliVersion, opencli: opencliAudit, computerUse:computerUseAudit, sourceReceipt:archSourceReceipt, electron: { sha256: electronAudit.sha256, machine: electronAudit.machine, zipSha256: input.electronSha256 }, codex: { sha256: nativeAudit.sha256, machine: nativeAudit.machine, npmIntegrity: input.codexIntegrity, helpers: nativeHelpers.map(item => ({ ...item, path: path.relative(nativeRoot, item.path).replaceAll('\\', '/') })) }, packageMethod: 'electron-builder linux dir + portable tar.gz' };
+    const manifestValue = { app: metadata.version, platform: 'linux', arch, crossPackagedOn: process.platform, runtimeVerified: false, electronVersion, codexVersion, opencliVersion, opencli: opencliAudit, computerUse:computerUseAudit, mihomo: mihomoAudit, appProxyDependencies: APP_PROXY_PRODUCTION_DEPENDENCIES, sourceReceipt:archSourceReceipt, electron: { sha256: electronAudit.sha256, machine: electronAudit.machine, zipSha256: input.electronSha256 }, codex: { sha256: nativeAudit.sha256, machine: nativeAudit.machine, npmIntegrity: input.codexIntegrity, helpers: nativeHelpers.map(item => ({ ...item, path: path.relative(nativeRoot, item.path).replaceAll('\\', '/') })) }, packageMethod: 'electron-builder linux dir + portable tar.gz' };
     await writeFile(manifestFile, `${JSON.stringify(manifestValue, null, 2)}\n`);
     await report(`archive-and-audit-${arch}`);
     const archive = path.join(outputRoot, `${folderName}.tar.gz`);
-    const executable = relative => /(?:^|\/)(?:petpal|chrome-sandbox|chrome_crashpad_handler|codex|codex-code-mode-host|rg)$/.test(relative) || relative.endsWith('.sh') || nativeHelpers.some(item => relative.endsWith(path.relative(appRoot, item.path).replaceAll('\\', '/')));
-    await tar.c({ cwd: portable, prefix: folderName, file: `${archive}.partial`, gzip: { level: 6 }, portable: true, onWriteEntry: entry => {
+    const executable = relative => /(?:^|\/)(?:petpal|chrome-sandbox|chrome_crashpad_handler|codex|codex-code-mode-host|rg|mihomo)$/.test(relative) || relative.endsWith('.sh') || nativeHelpers.some(item => relative.endsWith(path.relative(appRoot, item.path).replaceAll('\\', '/')));
+    await pipeline(tar.c({ cwd: portable, prefix: folderName, gzip: { level: 6 }, portable: true, onWriteEntry: entry => {
       entry.stat.mode = entry.type === 'Directory' || executable(entry.path) ? 0o755 : 0o644;
-    } }, ['.']);
+    } }, ['.']), createWriteStream(`${archive}.partial`, { flags: 'wx' }));
     let entryCount = 0; const executableModes = []; let foundManifest = false;
     await tar.t({ file: `${archive}.partial`, strict: true, onReadEntry: entry => {
       entryCount++;
@@ -382,12 +397,12 @@ try {
       if (entry.type === 'File' && executable(entry.path)) { if ((entry.mode & 0o111) !== 0o111) throw new Error(`Executable mode missing: ${entry.path}`); executableModes.push({ path: entry.path, mode: entry.mode.toString(8) }); }
     } });
     if (!foundManifest || executableModes.length < 5) throw new Error('Final archive is incomplete');
-    await rename(`${archive}.partial`, archive);
-    const receipt = { version: metadata.version, arch, archive: path.relative(root, archive).replaceAll('\\', '/'), stagedPayload: path.relative(root, portable).replaceAll('\\', '/'), bytes: (await stat(archive)).size, sha256: await digest(archive), entryCount, executableModes, electronVersion, codexVersion, opencliVersion, opencli: opencliAudit, computerUse:computerUseAudit, electronMachine: electronAudit.machine, codexMachine: nativeAudit.machine, codexSha256: nativeAudit.sha256, electronZipSha256: input.electronSha256, codexNpmIntegrity: input.codexIntegrity, runtimeVerified: false };
+    await publishLinuxPackageArchive(`${archive}.partial`, archive);
+    const receipt = { version: metadata.version, arch, archive: path.relative(root, archive).replaceAll('\\', '/'), stagedPayload: path.relative(root, portable).replaceAll('\\', '/'), bytes: (await stat(archive)).size, sha256: await digest(archive), entryCount, executableModes, electronVersion, codexVersion, opencliVersion, opencli: opencliAudit, computerUse:computerUseAudit, mihomo: mihomoAudit, appProxyDependencies: APP_PROXY_PRODUCTION_DEPENDENCIES, electronMachine: electronAudit.machine, codexMachine: nativeAudit.machine, codexSha256: nativeAudit.sha256, electronZipSha256: input.electronSha256, codexNpmIntegrity: input.codexIntegrity, runtimeVerified: false };
     progress.artifacts.push(receipt);
     await writeFile(path.join(evidenceDir, `linux-package-${arch}.json`), `${JSON.stringify(receipt, null, 2)}\n`);
     await writeFile(path.join(evidenceDir, `linux-package-${arch}-${metadata.version}.json`), `${JSON.stringify(receipt, null, 2)}\n`);
-    await writeFile(`${archive}.sha256`, `${receipt.sha256}  ${path.basename(archive)}\n`);
+    await writeFile(`${archive}.sha256`, `${receipt.sha256}  ${path.basename(archive)}\n`, { flag: 'wx' });
   }
   await report(process.argv.includes('--dir-only') ? 'complete-baseline-dirs-runtime-unverified' : 'complete-cross-package-runtime-unverified');
 } catch (error) {

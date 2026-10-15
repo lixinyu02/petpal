@@ -4,7 +4,7 @@ import { validateServerManifestUrl, validateServerAssetUrl, validateServerRedire
 export const UPDATE_CHANNEL = 'stable';
 export const UPDATE_MANIFEST_LIMIT = 128 * 1024;
 export const UPDATE_FILE_LIMIT = 2 * 1024 * 1024 * 1024;
-const FORMATS = Object.freeze({ 'windows-x64': 'portable-exe', 'ubuntu-x64': 'tar.gz', 'ubuntu-arm64': 'tar.gz', android: 'apk', web: 'web-zip' });
+const FORMATS = Object.freeze({ 'windows-x64': 'portable-exe', 'windows-arm64': 'portable-exe', 'ubuntu-x64': 'tar.gz', 'ubuntu-arm64': 'tar.gz', android: 'apk', web: 'web-zip' });
 const failure = (status, message) => Object.assign(new Error(message), { status });
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const fields = (value, allowed) => object(value) && Object.keys(value).every(key => allowed.includes(key));
@@ -108,7 +108,7 @@ export function verifyUpdateEnvelope(bytes, { repository, source = 'github', man
   const trustedKey = publicKey(pem);
   if (!trustedKey.pem || signature.length !== 64 || !verify(null, payloadBytes, trustedKey.pem, signature)) throw failure(502, '更新清单签名验证失败。');
   const payload = parseJson(payloadBytes);
-  if (!fields(payload, ['product', 'channel', 'sequence', 'issuedAt', 'expiresAt', 'releases']) || payload.product !== 'petpal' || payload.channel !== UPDATE_CHANNEL || !Number.isSafeInteger(payload.sequence) || payload.sequence < 1 || !Array.isArray(payload.releases) || !payload.releases.length || payload.releases.length > 5) throw failure(502, '更新清单内容无效。');
+  if (!fields(payload, ['product', 'channel', 'sequence', 'issuedAt', 'expiresAt', 'releases']) || payload.product !== 'petpal' || payload.channel !== UPDATE_CHANNEL || !Number.isSafeInteger(payload.sequence) || payload.sequence < 1 || !Array.isArray(payload.releases) || !payload.releases.length || payload.releases.length > 6) throw failure(502, '更新清单内容无效。');
   const issued = timestamp(payload.issuedAt), expires = timestamp(payload.expiresAt);
   if (issued > now + 5 * 60 * 1000 || expires <= now || expires <= issued) throw failure(502, '更新清单已过期或发布时间无效。');
   const ids = new Set(), targets = new Set();

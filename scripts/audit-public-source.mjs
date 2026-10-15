@@ -4,6 +4,17 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 const syntheticSecrets = new Map([
+  ['tests/accounts-settings-ui.test.mjs', new Set(['synthetic-password'])],
+  ['tests/app-preferences-ipc.test.mjs', new Set(['private credential'])],
+  ['tests/app-proxy-context.test.mjs', new Set(['private_generated_proxy_password_123'])],
+  ['tests/app-proxy-ipc.test.mjs', new Set(['private-node-password'])],
+  ['tests/app-proxy-network.test.mjs', new Set(['private_fixture_random_password_123'])],
+  ['tests/app-proxy-ui.test.mjs', new Set(['private-password', 'fixture-local-token'])],
+  ['tests/official-account-api.test.mjs', new Set(['synthetic-shared-key', 'synthetic-global-agent-key', 'synthetic-member-password', 'synthetic-relogged-key'])],
+  ['tests/official-account-ipc.test.mjs', new Set(['refresh-token-never-return'])],
+  ['tests/official-account-ui.test.mjs', new Set(['private-usage-token'])],
+  ['tests/official-account.test.mjs', new Set(['access-secret-alice-refreshed'])],
+  ['tests/user-device-roles.test.mjs', new Set(['isolated-device-role-password', 'isolated-role-provider-secret', 'isolated-central-secret'])],
   ['tests/desktop-startup.test.mjs', new Set(['startup-privacy-fixture', 'private-smoke-error', 'private-pairing-token', 'private-renderer-response-token'])],
   ['tests/asr-http.test.mjs', new Set(['asr-owner-fixture'])],
   ['tests/cosyvoice-stream.test.mjs', new Set(['fixture-private-key'])],
@@ -11,7 +22,7 @@ const syntheticSecrets = new Map([
   ['tests/execution-hosts-integration.test.mjs', new Set(['integration-owner', 'integration-password'])],
   ['tests/executor-relay-redactor.test.mjs', new Set(['synthetic-private-upstream-key'])],
   ['tests/executor-relay.test.mjs', new Set(['fixture-central-private-key', 'fixture-owner-session'])],
-  ['tests/executors.test.mjs', new Set(['never-send-this-key', 'private-review-key'])],
+  ['tests/executors.test.mjs', new Set(['never-send-this-key', 'private-review-key', 'private-personal-gateway-secret'])],
   ['tests/agent-skills.test.mjs', new Set(['synthetic-fixture-key'])],
   ['tests/agent-tasks.test.mjs', new Set(['synthetic-task-review-secret'])],
   ['tests/approval-review.test.mjs', new Set(['fixture-private-key'])],

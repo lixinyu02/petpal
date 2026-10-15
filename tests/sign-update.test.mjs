@@ -95,11 +95,12 @@ test('server signing rejects unsafe origins, normalized traversal and injected p
   await assert.rejects(stat(f.outputFile), { code: 'ENOENT' });
 });
 
-test('artifact paths resolve relative to config and all five targets receive fixed formats', async t => {
+test('artifact paths resolve relative to config and all six targets receive fixed formats', async t => {
   const f = await fixture(t), sub = path.join(f.directory, 'configuration'); await mkdir(sub);
   const value = config();
   value.artifacts = [
     { target: 'windows-x64', file: '../windows.exe', version: '0.7.0' },
+    { target: 'windows-arm64', file: '../windows-arm64.exe', version: '0.7.0' },
     { target: 'ubuntu-x64', file: '../linux-x64.tar.gz', version: '0.7.0' },
     { target: 'ubuntu-arm64', file: '../linux-arm64.tar.gz', version: '0.7.0' },
     { target: 'android', file: '../android.apk', version: '0.7.0', versionCode: 7 },
@@ -109,8 +110,8 @@ test('artifact paths resolve relative to config and all five targets receive fix
   const file = path.join(sub, 'release.json'); await writeFile(file, JSON.stringify(value));
   await f.sign({ configFile: file });
   const validated = verifyUpdateEnvelope(await readFile(f.outputFile), { repository: value.repository, publicKey: await readFile(f.keyResult.publicKeyPath, 'utf8'), now: epoch });
-  assert.deepEqual(validated.releases.map(item => item.format), ['portable-exe', 'tar.gz', 'tar.gz', 'apk', 'web-zip']);
-  assert.equal(validated.releases[3].versionCode, 7); assert.equal(validated.releases[0].notes, '');
+  assert.deepEqual(validated.releases.map(item => item.format), ['portable-exe', 'portable-exe', 'tar.gz', 'tar.gz', 'apk', 'web-zip']);
+  assert.equal(validated.releases[4].versionCode, 7); assert.equal(validated.releases[0].notes, '');
 });
 
 test('sign rejects public, malformed and non-Ed25519 private keys without creating output', async t => {

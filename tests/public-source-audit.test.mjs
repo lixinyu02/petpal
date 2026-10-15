@@ -50,6 +50,23 @@ test('reviewed synthetic credentials remain allowed only in their exact fixture 
   for(const value of ['<insert-your-secret-here>', '${process.env.KEY}', 'process.env.EXAMPLE_KEY'])assert.deepEqual(inspect('docs/config.json',JSON.stringify({apiKey:value})),[]);
 });
 
+test('account settings fixture password is allowed only for its reviewed file and value',async()=>{
+  const name='tests/accounts-settings-ui.test.mjs',value=['synthetic','password'].join('-');
+  assert.deepEqual(inspect(name,await readFile(new URL(`../${name}`,import.meta.url))),[]);
+  assert.ok(reasons(inspect(name,JSON.stringify({password:credential()}))).includes('unreviewed literal credential'));
+  assert.ok(reasons(inspect('docs/config.json',JSON.stringify({password:value}))).includes('unreviewed literal credential'));
+});
+
+test('desktop proxy, official account and device role fixtures stay scoped to exact reviewed files',async()=>{
+  for(const stem of ['app-preferences-ipc','app-proxy-context','app-proxy-ipc','app-proxy-network','app-proxy-ui','executors','official-account-api','official-account-ipc','official-account-ui','official-account','user-device-roles']){
+    const name=`tests/${stem}.test.mjs`;
+    assert.deepEqual(inspect(name,await readFile(new URL(`../${name}`,import.meta.url))),[],name);
+    assert.ok(reasons(inspect(name,JSON.stringify({token:credential()}))).includes('unreviewed literal credential'),name);
+  }
+  const bearer=['access','secret','alice','refreshed'].join('-');
+  assert.ok(reasons(inspect('docs/config.txt',`Bearer ${bearer}`)).includes('literal bearer value'));
+});
+
 test('ASR and Agent fixture credentials use the shared exact-file policy without exempting other values',async()=>{
   for(const name of ['tests/asr-http.test.mjs','tests/asr.test.mjs','tests/agent-access.test.mjs']){
     assert.deepEqual(inspect(name,await readFile(new URL(`../${name}`,import.meta.url))),[],name);

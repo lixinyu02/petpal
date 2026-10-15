@@ -42,6 +42,7 @@ async function fixture(t, options = {}) {
 
 test('runtime target and version are fixed by main; unsigned URLs, other repos and excessive sizes are rejected', async t => {
   assert.equal(desktopUpdateTarget('win32', 'x64'), 'windows-x64');
+  assert.equal(desktopUpdateTarget('win32', 'arm64'), 'windows-arm64');
   assert.equal(desktopUpdateTarget('linux', 'arm64'), 'ubuntu-arm64');
   for (const url of ['http://github.com/test-owner/petpal/releases/download/v1/a.exe', 'https://github.com/other/petpal/releases/download/v1/a.exe', 'https://github.com/test-owner/petpal/raw/main/a.exe', 'https://user@github.com/test-owner/petpal/releases/download/v1/a.exe', 'https://release-assets.githubusercontent.com/a']) assert.throws(() => validateDesktopAssetUrl(url, 'test-owner/petpal'));
   assert.equal(validateDesktopAssetUrl('https://release-assets.githubusercontent.com/github-production-release-asset/test?sig=test', 'test-owner/petpal', { cdn: true }), 'https://release-assets.githubusercontent.com/github-production-release-asset/test?sig=test');
@@ -52,6 +53,15 @@ test('runtime target and version are fixed by main; unsigned URLs, other repos a
   assert.equal((await wrong.manager.check()).phase, 'error');
   const downgrade = await fixture(t, { release: { version: '0.5.9' } });
   assert.equal((await downgrade.manager.check()).phase, 'error');
+});
+
+test('Windows ARM64 updates select and install only their exact native portable target', async t => {
+  const f = await fixture(t, { arch: 'arm64', release: { id: 'arm64-061', target: 'windows-arm64' } });
+  const checked = await f.manager.check(); assert.equal(checked.phase, 'available'); assert.equal(checked.target, 'windows-arm64');
+  assert.equal(f.calls.find(item => item.action === 'check').target, 'windows-arm64');
+  await f.manager.download(checked.release.id); await f.manager.install(checked.release.id); assert.equal(f.launches.length, 1); assert.equal(f.reveals.length, 0);
+  const x64 = await fixture(t, { arch: 'arm64' }); assert.equal((await x64.manager.check()).phase, 'error'); assert.equal(x64.requests.length, 0);
+  const format = await fixture(t, { arch: 'arm64', release: { target: 'windows-arm64', format: 'tar.gz' } }); assert.equal((await format.manager.check()).phase, 'error');
 });
 
 test('check reports not configured/current and never downloads by itself', async t => {

@@ -6,14 +6,20 @@ import { readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import * as tar from 'tar';
 import semver from 'semver';
-import { includeClientPayload, listClientPayloadFiles } from './client-payload.mjs';
+import { isDeepStrictEqual } from 'node:util';
+import { includeClientPayload, listClientPayloadFiles, APP_PROXY_PRODUCTION_DEPENDENCIES, readMihomoClientPolicy, verifyMihomoClientRecords } from './client-payload.mjs';
 
 const archive = process.argv[2];
 if (!archive) throw new Error('Usage: node scripts/linux-verify.mjs <PetPal-Ubuntu.tar.gz>');
+const mihomoPolicy = await readMihomoClientPolicy(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'));
+const mihomoRecords = new Map(); let mihomoVerification = null;
 const native = []; const failures = []; const frontend = []; const applicationSource = []; const seen = new Set(); let manifest; let appPackageMetadata; let count = 0;
 const requiredApplicationSource = ['server/app.mjs', 'server/auth.mjs', 'server/user-roles.mjs', 'server/agent-permissions.mjs', 'server/agent-tasks.mjs', 'server/attachments.mjs', 'server/downloads.mjs', 'server/codex.mjs', 'server/codex-config.mjs', 'server/codex-transport.mjs', 'server/updates.mjs', 'desktop/updates.mjs', 'server/desktop-tools.mjs', 'server/music.mjs', 'server/opencli.mjs', 'server/native/music-windows.ps1', 'server/index.mjs', 'server/providers.mjs', 'server/store.mjs', 'server/voice.mjs', 'server/cosyvoice.mjs', 'server/asr.mjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/remote-http.cjs', 'NOTICE'];
 requiredApplicationSource.push('desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs');
 requiredApplicationSource.push('desktop/official-auth.mjs', 'desktop/official-account.mjs', 'desktop/official-account-ipc.cjs');
+requiredApplicationSource.push('desktop/app-proxy.mjs', 'desktop/app-proxy-network.mjs', 'desktop/app-proxy-ipc.cjs', 'desktop/app-proxy-smoke.cjs',
+  'desktop/native/mihomo/manifest.json', 'desktop/native/mihomo/LICENSE', 'desktop/native/mihomo/PROVENANCE.json', 'desktop/native/mihomo/SOURCE-NOTICE.txt',
+  'server/app-proxy-network.mjs', 'server/app-proxy-context.mjs');
 requiredApplicationSource.push('server/official-providers.mjs');
 requiredApplicationSource.push('server/native/codex-review/models-0.143.0.json', 'server/native/codex-review/LICENSE', 'server/native/codex-review/PROVENANCE.json', 'server/native/codex-review/SHA256SUMS');
 requiredApplicationSource.push('server/approval-review.mjs', 'server/system-controls.mjs', 'server/native/system-windows.ps1');
@@ -32,7 +38,7 @@ requiredApplicationSource.push('server/ncmcli.mjs', 'server/agent-skills.mjs',
 const ncmSkillDirectory = 'server/native/skills/petpal-ncmcli';
 const ncmSkillMembers = ['SKILL.md', 'LICENSE', 'PROVENANCE.json'];
 const ncmSkillAssets = new Map();
-const isApplicationSource = relative => /^(?:server\/[^/]+\.mjs|server\/native\/[^/]+\.ps1|server\/native\/codex-review\/(?:models-0\.143\.0\.json|LICENSE|PROVENANCE\.json|SHA256SUMS)|server\/native\/computer-use\/(?:LICENSE|patches\/linux-x11-window-geometry\.patch|linux-(?:x64|arm64)\/(?:PROVENANCE\.json|computer-use-napi\.linux-(?:x64|arm64)\.node))|server\/native\/music-mcp\/(?:netease\/(?:server\.py|LICENSE|pyproject\.toml|PROVENANCE\.json)|qqmusic\/(?:login\.py|LICENSE|pyproject\.toml|PROVENANCE\.json|src\/mcp_qqmusic\/(?:__init__|__main__|server|format)\.py))|server\/native\/skills\/petpal-ncmcli\/(?:SKILL\.md|LICENSE|PROVENANCE\.json)|desktop\/(?:main|preload|window-layout|media-permissions|service-settings|startup-diagnostics|app-preferences|app-preferences-ipc|central-server|central-server-ipc|central-server-smoke|remote-http|official-account-ipc)\.cjs|desktop\/(?:updates|executor|official-auth|official-account)\.mjs|NOTICE)$/.test(relative);
+const isApplicationSource = relative => /^(?:server\/[^/]+\.mjs|server\/native\/[^/]+\.ps1|server\/native\/codex-review\/(?:models-0\.143\.0\.json|LICENSE|PROVENANCE\.json|SHA256SUMS)|server\/native\/computer-use\/(?:LICENSE|patches\/linux-x11-window-geometry\.patch|linux-(?:x64|arm64)\/(?:PROVENANCE\.json|computer-use-napi\.linux-(?:x64|arm64)\.node))|server\/native\/music-mcp\/(?:netease\/(?:server\.py|LICENSE|pyproject\.toml|PROVENANCE\.json)|qqmusic\/(?:login\.py|LICENSE|pyproject\.toml|PROVENANCE\.json|src\/mcp_qqmusic\/(?:__init__|__main__|server|format)\.py))|server\/native\/skills\/petpal-ncmcli\/(?:SKILL\.md|LICENSE|PROVENANCE\.json)|desktop\/(?:main|preload|window-layout|media-permissions|service-settings|startup-diagnostics|app-preferences|app-preferences-ipc|central-server|central-server-ipc|central-server-smoke|remote-http|official-account-ipc|app-proxy-ipc|app-proxy-smoke)\.cjs|desktop\/(?:updates|executor|official-auth|official-account|app-proxy|app-proxy-network)\.mjs|desktop\/native\/mihomo\/(?:manifest\.json|LICENSE|PROVENANCE\.json|SOURCE-NOTICE\.txt)|NOTICE)$/.test(relative);
 const packageMetadata = new Map(), dependencyHashes = new Map(), launchers = new Map();
 requiredApplicationSource.push('server/computer-use-mcp.mjs','server/computer-use-tool-names.mjs','server/computer-use-mcp-routes.mjs','server/dynamic-tool-output.mjs','server/model-request-limits.mjs');
 requiredApplicationSource.push('server/native/computer-use/LICENSE','server/native/computer-use/patches/linux-x11-window-geometry.patch');
@@ -58,6 +64,20 @@ await tar.t({ file: archive, strict: true, onReadEntry(entry) {
   if (/(?:^|\/)node_modules\/@music163\/ncm-cli(?:\/|$)/i.test(entry.path)) failures.push(`Optional ncm-cli runtime must not be distributed: ${entry.path}`);
   if (entry.path.endsWith('/BUILD-MANIFEST.json')) {
     let text = ''; entry.on('data', chunk => { text += chunk; }); entry.on('end', () => { manifest = JSON.parse(text); });
+  }
+  const mihomoRelative = entry.path.split('/resources/mihomo/')[1];
+  if (mihomoRelative !== undefined) {
+    if (entry.type === 'Directory' && !['', 'source/'].includes(mihomoRelative)) failures.push(`Unexpected Mihomo payload directory: ${mihomoRelative}`);
+    if (entry.type === 'File') {
+      const digest = createHash('sha256'), chunks = []; let bytes = 0, header = Buffer.alloc(0);
+      entry.on('data', chunk => {
+        digest.update(chunk); bytes += chunk.length;
+        if (header.length < 64) header = Buffer.concat([header, chunk]).subarray(0, 64);
+        if (mihomoRelative === 'audit.json' && bytes <= 65536) chunks.push(chunk);
+      });
+      entry.on('end', () => mihomoRecords.set(mihomoRelative, { bytes, sha256: digest.digest('hex'), header, mode: entry.mode,
+        ...(mihomoRelative === 'audit.json' && bytes <= 65536 ? { data: Buffer.concat(chunks) } : {}) }));
+    }
   }
   if (entry.type === 'File' && entry.path.includes('/resources/app/dist/')) {
     const hash = createHash('sha256'); entry.on('data', chunk => hash.update(chunk));
@@ -134,6 +154,11 @@ try {
 if (!manifest) failures.push('Missing manifest');
 else {
   if (manifest.platform !== 'linux' || !['x64', 'arm64'].includes(manifest.arch)) failures.push('Invalid Linux manifest platform/architecture');
+  try {
+    mihomoVerification = verifyMihomoClientRecords(mihomoRecords, mihomoPolicy, { arch: manifest.arch });
+    if (!isDeepStrictEqual(manifest.mihomo, mihomoVerification)) failures.push('Mihomo build manifest inventory differs from package bytes');
+    if (!isDeepStrictEqual(manifest.appProxyDependencies, APP_PROXY_PRODUCTION_DEPENDENCIES)) failures.push('App proxy production dependency manifest differs from pinned versions');
+  } catch (error) { failures.push(error.message); }
   const expectedMachine = manifest.arch === 'x64' ? 62 : 183;
   for (const file of native) if (file.machine !== expectedMachine) failures.push(`Wrong ELF architecture: ${file.path}`);
   if (!native.find(item => item.path.endsWith('/petpal') && item.sha256 === manifest.electron.sha256)) failures.push('Electron payload hash mismatch');
@@ -160,24 +185,24 @@ function locateDependency(directory, name) {
     directory = path.posix.dirname(directory);
   }
 }
-function verifyDependency(file) {
-  if (closure.has(file)) return;
+function verifyDependency(file, inventory = closure, dependencyEdges = edges, absent = optionalAbsent) {
+  if (inventory.has(file)) return;
   const pkg = packageMetadata.get(file);
   if (!pkg) { failures.push(`Dependency package.json missing: ${file}`); return; }
-  closure.set(file, { path: file, name: pkg.name, version: pkg.version, sha256: dependencyHashes.get(file), license: pkg.license ?? null });
+  inventory.set(file, { path: file, name: pkg.name, version: pkg.version, sha256: dependencyHashes.get(file), license: pkg.license ?? null });
   const optional = pkg.optionalDependencies ?? {}, dependencies = { ...(pkg.dependencies ?? {}), ...optional };
   for (const [name, range] of Object.entries(pkg.peerDependencies ?? {})) if (!pkg.peerDependenciesMeta?.[name]?.optional) dependencies[name] ??= range;
   for (const [name, range] of Object.entries(dependencies)) {
     const target = locateDependency(path.posix.dirname(file), name);
     if (!target) {
-      if (Object.hasOwn(optional, name)) optionalAbsent.push({ from: file, name, range });
+      if (Object.hasOwn(optional, name)) absent.push({ from: file, name, range });
       else failures.push(`Required dependency absent: ${pkg.name} -> ${name}`);
       continue;
     }
     const metadata = packageMetadata.get(target);
     if (metadata.name !== name || !semver.satisfies(metadata.version, range)) failures.push(`Dependency range mismatch: ${pkg.name} -> ${name}@${range}`);
-    edges.push({ from: file, name, range, to: target, optional: Object.hasOwn(optional, name) });
-    verifyDependency(target);
+    dependencyEdges.push({ from: file, name, range, to: target, optional: Object.hasOwn(optional, name) });
+    verifyDependency(target, inventory, dependencyEdges, absent);
   }
 }
 verifyDependency('node_modules/@jackwener/opencli/package.json');
@@ -189,6 +214,13 @@ if (closure.size !== manifest?.opencli?.packages?.length) failures.push('OpenCLI
 for (const item of closure.values()) if (!manifest?.opencli?.packages?.some(expected => expected.path === item.path && expected.name === item.name && expected.version === item.version && expected.sha256 === item.sha256)) failures.push(`OpenCLI dependency not in manifest: ${item.path}`);
 edges.sort((a, b) => `${a.from}/${a.name}`.localeCompare(`${b.from}/${b.name}`));
 if (JSON.stringify(edges) !== JSON.stringify(manifest?.opencli?.edges)) failures.push('OpenCLI dependency resolution differs from manifest');
+const proxyClosure = new Map(), proxyEdges = [], proxyOptionalAbsent = [];
+for (const [name, version] of Object.entries(APP_PROXY_PRODUCTION_DEPENDENCIES)) {
+  const file = `node_modules/${name}/package.json`, pkg = packageMetadata.get(file);
+  if (appPackageMetadata?.dependencies?.[name] !== version || pkg?.name !== name || pkg?.version !== version) failures.push(`App proxy production dependency missing or changed: ${name}`);
+  if (![...dependencyHashes.keys()].some(member => member.startsWith(`node_modules/${name}/`) && /^licen[cs]e(?:[._-]|$)/i.test(path.posix.basename(member)))) failures.push(`App proxy production dependency license missing: ${name}`);
+  verifyDependency(file, proxyClosure, proxyEdges, proxyOptionalAbsent);
+}
 for (const name of ['start-petpal.sh', 'codex.sh', 'opencli.sh']) if (!launchers.has(name)) failures.push(`Missing launcher: ${name}`);
 if (!launchers.get('opencli.sh')?.text.includes('ELECTRON_RUN_AS_NODE=1') || !launchers.get('opencli.sh')?.text.includes('node_modules/@jackwener/opencli/dist/src/main.js')) failures.push('OpenCLI launcher does not use the bundled runtime');
 if (process.argv.includes('--compare-current-dist')) {
@@ -208,6 +240,7 @@ for (const name of ['idle', 'blink', 'talk', 'round', 'curious', 'warm', 'sad', 
 }
 const hash = createHash('sha256'); for await (const chunk of createReadStream(archive)) hash.update(chunk);
 console.log(JSON.stringify({ archive: path.resolve(archive), bytes: (await stat(archive)).size, sha256: hash.digest('hex'), version: manifest?.app, arch: manifest?.arch, entries: count, native, frontend, companionAssets, applicationSource,
+  mihomo: mihomoVerification, appProxyDependencies: { pinned: APP_PROXY_PRODUCTION_DEPENDENCIES, packages: [...proxyClosure.values()], edges: proxyEdges, optionalAbsent: proxyOptionalAbsent },
   opencli: { version: opencliMetadata?.version, requiredNode: opencliMetadata?.engines?.node, packages: [...closure.values()], edges, optionalAbsent, runtimeFilesVerified: requiredOpencliFiles.length, licenseVerified: dependencyHashes.has('node_modules/@jackwener/opencli/LICENSE') },
   runtimeVerified: false, ok: !failures.length, failures }, null, 2));
 if (failures.length) process.exitCode = 1;

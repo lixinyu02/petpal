@@ -24,4 +24,12 @@ Windows / Ubuntu 客户端内置 Clash 兼容的 Mihomo 1.19.32。默认关闭�
 
 内核固定支持 Windows x64 / ARM64、Linux x64 / ARM64；x64 采用兼容指令集版本。客户端和内核必须使用同一平台架构。网页和 Android 不启动本地代理内核；下载中心按实际已发布的平台/架构列出客户端。
 
+下载中心将「安装设备架构」和「安装格式」分开选择。桌面客户端使用自身架构；浏览器只有提供可靠的架构信息时才推荐，其余情况手动选择。最新正式版缺少所选架构时会显示等待发布，不会发送其他架构的包。Windows 优先使用完整解压的便携 ZIP。
+
+Windows 便携 EXE 每次启动先解压完整运行时，本轮测试加代理验收约需两分多钟。长临时目录兼容性尚未验证通过，遇到启动无窗口时先使用 ZIP 完整解压到较短的本地路径运行。
+
+维护者可用 `node scripts/build-windows.mjs --arch arm64 --out-dir <新的项目内目录>` 构建 Windows ARM64，省略架构仍为 x64。Ubuntu 使用 `node scripts/linux-package.mjs x64 arm64 --out-dir <新目录>`；构建拒绝覆盖已有同名归档。
+
 核心未修改，以独立进程随包提供；包内 `mihomo/` 保留 GPL-3.0 LICENSE、来源与对应版本的源码、官方 vendor 压缩包。核心仅随小伴版本更新，不调用上游内核自升级。
+
+本轮实际验收及未验证边界见 [验收记录](workflow/2026-10-15-app-proxy-acceptance.md)。

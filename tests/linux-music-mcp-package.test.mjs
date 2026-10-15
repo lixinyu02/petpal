@@ -11,6 +11,7 @@ import {promisify} from 'node:util';
 import vm from 'node:vm';
 import * as tar from 'tar';
 import ts from 'typescript';
+import { APP_PROXY_PRODUCTION_DEPENDENCIES } from '../scripts/client-payload.mjs';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 const run=promisify(execFile);
@@ -168,7 +169,17 @@ test('Linux archive audit rejects every missing or modified music MCP vendor mem
     try{const result=await run(process.execPath,[path.join(root,'scripts','linux-verify.mjs'),archive],{cwd:root,maxBuffer:2*1024*1024});return {code:0,...JSON.parse(result.stdout)};}
     catch(error){assert.equal(error.code,1,error.stderr);return {code:error.code,...JSON.parse(error.stdout)};}
   }
-  const baseline=await verify();assert.equal(baseline.ok,true,baseline.failures.join('\n'));
+  // This narrow fixture intentionally contains no downloaded 60 MB Mihomo
+  // binary/source archives or proxy dependency closure. The real verifier must
+  // reject those omissions; keep their exact baseline and require every music
+  // mutation below to produce its own specific additional failure.
+  const baseline=await verify();assert.equal(baseline.ok,false);
+  assert.deepEqual(baseline.failures,['Mihomo payload member inventory mismatch',
+    ...Object.keys(APP_PROXY_PRODUCTION_DEPENDENCIES).flatMap(name=>[
+      `App proxy production dependency missing or changed: ${name}`,
+      `App proxy production dependency license missing: ${name}`,
+      `Dependency package.json missing: node_modules/${name}/package.json`,
+    ])]);
   for(const name of ['PetPal-Windows.exe','PetPal-Ubuntu.tar.gz','PetPal-Android.apk','latest.json'])await t.test(`published installer cache ${name} is not a client asset`,async()=>{
     const file=`dist/downloads/${name}`;await put(`resources/app/${file}`,'fixture cached distribution');
     try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Published installer cache must not be distributed: ${file}`));}
@@ -215,5 +226,5 @@ test('Linux archive audit rejects every missing or modified music MCP vendor mem
     await put('resources/app/package.json',JSON.stringify({...appPackage,[section]:{...appPackage[section],music:'npm:@music163/ncm-cli@0.1.7'}}));
     try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes('Optional ncm-cli runtime must not be a production dependency: package.json'));}finally{await put('resources/app/package.json',JSON.stringify(appPackage));}
   });
-  assert.equal((await verify()).ok,true,'All mutation fixtures must restore the accepted baseline');
+  assert.deepEqual((await verify()).failures,baseline.failures,'All mutation fixtures must restore the accepted narrow baseline');
 });

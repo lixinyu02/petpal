@@ -30,7 +30,7 @@ async function service(t, options = {}) {
 }
 
 test('server signed manifests authenticate all four platforms and Ubuntu architectures', () => {
-  const releases = [['windows-x64', 'portable-exe', 'PetPal.exe'], ['ubuntu-x64', 'tar.gz', 'PetPal-x64.tar.gz'], ['ubuntu-arm64', 'tar.gz', 'PetPal-arm64.tar.gz'], ['android', 'apk', 'PetPal.apk'], ['web', 'web-zip', 'PetPal-web.zip']].map(([target, format, name]) => ({ ...asset, id: target, target, format, url: asset.url.replace('PetPal.exe', name), ...(target === 'android' ? { versionCode: 10 } : {}) }));
+  const releases = [['windows-x64', 'portable-exe', 'PetPal.exe'], ['windows-arm64', 'portable-exe', 'PetPal-arm64.exe'], ['ubuntu-x64', 'tar.gz', 'PetPal-x64.tar.gz'], ['ubuntu-arm64', 'tar.gz', 'PetPal-arm64.tar.gz'], ['android', 'apk', 'PetPal.apk'], ['web', 'web-zip', 'PetPal-web.zip']].map(([target, format, name]) => ({ ...asset, id: target, target, format, url: asset.url.replace('PetPal.exe', name), ...(target === 'android' ? { versionCode: 10 } : {}) }));
   assert.deepEqual(verify(signed(payload({ releases }))).releases, releases);
   for (const url of [asset.url.replace('/stable/', '/other/'), asset.url.replace('updates.example.test', 'foreign.example.test'), asset.url.replace('/v0.10.0/', '/x/../v0.10.0/'), asset.url + '?token=private']) assert.throws(() => verify(signed(payload({ releases: [{ ...asset, url }] }))), { status: 502 });
   const tampered = JSON.parse(signed()); tampered.payload = Buffer.from(JSON.stringify(payload({ sequence: 99 }))).toString('base64url');

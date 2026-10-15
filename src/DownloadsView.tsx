@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {useUiEntrance} from './platform/ui-motion.ts';
 import { ArrowUpRight, Download, Laptop, Monitor, RefreshCw, Smartphone } from 'lucide-react';
 import { api, getConnection, getSessionEpoch, isSessionChanged, type DownloadPackage, type DownloadsCatalog } from './api';
+import {detectDownloadTarget,type DownloadTarget,type DownloadArchitecture} from './platform/download-target.mjs';
 import './downloads.css';
 
 type Platform = 'android' | 'windows' | 'ubuntu';
@@ -9,7 +10,7 @@ type Package = DownloadPackage;
 type Catalog = DownloadsCatalog;
 const platforms = [
   { id: 'android' as const, name: 'Android', icon: Smartphone, description: '手机陪伴 · 连接远程助手' },
-  { id: 'windows' as const, name: 'Windows', icon: Monitor, description: 'Windows 10/11 x64 · 桌宠与本机 Agent' },
+  { id: 'windows' as const, name: 'Windows', icon: Monitor, description: 'Windows 10/11 · 桌宠与本机 Agent' },
   { id: 'ubuntu' as const, name: 'Ubuntu', icon: Laptop, description: 'Linux 桌面 · 本机 Codex' },
 ];
 const formats = { apk: 'APK', 'portable-exe': '便携 EXE', 'portable-zip': '便携 ZIP（推荐）', 'tar.gz': 'tar.gz', appimage: 'AppImage', deb: 'DEB' };
@@ -22,6 +23,7 @@ const installation = (item: Package) => item.format === 'apk'
   : '下载后使用 Ubuntu 的软件安装器打开 DEB。';
 const packageLabel = (item: Package) => `v${item.version} · ${item.arch === 'universal' ? '通用' : item.arch} · ${formats[item.format]} · 正式版`;
 const architectureRank = (arch: Package['arch']) => arch === 'x64' ? 0 : arch === 'arm64' ? 1 : 2;
+const architectureLabel = (arch:DownloadArchitecture) => arch === 'arm64' ? 'ARM64' : arch === 'x64' ? 'x64' : '通用';
 /** Also protect upgraded clients still connected to an older mixed catalog. */
 export function latestStableDownloadPackages(packages: Package[], newestKnown?: string | null) {
   const stable = packages.filter(item => item.channel === 'stable' && /^(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})$/.test(item.version));
@@ -39,7 +41,15 @@ export default function DownloadsView() {
   const entrance = useUiEntrance<HTMLElement>('downloads');
   const [catalog, setCatalog] = useState<Catalog | null>(null), [error, setError] = useState(''), [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0), [clock, setClock] = useState(Date.now()), [selected, setSelected] = useState<Partial<Record<Platform, string>>>({});
+  const [architectures,setArchitectures] = useState<Partial<Record<Platform,DownloadArchitecture|''>>>({});
+  const [detected,setDetected] = useState<DownloadTarget|null>(null);
   const epoch = useRef(getSessionEpoch()).current;
+  useEffect(() => {
+    let alive=true;
+    void detectDownloadTarget({runtime:window.petpal?.runtime,navigator:typeof navigator==='undefined'?undefined:navigator})
+      .then(value => {if(alive&&getSessionEpoch()===epoch)setDetected(value);});
+    return()=>{alive=false;};
+  },[epoch]);
   useEffect(() => {
     const controller = new AbortController(); let alive = true;
     const current = () => alive && getSessionEpoch() === epoch;
@@ -66,22 +76,28 @@ export default function DownloadsView() {
     </header>
     {failure && <p className="downloads-notice" role="alert">{failure}{catalog?.checkedAt && ' 下方保留上次读取的最新正式版安装包。'}</p>}
     {catalog?.notices?.map(notice => <p className="downloads-notice" role="status" key={notice}>{notice}</p>)}
+    <p className="downloads-device" role="status">{!detected ? '正在确认当前设备的下载建议…' : detected.arch && detected.platform ? `${detected.source==='native'?'当前客户端':'当前设备'}：${platforms.find(platform=>platform.id===detected.platform)?.name} ${architectureLabel(detected.arch)}。已推荐对应架构，也可为其他电脑选择。` : '浏览器未提供可靠的架构信息，请按安装设备手动选择。'}</p>
     {loading && !catalog && <p className="downloads-loading" role="status">正在检查最新正式版安装包…</p>}
     <div className="downloads-list">
       {platforms.map(platform => {
         const packages = latestPackages.filter(item => item.platform === platform.id).sort((a, b) => architectureRank(a.arch) - architectureRank(b.arch)
           || (a.platform === 'windows' && a.releaseUrl === b.releaseUrl && a.arch === b.arch ? Number(b.format === 'portable-zip') - Number(a.format === 'portable-zip') : 0)
           || a.filename.localeCompare(b.filename));
-        const item = packages.find(item => item.id === selected[platform.id]) || packages[0], Icon = platform.icon;
+        const architecture = platform.id==='android' ? 'universal' : architectures[platform.id] !== undefined ? architectures[platform.id] : detected?.platform===platform.id ? detected.arch || '' : '';
+        const matching = packages.filter(item => item.arch===architecture);
+        const item = matching.find(item => item.id === selected[platform.id]) || matching[0], Icon = platform.icon;
+        const empty = loading&&!catalog ? '正在查询…' : failure&&!catalog?.checkedAt ? '列表暂不可用，请重试。' : !architecture ? '先选择要安装设备的架构。' : `最新正式版尚未提供 ${platform.name} ${architectureLabel(architecture)} 安装包。`;
         return <article key={platform.id} className="downloads-row" aria-labelledby={`download-${platform.id}`}>
           <div className="downloads-platform"><Icon size={26} strokeWidth={1.6}/><div><h3 id={`download-${platform.id}`}>{platform.name}</h3><p>{platform.description}</p></div></div>
           <div className="downloads-package">
-            {item ? <><div className="downloads-version">{packages.length > 1 ? <select aria-label={`${platform.name} 安装包`} value={item.id} onChange={event => setSelected(previous => ({ ...previous, [platform.id]: event.target.value }))}>{packages.map(item => <option key={item.id} value={item.id}>{packageLabel(item)}</option>)}</select> : <strong>{packageLabel(item)}</strong>}</div>
+            <div className="downloads-target-fields">{platform.id!=='android'&&<label className="downloads-architecture"><span>安装设备架构</span><select aria-label={`${platform.name} 架构`} value={architecture} onChange={event=>{const value=event.target.value;if(value!==''&&value!=='x64'&&value!=='arm64')return;setArchitectures(previous=>({...previous,[platform.id]:value}));setSelected(previous=>({...previous,[platform.id]:''}));}}><option value="" disabled>选择架构</option><option value="x64">x64 · Intel / AMD</option><option value="arm64">ARM64</option></select></label>}
+            {item&&<div className="downloads-version">{matching.length > 1 ? <label><span>安装格式</span><select aria-label={`${platform.name} 安装包`} value={item.id} onChange={event => {if(matching.some(item=>item.id===event.target.value))setSelected(previous => ({ ...previous, [platform.id]: event.target.value }));}}>{matching.map(item => <option key={item.id} value={item.id}>{packageLabel(item)}</option>)}</select></label> : <strong>{packageLabel(item)}</strong>}</div>}</div>
+            {item ? <>
               <p className="downloads-install">{installation(item)}</p><p className="downloads-file">{item.filename} <span>· {(item.bytes / 1024 ** 2).toFixed(1)} MB · {item.source === 'server' ? '服务器直连' : 'GitHub'}</span></p>
               {item.sha256 && <details className="downloads-checksum"><summary>查看 SHA-256</summary><code>{item.sha256}</code></details>}</>
-              : <p className="downloads-empty">{loading && !catalog ? '正在查询…' : failure && !catalog?.checkedAt ? '列表暂不可用，请重试。' : '最新正式版尚未提供此平台安装包。'}</p>}
+              : <p className="downloads-empty">{empty}</p>}
           </div>
-          <div className="downloads-actions">{item ? <><a className="primary-button" href={downloadUrl(item)} target="_blank" rel="noreferrer noopener" aria-label={`下载 ${platform.name} ${item.version} ${item.arch}`}><Download size={16}/>下载</a>{item.fallbackUrl && <a className="downloads-release" href={item.fallbackUrl} target="_blank" rel="noreferrer noopener">GitHub 备用<ArrowUpRight size={13}/></a>}<a className="downloads-release" href={item.releaseUrl} target="_blank" rel="noreferrer noopener">发布说明<ArrowUpRight size={13}/></a></> : <span className="downloads-pending">{loading && !catalog ? '查询中' : failure && !catalog?.checkedAt ? '等待恢复' : '等待发布'}</span>}</div>
+          <div className="downloads-actions">{item ? <><a className="primary-button" href={downloadUrl(item)} target="_blank" rel="noreferrer noopener" aria-label={`下载 ${platform.name} ${item.version} ${item.arch}`}><Download size={16}/>下载</a>{item.fallbackUrl && <a className="downloads-release" href={item.fallbackUrl} target="_blank" rel="noreferrer noopener">GitHub 备用<ArrowUpRight size={13}/></a>}<a className="downloads-release" href={item.releaseUrl} target="_blank" rel="noreferrer noopener">发布说明<ArrowUpRight size={13}/></a></> : <span className="downloads-pending">{loading && !catalog ? '查询中' : failure && !catalog?.checkedAt ? '等待恢复' : !architecture ? '选择架构' : '等待发布'}</span>}</div>
         </article>;
       })}
     </div>
