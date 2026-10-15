@@ -23,6 +23,11 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+    packagingOptions {
+        // The official Android PIE core is installed to the read-only native
+        // library directory. Android 10+ forbids executing it from app data.
+        jniLibs { useLegacyPackaging true; keepDebugSymbols += ['**/libpetpal_mihomo.so'] }
+    }
 }
 
 repositories {
@@ -37,6 +42,7 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation "androidx.webkit:webkit:$androidxWebkitVersion"
+    implementation 'org.yaml:snakeyaml:2.4'
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
@@ -45,6 +51,14 @@ dependencies {
 }
 
 apply from: 'capacitor.build.gradle'
+
+def verifyBundledMihomo = tasks.register('verifyBundledMihomo', Exec) {
+    workingDir rootProject.projectDir.parentFile
+    commandLine 'node', 'scripts/android-mihomo-package.mjs', '--verify'
+}
+tasks.configureEach { task ->
+    if (task.name.startsWith('merge') && task.name.endsWith('NativeLibs')) task.dependsOn verifyBundledMihomo
+}
 
 try {
     def servicesJSON = file('google-services.json')

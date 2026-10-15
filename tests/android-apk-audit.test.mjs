@@ -4,12 +4,21 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { packageIdentity, signerCertificates, verifyIdentity, manifestNumber, dexClassNames, readApkArchive, verifyFrozenWeb, verifyAndroidApk } from '../scripts/verify-android-apk.mjs';
+import { packageIdentity, signerCertificates, verifyIdentity, manifestNumber, dexClassNames, readApkArchive, verifyFrozenWeb, verifyAndroidApk,verifyAndroidRuntimeInventory } from '../scripts/verify-android-apk.mjs';
 
 const crc32 = createRequire(import.meta.url)('buffer-crc32');
 const signer = 'a'.repeat(64), otherSigner = 'b'.repeat(64);
 const identity = { name: 'com.petpal.app', version: '1.2.3', versionCode: 42, minSdk: 23, targetSdk: 35 };
 const expected = { applicationId: identity.name, version: identity.version, versionCode: 42, minSdk: 23, targetSdk: 35 };
+
+test('archive exception covers only the exact verified source members and never arbitrary gzip files',()=>{
+  const verified='assets/mihomo/vendor.tar.gzip',files=new Map([[verified,Buffer.from('verified bytes')]]),report={verifiedPaths:[verified]};
+  verifyAndroidRuntimeInventory(files,report);
+  assert.throws(()=>verifyAndroidRuntimeInventory(files),/desktop CLI\/server/);
+  for(const name of ['assets/mihomo/extra.tar.gzip','assets/extra.tar.gzip','assets/unknown.gz','assets/vendor.tar','assets/executable.zip']){
+    const extra=new Map(files);extra.set(name,Buffer.from('unverified'));assert.throws(()=>verifyAndroidRuntimeInventory(extra,report),/desktop CLI\/server/);
+  }
+});
 
 async function directory(t) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'petpal-apk-audit-'));

@@ -219,7 +219,7 @@ function toolsFor(value) {
 
 /** Existing clients declare flat tools. The official endpoint requires a
  * namespace; project only that synthetic wrapper, never a caller-owned one. */
-function flatBindings(original, normalized) {
+export function flatBindings(original, normalized) {
   const bindings = new Map();
   for (const tool of original || []) {
     if (!['function', 'custom'].includes(tool?.type)) continue;
@@ -270,7 +270,7 @@ function waitDrain(response, signal) {
 
 /** Bound one SSE frame, project only our synthetic tool namespace, and replace
  * upstream failure details. OAuth secrets can straddle transport chunks. */
-function streamFilter(secrets, bindings = new Map(), observe = () => {}) {
+export function streamFilter(secrets, bindings = new Map(), observe = () => {}) {
   const decoder = new TextDecoder(), encoder = new TextEncoder(); let buffer = '';
   const redact = value => secrets.reduce((result, secret) => secret ? result.split(secret).join('[redacted]') : result, value);
   const frame = value => {

@@ -27,6 +27,7 @@ version="$(node --input-type=module -e 'import fs from "node:fs"; const v=fs.rea
 export PETPAL_ANDROID_WEB_DIR="${PETPAL_ANDROID_WEB_DIR:-$PWD/.data/android-web-build}"
 export PETPAL_ANDROID_VERSION="$version"
 npm run build -- --outDir "$PETPAL_ANDROID_WEB_DIR"
+node scripts/android-mihomo-package.mjs
 npx --no-install cap sync android
 (cd android && bash "$gradle_path" --no-daemon --console plain assembleDebug)
 mkdir -p releases/android

@@ -1,4 +1,5 @@
 import {getConnection,getExecutionTarget,getIdentity,getSessionEpoch,SessionChangedError,type OfficialAccountBridge,type OfficialAccountStatus,type OfficialAccountUsage} from '../api';
+import {androidOfficialAccount,supportsAndroidOfficialAccount} from './android-official-account';
 
 export type OfficialAccountAction='status'|'start'|'cancel'|'select'|'logout'|'refresh'|'resumeUsage';
 export type OfficialAccountSnapshot={scope:string;status:OfficialAccountStatus|null;busy:OfficialAccountAction|'';error:string;defaultRequest:number};
@@ -8,10 +9,11 @@ let active:Context|undefined,defaultSequence=0,listening=false;
 const bounded=(value:unknown,limit:number)=>typeof value==='string'&&value.length<=limit&&!/[\x00-\x1f\x7f]/.test(value);
 
 export function nativeOfficialAccount():OfficialAccountBridge|undefined{
-  const bridge=window.petpal?.officialAccount;
+  const bridge=window.petpal?.officialAccount||androidOfficialAccount();
   return bridge&&['status','start','cancel','select','logout','refresh'].every(key=>typeof bridge[key as keyof OfficialAccountBridge]==='function')?bridge:undefined;
 }
-export function officialAccountIsLocal(){return getExecutionTarget()==='local';}
+export function officialAccountIsLocal(){return supportsAndroidOfficialAccount()||getExecutionTarget()==='local';}
+export const officialAccountDevice=()=>supportsAndroidOfficialAccount()?'手机':'电脑';
 function scope(){const identity=getIdentity();return `${getSessionEpoch()}:${identity?.instanceId||''}:${identity?.userId||''}:${getExecutionTarget()}`;}
 function stopTimer(context:Context){if(context.timer!==null){clearTimeout(context.timer);context.timer=null;}}
 function context(){
@@ -25,6 +27,7 @@ function context(){
 function current(value:Context,revision=value.revision){return active===value&&value.scope===scope()&&value.revision===revision&&value.allowed;}
 function notify(){for(const listener of listeners)listener();}
 function lifecycle(){context();notify();}
+function nativeChanged(){void readOfficialAccount().catch(()=>{});}
 function visible(){if(document.hidden){if(active)stopTimer(active);return;}if(active?.snapshot.status&&(active.snapshot.status.state==='signing-in'||active.snapshot.status.modelsLoading))void readOfficialAccount().catch(()=>{});}
 function schedule(value:Context){
   stopTimer(value);
@@ -51,16 +54,16 @@ export function readOfficialAccountStatus(value:unknown):OfficialAccountStatus{
     if(!item||typeof item!=='object'||!['unverified','available','limit-reached','temporarily-unavailable','not-eligible'].includes(item.state as string)||!(item.checkedAt===null||bounded(item.checkedAt,64)&&Number.isFinite(Date.parse(item.checkedAt as string)))||!(item.lastModel===null||bounded(item.lastModel,200))||['completedRequests','inputTokens','outputTokens','totalTokens'].some(key=>!Number.isSafeInteger(item[key])||(item[key] as number)<0))throw new Error('官方用量状态不完整，请刷新重试。');
     usage={state:item.state as OfficialAccountUsage['state'],checkedAt:item.checkedAt as string|null,lastModel:item.lastModel as string|null,completedRequests:item.completedRequests as number,inputTokens:item.inputTokens as number,outputTokens:item.outputTokens as number,totalTokens:item.totalTokens as number};
   }
-  return{supported:true,state:entry.state as OfficialAccountStatus['state'],activeProfileId:entry.activeProfileId as string|null,planUsageEnabled:entry.planUsageEnabled,profiles,models,...(usage?{usage}:{}),...(entry.modelsLoading===true?{modelsLoading:true}:{}),...(entry.error?{error:'官方账号需要重新连接，请重试登录。'}:{}),...(entry.modelsError?{modelsError:'暂时无法读取官方模型，请刷新重试。'}:{})};
+  return{supported:true,state:entry.state as OfficialAccountStatus['state'],activeProfileId:entry.activeProfileId as string|null,planUsageEnabled:entry.planUsageEnabled,profiles,models,...(usage?{usage}:{}),...(entry.modelsLoading===true?{modelsLoading:true}:{}),...(entry.error?{error:'官方账号需要重新连接，请重试登录。'}:{}),...(entry.modelsError?{modelsError:supportsAndroidOfficialAccount()?'暂时无法连接手机官方模型，请检查网络并确认小伴服务已更新。':'暂时无法读取官方模型，请刷新重试。'}:{})};
 }
 
 export const officialAccountSnapshot=()=>context().snapshot;
 export function subscribeOfficialAccount(listener:()=>void){
   listeners.add(listener);context();
-  if(!listening){listening=true;window.addEventListener('petpal:session-change',lifecycle);document.addEventListener('visibilitychange',visible);}
+  if(!listening){listening=true;window.addEventListener('petpal:session-change',lifecycle);window.addEventListener('petpal:official-native-change',nativeChanged);document.addEventListener('visibilitychange',visible);}
   return()=>{
     listeners.delete(listener);
-    if(!listeners.size){if(active){stopTimer(active);active.revision++;active.pending=null;}active=undefined;window.removeEventListener('petpal:session-change',lifecycle);document.removeEventListener('visibilitychange',visible);listening=false;}
+    if(!listeners.size){if(active){stopTimer(active);active.revision++;active.pending=null;}active=undefined;window.removeEventListener('petpal:session-change',lifecycle);window.removeEventListener('petpal:official-native-change',nativeChanged);document.removeEventListener('visibilitychange',visible);listening=false;}
   };
 }
 

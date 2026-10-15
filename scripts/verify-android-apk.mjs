@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
+import {verifyAndroidMihomoApk} from './android-mihomo-package.mjs';
 
 const require = createRequire(import.meta.url);
 const yauzl = require('yauzl'), crc32 = require('buffer-crc32');
@@ -14,8 +15,13 @@ const ensure = (condition, message) => { if (!condition) throw new AuditError(me
 const REQUIRED_PERMISSIONS = ['INTERNET', 'ACCESS_NETWORK_STATE', 'POST_NOTIFICATIONS', 'FOREGROUND_SERVICE_SPECIAL_USE', 'RECORD_AUDIO', 'CAMERA'];
 const FORBIDDEN_PERMISSIONS = ['FOREGROUND_SERVICE_DATA_SYNC', 'RECEIVE_BOOT_COMPLETED', 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS', 'WAKE_LOCK', 'QUERY_ALL_PACKAGES'];
 const FORBIDDEN_PRIVATE = /(?:^|\/)(?:\.env(?:\.|$)|\.data(?:\/|$)|(?:notification|background-settings)-runtime-[^/]*\.json$)|\.(?:jks|keystore|pem|key|p12|pfx)$/i;
-const FORBIDDEN_RUNTIME = /(?:^|\/)(?:node_modules|\.codex|codex|opencli|runtime|executor|server)(?:\/|\.(?:exe|mjs|cjs|js|cmd|bat)$)|\.(?:exe|dll|node|ps1|bat|cmd|sh|tar|tgz|zip)$/i;
+const FORBIDDEN_RUNTIME = /(?:^|\/)(?:node_modules|\.codex|codex|opencli|runtime|executor|server)(?:\/|\.(?:exe|mjs|cjs|js|cmd|bat)$)|\.(?:exe|dll|node|ps1|bat|cmd|sh|tar|tgz|zip|gz|gzip)$/i;
 const CREDENTIAL_LITERAL = /(?:Bearer\s+|["'](?:apiKey|api_key|sessionToken|accessToken|password|secretKey)["']\s*:\s*["'])([A-Za-z0-9_-]{24,})/;
+
+export function verifyAndroidRuntimeInventory(files, {verifiedPaths=[]}={}) {
+  const verified=new Set(verifiedPaths);
+  for(const name of files.keys())ensure(!FORBIDDEN_PRIVATE.test(name)&&(!FORBIDDEN_RUNTIME.test(name)||verified.has(name)), 'Private file or desktop CLI/server runtime is packaged.');
+}
 
 export function packageIdentity(text) {
   const name = text.match(/package:\s+name='([^']+)'/)?.[1], version = text.match(/\bversionName='([^']+)'/)?.[1];
@@ -242,8 +248,13 @@ export async function verifyAndroidApk(options) {
   for (const pkg of ['com.miui.securitycenter', 'com.miui.powerkeeper', 'com.huawei.systemmanager', 'com.coloros.safecenter', 'com.oppo.safe', 'com.vivo.permissionmanager', 'com.iqoo.secure', 'com.samsung.android.lool', 'com.meizu.safe', 'com.asus.mobilemanager'])
     ensure(manifest.includes(pkg), 'A supported OEM background-settings query is missing.');
   const { files, archiveEntries, bytesRead } = await readApkArchive(apk), { needles, sources } = await privateNeedles(root), nativeDefinitions = new Set();
+  const mihomo = verifyAndroidMihomoApk(files,{
+    manifest:JSON.parse(await fs.readFile(path.join(root,'android/mihomo/manifest.json'),'utf8')),
+    licenseBytes:await fs.readFile(path.join(root,'desktop/native/mihomo/LICENSE')),
+    noticeBytes:await fs.readFile(path.join(root,'android/mihomo/SOURCE-NOTICE.txt')),
+  });
+  verifyAndroidRuntimeInventory(files,mihomo);
   for (const [name, bytes] of files) {
-    ensure(!FORBIDDEN_PRIVATE.test(name) && !FORBIDDEN_RUNTIME.test(name), 'Private file or desktop CLI/server runtime is packaged.');
     ensure(!needles.some(value => bytes.includes(value)), 'A known private credential is packaged.');
     if (/\.(?:json|js|html|txt|xml)$/.test(name)) ensure(!CREDENTIAL_LITERAL.test(bytes.toString('utf8')), 'A hardcoded credential is packaged.');
     if (/^classes\d*\.dex$/.test(name)) for (const descriptor of dexClassNames(bytes)) {
@@ -267,7 +278,7 @@ export async function verifyAndroidApk(options) {
     zipalignVerified: true, fullArchiveEntriesRead: archiveEntries, crcVerifiedEntries: files.size, uncompressedBytesRead: bytesRead,
     frozenWebAssetsCompared: frozen.assets.length, generatedCapacitorBridgesCompared: frozen.bridges.length, assetDigests: frozen.assets,
     nativeClassesVerified: nativeNames, nativeSourceInputs: await Promise.all(nativeNames.map(async name => ({ path: `android/app/src/main/java/com/petpal/app/${name}.java`, sha256: digest(await fs.readFile(path.join(root, `android/app/src/main/java/com/petpal/app/${name}.java`))) }))),
-    cubism, notificationService: { present: true, exported: false, type: 'specialUse' }, noDesktopCliOrServerRuntime: true, noRuntimeTestFixtures: true, noRemotePageOverride: true,
+    cubism, mihomo, notificationService: { present: true, exported: false, type: 'specialUse' }, noDesktopCliOrServerRuntime: true, noRuntimeTestFixtures: true, noRemotePageOverride: true,
     knownPrivateValuesChecked: needles.length, privateScanSourcesAvailable: sources, noKnownPrivateValues: true, credentialsPersistedOrPrinted: false,
     deviceRuntimeVerified: false, androidDeviceAcceptance: { performed: false, reason: 'Package audit only; no device installation, restart or physical-board operation was performed.' } };
   await log('android-apk-audit.json', `${JSON.stringify(report, null, 2)}\n`); await log('SHA256SUMS.txt', `${report.app.sha256}  ${path.basename(apk)}\n`); return report;

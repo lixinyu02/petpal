@@ -28,7 +28,7 @@ Windows / Ubuntu 客户端内置 Clash 兼容的 Mihomo 1.19.32。默认关闭�
 
 ## 平台与分发
 
-内核固定支持 Windows x64 / ARM64、Linux x64 / ARM64；x64 采用兼容指令集版本。客户端和内核必须使用同一平台架构。网页和 Android 不启动本地代理内核；下载中心按实际已发布的平台/架构列出客户端。
+桌面内核固定支持 Windows x64 / ARM64、Linux x64 / ARM64；x64 采用兼容指令集版本。客户端和内核必须使用同一平台架构。网页不启动本地代理内核；Android 的新支持见下节。下载中心按实际已发布的平台/架构列出客户端。
 
 下载中心将「安装设备架构」和「安装格式」分开选择。桌面客户端使用自身架构；浏览器只有提供可靠的架构信息时才推荐，其余情况手动选择。最新正式版缺少所选架构时会显示等待发布，不会发送其他架构的包。Windows 优先使用完整解压的便携 ZIP。
 
@@ -39,3 +39,15 @@ Windows 便携 EXE 每次启动先解压完整运行时，本轮测试加代理�
 核心未修改，以独立进程随包提供；包内 `mihomo/` 保留 GPL-3.0 LICENSE、来源与对应版本的源码、官方 vendor 压缩包。核心仅随小伴版本更新，不调用上游内核自升级。
 
 本轮实际验收及未验证边界见 [验收记录](workflow/2026-10-15-app-proxy-acceptance.md)。
+
+## Android 应用代理
+
+新版 Android 客户端支持在「设备连接 → 小伴应用代理」中导入本地 YAML、粘贴 YAML 或下载 HTTPS YAML 直链。配置上限 4 MiB，安全解析与真实内核校验成功后才原子替换；远程下载失败、取消或无效配置均保留原文件。支持手动节点组选择、更新已保存的远程来源，以及登录相同账号后随小伴启用。退出登录或切换后端／账号立即撤销应用代理并停止内核；配置按后端地址、服务实例、用户 ID 的哈希分开保存，不保留小伴登录令牌。
+
+核心采用 Mihomo 1.19.32 官方 Android arm64-v8a／armeabi-v7a／x86_64 原始 PIE 字节，随 APK 的 JNI 目录分发，由系统安装器提取至只读 `nativeLibraryDir` 再作为独立进程启动，不从可写应用目录执行二进制，也不在手机运行时下载替换内核。三种官方 ELF 的 Android NDK note 均实际记录 API 34；当前功能保守支持 Android 14/API 34 及以上。旧系统仍能使用小伴的其他功能。64 位 ARM 与 x86 核心的 PT_LOAD 均为 16 KiB 对齐；32 位 ARM 为 4 KiB，不标为通过 16 KiB 兼容验收。完整 APK 还需安装器与实际设备验收。
+
+代理只绑定随机 `127.0.0.1` HTTP 端口；控制器同样仅监听 loopback 并使用随机 secret。WebView 通过 AndroidX `ProxyController` 设置本应用覆盖，等异步成功回调后才显示启用。官方账号、模型、更新和后台通知的原生 HTTPS 请求通过 `PetNetwork.open(URL)` 显式选择代理，本机和局域网地址直连，不修改 JVM 默认代理。导入的 TUN、DNS、透明代理、额外 listener／server、控制器与 UI、系统路由、外部证书及私钥文件路径被禁止；provider 缓存强制位于配置私有子目录，远程 provider 只允许 HTTPS。
+
+不申请 `VpnService` 或系统 VPN 权限，不占用其他 VPN，不改变其他应用联网。系统 Chrome／官方登录页面仍使用浏览器自身的网络设置，应用内代理无法替它代理。Loopback 不等于 Android UID 隔离：同一手机的其他应用若主动获知并连接该随机 HTTP 端口，也可能使用它；该端口不对局域网开放。
+
+维护者构建前运行 `node scripts/android-mihomo-package.mjs`。Windows／Linux 构建脚本已自动调用；Gradle 合并原生库前使用 `--verify` 校验所有 ABI、固定归档／ELF SHA-256、Android note、PT_LOAD、许可证、对应源码和 vendor。缺少核心时 APK 构建明确失败，普通策略单测仍可独立编译。生成的二进制与源码归档不提交 Git；固定清单及来源通知在 `android/mihomo/`，APK 的 `assets/mihomo/` 内含 GPL-3.0 LICENSE、精确源代码与 vendor 压缩包，可离线提取。源码 gzip 字节以 `.tar.gzip` 存放，避免 AAPT 自动解压 `.gz` 并改名；清单保留上游 `name`、压缩字节哈希与实际 `assetName`。APK 审核逐项检查三 ABI 核心、这两个精确源归档、清单和许可通知，拒绝缺失、改写或额外归档／原生库。核心更新仅随新 APK 发布。

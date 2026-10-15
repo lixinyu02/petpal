@@ -26,6 +26,18 @@ function SessionRoot(){
   useLayoutEffect(() => mountUiMotionLifecycle({ disabled: overlay }), []);
   useEffect(() => overlay ? undefined : mountInteractionLayers(), []);
   useEffect(()=>mountThemeLifecycle({transparent:overlay}),[]);
+  useEffect(()=>{
+    if(overlay||Capacitor.getPlatform()!=='android'||!Capacitor.isNativePlatform())return;
+    let disposed=false,cleanup:(()=>void)|undefined;
+    void import('./platform/android-official-account').then(module=>{if(!disposed)cleanup=module.mountAndroidOfficialSession();});
+    return()=>{disposed=true;cleanup?.();};
+  },[]);
+  useEffect(()=>{
+    if(overlay||Capacitor.getPlatform()!=='android'||!Capacitor.isNativePlatform())return;
+    let disposed=false,cleanup:(()=>void)|undefined;
+    void import('./platform/android-app-proxy').then(module=>{if(!disposed)cleanup=module.mountAndroidAppProxyLifecycle();});
+    return()=>{disposed=true;cleanup?.();};
+  },[]);
   const epoch=useSyncExternalStore(subscribeSession,getSessionEpoch,getSessionEpoch);
   const ownerIdentity=getIdentity();
   const[ready,setReady]=useState(overlay);

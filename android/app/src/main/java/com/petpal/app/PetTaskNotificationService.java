@@ -91,7 +91,7 @@ public class PetTaskNotificationService extends Service {
         Thread thread = new Thread(() -> {
             HttpsURLConnection connection = null;
             try {
-                connection = (HttpsURLConnection) new URL(config.url + "/api/notifications/device").openConnection(); connection.setInstanceFollowRedirects(false);
+                connection = (HttpsURLConnection) PetNetwork.open(new URL(config.url + "/api/notifications/device")); connection.setInstanceFollowRedirects(false);
                 connection.setConnectTimeout(5000); connection.setReadTimeout(5000); connection.setRequestMethod("DELETE"); connection.setRequestProperty("Authorization", "Bearer " + config.token); connection.getResponseCode();
             } catch (Exception ignored) { } finally { if (connection != null) connection.disconnect(); }
         }, "PetPal-notification-revoke"); thread.setDaemon(true); thread.start();
@@ -100,7 +100,7 @@ public class PetTaskNotificationService extends Service {
         return TaskNotificationPolicy.parseCursor(object.get(field));
     }
     private JSONObject request(TaskNotificationState.Snapshot config, String path, JSONObject body) throws Exception {
-        HttpsURLConnection connection = (HttpsURLConnection) new URL(config.url + path).openConnection();
+        HttpsURLConnection connection = (HttpsURLConnection) PetNetwork.open(new URL(config.url + path));
         connection.setInstanceFollowRedirects(false); connection.setConnectTimeout(10000); connection.setReadTimeout(33000);
         connection.setRequestProperty("Authorization", "Bearer " + config.token); connection.setRequestProperty("Accept", "application/json");
         if (!TaskNotificationState.connection(config.epoch, connection)) throw new InterruptedException();

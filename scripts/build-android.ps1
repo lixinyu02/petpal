@@ -47,6 +47,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Web build failed.' }
   }
   if (-not (Test-Path -LiteralPath "$WebDirectory\index.html" -PathType Leaf)) { throw 'Android web build entry is missing.' }
+  & node scripts/android-mihomo-package.mjs
+  if ($LASTEXITCODE -ne 0) { throw 'Pinned Android Mihomo preparation failed; no incomplete APK will be built.' }
   & npx.cmd --no-install cap sync android
   if ($LASTEXITCODE -ne 0) { throw 'Capacitor sync failed.' }
   Push-Location "$project\android"

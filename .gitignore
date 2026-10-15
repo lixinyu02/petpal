@@ -28,6 +28,9 @@ releases/
 *.db
 *.sqlite*
 android/app/src/main/assets/public/
+android/app/src/main/assets/mihomo/
+android/app/src/main/jniLibs/
+artifacts/android-official-account/
 android/.idea/
 android/capacitor-cordova-android-plugins/
 outputs/animations/frames/

@@ -1,0 +1,43 @@
+Mihomo v1.19.32 - Android application-private proxy core
+=====================================================
+Upstream: https://github.com/MetaCubeX/mihomo
+Source commit: 88dcbf7f1614a67c3b36b848ee3592dfa92ada36
+License: GNU General Public License, version 3 (GPL-3.0).
+
+PetPal packages unmodified official Android PIE executable bytes under the
+JNI packaging name libpetpal_mihomo.so. It is launched as a separate process
+from Android's read-only applicationInfo.nativeLibraryDir. It is not a JNI
+library, is never dlopen'ed, and is never executed from writable app data.
+The name does not change the binary contents. PetPal is not affiliated with
+MetaCubeX. This component comes WITHOUT ANY WARRANTY.
+
+The APK retains this notice, the complete GPL-3.0 LICENSE, the exact upstream
+source archive and corresponding official vendor archive in assets/mihomo/.
+The source archives are locally available without a network request. The
+manifest records fixed upstream URLs, archive and executable SHA-256 digests,
+architecture, interpreter and ELF segment alignment. The source entries retain
+the original upstream name/download URL and compressed-byte SHA-256; assetName
+records the packaged .tar.gzip filename. Only the suffix changes, preventing
+AAPT from transparently expanding .gz assets or changing their digest.
+Build-time preparation:
+node scripts/android-mihomo-package.mjs
+
+To rebuild, extract the .tar.gzip files in assets/mihomo/ with a gzip-capable
+archiver, or rename them to the manifest's original .tar.gz upstream names.
+Extract both into one source tree, then follow .github/workflows/build.yml
+at that exact commit. Android upstream builds use Go 1.26, CGO_ENABLED=1,
+the with_gvisor tag, NDK r29-beta1 with API 34 compiler targets, trimpath and
+version/build-time linker parameters. Android support in this PetPal feature
+is conservatively gated to API 34+, without claiming a lower API was tested.
+Other application features retain their existing Android minimum version.
+
+This is an explicit HTTP proxy for PetPal's network clients. It does not use
+VpnService or TUN, and does not change system proxy, DNS, routes or other apps.
+The listener and controller bind only to 127.0.0.1. Loopback is not an Android
+UID access-control boundary: another local app could connect to a discovered
+HTTP proxy port. The controller uses a random secret; no LAN listener exists.
+The system browser used for official login keeps its own network settings.
+
+Core updates are delivered only with a new PetPal APK. The app cannot fetch
+or execute arbitrary replacement cores. Node credentials and user subscription
+URLs are not part of this distribution.

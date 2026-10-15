@@ -35,6 +35,7 @@ import { createAutomationService } from './automations.mjs';
 import { executeAutomationTool, withAutomationTools } from './automation-tools.mjs';
 import { organizationPatch, organizationText, visibleProject } from './conversation-organization.mjs';
 import { createOfficialProviderScope, isOfficialProvider, publicOfficialProvider } from './official-providers.mjs';
+import { MobileOfficialAccounts, combineOfficialAccounts } from './mobile-official.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const now = () => new Date().toISOString();
@@ -61,12 +62,20 @@ function safeCodexStatus(value) {
   return value && typeof value === 'object' ? value : { available: false, error: 'Codex 状态不可用。' };
 }
 
-export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, officialAccounts, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, asrOptions, executorsOptions, automationOptions, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
+export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, officialAccounts, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, asrOptions, executorsOptions, automationOptions, mobileOfficialOptions, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
   const codexPolicy = { allowedHttpOrigins: parseCodexHttpOrigins(codexHttpOrigins) };
   const store = await new JsonStore(dataDir).init();
   const accessToken = await store.token(token ?? process.env.PETPAL_TOKEN);
   const ownerTokenHash = tokenHash(accessToken);
   const state = store.state;
+  let officialChange = async () => {};
+  const mobileOfficial = await new MobileOfficialAccounts({ ...mobileOfficialOptions, authorize: auth => {
+    if (!auth || auth.bootstrap || shuttingDown) throw failure(401, '手机官方模型需要有效的小伴账号登录。');
+    const user = state.users.find(item => item.id === auth.userId && !item.disabled);
+    const session = state.sessions.find(item => item.userId === auth.userId && item.tokenHash === auth.sessionHash && item.expiresAt > Date.now());
+    if (!user || !session) throw failure(401, '手机模型登记的登录已过期或已撤销。');
+  }, onChange: (userId, change) => officialChange(userId, change) }).init();
+  officialAccounts = combineOfficialAccounts(officialAccounts, mobileOfficial);
   const officialProviders = createOfficialProviderScope(officialAccounts);
   const officialBridges = new Map();
   const imageAttachments = await createAttachmentService({ store, dataDir });
@@ -184,6 +193,9 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (Object.keys(req.query).length) throw failure(400, '自动化工具回调不接受查询字段。');
     res.json(await executors.automation(req.params.connectionId, req.params.runId, req.headers.authorization, req.body));
   });
+  // A native SSE chunk can expand when JSON-escaped. Keep its larger parser
+  // separate from normal user APIs, while the relay enforces its 48 KiB cap.
+  app.use('/api/mobile-official', express.json({ limit: '384kb', strict: true }));
   app.use('/api', express.json({ limit: '128kb', strict: true }));
   app.use('/api', (req, res, next) => {
     if (req.body !== undefined && (Array.isArray(req.body) || !req.body || typeof req.body !== 'object')) return next(failure(400, '请求正文必须是 JSON 对象。'));
@@ -283,6 +295,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (related.some(item => active.has(item.id) || item.agent?.queue?.length || ['running', 'stopping', 'unknown'].includes(item.agent?.run?.status) || item.agent?.submissions?.some(entry => ['queued', 'running', 'dispatching', 'uncertain'].includes(entry.status))) || conversation.assistantTasks?.some(item => ['deciding', 'queued', 'running', 'unknown'].includes(item.status))) throw failure(409, '这个会话仍有执行中、排队或状态未知的任务，请先停止任务并确认执行电脑已结束，再删除。');
   };
   const stopTasks = async (predicate, options) => {
+    mobileOfficial.revoke(predicate);
     asr.revoke(predicate);
     executors.revoke(predicate);
     const agentStopped = agentTasks.revoke(predicate, options);
@@ -550,6 +563,23 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     req.user = user; req.sessionHash = hash; req.bootstrap = bootstrap; next();
   });
   const executorAuth = req => ({ userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap });
+  const mobileAuth = req => {
+    if (req.bootstrap) throw failure(403, '手机官方模型需要使用小伴账号密码登录。');
+    if (Object.keys(req.query).length) throw failure(400, '手机模型连接不接受查询字段。');
+    return executorAuth(req);
+  };
+  app.post('/api/mobile-official/connect', (req, res) => res.json(mobileOfficial.connect(mobileAuth(req), req.body)));
+  app.get('/api/mobile-official/:relayId/poll', async (req, res) => {
+    if (Object.keys(req.body).length) throw failure(400, '手机模型取件不接受正文。');
+    const controller = new AbortController(), stopped = () => { if (!res.writableEnded) controller.abort(); }; res.once('close', stopped);
+    try { const result = await mobileOfficial.poll(req.params.relayId, mobileAuth(req), controller.signal); if (!res.destroyed) res.json(result); }
+    finally { res.off('close', stopped); }
+  });
+  app.post('/api/mobile-official/:relayId/reply', async (req, res) => res.json(await mobileOfficial.reply(req.params.relayId, mobileAuth(req), req.body)));
+  app.post('/api/mobile-official/:relayId/disconnect', (req, res) => {
+    if (Object.keys(req.body).length) throw failure(400, '断开手机模型不接受附加字段。');
+    res.json(mobileOfficial.disconnect(req.params.relayId, mobileAuth(req)));
+  });
   app.post('/api/notifications/devices', async (req, res) => {
     if (Object.keys(req.query).length) throw failure(400, '通知设备注册不接受查询字段。');
     requireCodex(req.user); res.status(201).json(await notifications.register(executorAuth(req), req.body));
@@ -1344,7 +1374,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     for (const probe of probes) probe.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     for (const task of active.values()) task.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     if (configSwap) await configSwap.catch(() => {});
-    const results = await Promise.allSettled([notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), ...[...officialBridges.values()].map(item => item.bridge.close()), codexStatusProbe?.promise.catch(() => {}), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
+    const results = await Promise.allSettled([mobileOfficial.close(), notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), ...[...officialBridges.values()].map(item => item.bridge.close()), codexStatusProbe?.promise.catch(() => {}), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
     let saveError;
     try { await store.queue; } catch (error) { saveError = error; }
     finally { for (const listener of closingListeners) listener.closeAllConnections(); await httpClosed; }
@@ -1361,9 +1391,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     // Identity transitions must not end unrelated API work, executor sessions,
     // or the small companion's login. Only this account's old capabilities end.
     const matches = task => task.userId === userId && [task.providerId, task.reviewProviderId, task.assistantProviderId, task.assistantReviewProviderId].some(id => revoked.has(id));
-    const closing = [...officialBridges.entries()].filter(([, value]) => value.userId === userId);
+    const closing = [...officialBridges.entries()].filter(([, value]) => value.userId === userId && revoked.has(value.providerId));
     for (const [revision] of closing) officialBridges.delete(revision);
     await Promise.all([stopTasks(matches, { invalidateSession: false }), ...closing.map(([, value]) => value.bridge.close())]);
   };
+  officialChange = officialAccountChanged;
   return { server, token: accessToken, close, updates, hosting, automations, officialAccountChanged };
 }

@@ -4,6 +4,8 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 const syntheticSecrets = new Map([
+  ['tests/android-app-proxy-session.test.mjs', new Set(['fixture-session-not-real'])],
+  ['tests/android-official-relay.test.mjs', new Set(['fixture-password-123', 'must-never-be-accepted'])],
   ['tests/agent-context-repair-api.test.mjs', new Set(['synthetic-context-key-only'])],
   ['tests/agent-queue-api.test.mjs', new Set(['synthetic-queue-only-key'])],
   ['tests/agent-recovery-api.test.mjs', new Set(['synthetic-recovery-only'])],

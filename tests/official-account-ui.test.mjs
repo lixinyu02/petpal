@@ -28,7 +28,7 @@ function fixture({platform='desktop',connected=true,target='local',value=signedO
   if(platform==='desktop')window.petpal={officialAccount:native};else if(platform==='legacy')window.petpal={};
   class SessionChangedError extends Error{}
   const api={getConnection:()=>({url:target==='local'?'http://127.0.0.1:4318':'https://central.example.invalid',token:connected?'session-private':''}),getExecutionTarget:()=>target,getIdentity:()=>connected?identity:null,getSessionEpoch:()=>epoch,SessionChangedError};
-  const platformModule={exports:{}},context={module:platformModule,exports:platformModule.exports,window,document,Error,setTimeout(callback){const id=++timerId;timers.set(id,callback);return id;},clearTimeout:id=>timers.delete(id),require:name=>{assert.equal(name,'../api');return api;}};
+  const platformModule={exports:{}},context={module:platformModule,exports:platformModule.exports,window,document,Error,setTimeout(callback){const id=++timerId;timers.set(id,callback);return id;},clearTimeout:id=>timers.delete(id),require:name=>{if(name==='./android-official-account')return{androidOfficialAccount:()=>platform==='android-native'?native:undefined,supportsAndroidOfficialAccount:()=>platform==='android-native'};assert.equal(name,'../api');return api;}};
   vm.runInNewContext(platformSource,context);const session=platformModule.exports;
   const hooks=[],effects=[],same=(a,b)=>a&&b&&a.length===b.length&&a.every((item,at)=>Object.is(item,b[at]));
   const react={
@@ -56,6 +56,13 @@ function fixture({platform='desktop',connected=true,target='local',value=signedO
 
 test('official controls are absent on Web Android and older desktop clients',async t=>{
   for(const platform of ['web','android','legacy']){const f=fixture({platform});t.after(()=>f.close());await f.flush();assert.equal(f.tree,null);assert.equal(f.calls.length,0);}
+});
+test('native Android shows its own account on a central connection without pretending to host a local Agent',async t=>{
+  const f=fixture({platform:'android-native',target:'remote'});t.after(()=>f.close());await f.flush();
+  assert.equal(f.calls.length,1);assert.match(f.text(),/使用 ChatGPT 登录/);assert.doesNotMatch(f.text(),/当前连接的是远程服务/);
+  assert.match(f.text(),/此手机/);assert.match(f.text(),/系统浏览器/);assert.match(f.text(),/同一小伴账号/);
+  f.click('使用 ChatGPT 登录');await f.flush();assert.equal(f.calls.at(-1).action,'start');
+  const loggedOut=fixture({platform:'android-native',target:'remote',connected:false});t.after(()=>loggedOut.close());await loggedOut.flush();assert.equal(loggedOut.calls.length,0);assert.match(loggedOut.text(),/先登录这台手机/);
 });
 test('ordinary desktop users can sign in; disconnected and central connections never read native account',async t=>{
   const loggedOut=fixture({connected:false});t.after(()=>loggedOut.close());await loggedOut.flush();assert.equal(loggedOut.calls.length,0);assert.match(loggedOut.text(),/先登录/);

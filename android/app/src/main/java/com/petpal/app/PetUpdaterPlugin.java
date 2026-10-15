@@ -159,7 +159,7 @@ public final class PetUpdaterPlugin extends Plugin {
             HttpsURLConnection connection = null;
             for (int redirects = 0; ; redirects++) {
                 operation.check();
-                connection = (HttpsURLConnection) next.toURL().openConnection(); operation.connection = connection;
+                connection = (HttpsURLConnection) PetNetwork.open(next.toURL()); operation.connection = connection;
                 connection.setInstanceFollowRedirects(false); connection.setConnectTimeout(15000); connection.setReadTimeout(15000);
                 connection.setUseCaches(false); connection.setRequestMethod("GET"); connection.setRequestProperty("Accept", "application/octet-stream");
                 connection.setRequestProperty("Accept-Encoding", "identity"); connection.setRequestProperty("User-Agent", "PetPal-Updater/0.6.0");

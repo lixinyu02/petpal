@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "version": "1.19.32",
+  "repository": "https://github.com/MetaCubeX/mihomo",
+  "sourceCommit": "88dcbf7f1614a67c3b36b848ee3592dfa92ada36",
+  "minimumApi": 34,
+  "minimumApiBasis": "upstream NDK API 34 build; conservative feature gate, no lower-API runtime claim",
+  "targets": {
+    "arm64-v8a": {
+      "archive": {
+        "name": "mihomo-android-arm64-v8-v1.19.32.gz",
+        "bytes": 21866463,
+        "sha256": "42b1f2be8702484d3ae6238daab392622f54bd0d264966700f1f28f52596e326",
+        "machine": 183,
+        "elfClass": 2,
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-android-arm64-v8-v1.19.32.gz"
+      },
+      "executable": {
+        "name": "libpetpal_mihomo.so",
+        "format": "ELF",
+        "machine": 183,
+        "elfClass": 2,
+        "interpreter": "/system/bin/linker64",
+        "androidApi": 34,
+        "loadAlignments": [
+          16384,
+          16384,
+          16384,
+          16384
+        ],
+        "page16k": true,
+        "bytes": 64045272,
+        "sha256": "bb9afbd48717f92d59e07da35fb694b83d40d6edb63eb9033c2ee4174137d195"
+      }
+    },
+    "armeabi-v7a": {
+      "archive": {
+        "name": "mihomo-android-armv7-v1.19.32.gz",
+        "bytes": 22190735,
+        "sha256": "cbac13a26ab77ce80871a064783a02246a856a20ab7435fe301fa1665e99acf4",
+        "machine": 40,
+        "elfClass": 1,
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-android-armv7-v1.19.32.gz"
+      },
+      "executable": {
+        "name": "libpetpal_mihomo.so",
+        "format": "ELF",
+        "machine": 40,
+        "elfClass": 1,
+        "interpreter": "/system/bin/linker",
+        "androidApi": 34,
+        "loadAlignments": [
+          4096,
+          4096,
+          4096,
+          4096
+        ],
+        "page16k": null,
+        "bytes": 59576612,
+        "sha256": "10e85ebad5380e5cdcb4028b6ba40910593bc9c37ce6b50e9f3a21adfca1408d"
+      }
+    },
+    "x86_64": {
+      "archive": {
+        "name": "mihomo-android-amd64-v1.19.32.gz",
+        "bytes": 23471244,
+        "sha256": "91c159015e7d8aaff22153b9fd18749a0c7258d6f252ea344ecace975ce17413",
+        "machine": 62,
+        "elfClass": 2,
+        "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/mihomo-android-amd64-v1.19.32.gz"
+      },
+      "executable": {
+        "name": "libpetpal_mihomo.so",
+        "format": "ELF",
+        "machine": 62,
+        "elfClass": 2,
+        "interpreter": "/system/bin/linker64",
+        "androidApi": 34,
+        "loadAlignments": [
+          16384,
+          16384,
+          16384,
+          16384
+        ],
+        "page16k": true,
+        "bytes": 68750864,
+        "sha256": "1c5aa8e8a7006e4093560fe48505fd1587de29210879e806822cb1094b334413"
+      }
+    }
+  },
+  "sources": [
+    {
+      "name": "mihomo-88dcbf7f1614a67c3b36b848ee3592dfa92ada36.tar.gz",
+      "url": "https://codeload.github.com/MetaCubeX/mihomo/tar.gz/88dcbf7f1614a67c3b36b848ee3592dfa92ada36",
+      "bytes": 1269330,
+      "sha256": "77643ec763a92b330a0b4a44870f78ee05c08792897e7f5e40a3654415c5f077",
+      "assetName": "mihomo-88dcbf7f1614a67c3b36b848ee3592dfa92ada36.tar.gzip"
+    },
+    {
+      "name": "vendor.tar.gz",
+      "url": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.32/vendor.tar.gz",
+      "bytes": 17606440,
+      "sha256": "0e605b54a4e2508c57f7bf64ae30d98833b3d2e0c1b399dfffa75248f6e84441",
+      "assetName": "vendor.tar.gzip"
+    }
+  ]
+}
