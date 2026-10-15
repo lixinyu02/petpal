@@ -34,6 +34,14 @@ const managerMessages = new Set([
   '代理内核启动失败，检查配置与节点资源后重试。', '代理未能启用，小伴已恢复直连。',
   '恢复直连尚未确认，请关闭代理后重试。', '代理运行配置清理失败，请退出小伴后检查私有目录。',
   '请先启用代理并选择有效节点。', '节点列表已变化，请刷新后再选。',
+  '规范化后的代理配置超过 4 MB，原配置已保留。', '远程配置来源记录无效，原配置已保留。',
+  '尚未保存远程配置来源，请先通过链接导入。', '远程配置下载失败，请检查地址和网络后重试。',
+  '请输入有效的 HTTP 或 HTTPS 配置地址，地址不能包含账号密码或片段。',
+  '远程配置下载失败，请检查地址、网络或服务器。', '远程服务器未返回可用配置，请检查地址或访问权限。',
+  '远程配置重定向无效或次数过多。', '远程配置不允许从 HTTPS 降级到 HTTP。',
+  '远程配置文件过大，未覆盖原配置。', '远程配置下载超时，请稍后重试。', '远程配置下载已取消。',
+  '远程配置必须是有效的 UTF-8 文本。', '远程服务器返回了空配置。',
+  '远程服务器返回了网页，请使用直接下载 Clash YAML 的地址。',
 ]);
 
 function appProxyPublicStatus(value) {
@@ -45,6 +53,10 @@ function appProxyPublicStatus(value) {
     supported: value.supported === true, state: value.state, configured: value.configured === true,
     autoStart: value.autoStart === true, running: value.state === 'running' && value.running === true,
     version: value.version, platform: value.platform, arch: value.arch,
+    remoteConfigured: value.remoteConfigured === true,
+    ...(value.remoteConfigured === true && typeof value.remoteUpdatedAt === 'string' &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.remoteUpdatedAt) &&
+      Number.isFinite(Date.parse(value.remoteUpdatedAt)) && new Date(value.remoteUpdatedAt).toISOString() === value.remoteUpdatedAt ? { remoteUpdatedAt:value.remoteUpdatedAt } : {}),
     groups: Array.isArray(value.groups) ? value.groups.slice(0, 128).filter(group => plain(group) && text(group.name) && Array.isArray(group.choices)).map(group => ({
       name: group.name, selected: text(group.selected) ? group.selected : '',
       choices: group.choices.slice(0, 2048).filter(choice => text(choice)),
@@ -98,6 +110,14 @@ function createAppProxyHandlers({ manager, origin, isAllowed, readConnection, ve
       throw fail('INPUT', '请导入不超过 4 MB 的 Clash YAML 配置。');
     return input.yaml;
   };
+  const urlInput = input => {
+    if (!keys(input, ['url']) || !text(input.url, 4096) || input.url !== input.url.trim() || /\\/.test(input.url))
+      throw fail('INPUT', '请输入有效的 HTTP 或 HTTPS 配置文件链接。');
+    let url; try { url = new URL(input.url); } catch {}
+    if (!url || !['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password || url.hash || !/^https?:\/\//i.test(input.url))
+      throw fail('INPUT', '请输入有效的 HTTP 或 HTTPS 配置文件链接。');
+    return input.url;
+  };
   const operations = {
     status: async (guard, input) => { noInput(input); return manager.refresh(); },
     importFile: async (guard, input) => {
@@ -106,6 +126,8 @@ function createAppProxyHandlers({ manager, origin, isAllowed, readConnection, ve
       return manager.importConfiguration(yamlInput({ yaml: source }), { authorize: guard.authorize });
     },
     importText: async (guard, input) => manager.importConfiguration(yamlInput(input), { authorize: guard.authorize }),
+    importUrl: async (guard, input) => manager.importRemoteConfiguration(urlInput(input), { authorize: guard.authorize }),
+    updateRemote: async (guard, input) => { noInput(input); return manager.updateRemoteConfiguration({ authorize:guard.authorize }); },
     start: async (guard, input) => { noInput(input); return manager.start({ authorize: guard.authorize }); },
     stop: async (guard, input) => { noInput(input); return manager.stop({ authorize: guard.authorize }); },
     preferences: async (guard, input) => {

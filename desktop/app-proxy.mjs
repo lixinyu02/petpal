@@ -5,8 +5,10 @@ import {mkdir, readFile, writeFile, rename, rm, lstat, chmod} from 'node:fs/prom
 import net from 'node:net';
 import path from 'node:path';
 import yaml from 'js-yaml';
+import {normalizeRemoteConfigUrl,downloadProxyConfiguration,PROXY_DOWNLOAD_ERRORS} from './app-proxy-download.mjs';
 
 const VERSION='1.19.32',MAX_CONFIG=4*1024*1024;
+const REMOTE_PREFIX='# petpal-remote-source: ',MAX_REMOTE_HEADER=32768;
 const plain=value=>value&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value));
 const fail=(message,code='PETPAL_PROXY')=>Object.assign(new Error(message),{code});
 const cleanName=value=>typeof value==='string'&&value.length>0&&value.length<=160&&!/[\x00-\x1f\x7f]/.test(value);
@@ -24,26 +26,29 @@ async function privateRead(file,max=MAX_CONFIG){
   const info=await lstat(file);if(!info.isFile()||info.isSymbolicLink()||info.size>max)throw fail('代理配置文件无效或过大，原文件已保留。');
   return readFile(file,'utf8');
 }
-async function privateWrite(file,value){
+async function privateWrite(file,value,{beforeCommit=async()=>{}}={}){
   const info=await lstat(file).catch(error=>{if(error.code!=='ENOENT')throw error;return null;});
   if(info&&(info.isSymbolicLink()||!info.isFile()))throw fail('代理配置目标无效，原文件已保留。');
   const temporary=path.join(path.dirname(file),`.${path.basename(file)}-${randomUUID()}.tmp`);
-  try{await writeFile(temporary,value,{flag:'wx',mode:0o600});await rename(temporary,file);await chmod(file,0o600);}
-  finally{await rm(temporary,{force:true});}
+  let committed=false;
+  try{await writeFile(temporary,value,{flag:'wx',mode:0o600});await chmod(temporary,0o600);await beforeCommit();await rename(temporary,file);committed=true;}
+  finally{if(!committed)await rm(temporary,{force:true}).catch(()=>{});}
 }
 
 export function parseProxyConfiguration(source){
   if(typeof source!=='string'||!source.trim()||Buffer.byteLength(source)>MAX_CONFIG)throw fail('请导入不超过 4 MB 的 Clash YAML 配置。');
   let value;try{value=yaml.load(source,{schema:yaml.JSON_SCHEMA});}catch{throw fail('配置不是有效的 YAML，未覆盖原配置。');}
   if(!plain(value))throw fail('代理配置必须为 YAML 对象。');
-  let nodes=0;const ancestors=new Set();
+  let nodes=0,expandedBytes=0;const ancestors=new Set();
   const visit=(item,depth=0)=>{
     if(++nodes>60000||depth>48)throw fail('代理配置层级或展开内容过多。');
+    expandedBytes+=typeof item==='string'?Buffer.byteLength(item):16;
+    if(expandedBytes>MAX_CONFIG)throw fail('代理配置层级或展开内容过多。');
     if(item===null||['string','boolean'].includes(typeof item))return;
     if(typeof item==='number'&&Number.isFinite(item))return;
     if(!Array.isArray(item)&&!plain(item))throw fail('代理配置包含不支持的 YAML 类型。');
     if(ancestors.has(item))throw fail('代理配置不支持循环引用。');ancestors.add(item);
-    for(const [key,entry] of Object.entries(item)){if(['__proto__','constructor','prototype'].includes(key))throw fail('代理配置包含无效字段。');visit(entry,depth+1);}
+    for(const [key,entry] of Object.entries(item)){expandedBytes+=Buffer.byteLength(key);if(['__proto__','constructor','prototype'].includes(key))throw fail('代理配置包含无效字段。');visit(entry,depth+1);}
     ancestors.delete(item);
   };visit(value);
   for(const key of ['proxy-providers','rule-providers']){
@@ -58,6 +63,41 @@ export function parseProxyConfiguration(source){
   // otherwise create listeners, change host DNS/routes or read external files.
   for(const key of ['external-controller','external-controller-tls','external-controller-unix','external-controller-pipe','external-ui','external-ui-url','external-ui-name','external-ui-path','tls','listeners','tunnels','tuic-server','ss-config','vmess-config','iptables','ntp','hosts','geox-url','geodata-mode','geodata-loader','geo-auto-update','geo-update-interval','geodata-path'])delete value[key];
   return value;
+}
+
+function canonicalConfiguration(config){
+  const source=yaml.dump(config,{schema:yaml.JSON_SCHEMA,noRefs:true,lineWidth:120});
+  if(Buffer.byteLength(source)>MAX_CONFIG)throw fail('规范化后的代理配置超过 4 MB，原配置已保留。');
+  return source;
+}
+
+function sourceHeader(remote){
+  if(!remote)return '';
+  const header=REMOTE_PREFIX+Buffer.from(JSON.stringify({version:1,url:remote.url,updatedAt:remote.updatedAt})).toString('base64url')+'\n';
+  if(Buffer.byteLength(header)>MAX_REMOTE_HEADER)throw fail('远程配置来源记录无效，原配置已保留。');
+  return header;
+}
+
+// Only files written by this manager may carry source metadata. Imported YAML
+// always passes through parse + dump first, so a fetched/manual comment cannot
+// become a saved URL. A malformed private header disables refresh, never guesses.
+async function storedConfiguration(file){
+  let source=await privateRead(file,MAX_CONFIG+MAX_REMOTE_HEADER),remote=null;
+  if(source.startsWith(REMOTE_PREFIX)){
+    const end=source.indexOf('\n');
+    if(end<0||Buffer.byteLength(source.slice(0,end+1))>MAX_REMOTE_HEADER)throw fail('远程配置来源记录无效，原配置已保留。');
+    const encoded=source.slice(REMOTE_PREFIX.length,end);
+    if(!/^[A-Za-z0-9_-]+$/.test(encoded))throw fail('远程配置来源记录无效，原配置已保留。');
+    try{
+      const bytes=Buffer.from(encoded,'base64url');if(bytes.toString('base64url')!==encoded)throw new Error();
+      const value=JSON.parse(bytes.toString('utf8'));
+      if(!plain(value)||Object.keys(value).length!==3||value.version!==1||typeof value.url!=='string'||typeof value.updatedAt!=='string'||
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.updatedAt)||new Date(value.updatedAt).toISOString()!==value.updatedAt||normalizeRemoteConfigUrl(value.url)!==value.url)throw new Error();
+      remote={url:value.url,updatedAt:value.updatedAt};
+    }catch{throw fail('远程配置来源记录无效，原配置已保留。');}
+    source=source.slice(end+1);
+  }
+  return{config:parseProxyConfiguration(source),remote};
 }
 
 export function runtimeProxyConfiguration(value,{port,controllerPort,username,password,secret}){
@@ -91,20 +131,23 @@ export function mihomoEnvironment(env=process.env){
 }
 
 export class AppProxyManager{
-  constructor({directory,resolveCore,network,spawnImpl=spawn,fetchImpl=fetch,env=process.env,startTimeoutMs=20000,testTimeoutMs=20000,terminateTimeoutMs=2000,killTimeoutMs=3000}={}){
+  constructor({directory,resolveCore,network,spawnImpl=spawn,fetchImpl=fetch,downloadImpl=downloadProxyConfiguration,env=process.env,startTimeoutMs=20000,testTimeoutMs=20000,terminateTimeoutMs=2000,killTimeoutMs=3000}={}){
     if(!path.isAbsolute(directory||'')||typeof resolveCore!=='function'||!network)throw new Error('Invalid application proxy setup');
-    Object.assign(this,{directory,resolveCore,network,spawnImpl,fetch:fetchImpl,env,startTimeoutMs,testTimeoutMs,terminateTimeoutMs,killTimeoutMs});
+    Object.assign(this,{directory,resolveCore,network,spawnImpl,fetch:fetchImpl,download:downloadImpl,env,startTimeoutMs,testTimeoutMs,terminateTimeoutMs,killTimeoutMs});
     this.preferences={autoStart:false};this.state='stopped';this.configured=false;this.error='';this.pending=Promise.resolve();this.child=null;this.closed=false;this.controller=null;this.core=null;this.runtime=null;this.groups=[];
-    this.epoch=0;this.children=new WeakMap();this.deactivation=Promise.resolve();this.closing=null;
+    this.epoch=0;this.cancelGeneration=0;this.children=new WeakMap();this.deactivation=Promise.resolve();this.closing=null;
+    this.remoteSource=null;
   }
   _queue(work){const task=this.pending.then(()=>{if(this.closed)throw fail('代理正在退出。');return work();});this.pending=task.catch(()=>{});return task;}
+  _queueConfiguration(work){const generation=this.cancelGeneration;return this._queue(()=>{if(generation!==this.cancelGeneration)throw fail('代理操作已取消。');return work();});}
   status(){return{supported:true,state:this.state,configured:this.configured,autoStart:this.preferences.autoStart,version:VERSION,platform:process.platform,arch:process.arch,
-    running:this.state==='running',groups:this.groups.map(group=>({...group,choices:[...group.choices]})),...(this.error?{error:this.error}:{})};}
+    running:this.state==='running',remoteConfigured:!!this.remoteSource,...(this.remoteSource?{remoteUpdatedAt:this.remoteSource.updatedAt}:{}),groups:this.groups.map(group=>({...group,choices:[...group.choices]})),...(this.error?{error:this.error}:{})};}
   async load(){
     await privateDirectory(this.directory);
     try{const value=JSON.parse(await privateRead(path.join(this.directory,'settings.json'),4096));if(!plain(value)||Object.keys(value).some(key=>key!=='autoStart')||typeof value.autoStart!=='boolean')throw new Error();this.preferences=value;}
     catch(error){if(error.code!=='ENOENT')this.error='代理启动偏好读取失败，已保持关闭，原文件未覆盖。';}
-    try{parseProxyConfiguration(await privateRead(path.join(this.directory,'config.yaml')));this.configured=true;}
+    this.configured=false;this.remoteSource=null;
+    try{const stored=await storedConfiguration(path.join(this.directory,'config.yaml'));this.remoteSource=stored.remote;this.configured=true;}
     catch(error){if(error.code!=='ENOENT')this.error='代理配置读取失败，已保持关闭，原文件未覆盖。';}
     return this.status();
   }
@@ -135,7 +178,7 @@ export class AppProxyManager{
       let timer,cancel;
       try{
         await Promise.race([child.done,new Promise((_,reject)=>{timer=setTimeout(()=>reject(fail('配置校验超时，请检查节点、规则及远程 provider 是否可用。')),this.testTimeoutMs);cancel=()=>reject(fail('代理操作已取消。'));signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel();})]);
-        if(signal.aborted||exit!==0)throw fail('配置校验未通过，请检查节点、规则及远程 provider 是否可用。');
+        if(signal.aborted)throw fail('代理操作已取消。');if(exit!==0)throw fail('配置校验未通过，请检查节点、规则及远程 provider 是否可用。');
       }finally{
         clearTimeout(timer);signal.removeEventListener('abort',abort);if(cancel)signal.removeEventListener('abort',cancel);
         await this._terminate(child);if(this.child===child)this.child=null;
@@ -143,18 +186,37 @@ export class AppProxyManager{
     }else child.done.finally(()=>signal.removeEventListener('abort',abort));
     return child;
   }
-  async importConfiguration(source,{authorize=async()=>{}}={}){return this._queue(async()=>{
-    if(this.state==='running')throw fail('请先关闭代理，再更换配置。');await authorize();
+  async _replaceConfiguration(readSource,{authorize=async()=>{},remoteUrl=null}={}){
+    if(this.state==='running')throw fail('请先关闭代理，再更换配置。');
     const controller=new AbortController(),epoch=++this.epoch;this.controller=controller;
     const candidate=path.join(this.directory,`candidate-${randomUUID()}.yaml`);this.state='checking';this.error='';
     try{
-      const config=parseProxyConfiguration(source),core=await this.resolveCore();this._active(controller,epoch);
+      await authorize();this._active(controller,epoch);const source=await readSource(controller.signal);
+      await authorize();this._active(controller,epoch);
+      const config=parseProxyConfiguration(source),canonical=canonicalConfiguration(config),core=await this.resolveCore();this._active(controller,epoch);
       const ports={port:await reservePort(),controllerPort:await reservePort(),username:'petpal',password:randomBytes(24).toString('hex'),secret:randomBytes(24).toString('hex')};
       await privateWrite(candidate,runtimeProxyConfiguration(config,ports));
-      this._active(controller,epoch);await this._launch(core.executable,['-t','-d',this.directory,'-f',candidate],controller.signal,true);await authorize();this._active(controller,epoch);
-      await privateWrite(path.join(this.directory,'config.yaml'),yaml.dump(config,{schema:yaml.JSON_SCHEMA,noRefs:true,lineWidth:120}));this.configured=true;this.state='stopped';return this.status();
+      await authorize();this._active(controller,epoch);await this._launch(core.executable,['-t','-d',this.directory,'-f',candidate],controller.signal,true);await authorize();this._active(controller,epoch);
+      await rm(candidate,{force:true});
+      const remote=remoteUrl?{url:remoteUrl,updatedAt:new Date().toISOString()}:null;
+      await privateWrite(path.join(this.directory,'config.yaml'),sourceHeader(remote)+canonical,{beforeCommit:async()=>{await authorize();this._active(controller,epoch);}});
+      this.configured=true;this.remoteSource=remote;this.state='stopped';return this.status();
     }catch(error){this.state='error';this.error=error?.code==='PETPAL_PROXY'?error.message:'代理配置保存失败，原配置已保留。';throw fail(this.error);}
-    finally{await rm(candidate,{force:true});if(this.controller===controller)this.controller=null;}
+    finally{await rm(candidate,{force:true}).catch(()=>{});if(this.controller===controller)this.controller=null;}
+  }
+  importConfiguration(source,{authorize=async()=>{}}={}){return this._queueConfiguration(()=>this._replaceConfiguration(async()=>source,{authorize}));}
+  async _downloadRemote(url,signal){
+    try{return(await this.download(url,{signal})).yaml;}
+    catch(error){if(signal.aborted)throw fail('代理操作已取消。');if(error?.code==='PETPAL_PROXY'&&Object.values(PROXY_DOWNLOAD_ERRORS).includes(error.message))throw error;throw fail(PROXY_DOWNLOAD_ERRORS.FAILED);}
+  }
+  importRemoteConfiguration(url,{authorize=async()=>{}}={}){return this._queueConfiguration(()=>{
+    const remoteUrl=normalizeRemoteConfigUrl(url);
+    return this._replaceConfiguration(signal=>this._downloadRemote(remoteUrl,signal),{authorize,remoteUrl});
+  });}
+  updateRemoteConfiguration({authorize=async()=>{}}={}){return this._queueConfiguration(()=>{
+    if(!this.remoteSource)throw fail('尚未保存远程配置来源，请先通过链接导入。');
+    const remoteUrl=this.remoteSource.url;
+    return this._replaceConfiguration(signal=>this._downloadRemote(remoteUrl,signal),{authorize,remoteUrl});
   });}
   async updatePreferences(patch,{authorize=async()=>{}}={}){return this._queue(async()=>{
     if(!plain(patch)||Object.keys(patch).length!==1||typeof patch.autoStart!=='boolean')throw fail('代理启动选项无效。');
@@ -175,7 +237,7 @@ export class AppProxyManager{
     this.state='starting';this.error='';const controller=new AbortController(),epoch=++this.epoch;this.controller=controller;
     try{
       await this.deactivation;this._active(controller,epoch);
-      const config=parseProxyConfiguration(await privateRead(path.join(this.directory,'config.yaml'))),core=await this.resolveCore();await authorize();this._active(controller,epoch);
+      const {config}=await storedConfiguration(path.join(this.directory,'config.yaml')),core=await this.resolveCore();await authorize();this._active(controller,epoch);
       const runtime=this.runtime={port:await reservePort(),controllerPort:await reservePort(),username:'petpal',password:randomBytes(24).toString('hex'),secret:randomBytes(24).toString('hex')};
       const file=path.join(this.directory,'runtime.yaml');await privateWrite(file,runtimeProxyConfiguration(config,runtime));
       this._active(controller,epoch);const child=await this._launch(core.executable,['-d',this.directory,'-f',file],controller.signal),deadline=Date.now()+this.startTimeoutMs;
@@ -194,14 +256,14 @@ export class AppProxyManager{
     try{await rm(path.join(this.directory,'runtime.yaml'),{force:true});}catch{failure||=fail('代理运行配置清理失败，请退出小伴后检查私有目录。');}
     if(failure){this.state='error';this.error=failure.message;throw failure;}this.state='stopped';
   }
-  async stop({authorize=async()=>{}}={}){await authorize();this.epoch++;this.controller?.abort();return this._queue(async()=>{await authorize();await this._stop();this.error='';return this.status();});}
+  async stop({authorize=async()=>{}}={}){await authorize();this.cancelGeneration++;this.epoch++;this.controller?.abort();return this._queue(async()=>{await authorize();await this._stop();this.error='';return this.status();});}
   select(group,name,{authorize=async()=>{}}={}){return this._queue(async()=>{
     await authorize();if(this.state!=='running'||!cleanName(group)||!cleanName(name))throw fail('请先启用代理并选择有效节点。');await this._groups();
     if(!this.groups.some(item=>item.name===group&&item.choices.includes(name)))throw fail('节点列表已变化，请刷新后再选。');await authorize();
     await this._controller(`/proxies/${encodeURIComponent(group)}`,{method:'PUT',body:{name}});await authorize();await this._groups();return this.status();
   });}
   async refresh(){if(this.state==='running')await this._groups().catch(()=>{});return this.status();}
-  close(){if(this.closing)return this.closing;this.closed=true;this.epoch++;this.controller?.abort();this.closing=(async()=>{await this.pending;try{await this._stop();}finally{await this.network.close();}})();return this.closing;}
+  close(){if(this.closing)return this.closing;this.closed=true;this.cancelGeneration++;this.epoch++;this.controller?.abort();this.closing=(async()=>{await this.pending;try{await this._stop();}finally{await this.network.close();}})();return this.closing;}
 }
 
 export const MIHOMO_VERSION=VERSION;

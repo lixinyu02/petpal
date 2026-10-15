@@ -92,6 +92,8 @@ contextBridge.exposeInMainWorld('petpal', Object.freeze({
     status: () => appProxyCall('status'),
     importFile: () => appProxyCall('importFile'),
     importText: input => appProxyCall('importText', input),
+    importUrl: input => appProxyCall('importUrl', input),
+    updateRemote: () => appProxyCall('updateRemote'),
     start: () => appProxyCall('start'),
     stop: () => appProxyCall('stop'),
     preferences: input => appProxyCall('preferences', input),

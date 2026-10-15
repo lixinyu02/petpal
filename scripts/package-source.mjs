@@ -176,11 +176,11 @@ const requiredFiles = [
 requiredFiles.push('desktop/executor.mjs', 'server/executors.mjs', 'server/remote-codex.mjs', 'server/executor-relay.mjs', 'server/response-message-segments.mjs', 'server/project-directory.mjs');
 requiredFiles.push('server/native/codex-review/models-0.143.0.json', 'server/native/codex-review/LICENSE', 'server/native/codex-review/PROVENANCE.json', 'server/native/codex-review/SHA256SUMS');
 requiredFiles.push('server/approval-review.mjs', 'server/system-controls.mjs', 'server/native/system-windows.ps1');
-requiredFiles.push('desktop/app-proxy.mjs', 'desktop/app-proxy-network.mjs', 'desktop/app-proxy-ipc.cjs', 'desktop/app-proxy-smoke.cjs',
+requiredFiles.push('desktop/app-proxy.mjs', 'desktop/app-proxy-network.mjs', 'desktop/app-proxy-download.mjs', 'desktop/app-proxy-ipc.cjs', 'desktop/app-proxy-smoke.cjs',
   'desktop/native/mihomo/manifest.json', 'desktop/native/mihomo/LICENSE', 'desktop/native/mihomo/PROVENANCE.json', 'desktop/native/mihomo/SOURCE-NOTICE.txt',
   'server/app-proxy-network.mjs', 'server/app-proxy-context.mjs', 'scripts/mihomo-package.mjs', 'scripts/client-payload.mjs',
   'src/AppProxySettings.tsx', 'src/app-proxy.css', 'docs/app-proxy.md',
-  'tests/app-proxy.test.mjs', 'tests/app-proxy-network.test.mjs', 'tests/app-proxy-context.test.mjs', 'tests/app-proxy-ipc.test.mjs', 'tests/app-proxy-ui.test.mjs', 'tests/mihomo-package.test.mjs');
+  'tests/app-proxy.test.mjs', 'tests/app-proxy-download.test.mjs', 'tests/app-proxy-remote.test.mjs', 'tests/app-proxy-network.test.mjs', 'tests/app-proxy-context.test.mjs', 'tests/app-proxy-ipc.test.mjs', 'tests/app-proxy-ui.test.mjs', 'tests/mihomo-package.test.mjs');
 for (const required of requiredFiles) if (!selected.has(required)) throw new Error(`Required source entry missing: ${required}`);
 const pendingCompanionRoots = requiredCompanionRoots.filter(directory => ![...selected].some(file => file.startsWith(`${directory}/`)));
 if (!checkOnly && pendingCompanionRoots.length) throw new Error(`Required companion source/assets missing: ${pendingCompanionRoots.join(', ')}`);

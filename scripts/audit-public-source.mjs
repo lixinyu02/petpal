@@ -7,6 +7,7 @@ const syntheticSecrets = new Map([
   ['tests/accounts-settings-ui.test.mjs', new Set(['synthetic-password'])],
   ['tests/app-preferences-ipc.test.mjs', new Set(['private credential'])],
   ['tests/app-proxy-context.test.mjs', new Set(['private_generated_proxy_password_123'])],
+  ['tests/app-proxy-download.test.mjs', new Set(['fixture-private-token'])],
   ['tests/app-proxy-ipc.test.mjs', new Set(['private-node-password'])],
   ['tests/app-proxy-network.test.mjs', new Set(['private_fixture_random_password_123'])],
   ['tests/app-proxy-ui.test.mjs', new Set(['private-password', 'fixture-local-token'])],

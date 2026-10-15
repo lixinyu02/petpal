@@ -58,13 +58,15 @@ test('account settings fixture password is allowed only for its reviewed file an
 });
 
 test('desktop proxy, official account and device role fixtures stay scoped to exact reviewed files',async()=>{
-  for(const stem of ['app-preferences-ipc','app-proxy-context','app-proxy-ipc','app-proxy-network','app-proxy-ui','executors','official-account-api','official-account-ipc','official-account-ui','official-account','user-device-roles']){
+  for(const stem of ['app-preferences-ipc','app-proxy-context','app-proxy-download','app-proxy-remote','app-proxy-ipc','app-proxy-network','app-proxy-ui','executors','official-account-api','official-account-ipc','official-account-ui','official-account','user-device-roles']){
     const name=`tests/${stem}.test.mjs`;
     assert.deepEqual(inspect(name,await readFile(new URL(`../${name}`,import.meta.url))),[],name);
     assert.ok(reasons(inspect(name,JSON.stringify({token:credential()}))).includes('unreviewed literal credential'),name);
   }
   const bearer=['access','secret','alice','refreshed'].join('-');
   assert.ok(reasons(inspect('docs/config.txt',`Bearer ${bearer}`)).includes('literal bearer value'));
+  const downloadFixture=['fixture','private','token'].join('-');
+  assert.ok(reasons(inspect('docs/config.json',JSON.stringify({token:downloadFixture}))).includes('unreviewed literal credential'));
 });
 
 test('ASR and Agent fixture credentials use the shared exact-file policy without exempting other values',async()=>{

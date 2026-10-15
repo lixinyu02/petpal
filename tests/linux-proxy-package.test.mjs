@@ -12,7 +12,7 @@ import { APP_PROXY_PRODUCTION_DEPENDENCIES, readMihomoClientPolicy, verifyMihomo
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const policy = await readMihomoClientPolicy(root);
-const proxyFiles = ['desktop/app-proxy.mjs', 'desktop/app-proxy-network.mjs', 'desktop/app-proxy-ipc.cjs', 'desktop/app-proxy-smoke.cjs',
+const proxyFiles = ['desktop/app-proxy.mjs', 'desktop/app-proxy-network.mjs', 'desktop/app-proxy-download.mjs', 'desktop/app-proxy-ipc.cjs', 'desktop/app-proxy-smoke.cjs',
   'desktop/native/mihomo/manifest.json', 'desktop/native/mihomo/LICENSE', 'desktop/native/mihomo/PROVENANCE.json', 'desktop/native/mihomo/SOURCE-NOTICE.txt',
   'server/app-proxy-network.mjs', 'server/app-proxy-context.mjs'];
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');

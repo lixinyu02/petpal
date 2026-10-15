@@ -7,12 +7,12 @@ import vm from 'node:vm';
 const { createAppProxyHandlers, appProxyPublicStatus } = createRequire(import.meta.url)('../desktop/app-proxy-ipc.cjs');
 const selected = { url: 'http://127.0.0.1:43199', token: 'fixture-session' };
 const status = { supported: true, state: 'stopped', configured: true, autoStart: false, running: false,
-  version: '1.19.32', platform: 'win32', arch: 'x64', groups: [{ name: '节点选择', selected: 'DIRECT', choices: ['DIRECT', '节点一'] }] };
+  version: '1.19.32', platform: 'win32', arch: 'x64', remoteConfigured:false, groups: [{ name: '节点选择', selected: 'DIRECT', choices: ['DIRECT', '节点一'] }] };
 const deferred = () => { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; };
 function fixture({ verify, operation, file = null, fileOperation } = {}) {
   let current = { ...selected }, allowed = true;
   const calls = [], event = {}, manager = {};
-  for (const action of ['refresh', 'status', 'importConfiguration', 'start', 'stop', 'updatePreferences', 'select']) manager[action] = async (...args) => {
+  for (const action of ['refresh', 'status', 'importConfiguration', 'importRemoteConfiguration', 'updateRemoteConfiguration', 'start', 'stop', 'updatePreferences', 'select']) manager[action] = async (...args) => {
     calls.push([action, ...args]); await operation?.(action, ...args);
     if (typeof args.at(-1)?.authorize === 'function') await args.at(-1).authorize();
     return status;
@@ -25,7 +25,7 @@ function fixture({ verify, operation, file = null, fileOperation } = {}) {
   return { handlers, calls, manager, event, setConnection: value => { current = value; }, disallow: () => { allowed = false; },
     call: (action, input, connection = selected, sender = event) => handlers[`petpal:app-proxy:${action}`](sender, connection, input) };
 }
-const actionInputs = { status: undefined, importFile: undefined, importText: { yaml: 'proxies: []' }, start: undefined, stop: undefined,
+const actionInputs = { status: undefined, importFile: undefined, importText: { yaml: 'proxies: []' }, importUrl:{url:'https://config.example.test/clash.yaml?source=fixture'}, updateRemote:undefined, start: undefined, stop: undefined,
   preferences: { autoStart: true }, select: { group: '节点选择', name: '节点一' } };
 
 test('every proxy action requires the current trusted main window, local origin and owner login', async () => {
@@ -48,6 +48,7 @@ test('fixed actions pass only validated values and a fresh authorization callbac
   const imported = f.calls.find(call => call[0] === 'importConfiguration'); assert.equal(imported[1], 'proxies: []'); assert.equal(typeof imported[2].authorize, 'function');
   const preferences = f.calls.find(call => call[0] === 'updatePreferences'); assert.deepEqual(preferences[1], { autoStart: true });
   const selection = f.calls.find(call => call[0] === 'select'); assert.deepEqual(selection.slice(1, 3), ['节点选择', '节点一']);
+  const remote = f.calls.find(call => call[0] === 'importRemoteConfiguration'); assert.equal(remote[1], actionInputs.importUrl.url); assert.equal(typeof remote[2].authorize, 'function');
   assert.equal(f.calls.filter(call => call[0] === 'openConfigFile').length, 1);
   assert.deepEqual(Object.keys(f.handlers).sort(), Object.keys(actionInputs).map(action => `petpal:app-proxy:${action}`).sort());
 });
@@ -57,11 +58,13 @@ test('renderer paths, runtime options, extra fields and malformed input cannot r
     status: [null, {}, { refresh: true }], importFile: ['/private/config.yaml', { path: 'C:/secret.yaml' }],
     start: [null, {}, { port: 7890 }], stop: [null, { force: true }],
     importText: [undefined, null, [], '', { yaml: '' }, { yaml: ' ' }, { yaml: 42 }, { yaml: 'proxies: []', path: '/private' }, { yaml: 'x'.repeat(4 * 1024 * 1024 + 1) }],
+    importUrl:[undefined,null,{},[],{url:''},{url:'file:///private/config.yaml'},{url:'https://person:password@config.example.test/config'},{url:'https://config.example.test/config#private'},{url:' https://config.example.test/config'},{url:'https://config.example.test/\\private'},{url:'https://config.example.test/config',headers:{Authorization:'invalid'}},{url:'https://config.example.test/'+ 'a'.repeat(4096)}],
+    updateRemote:[null,{}, {url:'https://other.example.test/config.yaml'}],
     preferences: [undefined, null, [], { autoStart: 1 }, { autoStart: true, systemProxy: true }],
     select: [undefined, null, [], { group: '', name: 'x' }, { group: 'x', name: 'bad\nsecret' }, { group: 'x', name: 'y', url: 'private' }],
   };
   for (const [action, values] of Object.entries(malformed)) for (const value of values) {
-    const f = fixture(); await assert.rejects(f.call(action, value), /格式无效|不超过|选项无效|有效的代理节点/);
+    const f = fixture(); await assert.rejects(f.call(action, value), /格式无效|不超过|选项无效|有效的代理节点|配置文件链接/);
     assert.equal(f.calls.some(call => call[0] !== 'verify'), false, `${action} called a manager or dialog`);
   }
   for (const bad of [{ ...selected, userId: 'someone-else' }, { ...selected, token: '' }, { ...selected, token: 'bad token' }, new Date(), []]) {
@@ -94,15 +97,32 @@ test('login or window changes during verification and queued manager work stop c
 });
 
 test('readonly status and completed operations reverify owner and server identity before exposing any result', async () => {
-  for (const action of ['status', 'start', 'importFile']) {
+  for (const action of ['status', 'start', 'importFile', 'importUrl', 'updateRemote']) {
     let revoked = false;
     const f = fixture({ verify: async () => { if (revoked) throw new Error('private-revocation'); return { userId: 'local-owner', instanceId: 'local-instance' }; },
       operation: async () => { revoked = true; } });
-    await assert.rejects(f.call(action), /管理员登录/);
+    await assert.rejects(f.call(action, actionInputs[action]), /管理员登录/);
   }
   let reads = 0;
   const restarted = fixture({ verify: async () => ({ userId: 'local-owner', instanceId: ++reads > 1 ? 'new-server' : 'local-instance' }) });
   await assert.rejects(restarted.call('status'), /登录账号已变化/);
+});
+
+test('remote import and refresh cannot persist or return data after a login changes during network work', async () => {
+  for(const action of ['importUrl','updateRemote']){
+    const entered=deferred(),finish=deferred();
+    const f=fixture({operation:async method=>{if(!['importRemoteConfiguration','updateRemoteConfiguration'].includes(method))return;entered.resolve();await finish.promise;}});
+    const task=f.call(action,actionInputs[action]);await entered.promise;f.setConnection({...selected,token:'next-session'});finish.resolve();
+    await assert.rejects(task,/登录账号已变化/);
+  }
+});
+
+test('remote status exposes only a valid update timestamp, never the source URL or nested credentials',()=>{
+  const updated='2026-10-15T08:00:00.000Z',source='https://config.example.test/clash.yaml?source=private-fixture';
+  const result=appProxyPublicStatus({...status,remoteConfigured:true,remoteUpdatedAt:updated,remoteSource:{url:source},sourceUrl:source});
+  assert.equal(result.remoteConfigured,true);assert.equal(result.remoteUpdatedAt,updated);assert.equal(JSON.stringify(result).includes(source),false);
+  for(const remoteUpdatedAt of [source,'2026-02-30T08:00:00.000Z','2026-10-15',null,{}])assert.equal(appProxyPublicStatus({...status,remoteConfigured:true,remoteUpdatedAt}).remoteUpdatedAt,undefined);
+  assert.equal(appProxyPublicStatus({...status,remoteConfigured:false,remoteUpdatedAt:updated}).remoteUpdatedAt,undefined);
 });
 
 test('only controlled application errors survive IPC, including errors forged with a matching runtime code', async () => {
@@ -113,6 +133,16 @@ test('only controlled application errors survive IPC, including errors forged wi
   }
   const expected = fixture({ operation: async () => { throw Object.assign(new Error('请先导入 Clash YAML 配置。'), { code: 'PETPAL_PROXY' }); } });
   await assert.rejects(expected.call('start'), /请先导入 Clash YAML 配置/);
+});
+
+test('download errors are explicitly whitelisted and source failures never return the private address', async()=>{
+  const {PROXY_DOWNLOAD_ERRORS}=await import('../desktop/app-proxy-download.mjs');
+  for(const message of Object.values(PROXY_DOWNLOAD_ERRORS)){
+    const f=fixture({operation:async()=>{throw Object.assign(new Error(message),{code:'PETPAL_PROXY'});}});
+    await assert.rejects(f.call('importUrl',actionInputs.importUrl),error=>error.message===message);
+  }
+  const f=fixture({operation:async()=>{throw Object.assign(new Error(actionInputs.importUrl.url),{code:'PETPAL_PROXY'});}});
+  await assert.rejects(f.call('importUrl',actionInputs.importUrl),error=>!error.message.includes('https:')&&/操作未完成/.test(error.message));
 });
 
 test('public proxy status strips private configuration, ports, credentials and arbitrary nested fields', () => {
@@ -143,13 +173,15 @@ test('real preload exposes fixed proxy actions and takes the current login snaps
     sessionStorage: { getItem: () => saved ? JSON.stringify(saved) : null }, location: { origin: selected.url },
   });
   assert.ok(bridge.appProxy, 'preload must expose appProxy');
-  assert.deepEqual(Object.keys(bridge.appProxy), Object.keys(actionInputs)); assert.equal(Object.isFrozen(bridge.appProxy), true);
+  assert.deepEqual(Object.keys(bridge.appProxy).sort(), Object.keys(actionInputs).sort()); assert.equal(Object.isFrozen(bridge.appProxy), true);
   await bridge.appProxy.status(); await bridge.appProxy.importFile(); await bridge.appProxy.importText({ yaml: 'proxies: []' });
+  await bridge.appProxy.importUrl(actionInputs.importUrl); await bridge.appProxy.updateRemote();
   saved = { url: '', token: 'next-session' }; await bridge.appProxy.preferences({ autoStart: true });
   saved = null; await bridge.appProxy.stop();
   assert.deepEqual(calls, [
     ['petpal:app-proxy:status', selected, null], ['petpal:app-proxy:importFile', selected, null],
     ['petpal:app-proxy:importText', selected, { yaml: 'proxies: []' }],
+    ['petpal:app-proxy:importUrl', selected, actionInputs.importUrl],['petpal:app-proxy:updateRemote', selected, null],
     ['petpal:app-proxy:preferences', { url: selected.url, token: 'next-session' }, { autoStart: true }],
     ['petpal:app-proxy:stop', null, null],
   ]);

@@ -31,7 +31,7 @@ requiredApplicationSource.push('server/conversation-organization.mjs', 'server/c
 requiredApplicationSource.push('desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs');
 requiredApplicationSource.push('desktop/official-auth.mjs', 'desktop/official-account.mjs', 'desktop/official-account-ipc.cjs');
 requiredApplicationSource.push('server/official-providers.mjs');
-requiredApplicationSource.push('desktop/app-proxy.mjs', 'desktop/app-proxy-network.mjs', 'desktop/app-proxy-ipc.cjs', 'desktop/app-proxy-smoke.cjs',
+requiredApplicationSource.push('desktop/app-proxy.mjs', 'desktop/app-proxy-network.mjs', 'desktop/app-proxy-download.mjs', 'desktop/app-proxy-ipc.cjs', 'desktop/app-proxy-smoke.cjs',
   'desktop/native/mihomo/manifest.json', 'desktop/native/mihomo/LICENSE', 'desktop/native/mihomo/PROVENANCE.json', 'desktop/native/mihomo/SOURCE-NOTICE.txt',
   'server/app-proxy-network.mjs', 'server/app-proxy-context.mjs');
 requiredApplicationSource.push('server/native/codex-review/models-0.143.0.json', 'server/native/codex-review/LICENSE', 'server/native/codex-review/PROVENANCE.json', 'server/native/codex-review/SHA256SUMS');
