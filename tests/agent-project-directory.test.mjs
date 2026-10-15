@@ -177,11 +177,11 @@ test('request bodies cannot grant themselves internal full directory access', as
 });
 
 test('legacy native threads continue using the unchanged default workspace and old idempotency receipts', async t => {
-  const conversation = { id: 'conversation-directory', userId: 'user-directory', mode: 'codex', messages: [], threadId: 'legacy-thread' };
+  const conversation = { id: 'conversation-directory', userId: 'user-directory', mode: 'codex', messages: [], threadId: 'legacy-thread', codexRevision: 'directory-revision' };
   const f = agentFixture(t, conversation), request = body('legacy');
   const fingerprint = createHash('sha256').update(JSON.stringify({ kind: 'submit', content: request.content, attachmentIds: [], permissions: null, providerId: null })).digest('hex');
   f.conversation.agent = { revision: 1, paused: true, queue: [], run: null, submissions: [{ submissionId: request.submissionId, entryId: 'legacy-entry', fingerprint, status: 'completed', content: request.content, attachmentIds: [], createdAt: new Date().toISOString() }] };
-  assert.equal(restoreAgentState(f.conversation), false);
+  assert.equal(restoreAgentState(f.conversation), true); assert.equal(f.conversation.agent.queueRevision, 0);
   assert.equal((await f.submit(request)).status, 'completed'); assert.equal(f.calls.length, 0);
   await f.submit(body('fresh-default')); await f.manager.resume(f.conversation, f.auth); await until(() => f.calls.length === 1);
   assert.equal(f.calls[0].args.threadId, 'legacy-thread'); assert.equal(f.calls[0].args.projectDirectory, undefined);

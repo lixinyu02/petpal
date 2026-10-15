@@ -9,7 +9,7 @@ const now = () => new Date().toISOString();
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const identifier = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{8,128}$/.test(value);
 const validFingerprint = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
-const empty = () => ({ revision: 0, paused: false, queue: [], run: null, submissions: [] });
+const empty = () => ({ revision: 0, queueRevision: 0, paused: false, queue: [], run: null, submissions: [] });
 const content = (value, images = []) => {
   if ((value !== undefined && typeof value !== 'string') || (value?.length ?? 0) > 32000 || (!value?.trim() && !images.length)) throw failure(400, 'Agent 消息需要文字或图片，文字最多 32000 个字符。');
   return value?.trim() ?? '';
@@ -30,6 +30,8 @@ export function restoreAgentState(conversation) {
   if (conversation.mode !== 'codex' || !object(agent) || !Number.isSafeInteger(agent.revision) || agent.revision < 0 || typeof agent.paused !== 'boolean' || !Array.isArray(agent.queue) || agent.queue.length > 5 || !Array.isArray(agent.submissions) || agent.submissions.length > 500) throw new Error('本地 Agent 队列格式无效，请保留数据并检查备份。');
   const ids = new Set(), queueIds = new Set(), receiptIds = new Set();
   let changed = false;
+  if (agent.queueRevision === undefined) { agent.queueRevision = 0; changed = true; }
+  else if (!Number.isSafeInteger(agent.queueRevision) || agent.queueRevision < 0) throw new Error('本地 Agent 队列版本无效。');
   for (const entry of agent.queue) {
     if (!object(entry) || !identifier(entry.id) || queueIds.has(entry.id) || !identifier(entry.submissionId) || entry.conversationId !== conversation.id || !Number.isSafeInteger(entry.revision) || entry.revision < 1 || !object(entry.auth) || entry.auth.userId !== conversation.userId || typeof entry.auth.sessionHash !== 'string' || typeof entry.auth.bootstrap !== 'boolean' || !Number.isSafeInteger(entry.auth.generation) || entry.auth.generation < 0) throw new Error('本地 Agent 任务归属无效。');
     content(entry.content, attachments(entry.attachmentIds)); normalizeAgentPermissions(entry.permissions);
@@ -65,6 +67,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
   let closed = false;
   const data = conversation => conversation.agent ??= empty();
   const bump = conversation => { data(conversation).revision++; conversation.updatedAt = now(); };
+  const bumpQueue = conversation => { const agent = data(conversation); agent.queueRevision = (agent.queueRevision ?? 0) + 1; };
   const lock = (conversation, work) => {
     const previous = locks.get(conversation.id) ?? Promise.resolve();
     const result = previous.catch(() => {}).then(work);
@@ -85,7 +88,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
   };
   const projection = conversation => {
     const agent = conversation.agent ?? empty();
-    return { revision: agent.revision, paused: agent.paused, queue: agent.queue.map(publicEntry), run: publicRun(agent.run),
+    return { revision: agent.revision, queueRevision: agent.queueRevision ?? 0, paused: agent.paused, queue: agent.queue.map(publicEntry), run: publicRun(agent.run),
       submissions: agent.submissions.slice(-10).map(item => ({ ...receipt(item), content: item.content, attachmentIds: [...(item.attachmentIds ?? [])], ...(item.projectDirectory ? { projectDirectory: item.projectDirectory } : {}), createdAt: item.createdAt })),
       approvals: [...approvals].filter(([, value]) => value.conversationId === conversation.id && !value.task.controller.signal.aborted).map(([id, value]) => ({ id, kind: value.kind || '操作请求', description: value.description || 'Agent 请求确认。' })) };
   };
@@ -122,7 +125,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
   const enqueue = (conversation, entry, record) => {
     const agent = data(conversation);
     if (agent.queue.length >= 5) throw failure(409, 'Agent 待执行队列最多保留 5 条。');
-    agent.queue.push(entry); record.status = 'queued'; bump(conversation);
+    agent.queue.push(entry); record.status = 'queued'; bumpQueue(conversation); bump(conversation);
   };
   const reserve = (agent, entry, fingerprint) => {
     if (agent.submissions.length >= 500) throw failure(409, '这个会话已达到 500 次 Agent 提交，请创建新会话。');
@@ -200,12 +203,12 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
       if (closed || agent.paused || !agent.queue.length || active.has(conversation.id)) return;
       const entry = agent.queue[0], record = agent.submissions.find(item => item.entryId === entry.id);
       try { check(entry); }
-      catch (error) { agent.paused = true; if (error.code !== 'executor_offline') { agent.queue.shift(); record.status = 'cancelled'; } bump(conversation); await save(conversation); return; }
+      catch (error) { agent.paused = true; if (error.code !== 'executor_offline') { agent.queue.shift(); record.status = 'cancelled'; bumpQueue(conversation); } bump(conversation); await save(conversation); return; }
       if (conversation.messages.length > 498) { agent.paused = true; await save(conversation); return; }
       const controller = new AbortController(); let finish;
       const done = new Promise(resolve => { finish = resolve; });
       const task = { controller, done, finish, mode: 'codex', userId: entry.auth.userId, sessionHash: entry.auth.sessionHash, providerId: entry.providerId, ...(entry.permissions.approval === 'review' && entry.permissions.reviewProviderId ? { reviewProviderId: entry.permissions.reviewProviderId } : {}), approvalIds: new Set(), agentEntry: entry };
-      active.set(conversation.id, task); agent.queue.shift(); record.status = 'running';
+      active.set(conversation.id, task); agent.queue.shift(); bumpQueue(conversation); record.status = 'running';
       agent.run = { id: entry.id, submissionId: entry.submissionId, status: 'running', turnId: null, permissions: { ...entry.permissions }, providerId: entry.providerId, model: entry.model, ...(entry.reviewModel ? { reviewModel: entry.reviewModel } : {}), effort: entry.effort, hostId: entry.hostId ?? 'central', hostName: entry.hostName ?? '中央服务器', ...(entry.projectDirectory ? { projectDirectory: entry.projectDirectory } : {}), startedAt: now() };
       const userMessage = { id: randomUUID(), role: 'user', content: entry.content, ...(entry.attachmentIds.length ? { attachmentIds: [...entry.attachmentIds] } : {}), status: 'complete', createdAt: now(), agentSubmissionId: entry.submissionId };
       const assistant = { id: randomUUID(), role: 'assistant', content: '', status: 'streaming', createdAt: now(), model: entry.model, agentRunId: entry.id };
@@ -243,7 +246,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
           record.status = 'steered';
           conversation.messages.push({ id: randomUUID(), role: 'user', content: entry.content, ...(entry.attachmentIds.length ? { attachmentIds: [...entry.attachmentIds] } : {}), status: 'complete', createdAt: now(), agentSubmissionId: entry.submissionId, agentRunId: task.agentEntry.id, steered: true });
         } catch (error) {
-          if (error.code === 'turn_not_active') {
+          if (error.code === 'turn_not_active' || error.code === 'steer_unsupported') {
             try { check(entry); enqueue(conversation, entry, record); }
             catch (fallbackError) { record.status = fallbackError.status === 401 || task.controller.signal.aborted ? 'cancelled' : 'error'; record.error = String(redact(fallbackError.message)).slice(0, 500); agent.paused = true; }
           }
@@ -255,7 +258,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
       const record = reserve(agent, entry, fingerprint); enqueue(conversation, entry, record);
       await save(conversation);
       try { check(entry); }
-      catch (error) { agent.queue = agent.queue.filter(item => item.id !== entry.id); record.status = 'cancelled'; agent.paused = true; bump(conversation); await save(conversation); throw error; }
+      catch (error) { const remaining = agent.queue.filter(item => item.id !== entry.id); if (remaining.length !== agent.queue.length) bumpQueue(conversation); agent.queue = remaining; record.status = 'cancelled'; agent.paused = true; bump(conversation); await save(conversation); throw error; }
       return receipt(record);
     });
     kick(conversation); return result;
@@ -270,9 +273,33 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
       // Removing unstarted work must remain possible when its computer or model
       // is unavailable. Ownership, the current session and revision still apply.
       check({ ...entry, auth: { ...auth, generation: epoch(auth) } }, remove ? authorizeRemoval : authorize);
-      if (remove) { agent.queue = agent.queue.filter(item => item !== entry); agent.submissions.find(item => item.entryId === id).status = 'cancelled'; }
+      if (remove) { agent.queue = agent.queue.filter(item => item !== entry); bumpQueue(conversation); agent.submissions.find(item => item.entryId === id).status = 'cancelled'; }
       else { const images = attachments(body.attachmentIds), next = content(body.content, images); check({ ...entry, content: next, attachmentIds: images, auth: { ...auth, generation: epoch(auth) } }); entry.content = next; entry.attachmentIds = images; entry.revision++; }
       bump(conversation); await save(conversation);
+    });
+  }
+  async function reorder(conversation, body, auth) {
+    return lock(conversation, async () => {
+      if (!object(body) || Object.keys(body).some(key => !['queueRevision', 'entryIds'].includes(key)) || !Number.isSafeInteger(body.queueRevision) || body.queueRevision < 0 ||
+          !Array.isArray(body.entryIds) || body.entryIds.length > 5 || body.entryIds.some(id => !identifier(id)) || new Set(body.entryIds).size !== body.entryIds.length) throw failure(400, '队列排序需要有效的 queueRevision 和不重复的 entryIds。');
+      const agent = data(conversation);
+      check({ ...agent.queue[0], conversationId: conversation.id, auth: { ...auth, generation: epoch(auth) } }, authorizeRemoval);
+      if (body.queueRevision !== (agent.queueRevision ?? 0)) throw failure(409, '队列顺序已变化，请刷新后重试。', 'queue_revision_conflict');
+      const previous = agent.queue, previousRevision = agent.queueRevision ?? 0;
+      const entries = new Map(previous.map(entry => [entry.id, entry]));
+      if (body.entryIds.length !== previous.length || body.entryIds.some(id => !entries.has(id))) throw failure(400, '排序必须包含当前所有待执行任务，不能添加或移除任务。');
+      for (const entry of previous) { check({ ...entry, auth: { ...auth, generation: epoch(auth) } }); check(entry); }
+      if (body.entryIds.every((id, index) => id === previous[index].id)) return;
+      const reordered = body.entryIds.map(id => entries.get(id));
+      agent.queue = reordered; bumpQueue(conversation); bump(conversation);
+      try { await save(conversation); }
+      catch (error) {
+        // stop(clear) and revocation can fence work immediately while a save is
+        // pending. Their later queue mutation must never be undone by rollback.
+        if (agent.queue === reordered && agent.queueRevision === previousRevision + 1) { agent.queue = previous; agent.queueRevision = previousRevision; }
+        agent.paused = true; bump(conversation); throw error;
+      }
+      // Reordering is deliberately not a resume or dispatch operation.
     });
   }
   async function resume(conversation, auth) {
@@ -288,7 +315,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
   async function stop(conversation, { clear = false } = {}) {
     if (clear) { removed.add(conversation.id); knownReviewThreads.delete(conversation.id); }
     const agent = data(conversation); agent.paused = true;
-    if (clear) { for (const entry of agent.queue) agent.submissions.find(item => item.entryId === entry.id).status = 'cancelled'; agent.queue = []; }
+    if (clear) { for (const entry of agent.queue) agent.submissions.find(item => item.entryId === entry.id).status = 'cancelled'; if (agent.queue.length) bumpQueue(conversation); agent.queue = []; }
     const task = active.get(conversation.id);
     if (task) { if (task.agentEntry && agent.run) agent.run.status = 'stopping'; task.controller.abort(new DOMException('用户已停止 Agent。', 'AbortError')); clearApprovals(task); }
     bump(conversation); await save(conversation); if (task) await task.done;
@@ -302,7 +329,7 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
         if (invalidateSession) generations.set(entry.auth.sessionHash, epoch(entry.auth) + 1);
         agent.submissions.find(item => item.entryId === entry.id).status = 'cancelled';
       }
-      if (entries.length) { agent.queue = agent.queue.filter(entry => !entries.includes(entry)); agent.paused = true; bump(conversation); }
+      if (entries.length) { agent.queue = agent.queue.filter(entry => !entries.includes(entry)); bumpQueue(conversation); agent.paused = true; bump(conversation); }
       const task = active.get(conversation.id);
       if (task?.agentEntry && predicate(task)) {
         if (invalidateSession) generations.set(task.sessionHash, epoch(task.agentEntry.auth) + 1);
@@ -316,5 +343,5 @@ export function createAgentTasks({ store, active, approvals, getBridge, authoriz
     for (const conversation of store.state.conversations) if (conversation.agent && !conversation.agent.paused && (conversation.agent.queue.length || ['running', 'stopping'].includes(conversation.agent.run?.status))) { conversation.agent.paused = true; bump(conversation); }
     await Promise.allSettled([...locks.values()]); await store.save();
   }
-  return { snapshot: projection, submit, edit, resume, stop, revoke, kick, close, hasPending: () => store.state.conversations.some(conversation => conversation.agent?.queue.length) };
+  return { snapshot: projection, submit, edit, reorder, resume, stop, revoke, kick, close, hasPending: () => store.state.conversations.some(conversation => conversation.agent?.queue.length) };
 }

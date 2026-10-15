@@ -27,6 +27,24 @@ function fixture(t, options={}) {
   return {manager,registration,begin,auth,valid,config,store,userId,otherUserId,entry};
 }
 
+test('only an explicit remote steer unsupported receipt remains safe to enqueue; arbitrary failures stay uncertain',async t=>{
+  for(const [code,expected] of [['steer_unsupported','steer_unsupported'],['turn_not_active','turn_not_active'],['method not found','command_delivery_uncertain'],['steer_delivery_uncertain','command_delivery_uncertain']]){
+    const f=fixture(t),registered=await f.registration(),run=await f.begin(registered);run.event('started');
+    const result=run.bridge.steer({expectedTurnId:'turn-one',content:'fixture follow-up'}),rejected=assert.rejects(result,error=>error.code===expected);
+    const command=(await f.manager.poll(registered.connectionId,f.auth)).commands.find(item=>item.type==='steer');assert.ok(command);
+    run.event('command-result',{commandId:command.id,ok:false,code,message:'private diagnostic'});await rejected;
+    run.event('complete',{text:'done'});await run.completion;
+  }
+});
+
+test('unsupported approval is never classified as an unsupported steer receipt',async t=>{
+  const f=fixture(t),registered=await f.registration(),run=await f.begin(registered);run.event('started');run.event('approval',{id:'native-approval',kind:'command',description:'fixture operation'});
+  const id=run.events.find(item=>item.name==='approval').data.id;
+  const result=run.bridge.approve(id,'decline'),rejected=assert.rejects(result,error=>error.code==='command_delivery_uncertain');
+  const command=(await f.manager.poll(registered.connectionId,f.auth)).commands.find(item=>item.type==='approve');assert.ok(command);
+  run.event('command-result',{commandId:command.id,ok:false,code:'steer_unsupported'});await rejected;run.event('complete',{text:'done'});await run.completion;
+});
+
 test('registration is scoped to account, stable device identity, and rotated connection',async t=>{
   const f=fixture(t),deviceId=randomUUID(),first=await f.registration({deviceId}),second=await f.registration({deviceId});
   assert.equal(first.hostId,second.hostId);assert.notEqual(first.connectionId,second.connectionId);

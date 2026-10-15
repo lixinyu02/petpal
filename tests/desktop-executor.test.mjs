@@ -299,6 +299,21 @@ test('steer and approval stay on the active bridge and stop is reported only aft
   assert.deepEqual(f.events.filter(item => item.event === 'command-result').map(item => item.data.commandId), ['steer-one', 'approval-command']);
 });
 
+test('desktop forwards only exact steer unsupported classifications and hides native diagnostics',async t=>{
+  for(const code of ['steer_unsupported','turn_not_active','steer_delivery_uncertain','method not found']){
+    const started=deferred();
+    const f=await protocolFixture(t,{bridgeFactory:()=>({
+      run({signal}){started.resolve();return new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('stopped')),{once:true}));},
+      steer(){throw Object.assign(new Error('private native diagnostic'),{code});},async close(){},
+    })});
+    const ctx=f.manager.current;await f.manager._command(ctx,runCommand());await started.promise;
+    await f.manager._command(ctx,{id:'unsupported-steer',type:'steer',runId:'run-one',expectedTurnId:'turn-one',content:'follow-up',attachments:[]});
+    const receipt=f.events.find(item=>item.event==='command-result').data;
+    assert.equal(receipt.code,['steer_unsupported','turn_not_active'].includes(code)?code:undefined);assert.equal(receipt.ok,false);
+    assert.doesNotMatch(JSON.stringify(receipt),/private native diagnostic/);
+  }
+});
+
 function tinyPng() {
   const chunk = (name, data) => { const result = Buffer.alloc(12 + data.length); result.writeUInt32BE(data.length); result.write(name, 4); data.copy(result, 8); let crc = 0xffffffff; for (const byte of result.subarray(4, -4)) { crc ^= byte; for (let i = 0; i < 8; i++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1; } result.writeUInt32BE((crc ^ 0xffffffff) >>> 0, result.length - 4); return result; };
   const header = Buffer.alloc(13); header.writeUInt32BE(1); header.writeUInt32BE(1, 4); header[8] = 8; header[9] = 6;
@@ -474,7 +489,7 @@ test('Windows and Ubuntu packaging includes the dynamic executor module and its 
   const finalize = await readFile(new URL('../scripts/windows-native-finalize.mjs', import.meta.url), 'utf8');
   const main = await readFile(new URL('../desktop/main.cjs', import.meta.url), 'utf8');
   assert.match(windows, /desktop\/executor\.mjs/); assert.match(windows, /server\/\*\*/);
-  assert.equal(linux.match(/'desktop\/executor\.mjs'/g)?.length, 2); assert.match(linux, /'server\/\*\*'/);
+  assert.match(linux, /'desktop\/executor\.mjs'/); assert.match(linux, /requiredApplicationSource\.filter\(file => file\.startsWith\('desktop\/'\)\)/); assert.match(linux, /'server\/\*\*'/);
   assert.match(main, /path\.join\(__dirname, 'executor\.mjs'\)/); assert.match(main, /executor\?\.close\(\)/);
   const predicate = linuxVerify.match(/^const isApplicationSource = (.*);$/m)?.[1]; assert.ok(predicate);
   const selects = vm.runInNewContext(`(${predicate})`);

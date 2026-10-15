@@ -160,7 +160,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
   const rpc = (run, type, data) => {
     checkRun(run); const id = randomUUID();
     return new Promise((resolve, reject) => {
-      const pending = { resolve, reject, timer: setTimeout(() => { run.pending.delete(id); run.connection.commands = run.connection.commands.filter(command => command.id !== id); reject(failure(409, '无法确认命令是否已送达，不会自动重试。', 'command_delivery_uncertain')); }, commandMs) };
+      const pending = { type, resolve, reject, timer: setTimeout(() => { run.pending.delete(id); run.connection.commands = run.connection.commands.filter(command => command.id !== id); reject(failure(409, '无法确认命令是否已送达，不会自动重试。', 'command_delivery_uncertain')); }, commandMs) };
       run.pending.set(id, pending);
       try { enqueue(run, { id, type, runId: run.id, ...data }); } catch (error) { clearTimeout(pending.timer); run.pending.delete(id); reject(error); }
     });
@@ -265,7 +265,7 @@ export function createExecutors({ store, authorizeSession, authorizeEntry, readA
     else if (event === 'stopped') settle(run, Object.assign(new Error('执行电脑已确认任务停止。'),{name:'AbortError'}));
     else if (event === 'command-result') {
       const pending = run.pending.get(data.commandId);
-      if (pending) { clearTimeout(pending.timer); run.pending.delete(data.commandId); if (data.ok) pending.resolve({ok:true,...(data.turnId ? {turnId:data.turnId} : {})}); else pending.reject(failure(409, '执行命令未完成。', data.code === 'turn_not_active' ? data.code : 'command_delivery_uncertain')); }
+      if (pending) { clearTimeout(pending.timer); run.pending.delete(data.commandId); if (data.ok) pending.resolve({ok:true,...(data.turnId ? {turnId:data.turnId} : {})}); else pending.reject(failure(409, '执行命令未完成。', data.code === 'turn_not_active' || pending.type === 'steer' && data.code === 'steer_unsupported' ? data.code : 'command_delivery_uncertain')); }
     } else if (event === 'approval') {
       if (run.approvals.size >= 128 || [...run.approvals.values()].includes(data.id)) { settle(run, unknown()); throw failure(409,'审批标识重复或超过上限。'); }
       const approval = randomUUID(); run.approvals.set(approval,data.id);

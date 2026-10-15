@@ -28,6 +28,7 @@ const APPROVAL_METHODS = new Map([
 const abortError = () => Object.assign(new Error('Codex 任务已停止'), { name: 'AbortError' });
 const turnInactive = () => Object.assign(new Error('要引导的 Agent 任务已结束或已切换。'), { code: 'turn_not_active', status: 409 });
 const steerUncertain = () => Object.assign(new Error('无法确认引导是否已送达，请检查当前任务后再试；不会自动重复发送。'), { code: 'steer_delivery_uncertain', status: 409 });
+const unsupportedSteer = Symbol('native-steer-method-not-found');
 
 // Paths are resolved from authorized uploads by the service, never from raw HTTP
 // input. This final protocol boundary still rejects remote URLs and malformed paths.
@@ -48,6 +49,7 @@ const safeText = (value) => String(value ?? '')
   .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*[=:]\s*["']?)[^\s"',;]+/gi, '$1[已隐藏]');
 
 function protocolError(method, error, apiMode = false) {
+  if (method === 'turn/steer' && error?.code === -32601) return Object.assign(new Error('当前执行端不支持运行中引导，消息可转入待执行队列。'), { code:'steer_unsupported', status:409, [unsupportedSteer]:true });
   const source = String(error?.message ?? '');
   const info = error?.codexErrorInfo;
   const httpStatus = error?.httpStatusCode ?? info?.httpStatusCode ?? info?.httpConnectionFailed?.httpStatusCode ?? info?.responseStreamConnectionFailed?.httpStatusCode ?? info?.responseStreamDisconnected?.httpStatusCode;
@@ -612,11 +614,11 @@ export class CodexBridge {
     if (typeof conversationId !== 'string' || !conversationId || typeof expectedTurnId !== 'string' || !expectedTurnId) throw turnInactive();
     const run = [...this.runs.values()].find(item => item.conversationId === conversationId);
     if (!run || run.settled || run.aborted || run.turnId !== expectedTurnId || run.child !== this.child) throw turnInactive();
-    // Only this preflight is known not to have delivered. Every error after the
-    // write is uncertain, so callers must never retry it as a queued prompt.
+    // Only preflight rejection or an exact native method-not-found response
+    // proves no input was applied. Other post-write failures remain uncertain.
     let result;
     try { result = await this._rpc('turn/steer', { threadId: run.threadId, expectedTurnId, input }); }
-    catch { throw steerUncertain(); }
+    catch (error) { if(error?.[unsupportedSteer]===true)throw error;throw steerUncertain(); }
     if (result.turnId !== expectedTurnId) throw steerUncertain();
     return { turnId: result.turnId };
   }

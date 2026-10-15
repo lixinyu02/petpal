@@ -474,8 +474,9 @@ export class DesktopExecutor {
       }
       await this._event(ctx, run, 'command-result', { commandId: command.id, ok: true, ...(result?.turnId ? { turnId: result.turnId } : {}) });
     } catch (error) {
+      const unsupported = command.type === 'steer' && error?.code === 'steer_unsupported';
       await this._event(ctx, run, 'command-result', { commandId: command.id, ok: false,
-        ...(error.code === 'turn_not_active' ? { code: 'turn_not_active' } : {}), message: error.code === 'turn_not_active' ? '当前运行已结束。' : '无法确认操作已送达，请检查任务；不会自动重试。' });
+        ...(error.code === 'turn_not_active' ? { code: 'turn_not_active' } : unsupported ? {code:'steer_unsupported'} : {}), message: error.code === 'turn_not_active' ? '当前运行已结束。' : unsupported ? '当前执行端不支持运行中引导。' : '无法确认操作已送达，请检查任务；不会自动重试。' });
     }
   }
 

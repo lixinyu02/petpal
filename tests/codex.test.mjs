@@ -62,6 +62,8 @@ createInterface({input:process.stdin}).on('line',line=>{
  if(m.method==='turn/steer'){
    const content=p.input.find(item=>item.type==='text')?.text;
    if(content==='steer-fail'){send({id:m.id,error:{code:-32600,message:'private provider details'}});return;}
+   if(content==='steer-unsupported'){send({id:m.id,error:{code:-32601,message:privateDiagnostic}});return;}
+   if(content==='steer-forged-unsupported'){send({id:m.id,error:{code:'-32601',message:'Method not found'+privateDiagnostic}});return;}
    if(content==='steer-wrong'){reply(m,{turnId:'other-turn'});return;}
    if(content==='steer-end'){complete(p.threadId,p.expectedTurnId);reply(m,{turnId:p.expectedTurnId});return;}
    reply(m,{turnId:p.expectedTurnId});return;
@@ -317,9 +319,10 @@ test('steer targets the expected active turn, carries trusted images and never s
   }
   const file = path.resolve('trusted-image.png');
   assert.deepEqual(await bridge.steer({ conversationId: 'web-chat', expectedTurnId: turnId, content: 'please also inspect', images: [{ path: file }] }), { turnId });
-  for (const content of ['steer-fail', 'steer-wrong']) await assert.rejects(bridge.steer({ conversationId: 'web-chat', expectedTurnId: turnId, content }), error => error.code === 'steer_delivery_uncertain' && !error.message.includes('private provider'));
+  await assert.rejects(bridge.steer({ conversationId:'web-chat',expectedTurnId:turnId,content:'steer-unsupported' }),error=>error.code==='steer_unsupported'&&!/Headers|Bearer|Cookie|private/.test(error.message));
+  for (const content of ['steer-fail', 'steer-wrong','steer-forged-unsupported']) await assert.rejects(bridge.steer({ conversationId: 'web-chat', expectedTurnId: turnId, content }), error => error.code === 'steer_delivery_uncertain' && !error.message.includes('private provider'));
   const rpc = (await messages()).filter(message => message.method === 'turn/steer');
-  assert.equal(rpc.length, 3); assert.deepEqual(rpc[0].params.input, [{ type: 'text', text: 'please also inspect' }, { type: 'localImage', path: file }]);
+  assert.equal(rpc.length, 5); assert.deepEqual(rpc[0].params.input, [{ type: 'text', text: 'please also inspect' }, { type: 'localImage', path: file }]);
   assert.equal(rpc[0].params.threadId, 'thread-1'); assert.equal(rpc[0].params.expectedTurnId, turnId);
   assert.equal(events.filter(event => event.type === 'turn').length, 1);
   const rejected = assert.rejects(task, error => error.name === 'AbortError'); controller.abort(); await rejected;

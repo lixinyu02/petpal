@@ -1069,6 +1069,11 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     await agentTasks.edit(conversation, req.params.entryId, req.body, agentAuth(req), method === 'delete');
     requireCurrentAuth(req); res.json({ conversation: visibleConversation(conversation) });
   });
+  app.post('/api/conversations/:id/agent/queue/reorder', async (req, res) => {
+    const conversation = agentConversation(req);
+    await agentTasks.reorder(conversation, req.body, agentAuth(req)); requireCurrentAuth(req);
+    res.json({ conversation: visibleConversation(conversation) });
+  });
   app.post('/api/conversations/:id/agent/queue/resume', async (req, res) => {
     const conversation = agentConversation(req);
     if (Object.keys(req.body).length) throw failure(400, '恢复队列不接受权限或内容覆盖。');

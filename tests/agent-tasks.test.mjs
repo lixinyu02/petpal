@@ -104,6 +104,123 @@ test('FIFO queue caps five waiting tasks and rejects stale edits or permission c
   assert.equal(f.snapshot().queue[0].content, 'queue-1');
 });
 
+test('queue order uses an independent revision and starts only the reordered pending task', async t => {
+  const f = fixture(t); await f.submit(payload('running')); await until(() => f.calls.length === 1);
+  await f.submit(payload('pending-first')); await f.submit(payload('pending-second')); await f.submit(payload('pending-third'));
+  const before = f.snapshot(), ids = before.queue.map(entry => entry.id);
+  f.calls[0].args.onEvent('delta', { text: 'streaming without changing the queue' });
+  f.calls[0].args.onEvent('status', { message: 'continuing the same turn' });
+  assert.equal(f.snapshot().queueRevision, before.queueRevision); assert.ok(f.snapshot().revision > before.revision);
+  const original = structuredClone(before.queue);
+  await f.manager.reorder(f.conversation, { queueRevision: before.queueRevision, entryIds: [ids[2], ids[0], ids[1]] }, f.auth);
+  const after = f.snapshot();
+  assert.equal(after.queueRevision, before.queueRevision + 1);
+  assert.deepEqual(after.queue, [original[2], original[0], original[1]]);
+  assert.deepEqual(f.saved().conversations[0].agent.queue.map(entry => entry.id), [ids[2], ids[0], ids[1]]);
+  assert.equal(f.calls.length, 1); assert.equal(after.run.id, before.run.id);
+  await f.finish(0); await until(() => f.calls.length === 2);
+  assert.equal(f.calls[1].args.prompt, 'pending-third');
+  assert.equal(f.snapshot().queueRevision, after.queueRevision + 1);
+});
+
+test('reorder validates exact membership, unique ids, fields and stale queue revisions', async t => {
+  const f = fixture(t); await f.manager.stop(f.conversation); await f.submit(payload('one')); await f.submit(payload('two'));
+  const before = f.snapshot(), ids = before.queue.map(entry => entry.id);
+  for (const body of [
+    { queueRevision: before.queueRevision, entryIds: [ids[0], ids[0]] },
+    { queueRevision: before.queueRevision, entryIds: [ids[0]] },
+    { queueRevision: before.queueRevision, entryIds: [ids[0], 'foreign-entry-id'] },
+    { queueRevision: before.queueRevision, entryIds: [...ids, 'foreign-entry-id'] },
+    { queueRevision: -1, entryIds: ids }, { queueRevision: 1.5, entryIds: ids },
+    { queueRevision: before.queueRevision, entryIds: ids, permissions: { access: 'full-access' } },
+    { queueRevision: before.queueRevision, entryIds: null },
+  ]) await assert.rejects(f.manager.reorder(f.conversation, body, f.auth), { status: 400 });
+  await assert.rejects(f.manager.reorder(f.conversation, { queueRevision: before.queueRevision - 1, entryIds: ids }, f.auth), { status: 409, code: 'queue_revision_conflict' });
+  assert.deepEqual(f.snapshot(), before);
+  await f.manager.reorder(f.conversation, { queueRevision: before.queueRevision, entryIds: ids }, f.auth);
+  assert.equal(f.snapshot().queueRevision, before.queueRevision);
+});
+
+test('reorder rechecks ownership, current and original sessions, execution grants and host availability', async t => {
+  const f = fixture(t); await f.manager.stop(f.conversation); await f.submit(payload('one')); await f.submit(payload('two'));
+  const before = f.snapshot(), body = { queueRevision: before.queueRevision, entryIds: before.queue.map(entry => entry.id).reverse() };
+  await assert.rejects(f.manager.reorder(f.conversation, body, { ...f.auth, userId: 'other-user' }), { status: 404 });
+  await assert.rejects(f.manager.reorder(f.conversation, body, { ...f.auth, sessionHash: 'expired-session' }), { status: 401 });
+  f.setOnline(false); await assert.rejects(f.manager.reorder(f.conversation, body, f.auth), { code: 'executor_offline' }); f.setOnline(true);
+  f.model.model = 'revoked-model'; await assert.rejects(f.manager.reorder(f.conversation, body, f.auth), { status: 409 }); f.model.model = 'fixture-model';
+  const current = { ...f.auth, sessionHash: 'new-session' }; f.valid.add(current.sessionHash); f.valid.delete(f.auth.sessionHash);
+  await assert.rejects(f.manager.reorder(f.conversation, body, current), { status: 401 });
+  assert.deepEqual(f.snapshot(), before); assert.equal(f.calls.length, 0);
+});
+
+test('concurrent reorder requests use CAS and never resume a paused queue', async t => {
+  const f = fixture(t); await f.manager.stop(f.conversation); for (const id of ['one', 'two', 'three']) await f.submit(payload(id));
+  const before = f.snapshot(), ids = before.queue.map(entry => entry.id);
+  const results = await Promise.allSettled([
+    f.manager.reorder(f.conversation, { queueRevision: before.queueRevision, entryIds: [ids[1], ids[0], ids[2]] }, f.auth),
+    f.manager.reorder(f.conversation, { queueRevision: before.queueRevision, entryIds: [ids[2], ids[0], ids[1]] }, f.auth),
+  ]);
+  assert.equal(results[0].status, 'fulfilled'); assert.equal(results[1].status, 'rejected'); assert.equal(results[1].reason.code, 'queue_revision_conflict');
+  assert.deepEqual(f.snapshot().queue.map(entry => entry.id), [ids[1], ids[0], ids[2]]);
+  assert.equal(f.snapshot().paused, true); f.manager.kick(f.conversation); await delay(20); assert.equal(f.calls.length, 0);
+});
+
+test('failed reorder persistence rolls back the queue version and order and fences dispatch', async t => {
+  const f = fixture(t); await f.submit(payload('running')); await until(() => f.calls.length === 1); await f.submit(payload('one')); await f.submit(payload('two'));
+  const before = f.snapshot(); assert.equal(before.paused, false);
+  f.saveWith(() => { throw new Error('fixture persistence failure'); });
+  await assert.rejects(f.manager.reorder(f.conversation, { queueRevision: before.queueRevision, entryIds: before.queue.map(entry => entry.id).reverse() }, f.auth), { status: 500 });
+  assert.deepEqual(f.snapshot().queue, before.queue); assert.equal(f.snapshot().queueRevision, before.queueRevision); assert.equal(f.snapshot().paused, true);
+  f.saveWith(undefined); await f.finish(0); f.manager.kick(f.conversation); await delay(20); assert.equal(f.calls.length, 1);
+});
+
+test('failed reorder cannot resurrect tasks removed by stop while its save was pending', async t => {
+  const f = fixture(t); await f.manager.stop(f.conversation); await f.submit(payload('one')); await f.submit(payload('two'));
+  const before = f.snapshot(), saving = deferred(); let saves = 0;
+  f.saveWith(() => ++saves === 1 ? saving.promise : undefined);
+  const reordering = f.manager.reorder(f.conversation, { queueRevision: before.queueRevision, entryIds: before.queue.map(entry => entry.id).reverse() }, f.auth);
+  await until(() => saves === 1);
+  await f.manager.stop(f.conversation, { clear: true }); saving.reject(new Error('late save failure'));
+  await assert.rejects(reordering, { status: 500 });
+  assert.equal(f.snapshot().queue.length, 0); assert.equal(f.snapshot().queueRevision, before.queueRevision + 2); assert.equal(f.snapshot().paused, true);
+  assert.ok(f.snapshot().submissions.every(item => item.status === 'cancelled')); assert.equal(f.calls.length, 0);
+});
+
+test('failed reorder cannot restore a revoked session queue while preserving other sessions', async t => {
+  const f = fixture(t); await f.manager.stop(f.conversation); await f.submit(payload('revoked'));
+  const other = { ...f.auth, sessionHash: 'other-session' }; f.valid.add(other.sessionHash);
+  await f.manager.submit(f.conversation, payload('retained'), other);
+  const before = f.snapshot(), saving = deferred(); let saves = 0;
+  f.saveWith(() => ++saves === 1 ? saving.promise : undefined);
+  const reordering = f.manager.reorder(f.conversation, { queueRevision: before.queueRevision, entryIds: before.queue.map(entry => entry.id).reverse() }, f.auth);
+  await until(() => saves === 1); await f.manager.revoke(task => task.sessionHash === f.auth.sessionHash);
+  saving.reject(new Error('late save failure')); await assert.rejects(reordering, { status: 500 });
+  assert.deepEqual(f.snapshot().queue.map(entry => entry.content), ['retained']); assert.equal(f.snapshot().queueRevision, before.queueRevision + 2);
+});
+
+test('queue membership revisions include edits, removal, authorization cancellation, revocation and clear', async t => {
+  const f = fixture(t); assert.equal(f.snapshot().queueRevision, 0); await f.manager.stop(f.conversation);
+  await f.submit(payload('edited')); assert.equal(f.snapshot().queueRevision, 1);
+  const entry = f.snapshot().queue[0]; await f.manager.edit(f.conversation, entry.id, { revision: entry.revision, content: 'edited content' }, f.auth);
+  assert.equal(f.snapshot().queueRevision, 1);
+  await f.manager.edit(f.conversation, entry.id, { revision: 2 }, f.auth, true); assert.equal(f.snapshot().queueRevision, 2);
+  await f.submit(payload('authorization-cancelled')); f.conversation.agent.paused = false; f.model.model = 'different'; f.manager.kick(f.conversation);
+  await until(() => !f.snapshot().queue.length); assert.equal(f.snapshot().queueRevision, 4); f.model.model = 'fixture-model';
+  await f.submit(payload('revoked')); await f.manager.revoke(task => task.sessionHash === f.auth.sessionHash, { invalidateSession: false }); assert.equal(f.snapshot().queueRevision, 6);
+  await f.submit(payload('cleared')); await f.manager.stop(f.conversation, { clear: true }); assert.equal(f.snapshot().queueRevision, 8);
+});
+
+test('legacy queue states migrate an independent revision and invalid versions are rejected', async t => {
+  const f = fixture(t); await f.manager.stop(f.conversation); await f.submit(payload('legacy'));
+  const legacy = structuredClone(f.conversation); delete legacy.agent.queueRevision;
+  assert.equal(restoreAgentState(legacy), true); assert.equal(legacy.agent.queueRevision, 0);
+  assert.equal(restoreAgentState(legacy), false);
+  for (const queueRevision of [-1, null, 1.5, Number.MAX_SAFE_INTEGER + 1, '1']) {
+    const invalid = structuredClone(legacy); invalid.agent.queueRevision = queueRevision;
+    assert.throws(() => restoreAgentState(invalid), /队列版本/);
+  }
+});
+
 test('stop pauses pending tasks until explicit resume and retains their permissions', async t => {
   const f = fixture(t); await f.submit(payload('first')); await until(() => f.calls.length === 1);
   const permissions = { access: 'workspace-write', approval: 'review' };
@@ -152,13 +269,14 @@ test('steer receipts stay idempotent after inherited permissions and active turn
   assert.equal(f.conversation.messages.filter(item => item.steered).length, 1);
 });
 
-test('only a definitive inactive turn falls back to the next queued task', async t => {
+for (const code of ['turn_not_active', 'steer_unsupported']) test(`definitive ${code} falls back to the next queued task exactly once`, async t => {
   const f = fixture(t); await f.submit(payload('first')); await until(() => f.calls.length === 1);
-  f.steerWith(async () => { throw Object.assign(new Error('ended'), { code: 'turn_not_active' }); });
+  let deliveries = 0; f.steerWith(async () => { deliveries++; throw Object.assign(new Error('not delivered'), { code }); });
   const body = { ...payload('fallback'), expectedTurnId: 'turn-1' };
   const result = await f.submit(body, 'steer'); assert.equal(result.status, 'queued');
   assert.equal((await f.submit(body, 'steer')).entryId, result.entryId); assert.equal(f.snapshot().queue.length, 1);
   await f.finish(); await until(() => f.calls.length === 2); assert.equal(f.calls[1].args.prompt, 'fallback');
+  assert.equal(deliveries, 1);
 });
 
 test('uncertain steer delivery persists its text and is never resent on a retry', async t => {
