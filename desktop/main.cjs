@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, session, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, session, shell, dialog, safeStorage } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const crypto = require('node:crypto');
@@ -13,13 +13,14 @@ const { createAppPreferences } = require('./app-preferences.cjs');
 const { createAppPreferencesHandlers, verifyPreferencesSessionConnection } = require('./app-preferences-ipc.cjs');
 const { createCentralServer } = require('./central-server.cjs');
 const { createCentralServerHandlers } = require('./central-server-ipc.cjs');
+const { createOfficialAccountHandlers } = require('./official-account-ipc.cjs');
 const { spawn } = require('node:child_process');
 
 let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
 let pendingMainReveal = false, mainWindowCreated = false;
 let mainStartupFullscreenPending = false, mainFullscreenChange = null;
 let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor;
-let appPreferences, centralServer;
+let appPreferences, centralServer, officialAccounts;
 let startupDiagnostics, startupPhase = 'electron-ready', startupFailed = false;
 const root = path.resolve(__dirname, '..');
 const iconPath = path.join(__dirname, 'assets', 'icon.png');
@@ -846,6 +847,26 @@ async function boot() {
   await startupMilestone('workspace');
   const workspaceRoot = process.env.PETPAL_WORKSPACE || path.join(app.getPath('userData'), 'workspace');
   await fs.mkdir(workspaceRoot, { recursive: true });
+  await startupMilestone('official-accounts');
+  const { OfficialAuth } = await import(pathToFileURL(path.join(__dirname, 'official-auth.mjs')).href);
+  const { OfficialAccounts } = await import(pathToFileURL(path.join(__dirname, 'official-account.mjs')).href);
+  const protectedStorage = safeStorage.isEncryptionAvailable() && safeStorage.getSelectedStorageBackend?.() !== 'basic_text';
+  const officialAuth = new OfficialAuth({ directory: path.join(app.getPath('userData'), 'official-accounts'),
+    openExternal: url => shell.openExternal(url),
+    ...(protectedStorage ? { encrypt: value => safeStorage.encryptString(value), decrypt: value => safeStorage.decryptString(value) } : {}),
+    onChange: (userId, status) => { void Promise.resolve(officialAccounts?.changed(userId, status)).catch(() => {}); },
+  });
+  officialAccounts = new OfficialAccounts({ auth: officialAuth,
+    onChange: (userId, change) => { void Promise.resolve(backend?.officialAccountChanged?.(userId, change)).catch(() => {}); },
+  });
+  let officialAccountUnavailable = false;
+  try { await officialAccounts.init(); }
+  catch {
+    // A damaged optional credential store must not prevent existing API users
+    // from opening the client. Preserve the store and disable only this feature.
+    await officialAccounts.close().catch(() => {});
+    officialAccounts = null; officialAccountUnavailable = true;
+  }
   await startupMilestone('backend-create');
   backend = await createPetServer({
     dataDir: path.join(app.getPath('userData'), 'data'),
@@ -853,6 +874,7 @@ async function boot() {
     staticDir: process.argv.includes('--smoke-test') && process.env.PETPAL_SMOKE_DIST ? path.resolve(process.env.PETPAL_SMOKE_DIST) : path.join(root, 'dist'),
     allowedOrigins: [],
     workspaceRoot,
+    officialAccounts,
     codexHttpOrigins: serviceSettings.codexHttpOrigins,
   });
   await startupMilestone('backend-listen');
@@ -865,6 +887,12 @@ async function boot() {
     readConnection: event => event.sender.executeJavaScript(`(() => { try { const value = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); return value && { url: value.url === '' ? location.origin : value.url, token: value.token }; } catch { return null; } })()`),
     origin,
     assertOwnerSession: token => backend.hosting.assertOwnerSession(token),
+  }))) ipcMain.handle(channel, handler);
+  for (const [channel, handler] of Object.entries(createOfficialAccountHandlers({
+    auth: officialAuth, accounts: officialAccounts, origin,
+    unavailable: () => officialAccountUnavailable,
+    isAllowed: event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting,
+    readConnection: event => event.sender.executeJavaScript(`(() => { try { const value = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); return value && { url: value.url === '' ? location.origin : value.url, token: value.token }; } catch { return null; } })()`),
   }))) ipcMain.handle(channel, handler);
   for (const [channel, handler] of Object.entries(createAppPreferencesHandlers(appPreferences, {
     isAllowed: event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting,
@@ -1106,7 +1134,7 @@ async function boot() {
       const bytes = await fs.readFile(absolute);
       return [{ path: relative.split(path.sep).join('/'), bytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }];
     };
-    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
+    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/official-auth.mjs', 'desktop/official-account.mjs', 'desktop/official-account-ipc.cjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
     if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'result.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
     if (!health.ok || !bridge.hasToken || !codex.available || !desktopTools.opencli.available || desktopTools.opencli.version !== '1.8.8') throw new Error('Desktop smoke prerequisite failed');
@@ -1127,7 +1155,7 @@ else {
     tray?.destroy(); tray = null;
     (async () => {
       const centralOutcome = await Promise.allSettled([centralServer?.close()]);
-      const outcomes = await Promise.allSettled([appPreferences?.close(), executor?.close(), remoteHttp?.close(), updates?.close({ preserveHandoff: Boolean(pendingUpdate) }), backend?.close()]);
+      const outcomes = await Promise.allSettled([officialAccounts?.close(), appPreferences?.close(), executor?.close(), remoteHttp?.close(), updates?.close({ preserveHandoff: Boolean(pendingUpdate) }), backend?.close()]);
       const failed = [...centralOutcome, ...outcomes].find(outcome => outcome.status === 'rejected');
       if (failed) throw failed.reason;
       if (pendingUpdate) await launchPreparedUpdate(pendingUpdate);

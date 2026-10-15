@@ -18,7 +18,7 @@ function harness({ tray = true } = {}) {
     setVisibleOnAllWorkspaces() {} loadURL() { return Promise.resolve(); }
   }
   const context = vm.createContext({
-    BrowserWindow: Window, app: { quit() { calls.quits++; } },
+    BrowserWindow: Window, app: { quit() { calls.quits++; } }, officialAccounts: undefined,
     appPreferences: { current: () => ({ ...preferences }) },
     mainWindowLayout: () => ({}), petWindowLayout: () => ({}),
     screen: { getPrimaryDisplay: () => ({ workArea: {} }) },

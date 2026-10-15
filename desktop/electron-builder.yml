@@ -18,6 +18,9 @@ files:
   - desktop/startup-diagnostics.cjs
   - desktop/app-preferences.cjs
   - desktop/app-preferences-ipc.cjs
+  - desktop/official-auth.mjs
+  - desktop/official-account.mjs
+  - desktop/official-account-ipc.cjs
   - desktop/central-server.cjs
   - desktop/central-server-ipc.cjs
   - desktop/central-server-smoke.cjs
