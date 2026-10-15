@@ -32,6 +32,102 @@ function sharingError(value) {
 const tokenCount = value => Number.isSafeInteger(value) && value >= 0 ? value : 0;
 const addCount = (left, right) => Math.min(Number.MAX_SAFE_INTEGER, left + right);
 
+/** Report only protocol categories. Raw headers/body may contain credentials,
+ * user text or admission diagnostics and never belong in this error message. */
+async function nonStreamDiagnostic(response, signal) {
+  const mime = response.headers.get('content-type') || '';
+  const category = !mime.trim() ? 'empty' : /^application\/(?:[a-z0-9!#$&^_.+-]+\+)?json(?:\s*;|$)/i.test(mime) ? 'json' : /^text\/html(?:\s*;|$)/i.test(mime) ? 'html' : /^text\/plain(?:\s*;|$)/i.test(mime) ? 'plain' : 'other';
+  const status = Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : 502;
+  const parts = [`上游 HTTP ${status}`, `内容类型 ${category}`];
+  if (!response.body) return parts.concat('响应形态 empty-body').join('；');
+  const controller = new AbortController(), stopped = () => controller.abort();
+  signal?.addEventListener('abort', stopped, { once: true }); if (signal?.aborted) controller.abort();
+  const timer = setTimeout(stopped, 1500); timer.unref?.();
+  const reader = response.body.getReader(), chunks = []; let size = 0, complete = false, shape = 'other-prefix';
+  try {
+    for (;;) {
+      const next = await abortable(reader.read(), controller.signal);
+      if (next.done) { complete = true; break; }
+      size += next.value.byteLength;
+      if (size > 65536) { shape = 'size-limit'; break; }
+      chunks.push(Buffer.from(next.value));
+      const prefix = Buffer.concat(chunks, size).toString('utf8');
+      if (/(?:^|\r?\n)(?:event:|data:)/.test(prefix.replace(/^\uFEFF/, ''))) { shape = 'sse-prefix'; break; }
+      if (prefix.length >= 16 && category !== 'json' && !/^\s*[\[{]/.test(prefix)) break;
+    }
+    if (complete) {
+      const bytes = Buffer.concat(chunks, size), source = bytes.toString('utf8');
+      if (!source.trim()) shape = 'empty-body';
+      else {
+        let value; try { value = JSON.parse(source); } catch {}
+        if (object(value)) {
+          shape = 'json-object';
+          if (['queued', 'in_progress', 'completed', 'failed', 'incomplete', 'cancelled'].includes(value.status)) parts.push(`status=${value.status}`);
+          const type = ['response', 'error', 'message', 'function_call', 'custom_tool_call', 'list', 'response.completed', 'response.failed', 'response.incomplete'].includes(value.type) ? value.type : ['response', 'error', 'list'].includes(value.object) ? value.object : null;
+          if (type) parts.push(`type=${type}`);
+          parts.push(`output=${Array.isArray(value.output) || Array.isArray(value.response?.output) ? 'present' : 'absent'}`);
+          const known = sharingError(value); if (Object.hasOwn(sharingErrors, known.code)) parts.push(`error=${known.code}`);
+        } else if (Array.isArray(value)) shape = 'json-array';
+        else if (category === 'json') shape = 'json-invalid';
+      }
+    }
+  } catch { shape = 'unreadable'; }
+  finally { clearTimeout(timer); signal?.removeEventListener('abort', stopped); await reader.cancel().catch(() => {}); reader.releaseLock(); }
+  return parts.concat(`响应形态 ${shape}`).join('；');
+}
+
+/** Some direct-route responses omit Content-Type even though the body is SSE.
+ * Inspect a bounded complete frame, then replay every byte through the normal
+ * filter. A declared non-SSE MIME type never uses this compatibility path. */
+async function peekMissingMimeSse(reader, signal, status) {
+  const chunks = [], decoder = new TextDecoder('utf-8', { fatal: true });
+  const controller = new AbortController(), stop = () => controller.abort();
+  const timer = setTimeout(stop, 15000); timer.unref?.();
+  signal.addEventListener('abort', stop, { once: true }); if (signal.aborted) controller.abort();
+  let size = 0, pending = '', event = '', data = [];
+  const invalid = shape => failure(`官方模型没有返回流式响应（上游 HTTP ${Number.isInteger(status) && status >= 100 && status <= 599 ? status : 502}；内容类型 empty；响应形态 ${shape}）。`, 502);
+  const inspect = text => {
+    pending += text; let newline;
+    while ((newline = pending.indexOf('\n')) >= 0) {
+      const line = pending.slice(0, newline).replace(/\r$/, ''); pending = pending.slice(newline + 1);
+      if (!line) {
+        if (data.length) {
+          let value; try { value = JSON.parse(data.join('\n')); } catch { throw invalid('invalid-sse-frame'); }
+          const type = event || value?.type;
+          if (!object(value) || !/^(?:response\.[A-Za-z][A-Za-z0-9_.]*|error|ping)$/.test(type || '') || event && value.type && event !== value.type) throw invalid('invalid-sse-frame');
+          return true;
+        }
+        event = ''; data = []; continue;
+      }
+      if (line.startsWith(':')) continue;
+      if (line.startsWith('event:')) { event = line.slice(6).replace(/^ /, ''); continue; }
+      if (line.startsWith('data:')) { data.push(line.slice(5).replace(/^ /, '')); continue; }
+      if (line.startsWith('id:') || line.startsWith('retry:')) continue;
+      throw invalid(/^\s*[\[{]/.test(line) ? 'json-prefix' : /^\s*</.test(line) ? 'html-prefix' : 'other-prefix');
+    }
+    const trimmed = pending.trimStart();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) throw invalid('json-prefix');
+    if (trimmed.startsWith('<')) throw invalid('html-prefix');
+    return false;
+  };
+  try {
+    for (;;) {
+      const next = await abortable(reader.read(), controller.signal);
+      if (next.done) { inspect(decoder.decode()); throw invalid('incomplete-sse-prefix'); }
+      // Inspect at most one normal frame's byte allowance. A transport chunk
+      // may also contain later frames, so preserve it whole for normal replay.
+      const prefix = next.value.subarray(0, DIRECTORY_BYTES - size); size += prefix.byteLength;
+      chunks.push(next.value);
+      if (inspect(decoder.decode(prefix, { stream: true }))) return chunks;
+      if (size >= DIRECTORY_BYTES) throw invalid('prefix-size-limit');
+    }
+  } catch (error) {
+    if (signal.aborted) throw abortFailure();
+    if (error?.[safeFailure]) throw error;
+    throw invalid(controller.signal.aborted ? 'prefix-timeout' : 'invalid-sse-prefix');
+  } finally { clearTimeout(timer); signal.removeEventListener('abort', stop); }
+}
+
 function abortable(promise, signal) {
   if (!signal) return promise;
   return new Promise((resolve, reject) => {
@@ -392,12 +488,15 @@ export class OfficialAccounts {
         const status = Number.isInteger(upstream.status) && upstream.status >= 400 && upstream.status <= 599 ? upstream.status : 502;
         throw Object.assign(failure(known.code === 'official_request_failed' ? `官方模型请求未完成（HTTP ${status}）。` : known.message, status), { officialCode: known.code });
       }
-      if (!upstream.body || !/^text\/event-stream(?:\s*;|$)/i.test(upstream.headers.get('content-type') || '')) { await upstream.body?.cancel().catch(() => {}); throw failure('官方模型没有返回流式响应。', 502); }
+      const contentType = upstream.headers.get('content-type') || ''; let peeked = [];
+      if (!upstream.body || contentType.trim() && !/^text\/event-stream(?:\s*;|$)/i.test(contentType)) { const diagnostic = await nonStreamDiagnostic(upstream, controller.signal); assertCurrent(); throw failure(`官方模型没有返回流式响应（${diagnostic}）。`, 502); }
+      if (!contentType.trim()) { reader = upstream.body.getReader(); peeked = await peekMissingMimeSse(reader, controller.signal, upstream.status); assertCurrent(); }
       response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store' }); response.flushHeaders();
       let terminalObserved = false;
-      reader = upstream.body.getReader(); const filter = streamFilter(credentials, bindings, observation => { if (!terminalObserved) { assertCurrent(); terminalObserved = true; this._observeUsage(scope, normalized.model, observation); } });
+      reader ??= upstream.body.getReader(); const filter = streamFilter(credentials, bindings, observation => { if (!terminalObserved) { assertCurrent(); terminalObserved = true; this._observeUsage(scope, normalized.model, observation); } });
       const stopReader = () => { void reader?.cancel().catch(() => {}); }; controller.signal.addEventListener('abort', stopReader, { once: true });
       try {
+        for (const chunk of peeked) { assertCurrent(); const filtered = filter.push(chunk); if (filtered.byteLength && !response.write(Buffer.from(filtered))) await waitDrain(response, controller.signal); }
         while (true) { assertCurrent(); const { value: chunk, done } = await abortable(reader.read(), controller.signal); assertCurrent(); const filtered = filter.push(chunk, done); if (filtered.byteLength && !response.write(Buffer.from(filtered))) await waitDrain(response, controller.signal); if (done) break; }
         assertCurrent(); response.end();
       } finally { controller.signal.removeEventListener('abort', stopReader); }

@@ -1,5 +1,6 @@
 import http from 'node:http';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
+import {isDeepStrictEqual} from 'node:util';
 import {MODEL_REQUEST_BYTES} from './model-request-limits.mjs';
 import {CumulativeMessageAdapter,needsCumulativeMessageMapping} from './response-message-segments.mjs';
 import {normalizeCodexReviewConfig} from './codex-config.mjs';
@@ -53,7 +54,7 @@ export class ResponsesStreamNormalizer {
     if(!index(position)||!identifier(id))throw invalid();
     let state=this.items.get(position);
     if(state&&state.id!==id)throw invalid();
-    if(!state){state={id,position,item:null,parts:new Map(),buffer:[],toolText:'',toolDelta:false,toolDone:false,done:false};this.items.set(position,state);}
+    if(!state){state={id,position,item:null,parts:new Map(),buffer:[],toolText:'',toolDelta:false,toolDone:false,done:false,doneObserved:false};this.items.set(position,state);}
     return state;
   }
   _addMessage(state,out){
@@ -75,7 +76,7 @@ export class ResponsesStreamNormalizer {
   }
   _completeItem(position,item,out){
     this._validateItem(item);const state=this._state(position,item.id);
-    if(state.done){if(JSON.stringify(state.final)!==JSON.stringify(item))throw invalid();return;}
+    if(state.done){if(!isDeepStrictEqual(state.final,item))throw invalid();return;}
     if(state.item&&state.item.type!==item.type)throw invalid();
     if(state.pendingType&&state.pendingType!==item.type)throw invalid();
     if(item.type==='message'){
@@ -109,21 +110,33 @@ export class ResponsesStreamNormalizer {
     if(value.response_id!==undefined&&(!identifier(value.response_id)||this.responseId&&value.response_id!==this.responseId))throw invalid();
     if(['error','response.failed','response.incomplete'].includes(type))throw invalid();
     if(this.completed){
-      if(type!=='response.done'||value.response?.id!==this.completed.id||value.response?.status!=='completed'||JSON.stringify(value.response.output)!==JSON.stringify(this.completed.output))throw invalid();
+      if(type!=='response.done'||value.response?.id!==this.completed.id||value.response?.status!=='completed'||!isDeepStrictEqual(value.response.output,this.completed.output))throw invalid();
       if(this.terminal.some(frame=>frame.type==='response.done'))throw invalid();
       this.terminal.push({type,raw});return out;
     }
     if(type==='response.created'){
       if(!identifier(value.response?.id)||this.responseId)throw invalid();this.responseId=value.response.id;
     }else if(type==='response.completed'){
-      const response=value.response;
+      let response=value.response,terminalRaw=raw;
       if(!object(response)||!identifier(response.id)||response.status!=='completed'||!Array.isArray(response.output)||response.output.length>512||(this.responseId&&response.id!==this.responseId))throw invalid();
+      if(!response.output.length){
+        // Some official streams omit the final aggregate output. Reuse only
+        // complete item.done facts from this response, never text/partial state.
+        const states=[...this.items.values()].sort((left,right)=>left.position-right.position);
+        if(!this.responseId||!states.length||states.some((state,position)=>state.position!==position||!state.doneObserved||!state.done||state.buffer.length||!object(state.final)||state.final.id!==state.id))throw invalid();
+        for(const state of states){
+          this._validateItem(state.final);
+          if([...state.parts].some(([position,part])=>!part.done||state.final.type!=='message'||position>=state.final.content.length))throw invalid();
+        }
+        response={...response,output:states.map(state=>state.final)};
+        terminalRaw=encode({...value,response});
+      }
       const meaningful=response.output.some(item=>item?.type==='message'&&item.role==='assistant'&&Array.isArray(item.content)&&item.content.some(part=>part.type==='output_text'&&typeof part.text==='string'&&part.text.trim()||part.type==='refusal'&&typeof part.refusal==='string'&&part.refusal.trim())||['function_call','custom_tool_call'].includes(item?.type));
       if(!meaningful)throw invalid();
       if(new Set(response.output.map(item=>item?.id)).size!==response.output.length)throw invalid();
       for(let i=0;i<response.output.length;i++)this._completeItem(i,response.output[i],out);
       if([...this.items.values()].some(state=>!state.done||state.buffer.length||state.position>=response.output.length))throw invalid();
-      this.completed=response;this.terminal.push({type,raw});
+      this.completed=response;this.terminal.push({type,raw:terminalRaw});
       // Hold all completion markers until EOF, so malformed/truncated suffixes cannot succeed.
       this.terminal.unshift(...out.map(raw=>({type:'completion-item',raw})));return [];
     }else if(type==='response.done')throw invalid();
@@ -136,6 +149,7 @@ export class ResponsesStreamNormalizer {
       if(state.buffer.length){out.push(raw,...state.buffer);state.buffer=[];return out;}
     }else if(type==='response.output_item.done'){
       this._completeItem(value.output_index,value.item,out);
+      this.items.get(value.output_index).doneObserved=true;
       // Preserve the original complete item event, including any provider extension fields.
       if(out.length)out[out.length-1]=raw;return out;
     }else if(type==='response.content_part.added'){

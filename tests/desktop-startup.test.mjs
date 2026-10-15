@@ -126,7 +126,11 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false, pre
     readDesktopServiceSettings: async () => ({ codexHttpOrigins: '' }),
     createAppPreferences: () => ({ load: async () => {}, current: () => ({ startMinimized: false, showPetOnLaunch: true, closeToTray: true, petAlwaysOnTop: true, ...preferences }) }),
     createAppPreferencesHandlers: () => ({}), verifyPreferencesSessionConnection: async () => ({}),
+    mainWindowState: () => ({ fullscreen: false }), setMainFullscreen: async () => {}, toggleMainFullscreen() {}, applyMainStartupFullscreen() {},
     createCentralServer: () => ({ load: async () => {} }), createCentralServerHandlers: () => ({}),
+    safeStorage: { isEncryptionAvailable: () => false }, createOfficialAccountHandlers: () => ({}),
+    officialAuthModuleStub: { OfficialAuth: class { constructor(options) { this.options = options; } async close() {} } },
+    officialAccountsModuleStub: { OfficialAccounts: class { constructor(options) { this.auth = options.auth; } async init() {} async close() { await this.auth.close(); } } },
     serverModule: { createPetServer: async () => backendStub },
     executorModuleStub: { DesktopExecutor: class { async disconnect() {} }, createExecutorHandlers: () => ({}), createMusicMcpHandlers: () => ({}), createComputerUseMcpHandlers: () => ({}), createOpenCliHandlers: () => ({}) },
     updaterModuleStub: { DesktopUpdateManager: class {}, createDesktopUpdateHandlers: () => ({}) },
@@ -143,11 +147,14 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false, pre
   };
   const boot = declaration('boot')
     .replace("await import(pathToFileURL(path.join(root, 'server', 'app.mjs')).href)", 'serverModule')
+    .replace("await import(pathToFileURL(path.join(__dirname, 'official-auth.mjs')).href)", 'officialAuthModuleStub')
+    .replace("await import(pathToFileURL(path.join(__dirname, 'official-account.mjs')).href)", 'officialAccountsModuleStub')
     .replace("await import(pathToFileURL(path.join(__dirname, 'executor.mjs')).href)", 'executorModuleStub')
     .replace("await import(pathToFileURL(path.join(__dirname, 'updates.mjs')).href)", 'updaterModuleStub');
   vm.runInContext(`let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
     let pendingMainReveal = false, mainWindowCreated = false;
-    let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor, appPreferences, centralServer;
+    let mainStartupFullscreenPending = false, mainFullscreenChange = null;
+    let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor, appPreferences, centralServer, officialAccounts;
     let startupDiagnostics, startupPhase = 'electron-ready', startupFailed = false;
     const root = ${JSON.stringify(f.root)}, __dirname = ${JSON.stringify(f.root)}, iconPath = 'fixture-icon';
     ${['getStartupDiagnostics', 'startupMilestone', 'handleStartupFailure', 'rendererFailure', 'createMain', 'showPet', 'applyPetWindowPreferences'].map(declaration).join('\n')}

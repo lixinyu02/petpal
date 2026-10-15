@@ -41,6 +41,64 @@ test('complete standard events are passed through unchanged and never duplicated
   assert.deepEqual(processEvents(values),values);
 });
 
+test('real completed with empty aggregate output reuses only complete matching item.done facts and preserves terminal metadata',async t=>{
+  const item=message('OK'),empty={...completed(),sequence_number:8,response:{...completed().response,output:[],usage:{input_tokens:900,output_tokens:2,total_tokens:902},metadata:{fixture:true}}};
+  const values=[created,{type:'response.in_progress',response:{...created.response}},{type:'response.output_item.added',output_index:0,item:{...item,content:[],status:'in_progress'}},{type:'response.content_part.added',output_index:0,item_id:item.id,content_index:0,part:{type:'output_text',text:'',annotations:[]}},delta('OK'),textDone('OK'),{type:'response.content_part.done',output_index:0,item_id:item.id,content_index:0,part:item.content[0]},{type:'response.output_item.done',output_index:0,item},empty];
+  const expected={...empty,response:{...empty.response,output:[item]}},events=processEvents(values);
+  assert.deepEqual(events.slice(0,-1),values.slice(0,-1));assert.deepEqual(events.at(-1),expected);assert.deepEqual(empty.response.output,[]);
+  assert.equal(events.filter(value=>value.type==='response.output_item.done').length,1);assert.equal(events.filter(value=>value.type==='response.output_text.delta').length,1);
+  const f=await fixture(t,{fetch:()=>new Response(values.map(frame).join(''),{headers:{'Content-Type':'text/event-stream'}})});
+  const relayed=parse(await (await f.request()).text());assert.deepEqual(relayed,events);assert.equal(relayed.some(value=>value.type==='error'),false);
+});
+
+test('empty completed reconstructs contiguous complete tool/message items in output index order without guessing identity',()=>{
+  const tool={id:'fc_fixture',type:'function_call',name:'fixture_tool',call_id:'call_fixture',arguments:'{}',status:'completed'},item=message(),empty={...completed(),response:{...completed().response,output:[]}};
+  const events=processEvents([created,{type:'response.output_item.done',output_index:1,item},{type:'response.output_item.done',output_index:0,item:tool},empty]);
+  assert.deepEqual(events.at(-1).response.output,[tool,item]);assert.equal(events.filter(value=>value.type==='response.function_call_arguments.done').length,1);
+});
+
+test('empty aggregate output cannot complete absent, partial, sparse, buffered, mismatched or invalid item state',()=>{
+  const item=message(),done={type:'response.output_item.done',output_index:0,item},empty={...completed(),response:{...completed().response,output:[]}};
+  const pending={type:'response.function_call_arguments.delta',output_index:1,item_id:'fc_pending',delta:'{}'};
+  const cases=[
+    [created,empty],
+    [created,delta(item.content[0].text),textDone(item.content[0].text),empty],
+    [created,{type:'response.output_item.added',output_index:0,item:{...item,status:'in_progress'}},empty],
+    [created,{...done,output_index:1},empty],
+    [created,done,{...done,output_index:2,item:{...item,id:'msg_sparse'}},empty],
+    [created,done,pending,empty],
+    [created,{...delta('unfinished extra part'),content_index:1},done,empty],
+    [created,delta('different'),done,empty],
+    [created,delta(item.content[0].text),{...done,item:{...item,id:'msg_mismatch'}},empty],
+    [created,done,{...empty,response:{...empty.response,id:'resp_mismatch'}}],
+    [done,empty],
+    [created,done],
+    [created,done,{type:'response.incomplete',response:{...empty.response,status:'incomplete'}}],
+    [created,done,{...empty,response:{...empty.response,status:'in_progress'}}],
+    [created,done,{...empty,response:{...empty.response,output:null}}],
+    [created,{...done,item:{...item,status:'in_progress'}},empty],
+    [created,{...done,item:{id:'fc_invalid',type:'function_call',name:'fixture',arguments:'{}',status:'completed'}},empty],
+    [created,done,{...done,output_index:1},empty],
+    [created,done,empty,delta('late')],
+    [created,done,empty,{type:'ping'}],
+  ];
+  for(const values of cases){
+    const n=new ResponsesStreamNormalizer(),sent=[];
+    assert.throws(()=>{for(const value of values)sent.push(...n.accept(value));sent.push(...n.finish());});
+    assert.equal(sent.some(value=>value.includes('event: response.completed')),false);
+  }
+});
+
+test('completed item equality ignores object key order while preserving every field value and array order',()=>{
+  const reorder=value=>Array.isArray(value)?value.map(reorder):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).reverse().map(([key,entry])=>[key,reorder(entry)])):value;
+  const item={...message(),phase:'final_answer'},done={type:'response.output_item.done',output_index:0,item},final=completed(reorder(item)),tail={type:'response.done',response:reorder(final.response)};
+  const events=processEvents([created,done,final,tail]);assert.deepEqual(events.at(-2),final);assert.deepEqual(events.at(-1),tail);
+  for(const changed of [{...item,phase:'commentary'},{...item,extra:true},{...item,content:[{...item.content[0],text:'different'}]},{...item,content:[...item.content,item.content[0]]}]){
+    assert.throws(()=>processEvents([created,done,completed(changed)]));
+    assert.throws(()=>processEvents([created,done,final,{type:'response.done',response:{...final.response,output:[changed]}}]));
+  }
+});
+
 test('missing function identities stay buffered until a complete final tool item supplies exact name and call_id',()=>{
   const n=new ResponsesStreamNormalizer(),args=JSON.stringify({action:'fixture'}),item={type:'function_call',id:'fc_fixture',name:'synthetic_tool',call_id:'call_fixture',arguments:args,status:'completed'};
   n.accept(created);

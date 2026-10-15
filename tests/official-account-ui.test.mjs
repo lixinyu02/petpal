@@ -120,3 +120,8 @@ test('usage rejects negative or unbounded counters and malformed times rather th
   const f=fixture();t.after(()=>f.close());await f.flush();
   for(const patch of [{totalTokens:-1},{completedRequests:Number.MAX_SAFE_INTEGER+1},{checkedAt:'not-a-date'},{state:'100-percent-left'}])assert.throws(()=>f.session.readOfficialAccountStatus({...signedIn,usage:{...usage,...patch}}),/用量状态不完整/);
 });
+
+test('unverified usage does not claim no request was sent after a request failed without completion',async t=>{
+  const f=fixture({value:{...signedIn,usage:{state:'unverified',checkedAt:null,lastModel:null,completedRequests:0,inputTokens:0,outputTokens:0,totalTokens:0}}});t.after(()=>f.close());await f.flush();
+  assert.match(f.text(),/尚无已完成的请求验证/);assert.doesNotMatch(f.text(),/尚未发出模型请求/);assert.match(f.text(),/0 次请求/);
+});

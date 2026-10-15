@@ -513,7 +513,7 @@ async function liveOfficialAccount() {
   if (!process.env.PETPAL_SMOKE_PROFILE) throw new Error('Live official acceptance requires an isolated profile');
   await clickSmokeButton('.official-account-settings', '使用 ChatGPT 登录');
   console.log(JSON.stringify({event:'official-account-live-awaiting-consent'}));
-  const deadline = Date.now()+210000;
+  const deadline = Date.now()+620000;
   let signedIn = false, tested = false, result;
   while (Date.now()<deadline) {
     const status = await mainWindow.webContents.executeJavaScript('window.petpal.officialAccount.status()');
@@ -532,6 +532,150 @@ async function liveOfficialAccount() {
   if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR,'official-live-result.json'),JSON.stringify(result,null,2));
   console.log(JSON.stringify(result));
   // Keep the reviewable source client open for the person to continue using it.
+}
+
+async function resumeOfficialAccount() {
+  if (!process.env.PETPAL_SMOKE_PROFILE) throw new Error('Official account resume requires an isolated profile');
+  const requestedModel = 'gpt-6-luna';
+  // Resume never invokes OAuth, cancel, logout, select, or allowance recovery.
+  // Read only the native public DTO and return an explicit display whitelist.
+  const read = () => mainWindow.webContents.executeJavaScript(`(async () => {
+    const value = await window.petpal.officialAccount.status();
+    const selectedModel = Array.isArray(value.models) ? value.models.find(item => item.model === ${JSON.stringify(requestedModel)}) : null;
+    const safeText = item => typeof item === 'string' && item.length <= 200 && !/[\\x00-\\x1f\\x7f]/.test(item) ? item : null;
+    const count = item => Number.isSafeInteger(item) && item >= 0 ? item : 0;
+    const usage = value.usage && ['unverified','available','limit-reached','temporarily-unavailable','not-eligible'].includes(value.usage.state) ? {
+      state: value.usage.state, checkedAt: typeof value.usage.checkedAt === 'string' && /^\\d{4}-\\d{2}-\\d{2}T/.test(value.usage.checkedAt) ? value.usage.checkedAt : null,
+      lastModel: safeText(value.usage.lastModel), completedRequests: count(value.usage.completedRequests),
+      inputTokens: count(value.usage.inputTokens), outputTokens: count(value.usage.outputTokens), totalTokens: count(value.usage.totalTokens)
+    } : null;
+    return {state:['signed-out','signing-in','signed-in'].includes(value.state)?value.state:'unknown',signedIn:value.state==='signed-in',
+      planUsageEnabled:value.planUsageEnabled===true,modelsCount:Array.isArray(value.models)?Math.min(value.models.length,256):0,
+      selectedModelId:safeText(selectedModel?.id),model:safeText(selectedModel?.model),usage,hasError:!!value.error,hasModelsError:!!value.modelsError};
+  })()`);
+  await mainWindow.loadURL(`${origin}/?chat=1&settings=1`);
+  await mainWindow.webContents.executeJavaScript(`new Promise((resolve,reject) => {
+    const deadline=Date.now()+30000;
+    const check=()=>{
+      const panel=document.querySelector('.official-account-settings'),state=panel?.querySelector('.official-account-state');
+      if(panel&&state&&!state.textContent.includes('正在读取')){panel.scrollIntoView({block:'start'});return resolve(true);}
+      if(Date.now()>=deadline)return reject(new Error('Official resume settings are unavailable'));
+      setTimeout(check,50);
+    };check();
+  })`);
+  let snapshot;
+  try { snapshot = await read(); }
+  catch { snapshot = {state:'unknown',signedIn:false,planUsageEnabled:false,modelsCount:0,model:null,usage:null,hasError:true,hasModelsError:false}; }
+  const before = snapshot.usage?.completedRequests ?? 0;
+  const result = {event:'official-account-resume',platform:process.platform,arch:process.arch,packaged:app.isPackaged,
+    state:snapshot.state,signedIn:snapshot.signedIn,planUsageEnabled:snapshot.planUsageEnabled,modelsCount:snapshot.modelsCount,
+    requestedModel,model:snapshot.model,hasError:snapshot.hasError,hasModelsError:snapshot.hasModelsError,inferenceAttempted:false,inferenceCompleted:false,httpStatus:null,usage:snapshot.usage};
+  if(process.argv.includes('--smoke-official-agent'))result.agent={attempted:false,status:'chat-not-completed',completed:false};
+  const gated = ['limit-reached','not-eligible'].includes(snapshot.usage?.state);
+  if(snapshot.signedIn&&snapshot.planUsageEnabled&&snapshot.modelsCount&&snapshot.selectedModelId&&!snapshot.hasError&&!snapshot.hasModelsError&&!gated){
+    result.inferenceAttempted=true;
+    try {
+      // Exactly one application-level test. Credentials remain in process memory.
+      const response=await fetch(`${origin}/api/providers/${encodeURIComponent(snapshot.selectedModelId)}/test`,{
+        method:'POST',headers:{Authorization:`Bearer ${backend.token}`,'Content-Type':'application/json'},body:'{}',signal:AbortSignal.timeout(120000)});
+      result.httpStatus=response.status;
+      const data=await response.json().catch(()=>null);
+      result.inferenceCompleted=response.ok&&data?.ok===true;
+      if(!result.inferenceCompleted&&typeof data?.message==='string')result.failureMessage=data.message.slice(0,500);
+    } catch { result.requestFailed=true; }
+    if(result.inferenceCompleted&&process.argv.includes('--smoke-official-agent')){
+      const agent={attempted:true,status:'starting',completed:false},deadline=Date.now()+120000,submissionId=crypto.randomUUID();
+      let conversationId=null,submitted=false,last=null;
+      const request=async(pathname,body,cleanup=false)=>{
+        const remaining=cleanup?10000:Math.max(1,Math.min(15000,deadline-Date.now()));
+        const response=await fetch(`${origin}/api${pathname}`,{method:body===undefined?'GET':'POST',
+          headers:{Authorization:`Bearer ${backend.token}`,'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(remaining)});
+        agent.httpStatus=response.status;
+        return{ok:response.ok,data:await response.json().catch(()=>null)};
+      };
+      const inspect=value=>{
+        const state=value?.agent,run=state?.run?.submissionId===submissionId?state.run:null,receipt=state?.submissions?.find(item=>item.submissionId===submissionId);
+        if(run){agent.model=run.model===requestedModel?requestedModel:null;agent.modelMatched=run.model===requestedModel&&run.providerId===snapshot.selectedModelId;}
+        if(run&&state.approvals?.length)return'approval-pending';
+        if((run?.status==='completed'||receipt?.status==='completed')&&!agent.modelMatched)return'model-unconfirmed';
+        if(run&&['completed','cancelled','error','unknown'].includes(run.status))return run.status;
+        if(receipt&&['completed','cancelled','error','uncertain'].includes(receipt.status))return receipt.status==='uncertain'?'unknown':receipt.status;
+        return null;
+      };
+      try{
+        const created=await request('/conversations',{mode:'codex',providerId:snapshot.selectedModelId});
+        if(!created.ok||created.data?.mode!=='codex'||typeof created.data.id!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(created.data.id)){
+          agent.status='create-failed';agent.errorCode='create_failed';
+        }else{
+          conversationId=created.data.id;
+          // Only this fresh conversation receives one read-only, manual-approval
+          // submission. The harness never approves, steers, or retries a task.
+          submitted=true;
+          const submission=await request(`/conversations/${encodeURIComponent(conversationId)}/agent/submit`,{
+            submissionId,providerId:snapshot.selectedModelId,hostId:'central',content:'仅回复 OK，不要调用任何工具或操作电脑。',permissions:{access:'read-only',approval:'ask'}});
+          if(!submission.ok){agent.status='submit-failed';agent.errorCode='submit_failed';}
+          else{
+            last=submission.data?.conversation;
+            while(Date.now()<deadline){
+              const state=inspect(last);
+              if(state){agent.status=state;agent.completed=state==='completed';if(!agent.completed)agent.errorCode=state==='approval-pending'?'approval_required':'agent_not_completed';break;}
+              await new Promise(resolve=>setTimeout(resolve,Math.min(750,Math.max(1,deadline-Date.now()))));
+              if(Date.now()>=deadline)break;
+              const poll=await request(`/conversations/${encodeURIComponent(conversationId)}`);
+              if(!poll.ok){agent.status='request-failed';agent.errorCode='status_failed';break;}
+              last=poll.data;
+            }
+            if(agent.status==='starting'){agent.status='timed-out';agent.errorCode='timeout';}
+          }
+        }
+      }catch{agent.status=Date.now()>=deadline?'timed-out':'request-failed';agent.errorCode=agent.status==='timed-out'?'timeout':'request_failed';}
+      finally{
+        if(conversationId&&submitted&&!agent.completed){
+          try{
+            const current=await request(`/conversations/${encodeURIComponent(conversationId)}`,undefined,true),state=current.data?.agent;
+            const isolated=state&&(!state.run||state.run.submissionId===submissionId)&&state.queue?.every(item=>item.submissionId===submissionId)&&state.submissions?.every(item=>item.submissionId===submissionId);
+            const active=state&&(state.run?.submissionId===submissionId&&['running','stopping'].includes(state.run.status)||state.queue?.some(item=>item.submissionId===submissionId));
+            if(current.ok&&isolated&&active){
+              const stopped=await request(`/conversations/${encodeURIComponent(conversationId)}/stop`,{},true);
+              if(!stopped.ok)agent.errorCode='test_stop_failed';
+            }else if(active&&!isolated)agent.errorCode='test_conversation_changed';
+          }catch{agent.errorCode='test_stop_unconfirmed';}
+        }
+      }
+      result.agent=agent;
+    }
+    try { snapshot=await read();result.usage=snapshot.usage;result.hasError=snapshot.hasError;result.hasModelsError=snapshot.hasModelsError; }
+    catch { result.statusReadFailed=true; }
+    result.completedRequestsAdvanced=(result.usage?.completedRequests??0)>before;
+  }else result.skippedReason=gated?'official-usage-gated':!snapshot.signedIn?'official-login-not-completed':!snapshot.selectedModelId?'requested-official-model-unavailable':'official-models-unavailable';
+  const expected=result.usage;
+  result.ui=await mainWindow.webContents.executeJavaScript(`new Promise(resolve=>{
+    const expected=${JSON.stringify(expected)},deadline=Date.now()+25000;let refreshClicked=false;
+    const check=()=>{
+      const panel=document.querySelector('.official-account-settings'),usage=panel?.querySelector('.official-account-usage');
+      if(!expected||!${snapshot.signedIn===true})return resolve({nativeSettingsVisible:!!panel,usageVisible:!!usage,refreshClicked:false});
+      const refresh=usage?.querySelector('button[aria-label="刷新官方用量状态"]');
+      if(refresh&&!refresh.disabled&&!refreshClicked){refresh.click();refreshClicked=true;}
+      const row=usage&&[...usage.querySelectorAll('dl>div')].find(item=>item.querySelector('dt')?.textContent.includes('本次连接已完成'));
+      const digits=row?.querySelector('dd')?.textContent.match(/\\d/g),shown=digits?Number(digits.join('')):null;
+      const stateMatches=!!usage?.querySelector('.official-usage-state')?.classList.contains('is-'+expected.state),countMatches=shown===expected.completedRequests;
+      if(refreshClicked&&stateMatches&&countMatches){usage.scrollIntoView({block:'center'});return resolve({nativeSettingsVisible:true,usageVisible:true,refreshClicked,usageStateMatches:true,completedRequestsMatches:true,completedRequests:shown});}
+      if(Date.now()>=deadline)return resolve({nativeSettingsVisible:!!panel,usageVisible:!!usage,refreshClicked,usageStateMatches:stateMatches,completedRequestsMatches:countMatches,completedRequests:shown,timedOut:true});
+      setTimeout(check,50);
+    };check();
+  })`);
+  await mainWindow.webContents.executeJavaScript(`(async()=>{await document.fonts.ready;await Promise.all(document.getAnimations().filter(animation=>animation.effect?.getComputedTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{})));await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));})()`);
+  if(process.env.PETPAL_SMOKE_DIR){
+    await fs.mkdir(process.env.PETPAL_SMOKE_DIR,{recursive:true});
+    // Screenshots retain the actual model/usage UI, without account labels.
+    const mask=await mainWindow.webContents.insertCSS('.official-account-state,.official-account-profile{visibility:hidden!important}');
+    try { await mainWindow.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))'); await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR,'official-resume.png'),(await mainWindow.webContents.capturePage()).toPNG()); }
+    finally { await mainWindow.webContents.removeInsertedCSS(mask); }
+    result.screenshotAccountLabelsMasked=true;
+    await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR,'official-resume-result.json'),JSON.stringify(result,null,2));
+  }
+  console.log(JSON.stringify(result));
+  // Keep the authorized preview and its private profile available to the person.
 }
 
 async function clickSmokeButton(container, label) {
@@ -916,7 +1060,7 @@ async function boot() {
   const { OfficialAuth } = await import(pathToFileURL(path.join(__dirname, 'official-auth.mjs')).href);
   const { OfficialAccounts } = await import(pathToFileURL(path.join(__dirname, 'official-account.mjs')).href);
   const protectedStorage = safeStorage.isEncryptionAvailable() && safeStorage.getSelectedStorageBackend?.() !== 'basic_text';
-  const officialAuth = new OfficialAuth({ directory: path.join(app.getPath('userData'), 'official-accounts'),
+  const officialAuth = new OfficialAuth({ directory: path.join(app.getPath('userData'), 'official-accounts'), attemptMs: 600000,
     openExternal: url => shell.openExternal(url),
     ...(protectedStorage ? { encrypt: value => safeStorage.encryptString(value), decrypt: value => safeStorage.decryptString(value) } : {}),
     onChange: (userId, status) => { try { void Promise.resolve(officialAccounts?.changed(userId, status)).catch(() => {}); } catch {} },
@@ -1046,6 +1190,13 @@ async function boot() {
       app.quit(); return;
     }
     await startupMilestone('smoke-login');
+    if(process.argv.includes('--smoke-official-resume')){
+      await loginSmokeMain();
+      await startupMilestone('smoke-official-resume');
+      await resumeOfficialAccount();
+      await startupMilestone('smoke-complete');
+      return;
+    }
     const officialSmoke = process.argv.includes('--smoke-official-account');
     const officialGuestDenied = officialSmoke && await mainWindow.webContents.executeJavaScript('(async()=>{try{await window.petpal.officialAccount.status();return false;}catch{return true;}})()');
     const loginGate = await loginSmokeMain();

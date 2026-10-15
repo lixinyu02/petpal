@@ -293,6 +293,103 @@ test('EOF, incomplete response and unrelated HTTP failures do not manufacture qu
   const failed = await f.post(provider); assert.equal(failed.status, 503); assert.doesNotMatch(await failed.text(), /PRIVATE|unrelated_error/); assert.deepEqual((await f.manager.status('alice')).usage, initial);
 });
 
+test('wrong MIME diagnostics reveal only safe JSON status/type/output categories without accepting success or usage', async t => {
+  const f = await fixture(t, { onFetch: url => url.endsWith('/responses') ? Response.json({ object: 'response', status: 'completed', output: [{ type: 'message', content: 'PRIVATE-BODY access-secret-alice' }], usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120 }, private: 'PRIVATE-BODY', error: { code: 'unknown-private-code', message: 'PRIVATE-BODY' } }, { status: 200, headers: { 'content-type': 'application/json; private=PRIVATE-HEADER' } }) : undefined });
+  const p = await f.provider(), response = await f.post(p); assert.equal(response.status, 502); const text = await response.text();
+  assert.match(text, /上游 HTTP 200/); assert.match(text, /内容类型 json/); assert.match(text, /status=completed/); assert.match(text, /type=response/); assert.match(text, /output=present/); assert.match(text, /json-object/);
+  assert.doesNotMatch(text, /PRIVATE-|access-secret|unknown-private-code|input_tokens|120/);
+  assert.deepEqual((await f.manager.status('alice')).usage, { state: 'unverified', checkedAt: null, lastModel: null, completedRequests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+});
+
+test('wrong MIME SSE prefixes and known sharing error shapes stay strict failures and never print raw bodies', async t => {
+  let body = event('response.completed', { response: { status: 'completed', output: [], usage: { total_tokens: 100 } }, private: 'PRIVATE-EVENT' });
+  let mime = 'text/plain; secret=PRIVATE-HEADER';
+  const f = await fixture(t, { onFetch: url => url.endsWith('/responses') ? new Response(body, { headers: { 'content-type': mime } }) : undefined });
+  const p = await f.provider(); let response = await f.post(p), value = await response.text(); assert.equal(response.status, 502); assert.match(value, /内容类型 plain/); assert.match(value, /sse-prefix/); assert.doesNotMatch(value, /PRIVATE-|total_tokens|response.completed/);
+  mime = 'application/json'; response = await f.post(p); value = await response.text(); assert.equal(response.status, 502); assert.match(value, /内容类型 json/); assert.match(value, /sse-prefix/); assert.doesNotMatch(value, /PRIVATE-|total_tokens|response.completed/);
+  body = JSON.stringify({ type: 'error', error: { code: 'subscription_sharing_usage_unavailable', message: 'PRIVATE-ERROR' } }); response = await f.post(p); value = await response.text();
+  assert.equal(response.status, 502); assert.match(value, /json-object/); assert.match(value, /error=subscription_sharing_usage_unavailable/); assert.doesNotMatch(value, /PRIVATE-ERROR/);
+  assert.equal((await f.manager.status('alice')).usage.state, 'unverified'); assert.equal((await f.manager.status('alice')).usage.completedRequests, 0);
+});
+
+test('missing MIME validates fragmented BOM, comments and complete SSE frames before real Chat replay and usage', async t => {
+  const source = '\uFEFF\n: keepalive\n\nid: fixture\nretry: 1000\n' + event('response.created', { response: { status: 'in_progress', output: [] } }) + event('response.output_text.delta', { delta: '你好，官方模型。' }) + event('response.completed', { response: { status: 'completed', output: [], usage: { input_tokens: 11, output_tokens: 7, total_tokens: 18 } } });
+  const bytes = new TextEncoder().encode(source), chunks = [];
+  // Split all three BOM bytes, field names, JSON and multibyte text across reads.
+  for (let offset = 0; offset < bytes.length; offset += 1) chunks.push(bytes.subarray(offset, offset + 1));
+  const f = await fixture(t, { onFetch: url => url.endsWith('/responses') ? new Response(new ReadableStream({ start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close(); } })) : undefined });
+  const deltas = [], result = await streamProvider({ provider: await f.provider(), messages: [{ role: 'user', content: 'hello' }], onEvent: (type, value) => { if (type === 'delta') deltas.push(value.text); } });
+  assert.equal(result.text, '你好，官方模型。'); assert.deepEqual(deltas, ['你好，官方模型。']);
+  const usage = (await f.manager.status('alice')).usage;
+  assert.equal(usage.state, 'available'); assert.equal(usage.completedRequests, 1); assert.equal(usage.inputTokens, 11); assert.equal(usage.outputTokens, 7); assert.equal(usage.totalTokens, 18);
+  assert.equal(f.calls.filter(item => item.url.endsWith('/responses')).length, 1);
+});
+
+test('missing MIME accepts a cold complete SSE prefix after the short diagnostic body deadline', async t => {
+  const f = await fixture(t, { requestTimeoutMs: 5000, onFetch: url => url.endsWith('/responses') ? new Response(new ReadableStream({ async start(controller) { await new Promise(resolve => setTimeout(resolve, 1700)); controller.enqueue(new TextEncoder().encode(messageResponse('冷启动正常。'))); controller.close(); } })) : undefined });
+  const result = await streamProvider({ provider: await f.provider(), messages: [{ role: 'user', content: 'hello' }], timeoutMs: 5000 });
+  assert.equal(result.text, '冷启动正常。'); assert.equal((await f.manager.status('alice')).usage.completedRequests, 1);
+});
+
+test('missing MIME accepts a large first official frame within the normal SSE frame bound', async t => {
+  const source = event('response.created', { response: { status: 'in_progress', output: [], metadata: 'x'.repeat(70000) } }) + messageResponse('大型首帧正常。');
+  const f = await fixture(t, { onFetch: url => url.endsWith('/responses') ? new Response(new TextEncoder().encode(source)) : undefined });
+  const result = await streamProvider({ provider: await f.provider(), messages: [{ role: 'user', content: 'hello' }] });
+  assert.equal(result.text, '大型首帧正常。'); assert.equal((await f.manager.status('alice')).usage.completedRequests, 1);
+});
+
+test('missing MIME never accepts JSON, HTML, malformed SSE or invalid UTF-8 as a successful response', async t => {
+  let bytes;
+  const f = await fixture(t, { onFetch: url => url.endsWith('/responses') ? new Response(bytes) : undefined }), provider = await f.provider();
+  for (const source of [
+    JSON.stringify({ type: 'response', status: 'completed', output: [], usage: { total_tokens: 100 }, private: 'PRIVATE-BODY access-secret-alice' }),
+    '<html>PRIVATE-HTML access-secret-alice</html>',
+    'PRIVATE-TEXT access-secret-alice\n',
+    'event: response.completed\ndata: {"type":"response.failed","private":"PRIVATE-SSE"}\n\n',
+    'event: response.completed\ndata: ["PRIVATE-ARRAY"]\n\n',
+    'event: response.completed\ndata: {"type":"response.completed","private":"PRIVATE-INCOMPLETE"}',
+  ]) {
+    bytes = new TextEncoder().encode(source);
+    const response = await f.post(provider), value = await response.text(); assert.equal(response.status, 502); assert.match(value, /内容类型 empty/); assert.doesNotMatch(value, /PRIVATE-|access-secret|total_tokens/);
+  }
+  bytes = new Uint8Array([0xff, 0xfe, 0x0a]);
+  const invalid = await f.post(provider); assert.equal(invalid.status, 502); assert.match(await invalid.text(), /invalid-sse-prefix/);
+  assert.equal((await f.manager.status('alice')).usage.completedRequests, 0);
+});
+
+test('missing MIME prefix inspection obeys downstream cancellation and the enclosing request deadline', async t => {
+  const signals = []; let cancelled = 0;
+  const f = await fixture(t, { onFetch: (url, init) => url.endsWith('/responses') ? (signals.push(init.signal), new Response(new ReadableStream({ cancel() { cancelled++; } }))) : undefined });
+  const provider = await f.provider(), controller = new AbortController();
+  const rejected = assert.rejects(f.post(provider, undefined, { signal: controller.signal }), error => error.name === 'AbortError');
+  await until(() => signals.length === 1); controller.abort(); await rejected; await until(() => signals[0].aborted && cancelled === 1);
+  f.manager.requestTimeoutMs = 80;
+  const expired = await f.post(provider); assert.equal(expired.status, 499); assert.doesNotMatch(await expired.text(), /access-secret|PRIVATE/); await until(() => signals[1].aborted && cancelled === 2);
+  assert.equal((await f.manager.status('alice')).usage.completedRequests, 0); assert.equal(f.accesses.filter(item => item.forceRefresh).length, 0);
+});
+
+test('missing MIME bounded prefix rejection cancels oversized input without counting usage', async t => {
+  let cancelled = false;
+  const f = await fixture(t, { onFetch: url => url.endsWith('/responses') ? new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode(`: ${'x'.repeat(2 * 1024 * 1024)}\n\n`)); }, cancel() { cancelled = true; } })) : undefined });
+  const response = await f.post(await f.provider()); assert.equal(response.status, 502); assert.match(await response.text(), /prefix-size-limit/); await until(() => cancelled);
+  assert.equal((await f.manager.status('alice')).usage.completedRequests, 0);
+});
+
+test('missing MIME valid first delta followed by EOF is still an incomplete provider response', async t => {
+  const f = await fixture(t, { onFetch: url => url.endsWith('/responses') ? new Response(new TextEncoder().encode(event('response.output_text.delta', { delta: '未完成' }))) : undefined });
+  const deltas = [];
+  await assert.rejects(streamProvider({ provider: await f.provider(), messages: [{ role: 'user', content: 'hello' }], onEvent: (type, value) => { if (type === 'delta') deltas.push(value.text); } }), /提前结束/);
+  assert.deepEqual(deltas, ['未完成']); assert.equal((await f.manager.status('alice')).usage.completedRequests, 0); assert.equal(f.calls.filter(item => item.url.endsWith('/responses')).length, 1);
+});
+
+test('HTML and missing-body diagnostic categories do not echo unknown header, JSON or HTML fields', async t => {
+  let upstream = new Response('<html>PRIVATE-HTML access-secret-alice</html>', { headers: { 'content-type': 'text/html; private=PRIVATE-HEADER' } });
+  const f = await fixture(t, { onFetch: url => url.endsWith('/responses') ? upstream : undefined }), p = await f.provider();
+  let response = await f.post(p), value = await response.text(); assert.match(value, /内容类型 html/); assert.doesNotMatch(value, /PRIVATE-|access-secret/);
+  upstream = new Response(null, { status: 204 }); response = await f.post(p); value = await response.text(); assert.match(value, /上游 HTTP 204/); assert.match(value, /内容类型 empty/); assert.match(value, /empty-body/);
+  assert.equal((await f.manager.status('alice')).usage.completedRequests, 0);
+});
+
 test('401 before SSE retries at most once using force-refreshed access, never forwards error secrets', async t => {
   let attempts = 0;
   const f = await fixture(t, { onFetch: url => url.endsWith('/responses') && ++attempts <= 1 ? new Response('upstream-private-secret', { status: 401 }) : undefined });

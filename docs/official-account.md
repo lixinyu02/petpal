@@ -39,6 +39,10 @@ Agent 沿用现有执行电脑、项目目录、权限、审批与队列入口�
 
 ## 验证边界
 
-本轮授权、网关、模型、Chat／Agent、队列、审查、图片与账号隔离回归已通过。Windows x64 与 Ubuntu 24.04 WSLg x64 的原生源码客户端已实际启动，登录门禁、真实 IPC 和官方账号入口通过；这不等于独立 Ubuntu 物理电脑或新安装包验收。**真实用户官方 OAuth 授权及套餐推理仍待完成**；不能用目录替身或自动化测试代替真实账号准入和推理验证。详见[本轮验收记录](workflow/2026-10-15-official-account-acceptance.md)。本轮尚未发布新版正式安装包。
+本轮授权、网关、模型、Chat／Agent、队列、审查、图片与账号隔离回归已通过。最终组合回归 171 项中，170 项通过，1 项 90 秒 Guardian 检查按配置跳过；生产构建通过。
+
+Windows x64 原生源码客户端已沿用用户完成的真实官方授权，读取 7 个模型，并精确使用 `gpt-6-luna` 完成 Chat 和内置 Codex Agent 只读短任务。Agent 实际模型匹配，只回复 OK，未调用工具或操作电脑。两次官方完成响应后的用量状态、请求计数和页面刷新一致；这不代表复杂工具、图片输入或远程电脑操作已实际验收。早期登录等待超时记录保留，现已由成功续验替代，不需要因此重新授权；测试窗口及私有 profile 已保留。
+
+Ubuntu 24.04 WSLg x64 源码客户端此前通过原生启动、登录门禁、真实 IPC 和官方账号入口验收，尚未在 Ubuntu 进行真实官方 OAuth／套餐推理；也不等于独立 Ubuntu 物理电脑、ARM64 或新安装包验收。真实套餐剩余量仍以官方页面为准。详见[本轮验收记录](workflow/2026-10-15-official-account-acceptance.md)。本轮未重打安装包、未推送 GitHub 或更新正式下载清单。
 
 官方协议参考：[登录](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)、[账号与会话](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)、[模型与推理](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)、[预览限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)。

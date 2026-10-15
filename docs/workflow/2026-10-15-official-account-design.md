@@ -22,6 +22,8 @@ Windows/Ubuntu 已内置 Codex，但目前 host 模式继承系统登录，API �
 
 推理走官方公开 /v1/models 与 /v1/responses。主进程管理带随机临时密钥的回环 Responses 网关，OpenAI access/refresh token 不返回页面、中央服务或执行机。网关限制当前账号目录、模型和 SIWC 参数；拒绝重定向、过量请求及失效授权。普通 Chat 复用 Responses 流，只有已开启 Chat+Agent 才提供既有派发工具。
 
+真实账号续验发现部分官方 SSE 响应缺少 Content-Type：仅在 15 秒、2 MiB 内验证完整 JSON SSE 首帧后接受并完整回放，显式错误 MIME 仍拒绝。若真实 completed 的 output 汇总为空，Codex transport 只从同一 response.created 身份下、连续索引且已完整观察到 item.done 的内容重建；未完成片段、稀疏项、身份不符或缺失真实 completed 仍失败。完整项比较按 JSON 语义深相等处理，保留字段值和数组顺序约束；EOF 与尾部校验继续执行。
+
 本机服务以依赖注入获取该用户的临时官方 Provider（稳定 ID、官方名称、图片能力、来源）。所有解析、状态及默认模型按当前用户授权，管理员也不能读取他人的官方模型或令牌。Provider 不写进共享 providers 数组。Agent 按该用户 Provider 生成隔离运行配置；本机和执行机的现有受限 relay 路径继续工作。退出/换账号撤销旧请求与排队授权，不把旧线程恢复到另一官方账号。
 
 ## Impact
