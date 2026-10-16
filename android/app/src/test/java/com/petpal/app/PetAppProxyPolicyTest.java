@@ -81,4 +81,14 @@ public class PetAppProxyPolicyTest {
         assertEquals(Map.of("region", List.of("catalog")), PetAppProxyPolicy.dynamicGroups(source));
         assertEquals(java.util.Set.of("fixture", "choose"), PetAppProxyPolicy.requiredProxyNames(CONFIG));
     }
+    @Test public void backendAllowsOnlyCanonicalSameDeviceHttpWithoutWeakeningOtherTlsPolicies() {
+        assertEquals("https://example.com:44318/petpal", PetAppProxyPolicy.backendUrl("https://example.com:44318/petpal/"));
+        for (String value : new String[]{"http://127.0.0.1:45321", "http://127.0.0.1:65535", "http://[::1]:45321", "http://127.0.0.1", "http://[::1]"}) {
+            assertEquals(value, PetAppProxyPolicy.backendUrl(value)); assertEquals(value, PetAppProxyPolicy.backendUrl(value + "/"));
+        }
+        for (String value : new String[]{"http://192.168.60.10:45321", "http://10.0.2.2:45321", "http://localhost:45321", "http://127.1:45321", "http://127.000.000.001:45321", "http://2130706433:45321", "http://[0:0:0:0:0:0:0:1]:45321", "http://[::ffff:127.0.0.1]:45321", "http://127.0.0.1.evil:45321", "http://user@127.0.0.1:45321", "http://127.0.0.1@evil:45321", "http://127%2e0%2e0%2e1:45321", "http://%31%32%37.0.0.1:45321", "http://127.0.0.1:0", "http://127.0.0.1:65536", "http://127.0.0.1:-1", "http://127.0.0.1:", "http://127.0.0.1:045321", "http://127.0.0.1:45321/path", "http://127.0.0.1:45321//", "http://127.0.0.1:45321?query", "http://127.0.0.1:45321#fragment", "http://127.0.0.1:45321\\evil", "http://127.0.0.1:45321\n"}) assertThrows(value, IllegalArgumentException.class, () -> PetAppProxyPolicy.backendUrl(value));
+        assertThrows(IllegalArgumentException.class, () -> PetAppProxyPolicy.backendUrl(null));
+        assertThrows(IllegalArgumentException.class, () -> TaskNotificationPolicy.baseUrl("http://127.0.0.1:45321"));
+        assertThrows(IllegalArgumentException.class, () -> PetAppProxyPolicy.remoteUrl("http://127.0.0.1:45321/config.yaml"));
+    }
 }

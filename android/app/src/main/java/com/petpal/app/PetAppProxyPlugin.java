@@ -3,6 +3,7 @@ package com.petpal.app;
 import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Looper;
 import androidx.activity.result.ActivityResult;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -23,36 +24,46 @@ public final class PetAppProxyPlugin extends Plugin {
     private String fileScope;
     @Override public void load() { manager = new PetAppProxyState(getContext()); }
     private boolean trusted(boolean foreground) {
-        return !destroyed && getActivity() instanceof MainActivity && getBridge() != null && getBridge().getWebView() != null
+        // Capacitor invokes plugin methods on CapacitorPlugins. WebView origin
+        // and visibility must only be inspected on the owning main thread.
+        return Looper.myLooper() == Looper.getMainLooper() && !destroyed && getActivity() instanceof MainActivity
+            && !getActivity().isFinishing() && !getActivity().isDestroyed() && getBridge() != null && getBridge().getWebView() != null
             && TaskNotificationPolicy.trustedBridge(((MainActivity) getActivity()).hasSecureUpdaterBridge(),
                 UpdaterPolicy.trustedPage(getBridge().getLocalUrl(), getBridge().getWebView().getUrl()),
                 ((MainActivity) getActivity()).isUpdaterForeground() && getBridge().getWebView().isShown(), foreground);
     }
     private interface Work { JSONObject run() throws Exception; }
-    private void action(PluginCall call, boolean foreground, Work work) {
-        if (getActivity() == null) { call.reject("应用代理仅允许小伴主页面调用。"); return; }
-        getActivity().runOnUiThread(() -> {
+    private interface Prepared { void run(Activity activity); }
+    private void onUi(PluginCall call, boolean foreground, Prepared prepared) {
+        final Activity activity = getActivity();
+        if (activity == null) { call.reject("应用代理仅允许小伴主页面调用。"); return; }
+        activity.runOnUiThread(() -> {
             if (!trusted(foreground)) { call.reject("应用代理仅允许安全的本地主页面调用。"); return; }
+            try { prepared.run(activity); }
+            catch (RuntimeException failure) { call.reject("应用代理页面已关闭或操作无法启动，请重新打开设置。"); }
+        });
+    }
+    private void enqueue(PluginCall call, Activity activity, Work work) {
             io.execute(() -> {
                 try {
                     JSONObject result = work.run();
                     JSObject response = JSObject.fromJSONObject(result);
-                    getActivity().runOnUiThread(() -> { if (trusted(false)) call.resolve(response); else call.reject("应用页面已变化，代理操作已结束。"); });
+                    activity.runOnUiThread(() -> { if (trusted(false)) call.resolve(response); else call.reject("应用页面已变化，代理操作已结束。"); });
                 } catch (Exception failure) {
                     // Native, subscription and YAML errors are untrusted: never echo their details.
-                    getActivity().runOnUiThread(() -> call.reject(failure instanceof InterruptedException ? "登录已变化，代理操作已取消。" : "应用代理操作未完成，请检查配置、系统版本和网络。"));
+                    activity.runOnUiThread(() -> call.reject(failure instanceof InterruptedException ? "登录已变化，代理操作已取消。" : "应用代理操作未完成，请检查配置、系统版本和网络。"));
                 }
             });
+    }
+    private void action(PluginCall call, boolean foreground, Work work) { onUi(call, foreground, activity -> enqueue(call, activity, work)); }
+    @PluginMethod public void bindScope(PluginCall call) {
+        onUi(call, false, activity -> {
+            manager.invalidate(); final long generation = manager.generation(); final JSONObject input = call.getData();
+            enqueue(call, activity, () -> manager.bind(input, generation));
         });
     }
-    @PluginMethod public void bindScope(PluginCall call) {
-        if (!trusted(false)) { call.reject("请从小伴主页面设置应用代理。"); return; }
-        manager.invalidate(); final long generation = manager.generation(); final JSONObject input = call.getData();
-        action(call, false, () -> manager.bind(input, generation));
-    }
     @PluginMethod public void clearScope(PluginCall call) {
-        if (!trusted(false)) { call.reject("请从小伴主页面停止应用代理。"); return; }
-        manager.invalidate(); action(call, false, () -> manager.clear());
+        onUi(call, false, activity -> { manager.invalidate(); enqueue(call, activity, () -> manager.clear()); });
     }
     @PluginMethod public void status(PluginCall call) { final long generation = manager.generation(); action(call, false, () -> manager.refreshStatus(generation)); }
     @PluginMethod public void start(PluginCall call) {
@@ -90,10 +101,12 @@ public final class PetAppProxyPlugin extends Plugin {
         final long generation = manager.generation(); final String scope = call.getString("scope"), group = call.getString("group"), name = call.getString("name"); action(call, true, () -> manager.select(scope, group, name, generation));
     }
     @PluginMethod public void importFile(PluginCall call) {
-        if (!trusted(true) || !manager.current(call.getString("scope"))) { call.reject("请先登录并打开应用代理设置。"); return; }
-        fileGeneration = manager.generation(); fileScope = call.getString("scope");
-        Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/yaml", "text/yaml", "text/plain", "application/octet-stream"});
-        startActivityForResult(call, pick, "fileResult");
+        onUi(call, true, activity -> {
+            if (!manager.current(call.getString("scope"))) { call.reject("请先登录并打开应用代理设置。"); return; }
+            fileGeneration = manager.generation(); fileScope = call.getString("scope");
+            Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*").addCategory(Intent.CATEGORY_OPENABLE).putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/yaml", "text/yaml", "text/plain", "application/octet-stream"});
+            startActivityForResult(call, pick, "fileResult");
+        });
     }
     @ActivityCallback private void fileResult(PluginCall call, ActivityResult result) {
         if (call == null) return;

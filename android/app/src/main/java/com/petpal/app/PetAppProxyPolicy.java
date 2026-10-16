@@ -24,6 +24,18 @@ public final class PetAppProxyPolicy {
         LoaderOptions options = new LoaderOptions(); options.setAllowDuplicateKeys(false); options.setMaxAliasesForCollections(32); options.setNestingDepthLimit(48); options.setCodePointLimit(MAX_BYTES);
         return new Yaml(new SafeConstructor(options));
     }
+    /** Public backends require TLS; cleartext is limited to canonical same-device IPs. */
+    public static String backendUrl(String value) {
+        if (value != null && value.startsWith("https://")) return TaskNotificationPolicy.baseUrl(value);
+        try {
+            // Match the raw authority, not a DNS result or a decoded alias.
+            // An omitted port means HTTP's valid default port 80.
+            if (value == null || value.length() > 2048 || !value.matches("http://(?:127\\.0\\.0\\.1|\\[::1\\])(?::[1-9][0-9]{0,4})?/?")) throw new Exception();
+            URI url = new URI(value);
+            if (!"http".equals(url.getScheme()) || url.getRawUserInfo() != null || url.getRawQuery() != null || url.getRawFragment() != null || url.getPort() == 0 || url.getPort() < -1 || url.getPort() > 65535) throw new Exception();
+            return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+        } catch (Exception failure) { throw new IllegalArgumentException("应用代理需要可信 HTTPS 服务地址，或本机回环 IP 服务地址。"); }
+    }
     public static String remoteUrl(String value) {
         try {
             if (value == null || value.length() > 4096 || value.matches(".*[\\x00-\\x20\\x7f\\\\].*")) throw new Exception();

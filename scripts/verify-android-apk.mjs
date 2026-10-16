@@ -208,7 +208,7 @@ export async function verifyAndroidApk(options) {
   const gradle = await fs.readFile(path.join(root, 'android/app/build.gradle'), 'utf8'), variables = await fs.readFile(path.join(root, 'android/variables.gradle'), 'utf8');
   const version = options.version || project.version, versionCode = Number(options.versionCode || gradle.match(/\bversionCode\s+(\d+)/)?.[1]);
   const applicationId = options.applicationId || gradle.match(/\bapplicationId\s+"([^"]+)"/)?.[1];
-  ensure(/^\d+\.\d+\.\d+$/.test(version) && Number.isSafeInteger(versionCode) && versionCode > 0, 'Expected Android release version/code is invalid.');
+  ensure(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/.test(version) && Number.isSafeInteger(versionCode) && versionCode > 0, 'Expected Android release version/code is invalid.');
   const resolvePath = value => path.resolve(root, value), apk = resolvePath(options.apk || `releases/android/PetPal-${version}-Android-debug.apk`), web = resolvePath(options.webDirectory || 'dist');
   const evidence = resolvePath(options.evidenceDirectory || `evidence/android-apk-${version}`), sdk = path.resolve(options.sdk || process.env.ANDROID_HOME || 'E:/Android/Sdk');
   const jdk = path.resolve(options.jdk || process.env.JAVA_HOME || path.join(root, '.tools/jdk-21'));

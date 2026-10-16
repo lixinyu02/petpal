@@ -115,8 +115,8 @@ final class PetAppProxyState {
     JSONObject bind(JSONObject input, long expected) throws Exception {
         stop(); check(expected);
         String url = input.getString("url"), token = input.getString("token"), instance = input.getString("instanceId"), user = input.getString("userId");
-        // This policy is shared with the existing HTTPS Android task listener.
-        url = TaskNotificationPolicy.baseUrl(url); TaskNotificationPolicy.id(instance); TaskNotificationPolicy.id(user);
+        // Keep public TLS validation, with the app's same-device loopback exception.
+        url = PetAppProxyPolicy.backendUrl(url); TaskNotificationPolicy.id(instance); TaskNotificationPolicy.id(user);
         if (token.length() < 16 || token.length() > 4096 || token.matches(".*[\\x00-\\x20\\x7f].*")) throw new IllegalArgumentException("登录凭据无效。");
         HttpURLConnection connection = network.open(new URL(url + "/api/auth/me"));
         try {
