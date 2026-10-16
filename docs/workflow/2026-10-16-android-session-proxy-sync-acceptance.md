@@ -36,4 +36,21 @@
 
 ## 新增正式发布请求
 
-用户随后明确要求发布到正式链接。新增 issue-3：正式安卓 `0.9.13`／versionCode 25，更新官方安卓下载及签名升级清单；Windows／Ubuntu 保留已验收的 0.9.12。不得把旧包重命名为新版本，也不得伪造四端 0.9.13 验收。正式发布结果在 issue-3 完成后补充。
+用户随后明确要求发布到正式链接。issue-3 准备正式安卓 `0.9.13`／versionCode 25，issue-4 完成官方安卓下载及签名升级清单发布；Windows／Ubuntu 保留已验收的 0.9.12，没有将旧包改名为新版本。
+
+## 正式发布结果（2026-10-16）
+
+- 源码冻结提交：`927840a4d2493a2a8c4e33f79782f137b6de8b73`，tag `v0.9.13`。正式发布后的文档提交不改变包对应的源码tag。
+- GitHub：<https://github.com/lixinyu02/petpal/releases/tag/v0.9.13>，release ID 414528577，正式且为latest，六个附件均 uploaded。
+- 官方APK：<https://magicdatou.top:44318/downloads/PetPal-0.9.13-Android-debug.apk>，149427224 bytes，SHA256 `15170b1339ad0bd1b10b68dc1ddca9ccbe0117267c9b04e750aae19e4cfa1912`。
+- Web包：50878715 bytes，SHA256 `af903d15b95bf613acf73cba221e9d749b125e25405284ff3429eb3d957f8b58`。线上Web与后端为0.9.13。
+- 正式APK通过版本、ZIP/CRC、许可、资产、私有数据扫描及与0.9.12的签名连续性检查；实际覆盖开发包后，退出、清空、登录、强关恢复和代理恢复五阶段在Android16/API36模拟器通过。可以覆盖安装，不需卸载原客户端。仍使用项目既有开发证书，不是应用商店签名。
+- GitHub六文件在发布前全量回读，与准备文件逐字节hash/大小相等；发布后核对相同asset ID、digest、正式URL和tag源码。服务器`updates/`及正式根路径APK/Web均全量HTTPS回读，字节数和SHA相等。
+- 两个正式更新源均以原有受信任密钥签名，sequence从14推进至15；发布后实读清单并验证签名。Android/Web13，Windows/Ubuntu12原URL和SHA逐字段保留。
+- 本地和公网认证下载API均提供五个正式客户端包：Android13、Windows12 EXE/ZIP、Ubuntu12 x64/ARM64。各链接HEAD200且长度正确，旧安卓12直链404；匿名下载目录和代理配置API401。安装包文件保持公开下载。
+- Chrome实际使用既有账号登录并打开正式下载中心，Android13、Windows12和“服务器直连”显示正确，GitHub备用链接正确；未提交聊天任务或修改账号偏好。
+- 后端健康、guardian接管、Web冻结文件比对通过。业务数据及各业务字段摘要与部署前相同；没有回滚用户数据库、改账号权限或替换现有信任锚。
+
+发布收据与全量校验证据位于私有 `.data/release-0.9.13/`：`github-proof.json`、`github-latest.json`、`live-updates-verified.json`、`production-final-1792124487795.json`、`production-process-1792124490247.json` 以及 `promotion/`。未将凭据、配置YAML、数据库或签名私钥放入仓库。
+
+仍待真机验收：用户小米17 Pro Max／Android16的实际覆盖安装与运行；本轮未重新验收真实OpenAI套餐授权。

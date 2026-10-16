@@ -8,14 +8,14 @@
 
 - Goal: Android 关闭后保留有效登录，服务器分发代理配置和默认策略，手机保存并恢复选择。
 - Ordering rule: Issues顺序推进；同一issue内并行独立实现组件。
-- Current status: issue-1 至 issue-3 done，issue-4 in_progress（用户明确正式发布）。
+- Current status: issue-1 至 issue-4 done，Android/Web 0.9.13 已正式发布。
 
 ## Issue List
 
 - [x] issue-1 加密续登与按账号分发代理配置、原生同步及设置入口
 - [x] issue-2 组合验收、开发APK与服务接口交付
 - [x] issue-3 正式包与分平台最新下载目录准备
-- [ ] issue-4 GitHub、本地正式发布和签名升级清单
+- [x] issue-4 GitHub、本地正式发布和签名升级清单
 
 ## issue-1
 
@@ -48,7 +48,7 @@
 - 验收标准: 0.9.13/code25同签名可升级，实际Android16登录不崩溃，APK/Web归档全量验证；分平台目录可保留Windows/Ubuntu各自最新0.9.12而不复活旧安卓。
 - 状态: done
 - 验证方式: 正式0.9.13/code25 APK和Web归档完整读取/CRC/许可/私有数据扫描，APK与0.9.12签名连续通过；正式包覆盖dev.2成功，API36实际退出/清空/登录/重开/代理恢复五阶段通过；分平台下载服务、静态路由、真实React下载视图46项通过。
-- commit: 本 issue 的 build(issue-3) 提交
+- commit: 927840a
 
 ## issue-4
 
@@ -57,6 +57,6 @@
 - 范围: 双源序列15签名、GitHub正式v0.9.13、本地官方客户端下载、Web/后端13上线及生产保留验收。
 - 依赖: issue-3
 - 验收标准: Android/Web13正式包与最终审计SHA一致；Win/Ubuntu12保留原URL和SHA；正式下载中心和应用内升级可见；匿名不能调用代理配置API；用户数据保持。
-- 状态: in_progress
-- 验证方式: GitHub和服务器完整字节回读、清单签名及序列、实际下载UI、服务健康与业务数据保留。
-- commit: pending
+- 状态: done
+- 验证方式: GitHub latest v0.9.13（非草稿、非预览）六文件回读与digest一致；服务器APK/Web全量公网回读；GitHub/服务器签名清单seq15实读验证。Chrome实际登录下载中心显示Android13、桌面12和服务器直连；两端认证API五包、所有链接长度、旧安卓404及匿名配置接口401通过。Web/后端13健康、guardian正常，业务数据摘要保持，详见acceptance.md。
+- commit: 本 issue 的 docs(issue-4) 正式交付提交
