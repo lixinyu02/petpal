@@ -63,6 +63,9 @@ export type VoiceConfig = {
 export type CosyVoiceConfig = {configured:boolean;hasReference:boolean;referenceName:string;referenceText:string;baseUrl:string;hasApiKey:boolean;editable:boolean;revision:string};
 export type AsrConfig = {configured:boolean;editable:boolean;baseUrl:string;hasApiKey:boolean;revision:string;busy:boolean;audio:{format:'pcm_f32le';sampleRate:number;channels:number;maxFrameBytes:number;maxSeconds:number}};
 type CredentialKind = 'pairing'|'session'|'none';
+export type SavedLoginConnection = Connection & {credentialKind:CredentialKind;target:'local'|'remote'};
+/** Android implements this with a Keystore vault; browsers keep their existing session-only storage. */
+export type LoginSessionBridge = {read():Promise<{connection:SavedLoginConnection|null}>;write(connection:SavedLoginConnection):Promise<void>;clear():Promise<void>};
 export type StreamEvent = { type: string; data: Record<string, any> };
 export type Identity = {instanceId:string;userId:string};
 export type NativeExecutorStatus = {state:'disconnected'|'connecting'|'reconnecting'|'online'|'error';hostId?:string;name:string;platform:string;arch:string;error?:string;retryable?:boolean;retryAt?:number};
@@ -77,6 +80,7 @@ export type AppProxyBridge = {status():Promise<AppProxyStatus>;importFile():Prom
 export type DesktopRuntime = {readonly platform:string;readonly arch:string};
 declare global {
   interface Window { petpal?: { readonly runtime?:DesktopRuntime; connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; remoteAck?(id:string,sequence:number):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; preferences?:PreferencesBridge; centralServer?:CentralServerBridge; updates?:DesktopUpdates; executor?:NativeExecutor; musicMcp?:DesktopMusicMcp; officialAccount?:OfficialAccountBridge; appProxy?:AppProxyBridge }; }
+  interface Window { petpalLoginSession?:LoginSessionBridge; }
 }
 const requests = createRequestScope();
 const listeners = new Set<()=>void>();
@@ -88,6 +92,42 @@ let targetSwitchSequence=0;
 let executorScope:string|null=null;
 let executorPendingScope:string|null=null;
 let executorRevision=0;
+let loginPersistenceError='';
+let loginPersistenceQueue:Promise<void>=Promise.resolve();
+export const getLoginPersistenceError=()=>loginPersistenceError;
+function setLoginPersistenceError(message:string){
+  if(loginPersistenceError===message)return;
+  loginPersistenceError=message;window.dispatchEvent(new Event('petpal:login-persistence-error'));
+}
+function persistLogin(connection:SavedLoginConnection,assertCurrent:()=>void=()=>{},commit:()=>void=()=>{}):Promise<void>{
+  const epoch=getSessionEpoch(),fence=()=>{if(epoch!==getSessionEpoch())throw new SessionChangedError();assertCurrent();};
+  const bridge=window.petpalLoginSession;
+  if(!bridge){fence();commit();return Promise.resolve();}
+  let pending:Promise<void>;
+  if(connection.token){
+    // Keep the durable write AND publishing its account in one serialized
+    // transaction. Another same-epoch login must recheck before writing.
+    pending=loginPersistenceQueue.catch(()=>{}).then(async()=>{fence();await bridge.write(connection);fence();commit();});
+    loginPersistenceQueue=pending;
+  }else{
+    // Logout must reach native clear immediately, even when an older write's
+    // callback is delayed. Native reserve cancels that write; queued JS writes
+    // still fail their old epoch fence. New logins need not wait for it.
+    loginPersistenceQueue=Promise.resolve();
+    pending=(async()=>{
+      fence();
+      try{await bridge.clear();}
+      catch{fence();const message='当前会话已关闭，但未能清除设备保存的登录。请重试清除后再关闭应用。';setLoginPersistenceError(message);throw new Error(message);}
+      fence();setLoginPersistenceError('');commit();
+    })();
+  }
+  void pending.catch(()=>{});return pending;
+}
+export function clearSavedLogin(){
+  const connection=getConnection();
+  if(connection.token)return Promise.reject(new SessionChangedError());
+  return persistLogin({...connection,credentialKind:'none',target:executionTarget});
+}
 export const getExecutionTarget=()=>executionTarget;
 const notify = () => { for(const listener of listeners) listener(); };
 export const getConnection = requests.connection;
@@ -100,7 +140,7 @@ export function normalizeServerUrl(value:string) {
   if(url){const parsed=new URL(url);if(!['http:','https:'].includes(parsed.protocol)||parsed.username||parsed.password||parsed.search||parsed.hash)throw new Error('服务地址须为 HTTP(S) 地址，不能包含凭据或查询参数。');}
   return url;
 }
-export function setConnection(next:Connection,credentialKind:CredentialKind=next.token?'pairing':'none',target?:'local'|'remote',reason:'change'|'restore'|'authenticate'='change') {
+function replaceConnection(next:Connection,credentialKind:CredentialKind,target:'local'|'remote'|undefined,reason:'change'|'restore'|'authenticate',persist:boolean) {
   const connection={url:normalizeServerUrl(next.url),token:next.token.trim()};
   executorScope=null;
   executorPendingScope=null;executorRevision++;
@@ -108,9 +148,14 @@ export function setConnection(next:Connection,credentialKind:CredentialKind=next
   void window.petpal?.updates?.cancel().catch(()=>{});
   executionTarget=target || (nativeConnection && connection.url === nativeConnection.url ? 'local' : 'remote');
   identity=null;requests.replace(connection);
+  const changedEpoch=getSessionEpoch();
   try{const saved={...connection,credentialKind,target:executionTarget};sessionStorage.setItem('petpal.connection',JSON.stringify(saved));sessionStorage.setItem(`petpal.connection.${executionTarget}`,JSON.stringify(saved));}catch{}
   try{window.speechSynthesis?.cancel();}catch{}
   window.dispatchEvent(Object.assign(new Event('petpal:session-change'),{detail:{reason}}));notify();
+  return persist?persistLogin({...connection,credentialKind,target:executionTarget},()=>{if(changedEpoch!==getSessionEpoch())throw new SessionChangedError();}):Promise.resolve();
+}
+export function setConnection(next:Connection,credentialKind:CredentialKind=next.token?'pairing':'none',target?:'local'|'remote',reason:'change'|'restore'|'authenticate'='change') {
+  return replaceConnection(next,credentialKind,target,reason,reason!=='restore');
 }
 function acceptIdentity(value:{instanceId?:string;user?:User}) {
   if(!value.instanceId||!value.user?.id)return;
@@ -141,13 +186,24 @@ function acceptIdentity(value:{instanceId?:string;user?:User}) {
 }
 export function initConnection(defaultUrl = '') {
   initialization ??= (async()=>{
-    const native=window.petpal?await window.petpal.connection():undefined;nativeConnection=native;
+    const epoch=getSessionEpoch();
+    const native=window.petpal?await window.petpal.connection():undefined;
+    if(epoch!==getSessionEpoch())return getConnection();nativeConnection=native;
     const params=new URLSearchParams(location.hash.slice(1)),token=params.get('token');
     if(token){setConnection({url:native?.url||'',token});history.replaceState(null,'',location.pathname+location.search);return getConnection();}
-    try{const saved=sessionStorage.getItem('petpal.connection');if(saved){const parsed=JSON.parse(saved);if(typeof parsed.url==='string'&&typeof parsed.token==='string'){
+    let nativeReadFailed=false;
+    if(window.petpalLoginSession){
+      try{
+        const saved=(await window.petpalLoginSession.read()).connection;
+        if(epoch!==getSessionEpoch())return getConnection();
+        const restored=restoreTargetConnection(saved,native);
+        if(restored){setConnection(restored.connection,restored.credentialKind,restored.target,'restore');return getConnection();}
+      }catch{if(epoch!==getSessionEpoch())return getConnection();nativeReadFailed=true;loginPersistenceError='无法恢复设备保存的登录，请重新登录；原私有文件已保留。';}
+    }
+    try{const saved=!nativeReadFailed&&sessionStorage.getItem('petpal.connection');if(saved){const parsed=JSON.parse(saved);if(typeof parsed.url==='string'&&typeof parsed.token==='string'){
       const restored=restoreTargetConnection(parsed,native);
-      if(restored){setConnection(restored.connection,restored.credentialKind,restored.target,'restore');return getConnection();}
-    }}}catch{try{sessionStorage.removeItem('petpal.connection');}catch{}}
+      if(restored){if(window.petpalLoginSession&&restored.connection.token){await persistLogin({...restored.connection,credentialKind:restored.credentialKind,target:restored.target},()=>{if(epoch!==getSessionEpoch())throw new SessionChangedError();},()=>{setConnection(restored.connection,restored.credentialKind,restored.target,'restore');});}else setConnection(restored.connection,restored.credentialKind,restored.target,'restore');return getConnection();}
+    }}}catch{if(epoch!==getSessionEpoch())return getConnection();try{sessionStorage.removeItem('petpal.connection');}catch{}}
     if(native)setConnection({url:defaultUrl || native.url,token:''},'none',undefined,'restore');
     else if(defaultUrl)setConnection({url:defaultUrl,token:''},'none',undefined,'restore');
     return getConnection();
@@ -171,7 +227,7 @@ export async function switchExecutionTarget(target:'local'|'remote',defaultRemot
 function message(data:any,status:number){return data.error?.message||data.error||data.message||`请求失败 (${status})`;}
 async function responseJson(response:Response,request:ReturnType<typeof requests.begin>) {
   const data=await response.json().catch(()=>({}));request.assertCurrent();
-  if(!response.ok){if(response.status===401&&request.connection.token)setConnection({url:request.connection.url,token:''});throw Object.assign(new Error(message(data,response.status)),{status:response.status});}
+  if(!response.ok){if(response.status===401&&request.connection.token)await setConnection({url:request.connection.url,token:''}).catch(()=>{});throw Object.assign(new Error(message(data,response.status)),{status:response.status});}
   return data;
 }
 export async function api<T = any>(path:string, options:RequestInit = {}):Promise<T> {
@@ -242,18 +298,26 @@ export async function apiSpeechStream(text:string, signal:AbortSignal, handlers:
   }finally{request.close();}
 }
 /** Validate new credentials before atomically replacing the current account. */
+async function acceptLogin(request:ReturnType<typeof requests.begin>,connection:Connection,kind:CredentialKind,reason:'change'|'authenticate',accepted?:()=>void){
+  const target=nativeConnection&&connection.url===nativeConnection.url?'local':'remote';
+  await persistLogin({...connection,credentialKind:kind,target},request.assertCurrent,()=>{
+    const nextEpoch=getSessionEpoch()+1;setLoginPersistenceError('');request.assertCurrent();replaceConnection(connection,kind,target,reason,false);
+    if(getSessionEpoch()!==nextEpoch)throw new SessionChangedError();accepted?.();
+  });
+}
 export async function connectWithToken(next:Connection) {
   const url=normalizeServerUrl(next.url),token=next.token.trim();if(!token)throw new Error('请输入配对令牌。');
   const request=requests.begin();
-  try{const response=await connectionFetch(`${url}/api/auth/me`,{headers:{Authorization:`Bearer ${token}`},signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.instanceId!=='string'||!data.instanceId||typeof data.user?.id!=='string'||!data.user.id)throw new Error('服务身份响应无效。');const reason=!identity&&request.connection.url===url?'authenticate':'change';setConnection({url,token},'pairing',undefined,reason);acceptIdentity(data);}finally{request.close();}
+  try{const response=await connectionFetch(`${url}/api/auth/me`,{headers:{Authorization:`Bearer ${token}`},signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.instanceId!=='string'||!data.instanceId||typeof data.user?.id!=='string'||!data.user.id)throw new Error('服务身份响应无效。');const reason=!identity&&request.connection.url===url?'authenticate':'change';await acceptLogin(request,{url,token},'pairing',reason,()=>acceptIdentity(data));}finally{request.close();}
 }
 export async function login(urlValue:string,username:string,password:string) {
   const url=normalizeServerUrl(urlValue),request=requests.begin();
-  try{const response=await connectionFetch(`${url}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim(),password}),signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.token!=='string'||!data.token)throw new Error('登录响应缺少会话凭据。');const reason=!identity&&request.connection.url===url?'authenticate':'change';setConnection({url,token:data.token},'session',undefined,reason);}finally{request.close();}
+  try{const response=await connectionFetch(`${url}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim(),password}),signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.token!=='string'||!data.token)throw new Error('登录响应缺少会话凭据。');const reason=!identity&&request.connection.url===url?'authenticate':'change';await acceptLogin(request,{url,token:data.token},'session',reason);}finally{request.close();}
 }
 export function logout() {
-  const previous=getConnection();setConnection({url:previous.url,token:''});
+  const previous=getConnection(),cleared=setConnection({url:previous.url,token:''});
   if(previous.token){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4000);void connectionFetch(`${previous.url}/api/auth/logout`,{method:'POST',headers:{Authorization:`Bearer ${previous.token}`},signal:controller.signal}).catch(()=>{}).finally(()=>clearTimeout(timer));}
+  return cleared;
 }
 export async function streamMessage(id:string,content:string,signal:AbortSignal,onEvent:(event:StreamEvent)=>void,attachmentIds:string[] = [],assistantRequest?:ChatAssistantRequest) {
   const request=requests.begin(signal);let reader:ReadableStreamDefaultReader<Uint8Array>|undefined;

@@ -60,4 +60,25 @@ public class PetAppProxyPolicyTest {
             assertSame(original, java.net.ProxySelector.getDefault());
         } finally { PetNetwork.proxy(0); }
     }
+    @Test public void serverProfilesCannotInjectPathsEtagsOrUnboundedChoices() {
+        assertEquals("assigned-profile_1", PetAppProxyPolicy.profileId("assigned-profile_1")); assertEquals("r1:abc.2", PetAppProxyPolicy.revision("r1:abc.2"));
+        for (String value : new String[]{"../other", "a/config?token=x", "", "a%2fb", "a\nHeader"}) assertThrows(IllegalArgumentException.class, () -> PetAppProxyPolicy.profileId(value));
+        for (String value : new String[]{"\"r1\"", "*", "r1\r\nX: secret", "a/b", ""}) assertThrows(IllegalArgumentException.class, () -> PetAppProxyPolicy.revision(value));
+        assertEquals(Map.of("地区", "日本 01"), PetAppProxyPolicy.selections(Map.of("地区", "日本 01")));
+        assertThrows(IllegalArgumentException.class, () -> PetAppProxyPolicy.selections(Map.of("地区", 1)));
+        assertThrows(IllegalArgumentException.class, () -> PetAppProxyPolicy.selections(Map.of("地区\n", "节点")));
+        Map<String, String> tooMany = new java.util.LinkedHashMap<>(); for (int i = 0; i < 129; i++) tooMany.put("group" + i, "node");
+        assertThrows(IllegalArgumentException.class, () -> PetAppProxyPolicy.selections(tooMany));
+        assertEquals("a".repeat(64), PetAppProxyPolicy.contentHash("a".repeat(64))); assertThrows(IllegalArgumentException.class, () -> PetAppProxyPolicy.contentHash("A".repeat(64)));
+    }
+    @Test public void explicitPolicyModeIsBoundedAndDoesNotReenableHostFeatures() {
+        assertEquals("global", PetAppProxyPolicy.parse(PetAppProxyPolicy.withMode(CONFIG, "global")).get("mode"));
+        for (String value : new String[]{"Global", "script", "tun", "direct\nallow-lan: true"}) assertThrows(IllegalArgumentException.class, () -> PetAppProxyPolicy.withMode(CONFIG, value));
+    }
+    @Test public void startupReadinessIncludesRealGroupsAndInlineProviderNodes() {
+        String source = "proxy-providers:\n  catalog:\n    type: inline\n    payload: [{name: provider-node, type: socks5, server: 127.0.0.1, port: 49001}]\nproxy-groups: [{name: region, type: select, proxies: [DIRECT], use: [catalog]}]\n";
+        assertEquals(java.util.Set.of("region", "provider-node"), PetAppProxyPolicy.requiredProxyNames(source));
+        assertEquals(Map.of("region", List.of("catalog")), PetAppProxyPolicy.dynamicGroups(source));
+        assertEquals(java.util.Set.of("fixture", "choose"), PetAppProxyPolicy.requiredProxyNames(CONFIG));
+    }
 }

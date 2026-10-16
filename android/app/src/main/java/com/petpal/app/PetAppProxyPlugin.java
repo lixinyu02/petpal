@@ -54,7 +54,7 @@ public final class PetAppProxyPlugin extends Plugin {
         if (!trusted(false)) { call.reject("请从小伴主页面停止应用代理。"); return; }
         manager.invalidate(); action(call, false, () -> manager.clear());
     }
-    @PluginMethod public void status(PluginCall call) { action(call, false, () -> manager.status()); }
+    @PluginMethod public void status(PluginCall call) { final long generation = manager.generation(); action(call, false, () -> manager.refreshStatus(generation)); }
     @PluginMethod public void start(PluginCall call) {
         final long generation = manager.generation(); final String scope = call.getString("scope"); action(call, true, () -> manager.start(scope, generation));
     }
@@ -67,6 +67,20 @@ public final class PetAppProxyPlugin extends Plugin {
     }
     @PluginMethod public void updateRemote(PluginCall call) {
         final long generation = manager.generation(); final String scope = call.getString("scope"); action(call, true, () -> manager.importUrl(scope, "", true, generation));
+    }
+    @PluginMethod public void importServer(PluginCall call) {
+        final long generation = manager.generation(); final String scope = call.getString("scope"), profile = call.getString("profileId"); final boolean reset = Boolean.TRUE.equals(call.getBoolean("resetPolicy", false));
+        action(call, true, () -> manager.importServer(scope, profile, reset, generation));
+    }
+    @PluginMethod public void updateServer(PluginCall call) {
+        final long generation = manager.generation(); final String scope = call.getString("scope"); final boolean reset = Boolean.TRUE.equals(call.getBoolean("resetPolicy", false));
+        action(call, true, () -> manager.updateServer(scope, reset, generation));
+    }
+    @PluginMethod public void checkServer(PluginCall call) {
+        final long generation = manager.generation(); final String scope = call.getString("scope"); action(call, false, () -> manager.checkServer(scope, generation));
+    }
+    @PluginMethod public void mode(PluginCall call) {
+        final long generation = manager.generation(); final String scope = call.getString("scope"), mode = call.getString("mode"); action(call, true, () -> manager.mode(scope, mode, generation));
     }
     @PluginMethod public void preferences(PluginCall call) {
         final long generation = manager.generation(); final String scope = call.getString("scope"); final Boolean autoStart = call.getBoolean("autoStart");

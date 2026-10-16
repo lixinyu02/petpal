@@ -8,6 +8,8 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.LinkedHashSet;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
@@ -98,6 +100,59 @@ public final class PetAppProxyPolicy {
         return value;
     }
     public static String normalize(String source) { return dump(parse(source)); }
+    public static String mode(String value) {
+        if (!Arrays.asList("rule", "global", "direct").contains(value)) throw new IllegalArgumentException("代理模式只支持 rule、global 或 direct。");
+        return value;
+    }
+    public static String profileId(String value) {
+        if (value == null || !value.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,127}")) throw new IllegalArgumentException("服务器代理配置标识无效。");
+        return value;
+    }
+    public static String revision(String value) {
+        if (value == null || !value.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")) throw new IllegalArgumentException("服务器代理配置修订无效。");
+        return value;
+    }
+    public static String label(String value) {
+        if (value == null || value.isEmpty() || value.length() > 256 || value.matches(".*[\\x00-\\x1f\\x7f].*")) throw new IllegalArgumentException("代理名称无效。");
+        return value;
+    }
+    public static String contentHash(String value) {
+        if (value == null || !value.matches("[a-f0-9]{64}")) throw new IllegalArgumentException("服务器代理配置摘要无效。");
+        return value;
+    }
+    public static Map<String, String> selections(Map<?, ?> input) {
+        if (input == null || input.size() > 128) throw new IllegalArgumentException("代理选择组数量无效。");
+        Map<String, String> safe = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : input.entrySet()) {
+            if (!(entry.getKey() instanceof String) || !(entry.getValue() instanceof String)) throw new IllegalArgumentException("代理选择组无效。");
+            safe.put(label((String) entry.getKey()), label((String) entry.getValue()));
+        }
+        return safe;
+    }
+    public static String withMode(String source, String selectedMode) {
+        Map<String, Object> value = parse(source); value.put("mode", mode(selectedMode)); return dump(value);
+    }
+    private static void proxyNames(Object entries, Set<String> names) {
+        if (!(entries instanceof List)) return;
+        for (Object entry : (List<?>) entries) if (entry instanceof Map && ((Map<?, ?>) entry).get("name") instanceof String) names.add(label((String) ((Map<?, ?>) entry).get("name")));
+    }
+    /** The controller can answer /version before these configuration objects exist. */
+    public static Set<String> requiredProxyNames(String source) {
+        Map<String, Object> value = parse(source); Set<String> names = new LinkedHashSet<>();
+        proxyNames(value.get("proxies"), names); proxyNames(value.get("proxy-groups"), names);
+        Object providers = value.get("proxy-providers");
+        if (providers instanceof Map) for (Object provider : ((Map<?, ?>) providers).values()) if (provider instanceof Map) proxyNames(((Map<?, ?>) provider).get("payload"), names);
+        return names;
+    }
+    public static Map<String, List<String>> dynamicGroups(String source) {
+        Map<String, Object> value = parse(source); Map<String, List<String>> result = new LinkedHashMap<>(); Object groups = value.get("proxy-groups");
+        if (groups instanceof List) for (Object entry : (List<?>) groups) if (entry instanceof Map) {
+            Map<?, ?> group = (Map<?, ?>) entry; Object uses = group.get("use"); if (!(group.get("name") instanceof String) || !(uses instanceof List) || ((List<?>) uses).isEmpty()) continue;
+            List<String> providers = new ArrayList<>(); for (Object name : (List<?>) uses) { if (!(name instanceof String)) throw new IllegalArgumentException("代理 provider 名称无效。"); providers.add(label((String) name)); }
+            result.put(label((String) group.get("name")), providers);
+        }
+        return result;
+    }
     public static String runtime(String source, int port, int controller, String secret) {
         Map<String, Object> value = parse(source);
         value.put("mixed-port", port); value.put("port", 0); value.put("socks-port", 0); value.put("redir-port", 0); value.put("tproxy-port", 0);

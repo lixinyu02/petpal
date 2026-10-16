@@ -33,6 +33,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(PetTaskNotificationsPlugin.class);
         registerPlugin(PetAppProxyPlugin.class);
         registerPlugin(PetOfficialAccountPlugin.class);
+        registerPlugin(PetLoginSessionPlugin.class);
         super.onCreate(savedInstanceState);
         // Capacitor already presents its no-WebView fallback if bridge creation could not run.
         // Preserve that page instead of crashing while installing local-only features.

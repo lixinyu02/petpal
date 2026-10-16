@@ -36,6 +36,8 @@ import { executeAutomationTool, withAutomationTools } from './automation-tools.m
 import { organizationPatch, organizationText, visibleProject } from './conversation-organization.mjs';
 import { createOfficialProviderScope, isOfficialProvider, publicOfficialProvider } from './official-providers.mjs';
 import { MobileOfficialAccounts, combineOfficialAccounts } from './mobile-official.mjs';
+import { AppProxyProfiles } from './app-proxy-profiles.mjs';
+import { mountAppProxyProfileRoutes } from './app-proxy-profile-routes.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const now = () => new Date().toISOString();
@@ -62,12 +64,13 @@ function safeCodexStatus(value) {
   return value && typeof value === 'object' ? value : { available: false, error: 'Codex 状态不可用。' };
 }
 
-export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, officialAccounts, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, asrOptions, executorsOptions, automationOptions, mobileOfficialOptions, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
+export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, officialAccounts, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, asrOptions, executorsOptions, automationOptions, mobileOfficialOptions, appProxyProfilesOptions, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
   const codexPolicy = { allowedHttpOrigins: parseCodexHttpOrigins(codexHttpOrigins) };
   const store = await new JsonStore(dataDir).init();
   const accessToken = await store.token(token ?? process.env.PETPAL_TOKEN);
   const ownerTokenHash = tokenHash(accessToken);
   const state = store.state;
+  const appProxyProfiles = await new AppProxyProfiles({ ...appProxyProfilesOptions, dataDir:path.resolve(dataDir), users:()=>state.users }).init();
   let officialChange = async () => {};
   const mobileOfficial = await new MobileOfficialAccounts({ ...mobileOfficialOptions, authorize: auth => {
     if (!auth || auth.bootstrap || shuttingDown) throw failure(401, '手机官方模型需要有效的小伴账号登录。');
@@ -173,9 +176,9 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       if (!sameOrigin && !origins.has(origin) && !hostingAllowed) return res.status(403).json({ error: '此来源未被允许。' });
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
-      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
-      res.setHeader('Access-Control-Expose-Headers', 'X-PetPal-Speech-Emotion,X-PetPal-Speech-Intensity,X-PetPal-Speech-Source');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type,If-Match');
+      res.setHeader('Access-Control-Expose-Headers', 'X-PetPal-Speech-Emotion,X-PetPal-Speech-Intensity,X-PetPal-Speech-Source,ETag,X-Content-SHA256');
       if (req.method === 'OPTIONS') return res.sendStatus(204);
     }
     next();
@@ -196,6 +199,8 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   // A native SSE chunk can expand when JSON-escaped. Keep its larger parser
   // separate from normal user APIs, while the relay enforces its 48 KiB cap.
   app.use('/api/mobile-official', express.json({ limit: '384kb', strict: true }));
+  // A 4 MiB UTF-8 YAML string may expand to six JSON escape bytes per character.
+  app.use('/api/app-proxy/profiles', express.json({ limit: '26mb', strict: true }));
   app.use('/api', express.json({ limit: '128kb', strict: true }));
   app.use('/api', (req, res, next) => {
     if (req.body !== undefined && (Array.isArray(req.body) || !req.body || typeof req.body !== 'object')) return next(failure(400, '请求正文必须是 JSON 对象。'));
@@ -563,6 +568,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     req.user = user; req.sessionHash = hash; req.bootstrap = bootstrap; next();
   });
   const executorAuth = req => ({ userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap });
+  mountAppProxyProfileRoutes({app,profiles:appProxyProfiles,requireAdmin,requireCurrentAuth});
   const mobileAuth = req => {
     if (req.bootstrap) throw failure(403, '手机官方模型需要使用小伴账号密码登录。');
     if (Object.keys(req.query).length) throw failure(400, '手机模型连接不接受查询字段。');
@@ -1374,7 +1380,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     for (const probe of probes) probe.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     for (const task of active.values()) task.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     if (configSwap) await configSwap.catch(() => {});
-    const results = await Promise.allSettled([mobileOfficial.close(), notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), ...[...officialBridges.values()].map(item => item.bridge.close()), codexStatusProbe?.promise.catch(() => {}), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
+    const results = await Promise.allSettled([appProxyProfiles.close(), mobileOfficial.close(), notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), ...[...officialBridges.values()].map(item => item.bridge.close()), codexStatusProbe?.promise.catch(() => {}), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
     let saveError;
     try { await store.queue; } catch (error) { saveError = error; }
     finally { for (const listener of closingListeners) listener.closeAllConnections(); await httpClosed; }

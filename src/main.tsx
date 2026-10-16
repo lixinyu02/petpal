@@ -10,8 +10,8 @@ import { mountUiMotionLifecycle } from './platform/ui-motion.ts';
 import { mountInteractionLayers } from './platform/interaction-layers.mjs';
 import {mountThemeLifecycle} from './platform/theme.ts';
 import { useViewport } from './platform/useViewport';
-import { getIdentity, getSessionEpoch, initConnection, subscribeSession } from './api';
-import { Capacitor } from '@capacitor/core';
+import { getIdentity, getSessionEpoch, initConnection, subscribeSession, type LoginSessionBridge } from './api';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { PetOverlay as NativeOverlay, showPet } from './platform/overlay';
 import LoginGate from './auth/LoginGate';
 import { isPassiveNativeOverlay } from './auth/overlay-entry.mjs';
@@ -21,6 +21,9 @@ const CompanionWorld = lazy(() => import('./CompanionWorld'));
 const PetOverlay = lazy(() => import('./pet/PetOverlay'));
 const params = new URLSearchParams(location.search);
 const overlay = isPassiveNativeOverlay(location.href, Capacitor.isNativePlatform() || !!window.petpal);
+if(!overlay&&Capacitor.isNativePlatform()&&Capacitor.getPlatform()==='android'){
+  window.petpalLoginSession=registerPlugin<LoginSessionBridge>('PetLoginSession');
+}
 function SessionRoot(){
   useViewport();
   useLayoutEffect(() => mountUiMotionLifecycle({ disabled: overlay }), []);

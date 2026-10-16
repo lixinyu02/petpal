@@ -4,6 +4,10 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 const syntheticSecrets = new Map([
+  ['android/app/src/androidTest/java/com/petpal/app/PetAppProxyServerTest.java', new Set(['fixture-app-proxy-session-'])],
+  ['android/app/src/androidTest/java/com/petpal/app/PetLoginSessionAppTest.java', new Set(['SyntheticSync123a'])],
+  ['tests/android-login-session.test.mjs', new Set(['synthetic-saved-token','synthetic-new-login','synthetic-pairing-token','synthetic-other-token','synthetic-current-token','synthetic-pending-login','synthetic-new-after-logout','synthetic-replacement','synthetic-web-token'])],
+  ['tests/app-proxy-profiles-http.test.mjs', new Set(['isolated-profile-http-bootstrap'])],
   ['tests/android-app-proxy-session.test.mjs', new Set(['fixture-session-not-real'])],
   ['tests/android-official-relay.test.mjs', new Set(['fixture-password-123', 'must-never-be-accepted'])],
   ['tests/agent-context-repair-api.test.mjs', new Set(['synthetic-context-key-only'])],

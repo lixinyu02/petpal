@@ -3,14 +3,15 @@ import {useUiEntrance} from '../platform/ui-motion.ts';
 import { ArrowRight, Link2, Loader2, ShieldCheck, X } from 'lucide-react';
 import BrandMark from '../BrandMark';
 import { avatarPreview } from '../avatar/preview';
-import { api, connectWithToken, getConnection, isSessionChanged, login, type Connection } from '../api';
+import { api, clearSavedLogin, connectWithToken, getConnection, getLoginPersistenceError, isSessionChanged, login, type Connection } from '../api';
 import './login.css';
 
 export function ConnectionDialog({ close }: { close?(): void }) {
   const [form, setForm] = useState<Connection>({ url: getConnection().url, token: '' });
   const [method, setMethod] = useState<'password'|'token'>('password');
   const [username, setUsername] = useState(''), [password, setPassword] = useState('');
-  const [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const [error, setError] = useState(getLoginPersistenceError()), [busy, setBusy] = useState(false);
+  useEffect(()=>{const changed=()=>setError(getLoginPersistenceError());window.addEventListener('petpal:login-persistence-error',changed);changed();return()=>window.removeEventListener('petpal:login-persistence-error',changed);},[]);
   async function submit(event: FormEvent) {
     event.preventDefault(); if (busy) return; setBusy(true); setError('');
     try { if (method === 'password') await login(form.url, username, password); else await connectWithToken(form); }
@@ -22,6 +23,12 @@ export function ConnectionDialog({ close }: { close?(): void }) {
     try { if (window.petpal) await connectWithToken(await window.petpal.connection()); }
     catch (error) { if (!isSessionChanged(error)) setError((error as Error).message); }
     finally { setBusy(false); }
+  }
+  async function clearDeviceLogin(){
+    if(busy)return;setBusy(true);
+    try{await clearSavedLogin();setError('');}
+    catch(failure){if(!isSessionChanged(failure))setError(getLoginPersistenceError()||'无法清除设备保存的登录，请重试。');}
+    finally{setBusy(false);}
   }
   const pageEntrance = useUiEntrance<HTMLElement>('login-page', !close);
   const scrimEntrance = useUiEntrance<HTMLDivElement>('connection-dialog', !!close);
@@ -35,8 +42,9 @@ export function ConnectionDialog({ close }: { close?(): void }) {
       {error && <div className="form-error" role="alert">{error}</div>}
       <button className="primary-button full-button" type="submit">{busy ? <Loader2 className="spin" size={17} aria-hidden="true"/> : <ArrowRight size={17} aria-hidden="true"/>}登录并继续</button>
     </fieldset></form>
+    {window.petpalLoginSession&&getLoginPersistenceError()&&<button type="button" className="secondary-button full-button" disabled={busy} onClick={()=>void clearDeviceLogin()}>清除设备保存的登录</button>}
     {window.petpal && <button className="secondary-button full-button auth-owner" disabled={busy} onClick={localOwner}>以本机管理员身份登录</button>}
-    <p className="field-help login-note"><ShieldCheck size={14} aria-hidden="true"/>管理员分配模型与账号身份；登录凭据仅保留当前会话。</p>
+    <p className="field-help login-note"><ShieldCheck size={14} aria-hidden="true"/>{window.petpalLoginSession?'此设备会加密保存登录，退出账号后清除。':'管理员分配模型与账号身份；登录凭据仅保留当前会话。'}</p>
   </section>;
   return close ? <div ref={scrimEntrance} className="modal-backdrop" data-ui-layer="dialog" role="dialog" aria-modal="true">{formContent}</div> : <main ref={pageEntrance} className="login-page"><a href="/" className="login-brand"><BrandMark size={36}/><span>小伴<small>PetPal</small></span></a><div className="login-layout"><div className="login-welcome"><span>你的日常伙伴</span><h1>聊聊想法，<br/>一起把事情做好。</h1><img src={avatarPreview} alt="温柔的二次元伙伴" width="384" height="576" decoding="async" fetchPriority="high" onError={e => { e.currentTarget.style.display = 'none'; }}/></div>{formContent}</div></main>;
 }
