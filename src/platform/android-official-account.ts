@@ -17,6 +17,10 @@ type NativeOfficialAccount={
 const native=registerPlugin<NativeOfficialAccount>('PetOfficialAccount');
 export const supportsAndroidOfficialAccount=()=>Capacitor.isNativePlatform()&&Capacitor.getPlatform()==='android'&&Capacitor.isPluginAvailable('PetOfficialAccount');
 let generation=0,active:{key:string;scopeId:string;pending:Promise<string>}|undefined,reset:Promise<unknown>=Promise.resolve();
+type SessionSnapshot={epoch:number;url:string;hasToken:boolean;ownerKey?:string};
+// Kept for this JS module's lifetime, rather than for one React effect. A
+// StrictMode cleanup is not a logout and cannot cancel a native OAuth attempt.
+let observed:SessionSnapshot|undefined;
 
 function owner(){
   const identity=getIdentity(),connection=getConnection(),epoch=getSessionEpoch();
@@ -59,12 +63,22 @@ export const androidOfficialAccount=()=>supportsAndroidOfficialAccount()?bridge:
 /** Keep the native account bound to the login independently of settings tabs. */
 export function mountAndroidOfficialSession(){
   if(!supportsAndroidOfficialAccount())return()=>{};
-  let key='',alive=true,nativeListener:PluginListenerHandle|undefined;
+  let alive=true,nativeListener:PluginListenerHandle|undefined;
   const changed=()=>{
+    if(!alive)return;
     let value:ReturnType<typeof owner>|undefined;
     try{value=owner();}catch{}
-    if(value?.key===key)return;
-    key=value?.key||'';invalidate();
+    const connection=getConnection();
+    const next:SessionSnapshot={epoch:getSessionEpoch(),url:connection.url,hasToken:!!connection.token,ownerKey:value?.key};
+    const previous=observed;
+    observed=next;
+    // This lifecycle mounts only after initConnection has read saved login.
+    // A token without identity is still awaiting /auth/me: let native bind
+    // independently verify and reuse the existing host once identity arrives.
+    // A confirmed empty login, real connection/epoch change or changed verified
+    // owner must revoke immediately, including while an old bind is pending.
+    const changedSession=previous&&(previous.epoch!==next.epoch||previous.url!==next.url||previous.hasToken!==next.hasToken||!!previous.ownerKey&&previous.ownerKey!==next.ownerKey);
+    if((!previous&&!next.hasToken)||changedSession||value&&active&&active.key!==value.key)invalidate();
     if(value)void bound(value).catch(()=>{});
   };
   const unsubscribe=subscribeSession(changed);changed();
@@ -75,5 +89,5 @@ export function mountAndroidOfficialSession(){
   // an already-bound relay after coming back from the system browser.
   const visible=()=>{if(alive&&!document.hidden&&getIdentity())void call('status').catch(()=>{});};
   document.addEventListener('visibilitychange',visible);
-  return()=>{alive=false;unsubscribe();void nativeListener?.remove();document.removeEventListener('visibilitychange',visible);key='';invalidate();};
+  return()=>{alive=false;unsubscribe();void nativeListener?.remove();document.removeEventListener('visibilitychange',visible);};
 }

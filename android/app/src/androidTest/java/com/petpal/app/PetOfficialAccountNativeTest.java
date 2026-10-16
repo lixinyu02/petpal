@@ -32,6 +32,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
@@ -46,7 +48,7 @@ public class PetOfficialAccountNativeTest {
     private static Map<String, String> fields(String input) throws Exception { Map<String, String> out = new HashMap<>(); for (String part : input.split("&")) { String[] pair = part.split("=", 2); out.put(URLDecoder.decode(pair[0], "UTF-8"), pair.length > 1 ? URLDecoder.decode(pair[1], "UTF-8") : ""); } return out; }
     private static byte[] bytes(InputStream input) throws Exception { ByteArrayOutputStream out = new ByteArrayOutputStream(); byte[] data = new byte[4096]; for (int count; (count = input.read(data)) != -1;) out.write(data, 0, count); return out.toByteArray(); }
 
-    private static final class Fixture implements AutoCloseable {
+    static final class Fixture implements AutoCloseable {
         final File directory;
         final Context context;
         final KeyPair rsa;
@@ -54,8 +56,10 @@ public class PetOfficialAccountNativeTest {
         final CopyOnWriteArrayList<JSONObject> replies = new CopyOnWriteArrayList<>();
         final CopyOnWriteArrayList<JSONObject> inferenceBodies = new CopyOnWriteArrayList<>();
         final CopyOnWriteArrayList<Map<String, String>> grants = new CopyOnWriteArrayList<>();
-        final CountDownLatch tokenEntered = new CountDownLatch(1), tokenContinue = new CountDownLatch(1);
+        final CountDownLatch tokenEntered = new CountDownLatch(1), tokenContinue = new CountDownLatch(1), tokenPrepared = new CountDownLatch(1);
         volatile String authorize, user = "native-user", endpoint = "https://fixture.invalid", responseMode = "complete", badClaim = "";
+        volatile String callbackBody = "";
+        volatile Map<String, String> callbackHeaders = new HashMap<>();
         volatile boolean invalidGrant, blockToken, shortExpiry;
         volatile int refreshes, revoked, disconnected;
         final PetOfficialAccountRuntime runtime;
@@ -70,7 +74,27 @@ public class PetOfficialAccountNativeTest {
         String bind() throws Exception { return runtime.bind(binding()).getString("scopeId"); }
         Map<String, String> auth() throws Exception { return fields(new URI(authorize).getRawQuery()); }
         int callback(String state, String client) throws Exception {
-            Map<String, String> auth = auth(); String address = auth.get("redirect_uri") + "?state=" + URLEncoder.encode(state, "UTF-8") + "&code=synthetic-code&client_id=" + URLEncoder.encode(client, "UTF-8"); HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection(Proxy.NO_PROXY); connection.setConnectTimeout(5000); connection.setReadTimeout(5000); try { int status = connection.getResponseCode(); InputStream input = status == 200 ? connection.getInputStream() : connection.getErrorStream(); if (input != null) input.close(); return status; } finally { connection.disconnect(); }
+            Map<String, String> auth = auth(); String address = auth.get("redirect_uri") + "?state=" + URLEncoder.encode(state, "UTF-8") + "&code=synthetic-code&client_id=" + URLEncoder.encode(client, "UTF-8"); HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection(Proxy.NO_PROXY); connection.setConnectTimeout(5000); connection.setReadTimeout(5000);
+            try {
+                int status = connection.getResponseCode(); Map<String, String> headers = new HashMap<>();
+                for (String name : new String[] { "Content-Type", "Cache-Control", "Referrer-Policy", "Content-Security-Policy", "X-Content-Type-Options" }) headers.put(name, connection.getHeaderField(name));
+                callbackHeaders = headers;
+                try (InputStream input = status == 200 ? connection.getInputStream() : connection.getErrorStream()) { callbackBody = input == null ? "" : new String(bytes(input), StandardCharsets.UTF_8); }
+                return status;
+            } finally { connection.disconnect(); }
+        }
+        String returnUri() {
+            Matcher link = Pattern.compile("petpal://official-account/return\\?ticket=[A-Za-z0-9_-]{43}").matcher(callbackBody);
+            assertTrue("Successful callback must contain a navigation-only return link", link.find());
+            String uri = link.group(); assertEquals(43, OfficialReturnPolicy.parse(uri).length()); return uri;
+        }
+        void assertSafeReturnPage() throws Exception {
+            assertEquals("text/html; charset=utf-8", callbackHeaders.get("Content-Type"));
+            assertEquals("no-store", callbackHeaders.get("Cache-Control")); assertEquals("no-referrer", callbackHeaders.get("Referrer-Policy")); assertEquals("nosniff", callbackHeaders.get("X-Content-Type-Options"));
+            String csp = callbackHeaders.get("Content-Security-Policy"); assertNotNull(csp); Matcher nonce = Pattern.compile("script-src 'nonce-([A-Za-z0-9_-]{43})'").matcher(csp); assertTrue(nonce.find());
+            assertTrue(callbackBody.contains("<script nonce=\"" + nonce.group(1) + "\"")); assertTrue(callbackBody.contains("<style nonce=\"" + nonce.group(1) + "\""));
+            assertTrue(callbackBody.contains("正在验证")); assertTrue(callbackBody.contains("package=com.petpal.app;end"));
+            for (String secret : new String[] { "synthetic-code", auth().get("state"), auth().get("nonce"), "synthetic-access", "synthetic-refresh", "synthetic-petpal-session", "code=", "state=", "code_verifier=", "client_id=" }) assertFalse("Return page leaked an OAuth field or credential", callbackBody.contains(secret));
         }
         void login() throws Exception { runtime.start(null); assertEquals(200, callback(auth().get("state"), "fixture-issued-client")); until(() -> runtime.status().getJSONArray("models").length() == 1); }
         String jwt() throws Exception {
@@ -95,6 +119,7 @@ public class PetOfficialAccountNativeTest {
                         if (cancelled) throw new IOException();
                         if (invalidGrant) { invalidGrant = false; responseCode = 400; json.put("error", "invalid_grant"); }
                         else { boolean refreshing = "refresh_token".equals(grant.get("grant_type")); if (refreshing) refreshes++; else assertEquals(auth().get("code_challenge"), b64(MessageDigest.getInstance("SHA-256").digest(grant.get("code_verifier").getBytes(StandardCharsets.US_ASCII)))); json = tokens(refreshing); }
+                        tokenPrepared.countDown();
                     } else if (path.endsWith("/oauth/revoke")) revoked++;
                     else if (path.equals("/.well-known/jwks.json")) { RSAPublicKey key = (RSAPublicKey) rsa.getPublic(); json.put("keys", new JSONArray().put(new JSONObject().put("kid", "fixture-key").put("kty", "RSA").put("alg", "RS256").put("use", "sig").put("n", b64(unsigned(key.getModulus().toByteArray()))).put("e", b64(unsigned(key.getPublicExponent().toByteArray()))))); }
                     else if (path.equals("/v1/models")) { assertTrue(getRequestProperty("Authorization").startsWith("Bearer synthetic-")); json.put("models", new JSONArray().put(new JSONObject().put("slug", "gpt-6-luna").put("visibility", "list").put("display_name", "GPT 6 Luna").put("input_modalities", new JSONArray().put("text").put("image")))); }
@@ -156,6 +181,48 @@ public class PetOfficialAccountNativeTest {
     @Test public void cancelLoginDoesNotWaitForBlockedTokenExchange() throws Exception {
         try (Fixture fixture = new Fixture()) {
             String id = fixture.bind(); fixture.runtime.start(null); fixture.blockToken = true; fixture.callback(fixture.auth().get("state"), "fixture-issued-client"); assertTrue(fixture.tokenEntered.await(5, TimeUnit.SECONDS)); long start = System.nanoTime(); assertEquals("signed-out", fixture.runtime.cancelLocal(id).getString("state")); assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) < 1000); fixture.tokenContinue.countDown(); Thread.sleep(200); assertEquals(0, fixture.runtime.status().getJSONArray("profiles").length());
+        }
+    }
+    @Test public void callbackCanReturnOnceWhileNativeTokenVerificationIsStillPending() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.bind(); fixture.runtime.start(null); fixture.blockToken = true;
+            assertEquals(200, fixture.callback(fixture.auth().get("state"), "fixture-issued-client")); assertTrue(fixture.tokenEntered.await(5, TimeUnit.SECONDS)); fixture.assertSafeReturnPage();
+            JSONObject pending = fixture.runtime.status(); assertEquals("signing-in", pending.getString("state")); assertEquals("verifying", pending.getString("signInStage")); assertEquals(0, pending.getJSONArray("profiles").length());
+            String uri = fixture.returnUri(); assertTrue(fixture.runtime.consumeReturn(uri)); assertFalse(fixture.runtime.consumeReturn(uri)); assertNotNull(fixture.runtime.pendingAttemptId());
+            fixture.tokenContinue.countDown(); until(() -> "signed-in".equals(fixture.runtime.status().getString("state"))); assertNull(fixture.runtime.pendingAttemptId());
+        }
+    }
+    @Test public void invalidCallbackStateCannotMintNavigationTicketOrConsumeTheAttempt() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.bind(); fixture.runtime.start(null); String attempt = fixture.runtime.pendingAttemptId(); assertNotNull(attempt);
+            assertEquals(400, fixture.callback("wrong-state", "fixture-issued-client")); assertFalse(fixture.callbackBody.contains("ticket=")); assertFalse(fixture.callbackBody.contains("intent://")); assertTrue(fixture.grants.isEmpty());
+            assertFalse(fixture.runtime.consumeReturn(OfficialReturnPolicy.uri("A".repeat(43)))); assertEquals(attempt, fixture.runtime.pendingAttemptId()); assertEquals("browser", fixture.runtime.status().getString("signInStage"));
+            assertEquals(200, fixture.callback(fixture.auth().get("state"), "fixture-issued-client")); assertTrue(fixture.runtime.consumeReturn(fixture.returnUri())); until(() -> "signed-in".equals(fixture.runtime.status().getString("state")));
+        }
+    }
+    @Test public void cancellingOrChangingScopeInvalidatesPreviouslyIssuedReturnTickets() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.bind(); fixture.runtime.start(null); fixture.blockToken = true; fixture.callback(fixture.auth().get("state"), "fixture-issued-client"); assertTrue(fixture.tokenEntered.await(5, TimeUnit.SECONDS));
+            String uri = fixture.returnUri(), attempt = fixture.runtime.pendingAttemptId(); fixture.runtime.cancelAttempt(attempt, "Synthetic cancellation"); assertNull(fixture.runtime.pendingAttemptId()); assertFalse(fixture.runtime.consumeReturn(uri));
+            fixture.tokenContinue.countDown(); assertTrue(fixture.tokenPrepared.await(5, TimeUnit.SECONDS)); fixture.blockToken = false; fixture.runtime.start(null); String replacement = fixture.runtime.pendingAttemptId(); fixture.runtime.cancelAttempt(attempt, "Stale notification"); assertEquals(replacement, fixture.runtime.pendingAttemptId());
+            fixture.callback(fixture.auth().get("state"), "fixture-issued-client"); String replacementUri = fixture.returnUri(); until(() -> "signed-in".equals(fixture.runtime.status().getString("state")));
+            fixture.user = "other-user"; fixture.bind(); assertFalse(fixture.runtime.consumeReturn(uri)); assertFalse(fixture.runtime.consumeReturn(replacementUri)); assertEquals("signed-out", fixture.runtime.status().getString("state"));
+        }
+    }
+    @Test public void sameVerifiedScopeRebindKeepsPendingAttemptAndReturnTicket() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            String scope = fixture.bind(); fixture.runtime.start(null); String attempt = fixture.runtime.pendingAttemptId(), authorize = fixture.authorize;
+            assertEquals(scope, fixture.bind()); assertEquals(attempt, fixture.runtime.pendingAttemptId()); assertEquals(authorize, fixture.authorize); assertEquals("browser", fixture.runtime.status().getString("signInStage"));
+            fixture.blockToken = true; fixture.callback(fixture.auth().get("state"), "fixture-issued-client"); assertTrue(fixture.tokenEntered.await(5, TimeUnit.SECONDS)); String uri = fixture.returnUri();
+            assertEquals(scope, fixture.bind()); assertEquals(attempt, fixture.runtime.pendingAttemptId()); assertEquals("verifying", fixture.runtime.status().getString("signInStage")); assertTrue(fixture.runtime.consumeReturn(uri));
+            fixture.tokenContinue.countDown(); until(() -> "signed-in".equals(fixture.runtime.status().getString("state")));
+        }
+    }
+    @Test public void failedTokenExchangeStillAllowsReturnButDoesNotClaimSuccessfulLogin() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.bind(); fixture.invalidGrant = true; fixture.runtime.start(null); assertEquals(200, fixture.callback(fixture.auth().get("state"), "fixture-issued-client")); fixture.assertSafeReturnPage(); String uri = fixture.returnUri();
+            until(() -> fixture.runtime.pendingAttemptId() == null); JSONObject result = fixture.runtime.status(); assertEquals("signed-out", result.getString("state")); assertTrue(result.has("error")); assertFalse(result.has("signInStage")); assertEquals(0, result.getJSONArray("profiles").length());
+            assertTrue(fixture.runtime.consumeReturn(uri)); assertFalse(fixture.runtime.consumeReturn(uri)); assertFalse(fixture.runtime.status().getBoolean("planUsageEnabled"));
         }
     }
     @Test public void imagePollAboveTwoMiBAndUnicodeSseFramesRemainBoundedAndOrdered() throws Exception {

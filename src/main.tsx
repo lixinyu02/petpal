@@ -26,15 +26,18 @@ if(!overlay&&Capacitor.isNativePlatform()&&Capacitor.getPlatform()==='android'){
 }
 function SessionRoot(){
   useViewport();
+  const[ready,setReady]=useState(overlay);
   useLayoutEffect(() => mountUiMotionLifecycle({ disabled: overlay }), []);
   useEffect(() => overlay ? undefined : mountInteractionLayers(), []);
   useEffect(()=>mountThemeLifecycle({transparent:overlay}),[]);
   useEffect(()=>{
-    if(overlay||Capacitor.getPlatform()!=='android'||!Capacitor.isNativePlatform())return;
+    // An Activity rebuild starts with an empty JS session. Wait for the saved
+    // login before allowing the official-account lifecycle to revoke a scope.
+    if(!ready||overlay||Capacitor.getPlatform()!=='android'||!Capacitor.isNativePlatform())return;
     let disposed=false,cleanup:(()=>void)|undefined;
     void import('./platform/android-official-account').then(module=>{if(!disposed)cleanup=module.mountAndroidOfficialSession();});
     return()=>{disposed=true;cleanup?.();};
-  },[]);
+  },[ready]);
   useEffect(()=>{
     if(overlay||Capacitor.getPlatform()!=='android'||!Capacitor.isNativePlatform())return;
     let disposed=false,cleanup:(()=>void)|undefined;
@@ -43,7 +46,6 @@ function SessionRoot(){
   },[]);
   const epoch=useSyncExternalStore(subscribeSession,getSessionEpoch,getSessionEpoch);
   const ownerIdentity=getIdentity();
-  const[ready,setReady]=useState(overlay);
   useEffect(()=>{if(overlay)return;let alive=true;void initConnection(Capacitor.getPlatform()==='android'?'https://magicdatou.top:44318':window.petpal?'':location.origin).finally(()=>{if(alive)setReady(true);}).catch(()=>{});return()=>{alive=false;};},[]);
   useEffect(()=>{const change=()=>{if(Capacitor.isNativePlatform())void NativeOverlay.stop().catch(()=>{});};window.addEventListener('petpal:session-change',change);return()=>window.removeEventListener('petpal:session-change',change);},[]);
   useEffect(()=>{

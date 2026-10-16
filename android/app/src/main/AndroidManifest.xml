@@ -61,6 +61,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- This route carries a one-use navigation ticket, never an OAuth callback. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="petpal" android:host="official-account" android:path="/return" />
+            </intent-filter>
+
         </activity>
 
         <service
@@ -79,6 +87,15 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="User enabled floating cat companion with persistent stop notification" />
+        </service>
+
+        <service
+            android:name=".PetOfficialAccountService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User started temporary loopback official account authorization with visible, cancellable notification; stops on completion, cancellation, failure or timeout" />
         </service>
 
         <provider

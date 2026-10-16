@@ -104,6 +104,44 @@ test('initial status failure offers safe retry and future reads do not remain pe
   failing=false;f.click('重新读取');await f.flush();assert.equal(f.find('button',props=>text(props.children)==='使用 ChatGPT 登录').props.disabled,false);assert.doesNotMatch(f.text(),/无法读取/);
 });
 
+test('Android distinguishes browser consent from callback verification without claiming authorization succeeded',async t=>{
+  const f=fixture({platform:'android-native',target:'remote',value:{...signedOut,state:'signing-in',signInStage:'browser'}});t.after(()=>f.close());await f.flush();
+  assert.match(f.text(),/等待.*系统浏览器.*官方登录/);
+  assert.match(f.text(),/返回小伴|回到小伴/,'pending Android authorization explains how to return from the browser');
+  assert.equal(f.find('button',props=>text(props.children)==='取消登录').props.disabled,false);
+  assert.equal(f.find('button',props=>props['aria-label']==='刷新官方账号状态').props.disabled,true);
+  assert.equal(f.timerCount,1);
+  f.setValue({...signedOut,state:'signing-in',signInStage:'verifying'});f.fireTimers();await f.flush();
+  assert.match(f.text(),/正在验证|正在.*校验/);
+  assert.doesNotMatch(f.text(),/官方账号已连接|套餐已授权/);
+  assert.equal(f.session.officialAccountSnapshot().status.signInStage,'verifying');
+  assert.equal(f.find('button',props=>text(props.children)==='取消登录').props.disabled,false);
+  f.setHidden(true);assert.equal(f.timerCount,0);
+  f.setValue(signedIn);f.setHidden(false);await f.flush();
+  assert.match(f.text(),/alice@example.invalid/);assert.match(f.text(),/套餐已授权/);
+  assert.doesNotMatch(f.text(),/正在验证|等待.*系统浏览器.*官方登录/);
+});
+
+test('older desktop pending status without a sign-in stage remains compatible and cancellable',async t=>{
+  const f=fixture({value:{...signedOut,state:'signing-in'},cancel:()=>signedOut});t.after(()=>f.close());await f.flush();
+  assert.match(f.text(),/等待.*系统浏览器.*官方登录/);
+  assert.equal(f.find('button',props=>text(props.children)==='取消登录').props.disabled,false);
+  assert.equal(f.session.officialAccountSnapshot().status.signInStage,undefined);
+  f.click('取消登录');await f.flush();assert.match(f.text(),/尚未连接官方账号/);assert.equal(f.timerCount,0);
+});
+
+test('official sign-in stage accepts only bounded public progress while raw callback fields are dropped',async t=>{
+  const f=fixture({platform:'android-native'});t.after(()=>f.close());await f.flush();
+  for(const signInStage of ['browser','verifying']){
+    const result=f.session.readOfficialAccountStatus({...signedOut,state:'signing-in',signInStage,callbackUrl:'http://127.0.0.1/auth/callback?code=private-oauth-code&state=private-oauth-state',code:'private-oauth-code',stateNonce:'private-oauth-state'});
+    assert.equal(result.signInStage,signInStage);
+    assert.doesNotMatch(JSON.stringify(result),/private-oauth|callbackUrl|stateNonce/);
+  }
+  const unknown=f.session.readOfficialAccountStatus({...signedOut,state:'signing-in',signInStage:'private-unknown-native-stage'});
+  assert.equal(unknown.signInStage,undefined);
+  assert.doesNotMatch(JSON.stringify(unknown),/private-unknown-native-stage/);
+});
+
 const usage={state:'available',checkedAt:'2026-10-15T08:00:00.000Z',lastModel:'official-one',completedRequests:3,inputTokens:160,outputTokens:40,totalTokens:200};
 test('official usage distinguishes real connection counters from unavailable plan balance and exposes only a fixed official link',async t=>{
   const f=fixture({value:{...signedIn,usage:{...usage,accessToken:'private-usage-token',percentRemaining:88}}});t.after(()=>f.close());await f.flush();

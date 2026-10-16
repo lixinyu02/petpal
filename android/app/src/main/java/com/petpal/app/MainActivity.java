@@ -12,14 +12,16 @@ public class MainActivity extends BridgeActivity {
     public static final String OPEN_CHAT = "com.petpal.app.OPEN_CHAT";
     private boolean secureUpdaterBridge;
     private boolean updaterForeground;
+    private boolean officialSettingsRequested;
     private final BackNavigationPolicy backNavigation = new BackNavigationPolicy();
     private OnBackPressedCallback nativeBack;
     private final WebViewListener backPageListener = new WebViewListener() {
         @Override public void onPageStarted(WebView view) { backNavigation.cancel(); }
+        @Override public void onPageLoaded(WebView view) { openOfficialSettings(); }
     };
     public boolean hasSecureUpdaterBridge() { return secureUpdaterBridge; }
     public boolean isUpdaterForeground() { return updaterForeground; }
-    @Override public void onResume() { super.onResume(); updaterForeground = true; }
+    @Override public void onResume() { super.onResume(); updaterForeground = true; openOfficialSettings(); }
     @Override public void onPause() { updaterForeground = false; backNavigation.cancel(); super.onPause(); }
     @Override public void onDestroy() {
         backNavigation.cancel();
@@ -28,6 +30,7 @@ public class MainActivity extends BridgeActivity {
     }
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        sanitizeOfficialIntent(getIntent());
         registerPlugin(PetOverlayPlugin.class);
         registerPlugin(PetUpdaterPlugin.class);
         registerPlugin(PetTaskNotificationsPlugin.class);
@@ -52,15 +55,48 @@ public class MainActivity extends BridgeActivity {
         getOnBackPressedDispatcher().addCallback(this, nativeBack);
         captureTaskNavigation(getIntent());
         openRequestedChat(getIntent());
+        openOfficialSettings();
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
+        // Strip external data before Capacitor can publish an appUrlOpen event.
+        sanitizeOfficialIntent(intent);
         super.onNewIntent(intent);
         backNavigation.cancel();
         setIntent(intent);
         captureTaskNavigation(intent);
         openRequestedChat(intent);
+        openOfficialSettings();
+    }
+
+    private void sanitizeOfficialIntent(Intent intent) {
+        if (intent == null) return;
+        if (PetOfficialAccountService.OPEN_SETTINGS.equals(intent.getAction())) {
+            // Opening this fixed settings page has no authentication side effects.
+            officialSettingsRequested = true;
+        } else if (Intent.ACTION_VIEW.equals(intent.getAction()) || intent.getData() != null) {
+            PetOfficialAccountHost host = PetOfficialAccountHost.existing();
+            String value = Intent.ACTION_VIEW.equals(intent.getAction()) && intent.getData() != null ? intent.getData().toString() : null;
+            boolean accepted = host != null && host.runtime().consumeReturn(value);
+            if (accepted) officialSettingsRequested = true;
+        } else return;
+        intent.setData(null); intent.setClipData(null); intent.replaceExtras((Bundle) null); intent.setSelector(null); intent.setAction(Intent.ACTION_MAIN);
+        intent.setFlags(intent.getFlags() & ~(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION));
+    }
+
+    private void openOfficialSettings() {
+        if (!officialSettingsRequested || !updaterForeground || getBridge() == null || getBridge().getWebView() == null) return;
+        WebView view = getBridge().getWebView();
+        if (!UpdaterPolicy.trustedPage(getBridge().getLocalUrl(), view.getUrl())) return;
+        officialSettingsRequested = false;
+        // The event has no payload. Existing workspaces retain their WebView/session.
+        view.evaluateJavascript("(function(){try{return !window.dispatchEvent(new CustomEvent('petpal:official-return',{cancelable:true}));}catch(e){return false;}})()", handled -> {
+            if ("true".equals(handled) || isFinishing() || isDestroyed() || getBridge() == null || getBridge().getWebView() != view || !UpdaterPolicy.trustedPage(getBridge().getLocalUrl(), view.getUrl())) return;
+            android.net.Uri current = android.net.Uri.parse(view.getUrl());
+            if ("1".equals(current.getQueryParameter("chat")) && "1".equals(current.getQueryParameter("settings"))) return;
+            view.loadUrl(getBridge().getLocalUrl().replaceAll("/$", "") + "/?chat=1&settings=1");
+        });
     }
 
     private boolean activeLocalPage(WebView view) {

@@ -104,6 +104,13 @@ export default function App() {
     window.history.replaceState(null,'',`${location.pathname||'/'}?${params}${location.hash||''}`);
   },[view]);
   const [settingsTab, setSettingsTab] = useState<'models'|'pet'|'desktop'|'accounts'|'voice'|'assistant'|'updates'>('models');
+  const officialReturnAction=useRef<()=>void>(()=>{});
+  officialReturnAction.current=()=>{setSettingsTab('models');requestNavigation({kind:'page',view:'settings'});window.dispatchEvent(new Event('petpal:official-native-change'));};
+  useEffect(()=>{
+    const returned=(event:Event)=>{event.preventDefault();officialReturnAction.current();};
+    window.addEventListener('petpal:official-return',returned);
+    return()=>window.removeEventListener('petpal:official-return',returned);
+  },[]);
   const [mode, setMode] = useState<'chat' | 'codex'>(new URLSearchParams(location.search).get('mode') === 'codex' ? 'codex' : 'chat');
   const [selected, setSelected] = useState<string | null>(()=>new URLSearchParams(location.search).get('conversation'));
   const [providerId, setProviderId] = useState('');
@@ -851,6 +858,7 @@ function SettingsView({ state, connected, refresh, notice, connect, initialTab, 
   const voiceScope=state.instanceId&&state.user?`${state.instanceId}:${state.user.id}`:voiceIdentity?`${voiceIdentity.instanceId}:${voiceIdentity.userId}`:`guest:${getConnection().url||location.origin}`;
   const [tab, setTab] = useState(initialTab);
   useEffect(()=>setTab(initialTab),[initialTab]);
+  useEffect(()=>{const returned=()=>setTab('models');window.addEventListener('petpal:official-return',returned);return()=>window.removeEventListener('petpal:official-return',returned);},[]);
   const [defaultProviderId,setDefaultProviderId]=useState(state.settings.defaultProviderId || '');
   useEffect(()=>setDefaultProviderId(state.settings.defaultProviderId || ''),[state.settings.defaultProviderId]);
   async function saveDefault(){setBusy(true);setError('');try{await api('/settings',{method:'PATCH',body:JSON.stringify({defaultProviderId:defaultProviderId || null})});await refresh();notice('默认模型已保存，新对话将使用该模型。');}catch(e){if(!isSessionChanged(e))setError((e as Error).message);}finally{setBusy(false);}}

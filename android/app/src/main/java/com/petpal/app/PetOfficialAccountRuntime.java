@@ -1,6 +1,7 @@
 package com.petpal.app;
 
 import android.content.Context;
+import android.os.SystemClock;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.AtomicFile;
@@ -70,6 +71,7 @@ class PetOfficialAccountRuntime implements AutoCloseable {
     private long generation;
     private boolean closed;
     private Attempt attempt;
+    private ReturnNavigation returnNavigation;
     private String error = "", modelsError = "";
     private JSONArray models = new JSONArray();
     private Relay relay;
@@ -86,9 +88,14 @@ class PetOfficialAccountRuntime implements AutoCloseable {
     }
     private static final class Attempt {
         final Scope scope; final ServerSocket server; final String state = random(32), nonce = random(32), verifier = random(48), redirect, selectedId, clientId;
-        final long deadline = System.currentTimeMillis() + 600000; volatile boolean used;
+        final String id = random(24);
+        final long deadline = SystemClock.elapsedRealtime() + 600000; volatile boolean used;
         Attempt(Scope scope, ServerSocket server, String selectedId, String clientId) { this.scope = scope; this.server = server; this.selectedId = selectedId; this.clientId = clientId; redirect = "http://127.0.0.1:" + server.getLocalPort() + "/auth/callback"; }
         void close() { try { server.close(); } catch (Exception ignored) { } }
+    }
+    private static final class ReturnNavigation {
+        final Scope scope; final String attemptId, ticket = random(32); long expiresAt;
+        ReturnNavigation(Attempt attempt) { scope = attempt.scope; attemptId = attempt.id; expiresAt = attempt.deadline; }
     }
     private static final class Relay {
         final Scope scope; final String id, revision; volatile boolean stopped; volatile HttpURLConnection poll;
@@ -161,6 +168,7 @@ class PetOfficialAccountRuntime implements AutoCloseable {
             JSONArray profiles = new JSONArray(), saved = user.getJSONArray("profiles");
             for (int i = 0; i < saved.length(); i++) { JSONObject entry = saved.getJSONObject(i); profiles.put(new JSONObject().put("id", entry.getString("id")).put("email", entry.optString("email")).put("label", entry.optString("label")).put("signedIn", signedIn(entry)).put("planUsageEnabled", signedIn(entry) && plan(entry))); }
             JSONObject out = new JSONObject().put("supported", true).put("state", attempt != null && value == attempt.scope ? "signing-in" : signedIn(profile) ? "signed-in" : "signed-out").put("activeProfileId", profile == null ? JSONObject.NULL : profile.getString("id")).put("planUsageEnabled", signedIn(profile) && plan(profile)).put("profiles", profiles).put("models", new JSONArray(models.toString())).put("usage", user.optJSONObject("usage") == null ? emptyUsage() : new JSONObject(user.getJSONObject("usage").toString()));
+            if (attempt != null && value == attempt.scope) out.put("signInStage", attempt.used ? "verifying" : "browser");
             if (!error.isEmpty()) out.put("error", error); if (!modelsError.isEmpty()) out.put("modelsError", modelsError);
             out.put("relayConnected", relay != null && !relay.stopped); return out;
         }
@@ -218,10 +226,10 @@ class PetOfficialAccountRuntime implements AutoCloseable {
         Scope value = required(); JSONObject selected = null;
         synchronized (gate) {
             if (profileId != null) { PetOfficialAccountPolicy.uuid(profileId); JSONArray saved = user(value, vault).getJSONArray("profiles"); for (int i = 0; i < saved.length(); i++) if (profileId.equals(saved.getJSONObject(i).optString("id"))) selected = new JSONObject(saved.getJSONObject(i).toString()); if (selected == null) throw new IOException("保存的官方账号不存在。"); }
-            if (attempt != null) attempt.close(); attempt = null; error = "";
+            if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; error = "";
         }
         ServerSocket server = new ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")); server.setSoTimeout(1000); String clientId; synchronized (gate) { clientId = selected == null ? retryClients.get(value.key) : selected.getString("clientId"); } Attempt next = new Attempt(value, server, profileId, clientId);
-        synchronized (gate) { assertCurrent(value); attempt = next; }
+        synchronized (gate) { assertCurrent(value); attempt = next; returnNavigation = new ReturnNavigation(next); }
         Map<String, String> parameters = new HashMap<>(); parameters.put("client_id", next.clientId == null ? "dynamic_agent_client" : next.clientId); parameters.put("ext_agent_host_id", vault.getString("hostId")); parameters.put("response_type", "code"); parameters.put("redirect_uri", next.redirect); parameters.put("scope", "openid profile email offline_access resource.invoke " + PLAN); parameters.put("resource", RESOURCE); parameters.put("state", next.state); parameters.put("nonce", next.nonce); parameters.put("code_challenge_method", "S256"); parameters.put("code_challenge", b64(MessageDigest.getInstance("SHA-256").digest(next.verifier.getBytes(StandardCharsets.US_ASCII))));
         if (next.clientId == null) parameters.put("agent_name_hint", "小伴 PetPal Android"); if (selected != null) { if (!selected.optString("idToken").isEmpty()) parameters.put("id_token_hint", selected.getString("idToken")); if (!selected.optString("email").isEmpty()) parameters.put("login_hint", selected.getString("email")); }
         StringBuilder url = new StringBuilder(AUTHORIZE).append('?'); for (Map.Entry<String, String> field : parameters.entrySet()) url.append(URLEncoder.encode(field.getKey(), "UTF-8")).append('=').append(URLEncoder.encode(field.getValue(), "UTF-8")).append('&');
@@ -231,7 +239,7 @@ class PetOfficialAccountRuntime implements AutoCloseable {
     }
     private void accept(Attempt next) {
         try {
-            while (System.currentTimeMillis() < next.deadline) {
+            while (SystemClock.elapsedRealtime() < next.deadline) {
                 synchronized (gate) { if (attempt != next || scope != next.scope || closed) return; }
                 try (Socket socket = next.server.accept()) {
                     socket.setSoTimeout(5000); BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
@@ -240,11 +248,13 @@ class PetOfficialAccountRuntime implements AutoCloseable {
                     String[] request = first.split(" ", -1); Map<String, String> parameters;
                     try { if (request.length != 3 || !"GET".equals(request[0]) || !"HTTP/1.1".equals(request[2]) || !("127.0.0.1:" + next.server.getLocalPort()).equals(headers.get("host"))) throw failure(); parameters = PetOfficialAccountPolicy.callback(request[1], next.state); }
                     catch (Exception invalid) { respond(socket, 400, "登录回调无效，请继续原来的登录。"); continue; }
-                    if (next.used) { respond(socket, 410, "此登录已经结束，请回到小伴。"); return; } next.used = true;
-                    if (parameters.containsKey("error")) { respond(socket, 400, "官方授权未完成，请回到小伴重试。"); finish(next, "官方授权未完成，请重新登录。"); return; }
+                    if (next.used) { respond(socket, 410, "此登录已经结束，请回到小伴。"); return; } next.used = true; emit();
+                    if (parameters.containsKey("error")) { try { respondReturn(socket, next); } catch (Exception ignored) { } finish(next, "官方授权未完成，请重新登录。"); return; }
                     String code = PetOfficialAccountPolicy.text(parameters.get("code"), 8192, false), returned = parameters.get("client_id"), clientId = next.clientId == null ? returned : next.clientId;
                     PetOfficialAccountPolicy.text(clientId, 512, false); if ("dynamic_agent_client".equals(clientId) || returned != null && !returned.equals(clientId)) throw failure();
-                    respond(socket, 200, "正在完成官方登录，可以回到小伴。"); complete(next, code, clientId); return;
+                    // Browser delivery must not cancel an otherwise valid authorization code.
+                    try { respondReturn(socket, next); } catch (Exception ignored) { }
+                    complete(next, code, clientId); return;
                 } catch (SocketTimeoutException ignored) { }
             }
             finish(next, "官方登录已超时，请重新登录。");
@@ -252,8 +262,30 @@ class PetOfficialAccountRuntime implements AutoCloseable {
     }
     private static String line(BufferedReader reader, int maximum) throws Exception { StringBuilder value = new StringBuilder(); for (int next; (next = reader.read()) != -1;) { if (next == '\n') return value.toString().replaceAll("\r$", ""); if (value.length() >= maximum) throw failure(); value.append((char) next); } throw failure(); }
     private static void respond(Socket socket, int status, String text) throws Exception { byte[] bytes = text.getBytes(StandardCharsets.UTF_8); OutputStream out = socket.getOutputStream(); out.write(("HTTP/1.1 " + status + " Response\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'none'; frame-ancestors 'none'\r\nConnection: close\r\nContent-Length: " + bytes.length + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII)); out.write(bytes); out.flush(); }
-    private void finish(Attempt next, String message) { next.close(); synchronized (gate) { if (attempt != next) return; attempt = null; error = message; } emit(); }
-    private void assertAttempt(Attempt next) throws IOException { assertCurrent(next.scope); synchronized (gate) { if (attempt != next || System.currentTimeMillis() >= next.deadline) throw failure(); } }
+    private void respondReturn(Socket socket, Attempt next) throws Exception {
+        final String ticket; synchronized (gate) { assertAttempt(next); if (returnNavigation == null || !next.id.equals(returnNavigation.attemptId)) throw failure(); ticket = returnNavigation.ticket; }
+        String nonce = random(32); byte[] bytes = OfficialReturnPolicy.html(ticket, nonce).getBytes(StandardCharsets.UTF_8);
+        OutputStream out = socket.getOutputStream(); out.write(("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: " + OfficialReturnPolicy.csp(nonce) + "\r\nConnection: close\r\nContent-Length: " + bytes.length + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII)); out.write(bytes); out.flush();
+    }
+    private void finish(Attempt next, String message) {
+        next.close(); synchronized (gate) {
+            if (attempt != next) return; attempt = null; error = message;
+            if (returnNavigation != null && next.id.equals(returnNavigation.attemptId)) returnNavigation.expiresAt = Math.min(returnNavigation.expiresAt, SystemClock.elapsedRealtime() + 120000);
+        } emit();
+    }
+    String pendingAttemptId() { synchronized (gate) { return !closed && attempt != null && OfficialReturnPolicy.live(SystemClock.elapsedRealtime(), attempt.deadline) ? attempt.id : null; } }
+    void cancelAttempt(String id, String message) {
+        synchronized (gate) { if (attempt == null || !PetOfficialAccountPolicy.equal(id, attempt.id)) return; attempt.close(); attempt = null; returnNavigation = null; error = message; } emit();
+    }
+    boolean consumeReturn(String uri) {
+        final String ticket; try { ticket = OfficialReturnPolicy.parse(uri); } catch (Exception invalid) { return false; }
+        synchronized (gate) {
+            ReturnNavigation navigation = returnNavigation;
+            if (closed || navigation == null || scope == null || navigation.scope != scope || scope.generation != generation || !OfficialReturnPolicy.live(SystemClock.elapsedRealtime(), navigation.expiresAt) || !PetOfficialAccountPolicy.equal(ticket, navigation.ticket)) return false;
+            returnNavigation = null; return true;
+        }
+    }
+    private void assertAttempt(Attempt next) throws IOException { assertCurrent(next.scope); synchronized (gate) { if (attempt != next || SystemClock.elapsedRealtime() >= next.deadline) throw failure(); } }
     private JSONObject verifyId(String token, String clientId, String nonce, String subject, Scope value) throws Exception {
         PetOfficialAccountPolicy.text(token, 65536, false); String[] parts = token.split("\\.", -1); if (parts.length != 3) throw failure(); JSONObject header = new JSONObject(new String(decode(parts[0]), StandardCharsets.UTF_8)), claims = new JSONObject(new String(decode(parts[1]), StandardCharsets.UTF_8));
         if (!"RS256".equals(header.optString("alg")) || header.has("crit")) throw failure(); String kid = PetOfficialAccountPolicy.text(header.getString("kid"), 200, false);
@@ -305,13 +337,13 @@ class PetOfficialAccountRuntime implements AutoCloseable {
         }
     }
     private static void clearTokens(JSONObject profile) throws Exception { profile.put("accessToken", "").put("refreshToken", "").put("idToken", "").put("expiresAt", 0).put("scopes", new JSONArray()).put("revision", UUID.randomUUID().toString()); }
-    JSONObject cancelLocal(String scopeId) throws Exception { checkScope(scopeId); synchronized (gate) { checkScope(scopeId); if (attempt != null) attempt.close(); attempt = null; error = ""; } emit(); return status(); }
+    JSONObject cancelLocal(String scopeId) throws Exception { checkScope(scopeId); synchronized (gate) { checkScope(scopeId); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; error = ""; } emit(); return status(); }
     JSONObject select(String id) throws Exception {
-        Scope value = required(); PetOfficialAccountPolicy.uuid(id); revokeRelay(); synchronized (gate) { assertCurrent(value); if (attempt != null) attempt.close(); attempt = null; JSONObject draft = new JSONObject(vault.toString()), user = user(value, draft); boolean found = false; JSONArray profiles = user.getJSONArray("profiles"); for (int i = 0; i < profiles.length(); i++) if (id.equals(profiles.getJSONObject(i).optString("id"))) { profiles.getJSONObject(i).put("revision", UUID.randomUUID().toString()); found = true; } if (!found) throw failure(); user.put("activeProfileId", id).put("usage", emptyUsage()); save(draft); error = ""; }
+        Scope value = required(); PetOfficialAccountPolicy.uuid(id); revokeRelay(); synchronized (gate) { assertCurrent(value); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; JSONObject draft = new JSONObject(vault.toString()), user = user(value, draft); boolean found = false; JSONArray profiles = user.getJSONArray("profiles"); for (int i = 0; i < profiles.length(); i++) if (id.equals(profiles.getJSONObject(i).optString("id"))) { profiles.getJSONObject(i).put("revision", UUID.randomUUID().toString()); found = true; } if (!found) throw failure(); user.put("activeProfileId", id).put("usage", emptyUsage()); save(draft); error = ""; }
         try { refreshModels(value); } catch (Exception failure) { modelsFailed(value); } emit(); return status();
     }
     JSONObject logout() throws Exception {
-        Scope value = required(); JSONObject previous = active(value); revokeRelay(); synchronized (gate) { assertCurrent(value); if (attempt != null) attempt.close(); attempt = null; JSONObject draft = new JSONObject(vault.toString()), profile = profile(value, draft); if (profile != null) clearTokens(profile); user(value, draft).put("usage", emptyUsage()); save(draft); error = ""; }
+        Scope value = required(); JSONObject previous = active(value); revokeRelay(); synchronized (gate) { assertCurrent(value); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; JSONObject draft = new JSONObject(vault.toString()), profile = profile(value, draft); if (profile != null) clearTokens(profile); user(value, draft).put("usage", emptyUsage()); save(draft); error = ""; }
         if (previous != null && !previous.optString("refreshToken").isEmpty()) try { form(REVOKE, map("token", previous.getString("refreshToken"), "token_type_hint", "refresh_token", "client_id", previous.getString("clientId")), value); } catch (Exception failure) { synchronized (gate) { if (scope == value) error = "已退出手机账号，官方会话撤销未确认，可在 ChatGPT 设置断开此应用。"; } }
         emit(); return status();
     }
@@ -391,6 +423,6 @@ class PetOfficialAccountRuntime implements AutoCloseable {
         Relay previous; synchronized (gate) { previous = relay; relay = null; models = new JSONArray(); modelsError = ""; } stopRelay(previous);
         if (previous != null) { Thread worker = new Thread(() -> { try { backend(previous.scope, "/api/mobile-official/" + previous.id + "/disconnect", new JSONObject(), 5000, false); } catch (Exception ignored) { } }, "petpal-official-disconnect"); worker.setDaemon(true); worker.start(); }
     }
-    void clearScope() { synchronized (gate) { generation++; scope = null; if (attempt != null) attempt.close(); attempt = null; retryClients.clear(); error = ""; } revokeRelay(); for (HttpURLConnection connection : connections) connection.disconnect(); emit(); }
+    void clearScope() { synchronized (gate) { generation++; scope = null; if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; retryClients.clear(); error = ""; } revokeRelay(); for (HttpURLConnection connection : connections) connection.disconnect(); emit(); }
     @Override public void close() { synchronized (gate) { closed = true; } clearScope(); callbacks.shutdownNow(); requests.shutdownNow(); clock.shutdownNow(); }
 }

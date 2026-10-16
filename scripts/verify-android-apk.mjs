@@ -237,7 +237,7 @@ export async function verifyAndroidApk(options) {
   for (const permission of REQUIRED_PERMISSIONS) ensure(permissions.includes(`android.permission.${permission}`), 'Required Android permission is missing.');
   for (const permission of FORBIDDEN_PERMISSIONS) ensure(!permissions.includes(`android.permission.${permission}`), 'Unexpected background/device-wide permission is packaged.');
   ensure(/android:allowBackup[^\n]*=false\b/.test(manifest) && /android:usesCleartextTraffic[^\n]*=false\b/.test(manifest), 'Android backup/HTTPS-only policy differs from the release contract.');
-  for (const [type, name] of [['service', 'PetTaskNotificationService'], ['service', 'PetOverlayService'], ['provider', 'PetUpdateFileProvider']]) {
+  for (const [type, name] of [['service', 'PetTaskNotificationService'], ['service', 'PetOverlayService'], ['service', 'PetOfficialAccountService'], ['provider', 'PetUpdateFileProvider']]) {
     const block = elementBlock(manifest, type, name); ensure(block && /android:exported[^\n]*=false\b/.test(block), 'A private Android component is missing or exported.');
     if (type === 'service') ensure(manifestNumber(block, 'foregroundServiceType') === 0x40000000, 'Android service lost its special-use foreground type.');
   }
