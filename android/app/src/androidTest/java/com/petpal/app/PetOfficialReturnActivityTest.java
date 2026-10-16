@@ -77,7 +77,7 @@ public class PetOfficialReturnActivityTest {
         return title && action && terms;
     }
 
-    private static final class Session implements AutoCloseable {
+    static final class Session implements AutoCloseable {
         final Context context = INSTRUMENTATION.getTargetContext();
         final Application application = (Application) context.getApplicationContext();
         final AtomicReference<MainActivity> activity = new AtomicReference<>();

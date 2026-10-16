@@ -37,11 +37,28 @@ public final class PetOfficialAccountPolicy {
             Map<String, String> parameters = new HashMap<>();
             for (String part : uri.getRawQuery().split("&", -1)) {
                 String[] pair = part.split("=", 2); String name = URLDecoder.decode(pair[0], "UTF-8"), value = pair.length == 2 ? URLDecoder.decode(pair[1], "UTF-8") : "";
+                text(name, 128, false);
+                for (int i = 0; i < name.length(); i++) if (Character.isISOControl(name.charAt(i))) throw new IllegalArgumentException();
+                for (int i = 0; i < value.length(); i++) if (Character.isISOControl(value.charAt(i))) throw new IllegalArgumentException();
                 if (parameters.put(name, value) != null) throw new IllegalArgumentException();
             }
             if (!equal(parameters.get("state"), expectedState)) throw new IllegalArgumentException();
             return parameters;
         } catch (Exception failure) { throw new IllegalArgumentException("官方登录回调无效，请继续原来的登录。"); }
+    }
+    /** Parse only the current literal loopback destination. Never fetch this URL. */
+    public static String callbackTarget(String value, String expectedRedirect) {
+        try {
+            text(value, 16384, false);
+            for (int i = 0; i < value.length(); i++) if (Character.isISOControl(value.charAt(i))) throw new IllegalArgumentException();
+            URI expected = new URI(expectedRedirect), uri = new URI(value);
+            if (!"http".equals(expected.getScheme()) || expected.getPort() < 1 || expected.getPort() > 65535
+                || !("127.0.0.1:" + expected.getPort()).equals(expected.getRawAuthority()) || !"/auth/callback".equals(expected.getRawPath())
+                || expected.getRawQuery() != null || expected.getRawFragment() != null || expected.getRawUserInfo() != null) throw new IllegalArgumentException();
+            if (!"http".equals(uri.getScheme()) || !expected.getRawAuthority().equals(uri.getRawAuthority()) || uri.getRawUserInfo() != null
+                || !"/auth/callback".equals(uri.getRawPath()) || uri.getRawQuery() == null || uri.getRawFragment() != null) throw new IllegalArgumentException();
+            return uri.getRawPath() + "?" + uri.getRawQuery();
+        } catch (Exception failure) { throw new IllegalArgumentException("请输入本次官方授权最后显示的完整本机回调地址。"); }
     }
     public static boolean equal(String first, String second) {
         return first != null && second != null && MessageDigest.isEqual(first.getBytes(StandardCharsets.UTF_8), second.getBytes(StandardCharsets.UTF_8));

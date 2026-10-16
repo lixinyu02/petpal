@@ -12,7 +12,7 @@ const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{reso
 const nodes=tree=>Array.isArray(tree)?tree.flatMap(nodes):!tree||typeof tree!=='object'?[]:[tree,...nodes(tree.props?.children)];
 const text=tree=>Array.isArray(tree)?tree.map(text).join(''):tree==null||typeof tree==='boolean'?'':typeof tree!=='object'?typeof tree==='symbol'?'':String(tree):text(tree.props?.children);
 
-function fixture({platform='desktop',connected=true,target='local',value=signedOut,read,start,cancel,select,logout,refresh,resumeUsage}={}){
+function fixture({platform='desktop',connected=true,target='local',value=signedOut,read,start,cancel,select,logout,refresh,resumeUsage,completeCallback}={}){
   const window=new EventTarget(),document=new EventTarget(),timers=new Map(),calls=[];
   let actual=structuredClone(value),epoch=1,identity={instanceId:'local-service',userId:'ordinary-member'},timerId=0,index=0,tree,dirty=false,mounted=true,updatesAfterUnmount=0,connections=0;
   document.hidden=false;
@@ -25,6 +25,7 @@ function fixture({platform='desktop',connected=true,target='local',value=signedO
     async refresh(){calls.push({action:'refresh'});return refresh?refresh(actual):structuredClone(actual);},
     async resumeUsage(){calls.push({action:'resumeUsage'});actual=resumeUsage?await resumeUsage(actual):{...actual,usage:{...actual.usage,state:'unverified'}};return structuredClone(actual);},
   };
+  if(completeCallback)native.completeCallback=async function(){calls.push({action:'completeCallback',argumentCount:arguments.length});return completeCallback(actual);};
   if(platform==='desktop')window.petpal={officialAccount:native};else if(platform==='legacy')window.petpal={};
   class SessionChangedError extends Error{}
   const api={getConnection:()=>({url:target==='local'?'http://127.0.0.1:4318':'https://central.example.invalid',token:connected?'session-private':''}),getExecutionTarget:()=>target,getIdentity:()=>connected?identity:null,getSessionEpoch:()=>epoch,SessionChangedError};
@@ -46,6 +47,7 @@ function fixture({platform='desktop',connected=true,target='local',value=signedO
     click(label){const node=find('button',props=>props['aria-label']===label||text(props.children)===label);assert.ok(node,`Missing button ${label}`);node.props.onClick();},
     choose(profileId){find('select',props=>props['aria-label']==='切换官方账号').props.onChange({target:{value:profileId}});},
     setValue(next){actual=structuredClone(next);},
+    emitNative(){window.dispatchEvent(new Event('petpal:official-native-change'));},
     setConnected(next){connected=next;epoch++;window.dispatchEvent(new Event('petpal:session-change'));render();},
     changeSession(){epoch++;identity={...identity,userId:'next-user'};window.dispatchEvent(new Event('petpal:session-change'));render();},
     setHidden(hidden){document.hidden=hidden;document.dispatchEvent(new Event('visibilitychange'));},
@@ -140,6 +142,92 @@ test('official sign-in stage accepts only bounded public progress while raw call
   const unknown=f.session.readOfficialAccountStatus({...signedOut,state:'signing-in',signInStage:'private-unknown-native-stage'});
   assert.equal(unknown.signInStage,undefined);
   assert.doesNotMatch(JSON.stringify(unknown),/private-unknown-native-stage/);
+});
+
+const manualPending={...signedOut,state:'signing-in',signInStage:'browser',manualCallbackSupported:true};
+test('manual callback is offered only for a capable Android client during an active authorization',async t=>{
+  for(const options of [
+    {platform:'desktop',value:manualPending,completeCallback:value=>value},
+    {platform:'android-native',value:manualPending},
+    {platform:'android-native',value:{...manualPending,manualCallbackSupported:false},completeCallback:value=>value},
+    {platform:'android-native',value:{...signedOut,manualCallbackSupported:true},completeCallback:value=>value},
+  ]){
+    const f=fixture(options);t.after(()=>f.close());await f.flush();
+    assert.equal(f.find('button',props=>text(props.children)==='手动输入回调地址'),undefined);
+  }
+  const f=fixture({platform:'android-native',value:manualPending,completeCallback:value=>value});t.after(()=>f.close());await f.flush();
+  assert.equal(f.find('button',props=>text(props.children)==='手动输入回调地址').props.disabled,false);
+  assert.equal(f.find('input'),undefined,'callback text must never be entered into a WebView form');
+});
+
+test('dismissing the native paste dialog keeps authorization pending and sends no callback argument through JS',async t=>{
+  const f=fixture({platform:'android-native',value:manualPending,completeCallback:value=>value});t.after(()=>f.close());await f.flush();
+  const defaultRequest=f.session.officialAccountSnapshot().defaultRequest;
+  f.click('手动输入回调地址');await f.flush();
+  assert.deepEqual(f.calls.at(-1),{action:'completeCallback',argumentCount:0});
+  assert.equal(f.calls.some(call=>call.action==='cancel'),false);
+  assert.match(f.text(),/等待.*系统浏览器.*官方登录/);
+  assert.equal(f.find('button',props=>text(props.children)==='手动输入回调地址').props.disabled,false);
+  assert.equal(f.session.officialAccountSnapshot().defaultRequest,defaultRequest);
+  assert.equal(f.timerCount,1);
+});
+
+test('native status can finish authorization while a paste dialog is still pending and a late dialog cannot overwrite it',async t=>{
+  const prompt=deferred(),f=fixture({platform:'android-native',value:manualPending,completeCallback:()=>prompt.promise});t.after(()=>f.close());await f.flush();
+  f.click('手动输入回调地址');await f.flush();
+  assert.equal(f.session.officialAccountSnapshot().busy,'completeCallback');
+  assert.equal(f.find('button',props=>text(props.children)==='手动输入回调地址').props.disabled,true);
+  f.setValue({...manualPending,signInStage:'verifying'});f.emitNative();await f.flush();
+  assert.match(f.text(),/正在验证/);assert.equal(f.session.officialAccountSnapshot().busy,'completeCallback');
+  f.setValue(signedIn);f.emitNative();await f.flush();
+  assert.match(f.text(),/alice@example.invalid/);assert.equal(f.session.officialAccountSnapshot().busy,'');
+  assert.equal(f.calls.filter(call=>call.action==='status').length,3);
+  prompt.resolve(manualPending);await f.flush();
+  assert.match(f.text(),/alice@example.invalid/);assert.doesNotMatch(f.text(),/等待.*系统浏览器.*官方登录/);
+  assert.equal(f.session.officialAccountSnapshot().status.state,'signed-in');
+});
+
+test('callback dialog and concurrent native status reads cannot overwrite newer prompt completion',async t=>{
+  const prompt=deferred(),reading=deferred(),f=fixture({platform:'android-native',value:manualPending,completeCallback:()=>prompt.promise,read:count=>count===1?manualPending:reading.promise});t.after(()=>f.close());await f.flush();
+  f.click('手动输入回调地址');await f.flush();f.emitNative();await f.flush();
+  prompt.resolve(signedIn);await f.flush();assert.match(f.text(),/alice@example.invalid/);
+  reading.resolve(manualPending);await f.flush();assert.match(f.text(),/alice@example.invalid/);
+  assert.equal(f.session.officialAccountSnapshot().status.state,'signed-in');
+});
+
+test('an old pending status read cannot block status events for a newly reopened native dialog',async t=>{
+  const first=deferred(),second=deferred(),oldRead=deferred();let promptCount=0;
+  const f=fixture({platform:'android-native',value:manualPending,completeCallback:()=>++promptCount===1?first.promise:second.promise,read:count=>count===1?manualPending:count===2?oldRead.promise:signedIn});t.after(()=>f.close());await f.flush();
+  f.click('手动输入回调地址');await f.flush();f.emitNative();await f.flush();
+  first.resolve(manualPending);await f.flush();f.click('手动输入回调地址');await f.flush();
+  f.emitNative();await f.flush();assert.match(f.text(),/alice@example.invalid/);
+  assert.equal(f.calls.filter(call=>call.action==='status').length,3);
+  oldRead.resolve(manualPending);second.resolve(manualPending);await f.flush();
+  assert.equal(f.session.officialAccountSnapshot().status.state,'signed-in');
+});
+
+test('manual callback dialog keeps cancel available and discards results from a revoked login',async t=>{
+  for(const switchAccount of [false,true]){
+    const prompt=deferred(),f=fixture({platform:'android-native',value:manualPending,completeCallback:()=>prompt.promise,cancel:()=>signedOut});t.after(()=>f.close());await f.flush();
+    f.click('手动输入回调地址');await f.flush();
+    assert.equal(f.find('button',props=>text(props.children)==='取消登录').props.disabled,false);
+    if(switchAccount)f.changeSession();else f.click('取消登录');await f.flush();
+    prompt.resolve(signedIn);await f.flush();
+    assert.doesNotMatch(f.text(),/alice@example.invalid/);
+    assert.equal(f.session.officialAccountSnapshot().defaultRequest,0);
+  }
+});
+
+test('manual callback progress exposes only a boolean capability and keeps native callback errors private',async t=>{
+  const secret='http://127.0.0.1:1455/auth/callback?code=private-oauth-code&state=private-oauth-state';
+  const f=fixture({platform:'android-native',value:manualPending,completeCallback:()=>{throw new Error(secret);}});t.after(()=>f.close());await f.flush();
+  f.click('手动输入回调地址');await f.flush();
+  assert.match(f.text(),/官方账号操作未完成/);assert.doesNotMatch(f.text(),/private-oauth|auth\/callback/);
+  for(const capability of [true,false,'true',1,{url:secret}]){
+    const result=f.session.readOfficialAccountStatus({...manualPending,manualCallbackSupported:capability,callbackUrl:secret});
+    assert.equal(result.manualCallbackSupported,typeof capability==='boolean'?capability:undefined);
+    assert.doesNotMatch(JSON.stringify(result),/private-oauth|callbackUrl/);
+  }
 });
 
 const usage={state:'available',checkedAt:'2026-10-15T08:00:00.000Z',lastModel:'official-one',completedRequests:3,inputTokens:160,outputTokens:40,totalTokens:200};

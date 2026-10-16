@@ -72,6 +72,7 @@ class PetOfficialAccountRuntime implements AutoCloseable {
     private boolean closed;
     private Attempt attempt;
     private ReturnNavigation returnNavigation;
+    private CallbackReceipt callbackReceipt;
     private String error = "", modelsError = "";
     private JSONArray models = new JSONArray();
     private Relay relay;
@@ -89,13 +90,23 @@ class PetOfficialAccountRuntime implements AutoCloseable {
     private static final class Attempt {
         final Scope scope; final ServerSocket server; final String state = random(32), nonce = random(32), verifier = random(48), redirect, selectedId, clientId;
         final String id = random(24);
-        final long deadline = SystemClock.elapsedRealtime() + 600000; volatile boolean used;
+        final long deadline = SystemClock.elapsedRealtime() + 600000; volatile boolean used; volatile Socket inbound;
         Attempt(Scope scope, ServerSocket server, String selectedId, String clientId) { this.scope = scope; this.server = server; this.selectedId = selectedId; this.clientId = clientId; redirect = "http://127.0.0.1:" + server.getLocalPort() + "/auth/callback"; }
-        void close() { try { server.close(); } catch (Exception ignored) { } }
+        void closeListener() { try { server.close(); } catch (Exception ignored) { } }
+        void close() { closeListener(); Socket value = inbound; if (value != null) try { value.close(); } catch (Exception ignored) { } }
     }
     private static final class ReturnNavigation {
         final Scope scope; final String attemptId, ticket = random(32); long expiresAt;
         ReturnNavigation(Attempt attempt) { scope = attempt.scope; attemptId = attempt.id; expiresAt = attempt.deadline; }
+    }
+    /** Only an exact URL digest survives consumption; authorization codes never do. */
+    private static final class CallbackReceipt {
+        final Scope scope; final String attemptId, redirect, digest; long expiresAt;
+        CallbackReceipt(Attempt value, String digest) { scope = value.scope; attemptId = value.id; redirect = value.redirect; this.digest = digest; expiresAt = value.deadline; }
+    }
+    private static final class CallbackInput {
+        final boolean denied; final String code, clientId;
+        CallbackInput(boolean denied, String code, String clientId) { this.denied = denied; this.code = code; this.clientId = clientId; }
     }
     private static final class Relay {
         final Scope scope; final String id, revision; volatile boolean stopped; volatile HttpURLConnection poll;
@@ -167,7 +178,7 @@ class PetOfficialAccountRuntime implements AutoCloseable {
             Scope value = scope; JSONObject user = value == null ? new JSONObject().put("profiles", new JSONArray()) : user(value, vault), profile = value == null ? null : profile(value, vault);
             JSONArray profiles = new JSONArray(), saved = user.getJSONArray("profiles");
             for (int i = 0; i < saved.length(); i++) { JSONObject entry = saved.getJSONObject(i); profiles.put(new JSONObject().put("id", entry.getString("id")).put("email", entry.optString("email")).put("label", entry.optString("label")).put("signedIn", signedIn(entry)).put("planUsageEnabled", signedIn(entry) && plan(entry))); }
-            JSONObject out = new JSONObject().put("supported", true).put("state", attempt != null && value == attempt.scope ? "signing-in" : signedIn(profile) ? "signed-in" : "signed-out").put("activeProfileId", profile == null ? JSONObject.NULL : profile.getString("id")).put("planUsageEnabled", signedIn(profile) && plan(profile)).put("profiles", profiles).put("models", new JSONArray(models.toString())).put("usage", user.optJSONObject("usage") == null ? emptyUsage() : new JSONObject(user.getJSONObject("usage").toString()));
+            JSONObject out = new JSONObject().put("supported", true).put("manualCallbackSupported", true).put("state", attempt != null && value == attempt.scope ? "signing-in" : signedIn(profile) ? "signed-in" : "signed-out").put("activeProfileId", profile == null ? JSONObject.NULL : profile.getString("id")).put("planUsageEnabled", signedIn(profile) && plan(profile)).put("profiles", profiles).put("models", new JSONArray(models.toString())).put("usage", user.optJSONObject("usage") == null ? emptyUsage() : new JSONObject(user.getJSONObject("usage").toString()));
             if (attempt != null && value == attempt.scope) out.put("signInStage", attempt.used ? "verifying" : "browser");
             if (!error.isEmpty()) out.put("error", error); if (!modelsError.isEmpty()) out.put("modelsError", modelsError);
             out.put("relayConnected", relay != null && !relay.stopped); return out;
@@ -226,7 +237,7 @@ class PetOfficialAccountRuntime implements AutoCloseable {
         Scope value = required(); JSONObject selected = null;
         synchronized (gate) {
             if (profileId != null) { PetOfficialAccountPolicy.uuid(profileId); JSONArray saved = user(value, vault).getJSONArray("profiles"); for (int i = 0; i < saved.length(); i++) if (profileId.equals(saved.getJSONObject(i).optString("id"))) selected = new JSONObject(saved.getJSONObject(i).toString()); if (selected == null) throw new IOException("保存的官方账号不存在。"); }
-            if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; error = "";
+            if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; callbackReceipt = null; error = "";
         }
         ServerSocket server = new ServerSocket(0, 8, InetAddress.getByName("127.0.0.1")); server.setSoTimeout(1000); String clientId; synchronized (gate) { clientId = selected == null ? retryClients.get(value.key) : selected.getString("clientId"); } Attempt next = new Attempt(value, server, profileId, clientId);
         synchronized (gate) { assertCurrent(value); attempt = next; returnNavigation = new ReturnNavigation(next); }
@@ -242,23 +253,65 @@ class PetOfficialAccountRuntime implements AutoCloseable {
             while (SystemClock.elapsedRealtime() < next.deadline) {
                 synchronized (gate) { if (attempt != next || scope != next.scope || closed) return; }
                 try (Socket socket = next.server.accept()) {
+                    synchronized (gate) { if (attempt != next || next.used || scope != next.scope || closed) return; next.inbound = socket; }
                     socket.setSoTimeout(5000); BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
                     String first = line(reader, 16384); Map<String, String> headers = new HashMap<>(); int size = first.length();
                     for (int i = 0; i < 32; i++) { String field = line(reader, 8192); size += field.length(); if (size > 32768) throw failure(); if (field.isEmpty()) break; int colon = field.indexOf(':'); if (colon <= 0) throw failure(); String name = field.substring(0, colon).toLowerCase(java.util.Locale.ROOT); if (headers.put(name, field.substring(colon + 1).trim()) != null) throw failure(); }
-                    String[] request = first.split(" ", -1); Map<String, String> parameters;
-                    try { if (request.length != 3 || !"GET".equals(request[0]) || !"HTTP/1.1".equals(request[2]) || !("127.0.0.1:" + next.server.getLocalPort()).equals(headers.get("host"))) throw failure(); parameters = PetOfficialAccountPolicy.callback(request[1], next.state); }
+                    String[] request = first.split(" ", -1); CallbackInput input; String digest;
+                    try {
+                        if (request.length != 3 || !"GET".equals(request[0]) || !"HTTP/1.1".equals(request[2]) || !("127.0.0.1:" + next.server.getLocalPort()).equals(headers.get("host"))) throw failure();
+                        input = callbackInput(next, PetOfficialAccountPolicy.callback(request[1], next.state));
+                        digest = callbackDigest(next.redirect + request[1].substring("/auth/callback".length()));
+                    }
                     catch (Exception invalid) { respond(socket, 400, "登录回调无效，请继续原来的登录。"); continue; }
-                    if (next.used) { respond(socket, 410, "此登录已经结束，请回到小伴。"); return; } next.used = true; emit();
-                    if (parameters.containsKey("error")) { try { respondReturn(socket, next); } catch (Exception ignored) { } finish(next, "官方授权未完成，请重新登录。"); return; }
-                    String code = PetOfficialAccountPolicy.text(parameters.get("code"), 8192, false), returned = parameters.get("client_id"), clientId = next.clientId == null ? returned : next.clientId;
-                    PetOfficialAccountPolicy.text(clientId, 512, false); if ("dynamic_agent_client".equals(clientId) || returned != null && !returned.equals(clientId)) throw failure();
+                    if (!claimCallback(next, digest)) { respond(socket, 410, "此登录已经结束，请回到小伴。"); return; } emit();
                     // Browser delivery must not cancel an otherwise valid authorization code.
                     try { respondReturn(socket, next); } catch (Exception ignored) { }
-                    complete(next, code, clientId); return;
+                    exchangeCallback(next, input); return;
                 } catch (SocketTimeoutException ignored) { }
+                finally { next.inbound = null; }
             }
             finish(next, "官方登录已超时，请重新登录。");
-        } catch (Exception failure) { finish(next, "官方账号验证未完成，请重新登录。"); }
+        } catch (Exception failure) { synchronized (gate) { if (next.used) return; } finish(next, "官方账号验证未完成，请重新登录。"); }
+    }
+    private static String callbackDigest(String value) throws Exception { return hex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8))); }
+    private static CallbackInput callbackInput(Attempt next, Map<String, String> parameters) throws Exception {
+        if (parameters.containsKey("error")) {
+            PetOfficialAccountPolicy.text(parameters.get("error"), 512, false); if (parameters.containsKey("code")) throw failure();
+            return new CallbackInput(true, null, null);
+        }
+        String code = PetOfficialAccountPolicy.text(parameters.get("code"), 8192, false), returned = parameters.get("client_id"), clientId = next.clientId == null ? returned : next.clientId;
+        PetOfficialAccountPolicy.text(clientId, 512, false); if ("dynamic_agent_client".equals(clientId) || returned != null && !returned.equals(clientId)) throw failure();
+        return new CallbackInput(false, code, clientId);
+    }
+    private boolean claimCallback(Attempt next, String digest) throws Exception {
+        synchronized (gate) {
+            assertAttempt(next); if (next.used) return false;
+            next.used = true; callbackReceipt = new CallbackReceipt(next, digest); next.closeListener(); return true;
+        }
+    }
+    private void exchangeCallback(Attempt next, CallbackInput input) {
+        try { if (input.denied) finish(next, "官方授权未完成，请重新登录。"); else complete(next, input.code, input.clientId); }
+        catch (Exception invalid) { finish(next, "官方账号验证未完成，请重新登录。"); }
+    }
+    /** Called only from the trusted native dialog; the URL never crosses the JS bridge. */
+    JSONObject completeCallback(String scopeId, String callbackUrl) throws Exception {
+        checkScope(scopeId); final Scope owner; final Attempt next; final String redirect;
+        synchronized (gate) {
+            owner = scope; next = attempt;
+            if (next == null && (callbackReceipt == null || callbackReceipt.scope != owner || !OfficialReturnPolicy.live(SystemClock.elapsedRealtime(), callbackReceipt.expiresAt))) throw failure();
+            redirect = next == null ? callbackReceipt.redirect : next.redirect;
+        }
+        String target = PetOfficialAccountPolicy.callbackTarget(callbackUrl, redirect), digest = callbackDigest(callbackUrl);
+        CallbackInput input = next == null ? null : callbackInput(next, PetOfficialAccountPolicy.callback(target, next.state));
+        synchronized (gate) {
+            checkScope(scopeId); assertCurrent(owner);
+            CallbackReceipt receipt = callbackReceipt;
+            if (receipt != null && receipt.scope == owner && (next == null || next.id.equals(receipt.attemptId)) && OfficialReturnPolicy.live(SystemClock.elapsedRealtime(), receipt.expiresAt) && PetOfficialAccountPolicy.equal(digest, receipt.digest)) return status();
+            if (next == null || attempt != next || !claimCallback(next, digest)) throw failure();
+            next.close();
+        }
+        emit(); callbacks.execute(() -> exchangeCallback(next, input)); checkScope(scopeId); return status();
     }
     private static String line(BufferedReader reader, int maximum) throws Exception { StringBuilder value = new StringBuilder(); for (int next; (next = reader.read()) != -1;) { if (next == '\n') return value.toString().replaceAll("\r$", ""); if (value.length() >= maximum) throw failure(); value.append((char) next); } throw failure(); }
     private static void respond(Socket socket, int status, String text) throws Exception { byte[] bytes = text.getBytes(StandardCharsets.UTF_8); OutputStream out = socket.getOutputStream(); out.write(("HTTP/1.1 " + status + " Response\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'none'; frame-ancestors 'none'\r\nConnection: close\r\nContent-Length: " + bytes.length + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII)); out.write(bytes); out.flush(); }
@@ -271,11 +324,12 @@ class PetOfficialAccountRuntime implements AutoCloseable {
         next.close(); synchronized (gate) {
             if (attempt != next) return; attempt = null; error = message;
             if (returnNavigation != null && next.id.equals(returnNavigation.attemptId)) returnNavigation.expiresAt = Math.min(returnNavigation.expiresAt, SystemClock.elapsedRealtime() + 120000);
+            if (callbackReceipt != null && next.id.equals(callbackReceipt.attemptId)) callbackReceipt.expiresAt = Math.min(callbackReceipt.expiresAt, SystemClock.elapsedRealtime() + 120000);
         } emit();
     }
     String pendingAttemptId() { synchronized (gate) { return !closed && attempt != null && OfficialReturnPolicy.live(SystemClock.elapsedRealtime(), attempt.deadline) ? attempt.id : null; } }
     void cancelAttempt(String id, String message) {
-        synchronized (gate) { if (attempt == null || !PetOfficialAccountPolicy.equal(id, attempt.id)) return; attempt.close(); attempt = null; returnNavigation = null; error = message; } emit();
+        synchronized (gate) { if (attempt == null || !PetOfficialAccountPolicy.equal(id, attempt.id)) return; attempt.close(); attempt = null; returnNavigation = null; callbackReceipt = null; error = message; } emit();
     }
     boolean consumeReturn(String uri) {
         final String ticket; try { ticket = OfficialReturnPolicy.parse(uri); } catch (Exception invalid) { return false; }
@@ -337,13 +391,13 @@ class PetOfficialAccountRuntime implements AutoCloseable {
         }
     }
     private static void clearTokens(JSONObject profile) throws Exception { profile.put("accessToken", "").put("refreshToken", "").put("idToken", "").put("expiresAt", 0).put("scopes", new JSONArray()).put("revision", UUID.randomUUID().toString()); }
-    JSONObject cancelLocal(String scopeId) throws Exception { checkScope(scopeId); synchronized (gate) { checkScope(scopeId); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; error = ""; } emit(); return status(); }
+    JSONObject cancelLocal(String scopeId) throws Exception { checkScope(scopeId); synchronized (gate) { checkScope(scopeId); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; callbackReceipt = null; error = ""; } emit(); return status(); }
     JSONObject select(String id) throws Exception {
-        Scope value = required(); PetOfficialAccountPolicy.uuid(id); revokeRelay(); synchronized (gate) { assertCurrent(value); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; JSONObject draft = new JSONObject(vault.toString()), user = user(value, draft); boolean found = false; JSONArray profiles = user.getJSONArray("profiles"); for (int i = 0; i < profiles.length(); i++) if (id.equals(profiles.getJSONObject(i).optString("id"))) { profiles.getJSONObject(i).put("revision", UUID.randomUUID().toString()); found = true; } if (!found) throw failure(); user.put("activeProfileId", id).put("usage", emptyUsage()); save(draft); error = ""; }
+        Scope value = required(); PetOfficialAccountPolicy.uuid(id); revokeRelay(); synchronized (gate) { assertCurrent(value); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; callbackReceipt = null; JSONObject draft = new JSONObject(vault.toString()), user = user(value, draft); boolean found = false; JSONArray profiles = user.getJSONArray("profiles"); for (int i = 0; i < profiles.length(); i++) if (id.equals(profiles.getJSONObject(i).optString("id"))) { profiles.getJSONObject(i).put("revision", UUID.randomUUID().toString()); found = true; } if (!found) throw failure(); user.put("activeProfileId", id).put("usage", emptyUsage()); save(draft); error = ""; }
         try { refreshModels(value); } catch (Exception failure) { modelsFailed(value); } emit(); return status();
     }
     JSONObject logout() throws Exception {
-        Scope value = required(); JSONObject previous = active(value); revokeRelay(); synchronized (gate) { assertCurrent(value); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; JSONObject draft = new JSONObject(vault.toString()), profile = profile(value, draft); if (profile != null) clearTokens(profile); user(value, draft).put("usage", emptyUsage()); save(draft); error = ""; }
+        Scope value = required(); JSONObject previous = active(value); revokeRelay(); synchronized (gate) { assertCurrent(value); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; callbackReceipt = null; JSONObject draft = new JSONObject(vault.toString()), profile = profile(value, draft); if (profile != null) clearTokens(profile); user(value, draft).put("usage", emptyUsage()); save(draft); error = ""; }
         if (previous != null && !previous.optString("refreshToken").isEmpty()) try { form(REVOKE, map("token", previous.getString("refreshToken"), "token_type_hint", "refresh_token", "client_id", previous.getString("clientId")), value); } catch (Exception failure) { synchronized (gate) { if (scope == value) error = "已退出手机账号，官方会话撤销未确认，可在 ChatGPT 设置断开此应用。"; } }
         emit(); return status();
     }
@@ -423,6 +477,6 @@ class PetOfficialAccountRuntime implements AutoCloseable {
         Relay previous; synchronized (gate) { previous = relay; relay = null; models = new JSONArray(); modelsError = ""; } stopRelay(previous);
         if (previous != null) { Thread worker = new Thread(() -> { try { backend(previous.scope, "/api/mobile-official/" + previous.id + "/disconnect", new JSONObject(), 5000, false); } catch (Exception ignored) { } }, "petpal-official-disconnect"); worker.setDaemon(true); worker.start(); }
     }
-    void clearScope() { synchronized (gate) { generation++; scope = null; if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; retryClients.clear(); error = ""; } revokeRelay(); for (HttpURLConnection connection : connections) connection.disconnect(); emit(); }
+    void clearScope() { synchronized (gate) { generation++; scope = null; if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; callbackReceipt = null; retryClients.clear(); error = ""; } revokeRelay(); for (HttpURLConnection connection : connections) connection.disconnect(); emit(); }
     @Override public void close() { synchronized (gate) { closed = true; } clearScope(); callbacks.shutdownNow(); requests.shutdownNow(); clock.shutdownNow(); }
 }

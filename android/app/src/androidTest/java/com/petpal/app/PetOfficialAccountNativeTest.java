@@ -14,6 +14,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.Proxy;
+import java.net.Socket;
 import java.net.URI;
 import java.net.URL;
 import java.net.URLDecoder;
@@ -30,6 +31,9 @@ import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -73,8 +77,9 @@ public class PetOfficialAccountNativeTest {
         JSONObject binding() throws Exception { return new JSONObject().put("url", endpoint).put("token", "synthetic-petpal-session").put("instanceId", "native-instance").put("userId", user); }
         String bind() throws Exception { return runtime.bind(binding()).getString("scopeId"); }
         Map<String, String> auth() throws Exception { return fields(new URI(authorize).getRawQuery()); }
+        String callbackUrl(String state, String client) throws Exception { return auth().get("redirect_uri") + "?state=" + URLEncoder.encode(state, "UTF-8") + "&code=synthetic-code&client_id=" + URLEncoder.encode(client, "UTF-8"); }
         int callback(String state, String client) throws Exception {
-            Map<String, String> auth = auth(); String address = auth.get("redirect_uri") + "?state=" + URLEncoder.encode(state, "UTF-8") + "&code=synthetic-code&client_id=" + URLEncoder.encode(client, "UTF-8"); HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection(Proxy.NO_PROXY); connection.setConnectTimeout(5000); connection.setReadTimeout(5000);
+            String address = callbackUrl(state, client); HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection(Proxy.NO_PROXY); connection.setConnectTimeout(5000); connection.setReadTimeout(5000);
             try {
                 int status = connection.getResponseCode(); Map<String, String> headers = new HashMap<>();
                 for (String name : new String[] { "Content-Type", "Cache-Control", "Referrer-Policy", "Content-Security-Policy", "X-Content-Type-Options" }) headers.put(name, connection.getHeaderField(name));
@@ -223,6 +228,68 @@ public class PetOfficialAccountNativeTest {
             fixture.bind(); fixture.invalidGrant = true; fixture.runtime.start(null); assertEquals(200, fixture.callback(fixture.auth().get("state"), "fixture-issued-client")); fixture.assertSafeReturnPage(); String uri = fixture.returnUri();
             until(() -> fixture.runtime.pendingAttemptId() == null); JSONObject result = fixture.runtime.status(); assertEquals("signed-out", result.getString("state")); assertTrue(result.has("error")); assertFalse(result.has("signInStage")); assertEquals(0, result.getJSONArray("profiles").length());
             assertTrue(fixture.runtime.consumeReturn(uri)); assertFalse(fixture.runtime.consumeReturn(uri)); assertFalse(fixture.runtime.status().getBoolean("planUsageEnabled"));
+        }
+    }
+    @Test public void invalidManualAddressesLeaveTheOriginalBrowserAttemptWaiting() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            String scope = fixture.bind(); fixture.runtime.start(null); String attempt = fixture.runtime.pendingAttemptId(), url = fixture.callbackUrl(fixture.auth().get("state"), "fixture-issued-client");
+            assertTrue(fixture.runtime.status().getBoolean("manualCallbackSupported"));
+            for (String invalid : new String[] { url.replace("127.0.0.1", "localhost"), url.replace("http://", "https://"), url.replace("/auth/callback", "/auth/other"), url + "&code=other", url + "#fragment", fixture.callbackUrl("wrong-state", "fixture-issued-client"), fixture.callbackUrl(fixture.auth().get("state"), "dynamic_agent_client") }) {
+                assertThrows(Exception.class, () -> fixture.runtime.completeCallback(scope, invalid)); assertEquals(attempt, fixture.runtime.pendingAttemptId()); assertEquals("browser", fixture.runtime.status().getString("signInStage")); assertTrue(fixture.grants.isEmpty());
+            }
+            assertEquals(200, fixture.callback(fixture.auth().get("state"), "fixture-issued-client")); until(() -> "signed-in".equals(fixture.runtime.status().getString("state")));
+        }
+    }
+    @Test public void manualCallbackInterruptsAPartialHttpRequestAndDeduplicatesPendingAndCompletedResults() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            String scope = fixture.bind(); fixture.runtime.start(null); fixture.blockToken = true; String url = fixture.callbackUrl(fixture.auth().get("state"), "fixture-issued-client"); URI destination = new URI(url);
+            try (Socket partial = new Socket("127.0.0.1", destination.getPort())) {
+                partial.getOutputStream().write("GET /auth/callback?".getBytes(StandardCharsets.US_ASCII)); partial.getOutputStream().flush();
+                java.lang.reflect.Field attemptField = PetOfficialAccountRuntime.class.getDeclaredField("attempt"); attemptField.setAccessible(true); Object attempt = attemptField.get(fixture.runtime); java.lang.reflect.Field inbound = attempt.getClass().getDeclaredField("inbound"); inbound.setAccessible(true); until(() -> inbound.get(attempt) != null);
+                JSONObject pending = fixture.runtime.completeCallback(scope, url); assertEquals("verifying", pending.getString("signInStage")); assertTrue(fixture.tokenEntered.await(5, TimeUnit.SECONDS));
+                assertEquals("verifying", fixture.runtime.completeCallback(scope, url).getString("signInStage")); assertEquals(1, fixture.grants.size());
+                assertThrows(Exception.class, () -> fixture.runtime.completeCallback(scope, url.replace("synthetic-code", "other-code"))); assertEquals("verifying", fixture.runtime.status().getString("signInStage"));
+                fixture.tokenContinue.countDown(); until(() -> "signed-in".equals(fixture.runtime.status().getString("state"))); assertEquals("signed-in", fixture.runtime.completeCallback(scope, url).getString("state")); assertEquals(1, fixture.grants.size());
+                String status = fixture.runtime.status().toString(); assertFalse(status.contains("synthetic-code")); assertFalse(status.contains(fixture.auth().get("state"))); assertFalse(status.contains("synthetic-access"));
+                java.lang.reflect.Field receiptField = PetOfficialAccountRuntime.class.getDeclaredField("callbackReceipt"); receiptField.setAccessible(true); Object receipt = receiptField.get(fixture.runtime); java.lang.reflect.Field expires = receipt.getClass().getDeclaredField("expiresAt"); expires.setAccessible(true);
+                assertTrue(expires.getLong(receipt) <= android.os.SystemClock.elapsedRealtime() + 120000); expires.setLong(receipt, android.os.SystemClock.elapsedRealtime() - 1);
+                assertThrows(Exception.class, () -> fixture.runtime.completeCallback(scope, url)); assertEquals(1, fixture.grants.size());
+            }
+        }
+    }
+    @Test public void browserAndManualCallbackRaceCanOnlyExchangeOneAuthorizationCode() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            String scope = fixture.bind(); fixture.runtime.start(null); fixture.blockToken = true; String url = fixture.callbackUrl(fixture.auth().get("state"), "fixture-issued-client");
+            ExecutorService workers = Executors.newFixedThreadPool(2); CountDownLatch ready = new CountDownLatch(2), go = new CountDownLatch(1);
+            try {
+                Future<JSONObject> manual = workers.submit(() -> { ready.countDown(); assertTrue(go.await(5, TimeUnit.SECONDS)); return fixture.runtime.completeCallback(scope, url); });
+                Future<Integer> browser = workers.submit(() -> {
+                    ready.countDown(); assertTrue(go.await(5, TimeUnit.SECONDS)); HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection(Proxy.NO_PROXY); connection.setConnectTimeout(3000); connection.setReadTimeout(3000);
+                    try { return connection.getResponseCode(); } catch (IOException listenerClosedByManual) { return -1; } finally { connection.disconnect(); }
+                });
+                assertTrue(ready.await(5, TimeUnit.SECONDS)); go.countDown(); assertEquals("verifying", manual.get(5, TimeUnit.SECONDS).getString("signInStage")); int http = browser.get(5, TimeUnit.SECONDS); assertTrue(http == -1 || http == 200 || http == 410);
+                assertTrue(fixture.tokenEntered.await(5, TimeUnit.SECONDS)); assertEquals(1, fixture.grants.size()); assertEquals("verifying", fixture.runtime.completeCallback(scope, url).getString("signInStage"));
+                fixture.tokenContinue.countDown(); until(() -> "signed-in".equals(fixture.runtime.status().getString("state"))); assertEquals(1, fixture.grants.size());
+            } finally { go.countDown(); workers.shutdownNow(); }
+        }
+    }
+    @Test public void receivedBrowserCallbackCanBePastedAfterSuccessOrInvalidGrantWithoutReexchange() throws Exception {
+        for (boolean invalidGrant : new boolean[] { false, true }) try (Fixture fixture = new Fixture()) {
+            String scope = fixture.bind(); fixture.runtime.start(null); fixture.invalidGrant = invalidGrant; String url = fixture.callbackUrl(fixture.auth().get("state"), "fixture-issued-client");
+            assertEquals(200, fixture.callback(fixture.auth().get("state"), "fixture-issued-client")); until(() -> fixture.runtime.pendingAttemptId() == null);
+            JSONObject status = fixture.runtime.completeCallback(scope, url); assertEquals(invalidGrant ? "signed-out" : "signed-in", status.getString("state")); assertEquals(invalidGrant, status.has("error")); assertEquals(1, fixture.grants.size());
+            assertEquals(status.getString("state"), fixture.runtime.completeCallback(scope, url).getString("state")); assertEquals(1, fixture.grants.size());
+            assertThrows(Exception.class, () -> fixture.runtime.completeCallback(scope, url + "&unrecognized=1")); assertEquals(1, fixture.grants.size());
+        }
+    }
+    @Test public void cancellationNewAttemptLogoutAndScopeChangesRevokeManualCallbackReceipts() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            String scope = fixture.bind(); fixture.runtime.start(null); String cancelled = fixture.callbackUrl(fixture.auth().get("state"), "fixture-issued-client"); fixture.runtime.cancelLocal(scope);
+            assertThrows(Exception.class, () -> fixture.runtime.completeCallback(scope, cancelled)); assertTrue(fixture.grants.isEmpty());
+            fixture.runtime.start(null); String first = fixture.callbackUrl(fixture.auth().get("state"), "fixture-issued-client"); fixture.runtime.completeCallback(scope, first); until(() -> "signed-in".equals(fixture.runtime.status().getString("state")));
+            fixture.runtime.start(null); String replacement = fixture.callbackUrl(fixture.auth().get("state"), "fixture-issued-client"); assertThrows(Exception.class, () -> fixture.runtime.completeCallback(scope, first)); assertEquals("browser", fixture.runtime.status().getString("signInStage"));
+            fixture.runtime.completeCallback(scope, replacement); until(() -> fixture.runtime.pendingAttemptId() == null); assertEquals(2, fixture.grants.size()); fixture.runtime.logout(); assertThrows(Exception.class, () -> fixture.runtime.completeCallback(scope, replacement));
+            fixture.runtime.start(null); String otherScope = fixture.callbackUrl(fixture.auth().get("state"), "fixture-issued-client"); fixture.user = "other-user"; String nextScope = fixture.bind(); assertThrows(Exception.class, () -> fixture.runtime.completeCallback(scope, otherScope)); assertThrows(Exception.class, () -> fixture.runtime.completeCallback(nextScope, otherScope)); assertEquals(2, fixture.grants.size());
         }
     }
     @Test public void imagePollAboveTwoMiBAndUnicodeSseFramesRemainBoundedAndOrdered() throws Exception {

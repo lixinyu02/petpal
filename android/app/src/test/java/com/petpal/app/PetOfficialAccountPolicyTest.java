@@ -22,6 +22,36 @@ public class PetOfficialAccountPolicyTest {
         assertThrows(IllegalArgumentException.class, () -> PetOfficialAccountPolicy.text("token\r\nCookie: x", 100, false));
         assertFalse(PetOfficialAccountPolicy.equal("one", "two")); assertTrue(PetOfficialAccountPolicy.equal("one", "one")); assertFalse(PetOfficialAccountPolicy.equal(null, "one"));
     }
+    @Test public void manualCallbackOnlyAcceptsTheCurrentLiteralLoopbackDestination() {
+        String redirect = "http://127.0.0.1:43181/auth/callback", query = "?state=known&code=secret-code&client_id=real";
+        assertEquals("/auth/callback" + query, PetOfficialAccountPolicy.callbackTarget(redirect + query, redirect));
+        assertEquals("secret-code", PetOfficialAccountPolicy.callback(PetOfficialAccountPolicy.callbackTarget(redirect + query, redirect), "known").get("code"));
+        for (String value : new String[] {
+            null, "", " " + redirect + query, redirect + query + " ", redirect + query + "\n", redirect + query + "\u0085",
+            "https://127.0.0.1:43181/auth/callback" + query, "HTTP://127.0.0.1:43181/auth/callback" + query,
+            "http://localhost:43181/auth/callback" + query, "http://127.1:43181/auth/callback" + query,
+            "http://2130706433:43181/auth/callback" + query, "http://127.000.000.001:43181/auth/callback" + query,
+            "http://[::1]:43181/auth/callback" + query, "http://127.0.0.1:43182/auth/callback" + query,
+            "http://127.0.0.1:043181/auth/callback" + query, "http://127.0.0.1/auth/callback" + query,
+            "http://user@127.0.0.1:43181/auth/callback" + query, "http://127.0.0.1:43181@evil.test/auth/callback" + query,
+            "http://127.0.0.1.evil.test:43181/auth/callback" + query, "http://%31%32%37.0.0.1:43181/auth/callback" + query,
+            redirect + "/" + query, "http://127.0.0.1:43181/auth/%63allback" + query, redirect + query + "#", redirect + query + "#fragment",
+            redirect, redirect + "?state=" + "A".repeat(16384), "petpal://official-account/return?ticket=" + "A".repeat(43)
+        }) assertThrows(String.valueOf(value), IllegalArgumentException.class, () -> PetOfficialAccountPolicy.callbackTarget(value, redirect));
+    }
+    @Test public void manualCallbackRejectsDuplicateEncodedAndControlQueryFields() {
+        String redirect = "http://127.0.0.1:43181/auth/callback";
+        for (String query : new String[] {
+            "?state=wrong&code=x", "?state=known&state=known&code=x", "?state=known&%73tate=known&code=x",
+            "?state=known&code=x&code=y", "?state=known&code=x&client_id=first&client_id=second",
+            "?state=known&code=x&empty=%0A", "?state=known&code=x&empty=%0D", "?state=known&code=x&empty=%7F",
+            "?state=known&code=x&empty=%C2%85", "?state=known&code=x&%C2%85=bad", "?state=known&code=x&=bad", "?state=known&code=x&bad=%XX"
+        }) assertThrows(query, IllegalArgumentException.class, () -> PetOfficialAccountPolicy.callback(PetOfficialAccountPolicy.callbackTarget(redirect + query, redirect), "known"));
+    }
+    @Test public void manualCallbackCannotExpandAnInvalidExpectedRedirect() {
+        String value = "http://127.0.0.1:43181/auth/callback?state=known&code=x";
+        for (String redirect : new String[] { null, "http://127.0.0.1:0/auth/callback", "http://127.0.0.1:65536/auth/callback", "http://127.0.0.1/auth/callback", "http://localhost:43181/auth/callback", "http://user@127.0.0.1:43181/auth/callback", "http://127.0.0.1:43181/auth/callback?x=1", "http://127.0.0.1:43181/auth/callback#x" }) assertThrows(IllegalArgumentException.class, () -> PetOfficialAccountPolicy.callbackTarget(value, redirect));
+    }
     @Test public void chunkingPreservesUtf8IncludingEmojiAtEveryBoundary() {
         String original = "a中文🧡b".repeat(12000), remaining = original; StringBuilder result = new StringBuilder();
         while (!remaining.isEmpty()) { int end = PetOfficialAccountPolicy.utf8Boundary(remaining, 48 * 1024); assertTrue(end > 0); String chunk = remaining.substring(0, end); assertTrue(chunk.getBytes(StandardCharsets.UTF_8).length <= 48 * 1024); assertEquals(chunk, new String(chunk.getBytes(StandardCharsets.UTF_8), StandardCharsets.UTF_8)); result.append(chunk); remaining = remaining.substring(end); }

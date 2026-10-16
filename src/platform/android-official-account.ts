@@ -12,6 +12,7 @@ type NativeOfficialAccount={
   logout(input:NativeScope):Promise<OfficialAccountStatus>;
   refresh(input:NativeScope):Promise<OfficialAccountStatus>;
   resumeUsage(input:NativeScope):Promise<OfficialAccountStatus>;
+  completeCallback(input:NativeScope):Promise<OfficialAccountStatus>;
   addListener(event:'status',listener:()=>void):Promise<PluginListenerHandle>;
 };
 const native=registerPlugin<NativeOfficialAccount>('PetOfficialAccount');
@@ -50,14 +51,15 @@ async function bound(value:ReturnType<typeof owner>){
   })().catch(error=>{if(active===state)active=undefined;throw error;});
   return state.pending;
 }
-async function call(action:'status'|'start'|'cancel'|'select'|'logout'|'refresh'|'resumeUsage',profileId?:string){
+async function call(action:'status'|'start'|'cancel'|'select'|'logout'|'refresh'|'resumeUsage'|'completeCallback',profileId?:string){
   const value=owner(),scopeId=await bound(value);
   if(!current(value))throw new SessionChangedError();
   const result=action==='start'?await native.start({scopeId,...(profileId?{profileId}:{})}):action==='select'?await native.select({scopeId,profileId:profileId||''}):await native[action]({scopeId});
   if(!current(value)||active?.scopeId!==scopeId)throw new SessionChangedError();
   return result;
 }
-const bridge:OfficialAccountBridge={status:()=>call('status'),start:input=>call('start',input?.profileId),cancel:()=>call('cancel'),select:id=>call('select',id),logout:()=>call('logout'),refresh:()=>call('refresh'),resumeUsage:()=>call('resumeUsage')};
+// Callback text is accepted by a native-only dialog, never as a JS argument.
+const bridge:OfficialAccountBridge={status:()=>call('status'),start:input=>call('start',input?.profileId),cancel:()=>call('cancel'),select:id=>call('select',id),logout:()=>call('logout'),refresh:()=>call('refresh'),resumeUsage:()=>call('resumeUsage'),completeCallback:()=>call('completeCallback')};
 export const androidOfficialAccount=()=>supportsAndroidOfficialAccount()?bridge:undefined;
 
 /** Keep the native account bound to the login independently of settings tabs. */

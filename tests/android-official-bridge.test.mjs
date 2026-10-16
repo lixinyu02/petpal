@@ -13,11 +13,11 @@ function fixture({available=true,bind,verified=true,connected=true,runtime}={}){
   const status=runtime.status;
   let statusListener;
   const native={bind:async value=>{calls.push({action:'bind',value});const key=`${value.url}:${value.instanceId}:${value.userId}`;if(runtime.key!==key){runtime.key=key;runtime.scopeId=`scope-${++runtime.binding}`;}return bind?bind(value,runtime.scopeId):{scopeId:runtime.scopeId,status};},clearScope:async()=>{calls.push({action:'clearScope'});runtime.key='';runtime.scopeId='';status.state='signed-out';},async addListener(event,listener){assert.equal(event,'status');statusListener=listener;return{async remove(){if(statusListener===listener)statusListener=undefined;}};}};
-  for(const action of ['status','start','cancel','select','logout','refresh','resumeUsage'])native[action]=async value=>{calls.push({action,value});if(action==='start')status.state='signing-in';return structuredClone(status);};
+  for(const action of ['status','start','cancel','select','logout','refresh','resumeUsage','completeCallback'])native[action]=async value=>{calls.push({action,value});if(action==='start')status.state='signing-in';return structuredClone(status);};
   const api={getConnection:()=>connection,getIdentity:()=>identity,getSessionEpoch:()=>epoch,subscribeSession:watcher=>{watchers.add(watcher);return()=>watchers.delete(watcher);},SessionChangedError};
   const capacitor={Capacitor:{isNativePlatform:()=>true,getPlatform:()=> 'android',isPluginAvailable:()=>available},registerPlugin:name=>{assert.equal(name,'PetOfficialAccount');return native;}};
   const module={exports:{}};vm.runInNewContext(source,{module,exports:module.exports,document,window,Event,location:{origin:'https://localhost'},Promise,Error,require:name=>name==='@capacitor/core'?capacitor:api});
-  return{session:module.exports,calls,SessionChangedError,status,runtime,window,document,emitStatus(){statusListener?.();},async flush(){for(let n=0;n<20;n++)await Promise.resolve();},verify(userId='alice'){identity={instanceId:'server-a',userId};for(const watcher of watchers)watcher();},change(userId,url=connection.url){epoch++;identity=userId?{instanceId:'server-a',userId}:null;connection={url,token:userId?'new-session':''};for(const watcher of watchers)watcher();},get watcherCount(){return watchers.size;}};
+  return{session:module.exports,calls,SessionChangedError,status,runtime,native,window,document,emitStatus(){statusListener?.();},async flush(){for(let n=0;n<20;n++)await Promise.resolve();},verify(userId='alice'){identity={instanceId:'server-a',userId};for(const watcher of watchers)watcher();},change(userId,url=connection.url){epoch++;identity=userId?{instanceId:'server-a',userId}:null;connection={url,token:userId?'new-session':''};for(const watcher of watchers)watcher();},get watcherCount(){return watchers.size;}};
 }
 test('Android binds once to the verified PetPal scope and does not expose native credentials',async()=>{
   const f=fixture(),bridge=f.session.androidOfficialAccount();
@@ -106,4 +106,22 @@ test('a session changed during a detached page is revoked before a new owner bin
   f.change('bob');const stop=f.session.mountAndroidOfficialSession();await f.flush();
   assert.deepEqual(f.calls.map(call=>call.action),['bind','clearScope','bind']);
   assert.equal(f.calls.at(-1).value.userId,'bob');stop();
+});
+
+test('manual callback bridge opens only a scoped native dialog and ignores every JS input',async()=>{
+  const f=fixture(),bridge=f.session.androidOfficialAccount();
+  await bridge.completeCallback('http://127.0.0.1:1455/auth/callback?code=private-code&state=private-state');
+  assert.deepEqual(JSON.parse(JSON.stringify(f.calls.at(-1))),{action:'completeCallback',value:{scopeId:'scope-1'}});
+  assert.doesNotMatch(JSON.stringify(f.calls),/private-code|private-state|auth\/callback/);
+  assert.equal(bridge.completeCallback.length,0);
+});
+
+test('a delayed native callback dialog cannot deliver results after logout or a server switch',async()=>{
+  for(const user of [null,'bob']){
+    const f=fixture(),gate=deferred(),close=f.session.mountAndroidOfficialSession();await f.flush();
+    f.native.completeCallback=async input=>{f.calls.push({action:'completeCallback',value:input});return gate.promise;};
+    const pending=f.session.androidOfficialAccount().completeCallback();await f.flush();f.change(user,'https://other.example');
+    gate.resolve({...f.status,state:'signed-in'});await assert.rejects(pending,f.SessionChangedError);
+    assert.equal(f.calls.filter(call=>call.action==='clearScope').length,1);close();
+  }
 });

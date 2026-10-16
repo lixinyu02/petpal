@@ -1,9 +1,9 @@
 import {getConnection,getExecutionTarget,getIdentity,getSessionEpoch,SessionChangedError,type OfficialAccountBridge,type OfficialAccountStatus,type OfficialAccountUsage} from '../api';
 import {androidOfficialAccount,supportsAndroidOfficialAccount} from './android-official-account';
 
-export type OfficialAccountAction='status'|'start'|'cancel'|'select'|'logout'|'refresh'|'resumeUsage';
+export type OfficialAccountAction='status'|'start'|'cancel'|'select'|'logout'|'refresh'|'resumeUsage'|'completeCallback';
 export type OfficialAccountSnapshot={scope:string;status:OfficialAccountStatus|null;busy:OfficialAccountAction|'';error:string;defaultRequest:number};
-type Context={scope:string;bridge:OfficialAccountBridge|undefined;allowed:boolean;snapshot:OfficialAccountSnapshot;revision:number;pending:Promise<OfficialAccountStatus>|null;timer:ReturnType<typeof setTimeout>|null};
+type Context={scope:string;bridge:OfficialAccountBridge|undefined;allowed:boolean;snapshot:OfficialAccountSnapshot;revision:number;pending:Promise<OfficialAccountStatus>|null;promptStatus:Promise<OfficialAccountStatus>|null;timer:ReturnType<typeof setTimeout>|null};
 const listeners=new Set<()=>void>();
 let active:Context|undefined,defaultSequence=0,listening=false;
 const bounded=(value:unknown,limit:number)=>typeof value==='string'&&value.length<=limit&&!/[\x00-\x1f\x7f]/.test(value);
@@ -20,7 +20,7 @@ function context(){
   const key=scope(),bridge=nativeOfficialAccount();
   if(!active||active.scope!==key||active.bridge!==bridge){
     if(active){stopTimer(active);active.revision++;}
-    active={scope:key,bridge,allowed:!!bridge&&officialAccountIsLocal()&&!!getIdentity()&&!!getConnection().token,snapshot:{scope:key,status:null,busy:'',error:'',defaultRequest:0},revision:0,pending:null,timer:null};
+    active={scope:key,bridge,allowed:!!bridge&&officialAccountIsLocal()&&!!getIdentity()&&!!getConnection().token,snapshot:{scope:key,status:null,busy:'',error:'',defaultRequest:0},revision:0,pending:null,promptStatus:null,timer:null};
   }
   return active;
 }
@@ -54,7 +54,28 @@ export function readOfficialAccountStatus(value:unknown):OfficialAccountStatus{
     if(!item||typeof item!=='object'||!['unverified','available','limit-reached','temporarily-unavailable','not-eligible'].includes(item.state as string)||!(item.checkedAt===null||bounded(item.checkedAt,64)&&Number.isFinite(Date.parse(item.checkedAt as string)))||!(item.lastModel===null||bounded(item.lastModel,200))||['completedRequests','inputTokens','outputTokens','totalTokens'].some(key=>!Number.isSafeInteger(item[key])||(item[key] as number)<0))throw new Error('官方用量状态不完整，请刷新重试。');
     usage={state:item.state as OfficialAccountUsage['state'],checkedAt:item.checkedAt as string|null,lastModel:item.lastModel as string|null,completedRequests:item.completedRequests as number,inputTokens:item.inputTokens as number,outputTokens:item.outputTokens as number,totalTokens:item.totalTokens as number};
   }
-  return{supported:true,state:entry.state as OfficialAccountStatus['state'],activeProfileId:entry.activeProfileId as string|null,planUsageEnabled:entry.planUsageEnabled,profiles,models,...(usage?{usage}:{}),...(['browser','verifying'].includes(entry.signInStage as string)?{signInStage:entry.signInStage as 'browser'|'verifying'}:{}),...(entry.modelsLoading===true?{modelsLoading:true}:{}),...(entry.error?{error:'官方账号需要重新连接，请重试登录。'}:{}),...(entry.modelsError?{modelsError:supportsAndroidOfficialAccount()?'暂时无法连接手机官方模型，请检查网络并确认小伴服务已更新。':'暂时无法读取官方模型，请刷新重试。'}:{})};
+  return{supported:true,state:entry.state as OfficialAccountStatus['state'],activeProfileId:entry.activeProfileId as string|null,planUsageEnabled:entry.planUsageEnabled,profiles,models,...(usage?{usage}:{}),...(['browser','verifying'].includes(entry.signInStage as string)?{signInStage:entry.signInStage as 'browser'|'verifying'}:{}),...(typeof entry.manualCallbackSupported==='boolean'?{manualCallbackSupported:entry.manualCallbackSupported}:{}),...(entry.modelsLoading===true?{modelsLoading:true}:{}),...(entry.error?{error:'官方账号需要重新连接，请重试登录。'}:{}),...(entry.modelsError?{modelsError:supportsAndroidOfficialAccount()?'暂时无法连接手机官方模型，请检查网络并确认小伴服务已更新。':'暂时无法读取官方模型，请刷新重试。'}:{})};
+}
+
+/** Native authorization can finish while its paste dialog is still open. Keep
+ * status events independent of that dialog's Promise without unlocking it for
+ * a second prompt or allowing an old read to overwrite a completed prompt. */
+function readDuringCallbackPrompt(owner:Context){
+  if(owner.promptStatus)return owner.promptStatus;
+  const revision=owner.revision,pending=owner.pending;
+  let observedRevision=revision;
+  const run=Promise.resolve().then(async()=>{
+    try{
+      if(!current(owner,revision)||owner.pending!==pending||owner.snapshot.busy!=='completeCallback')throw new SessionChangedError();
+      const result=await owner.bridge!.status();
+      if(!current(owner,revision)||owner.pending!==pending||owner.snapshot.busy!=='completeCallback')throw new SessionChangedError();
+      const status=readOfficialAccountStatus(result),finished=status.state!=='signing-in';
+      if(finished){observedRevision=++owner.revision;owner.pending=null;}
+      owner.snapshot={...owner.snapshot,status,...(finished?{busy:'' as const,error:''}:{})};notify();return status;
+    }catch(error){throw error instanceof SessionChangedError?error:new Error('无法读取官方账号，请刷新重试。');}
+    finally{if(owner.promptStatus===run)owner.promptStatus=null;if(current(owner,observedRevision))schedule(owner);}
+  });
+  owner.promptStatus=run;return run;
 }
 
 export const officialAccountSnapshot=()=>context().snapshot;
@@ -70,18 +91,21 @@ export function subscribeOfficialAccount(listener:()=>void){
 export async function performOfficialAccount(action:OfficialAccountAction,input?:string):Promise<OfficialAccountStatus>{
   const owner=context();
   if(!owner.allowed||!owner.bridge)throw new Error(officialAccountIsLocal()?'请先登录这台电脑的小伴账号。':'官方账号保存在这台电脑，请先连接客户端的本机服务。');
-  if(owner.pending&&action==='status')return owner.pending;
+  if(owner.pending&&action==='status')return owner.snapshot.busy==='completeCallback'?readDuringCallbackPrompt(owner):owner.pending;
   if(owner.pending&&action!=='cancel')throw new Error('正在处理官方账号，请稍候。');
+  if(action==='completeCallback'&&(!supportsAndroidOfficialAccount()||typeof owner.bridge.completeCallback!=='function'||owner.snapshot.status?.state!=='signing-in'||owner.snapshot.status.manualCallbackSupported!==true))throw new Error('此客户端暂不支持手动输入回调地址，请更新后重试。');
   const revision=++owner.revision;
+  owner.promptStatus=null;
   const previousDefault=owner.snapshot.defaultRequest;
   stopTimer(owner);
   if(action==='start'||action==='select')owner.snapshot={...owner.snapshot,defaultRequest:++defaultSequence};
   owner.snapshot={...owner.snapshot,busy:action,error:''};notify();
   const run=Promise.resolve().then(async()=>{
     try{
+      if(!current(owner,revision))throw new SessionChangedError();
       const native=owner.bridge!;
       if(action==='resumeUsage'&&!native.resumeUsage)throw new Error('请更新客户端后重试。');
-      const result=action==='start'?await native.start(input?{profileId:input}:undefined):action==='select'?await native.select(input||''):action==='resumeUsage'?await native.resumeUsage!():await native[action]();
+      const result=action==='start'?await native.start(input?{profileId:input}:undefined):action==='select'?await native.select(input||''):action==='resumeUsage'?await native.resumeUsage!():action==='completeCallback'?await native.completeCallback!():await native[action]();
       if(!current(owner,revision))throw new SessionChangedError();
       const status=readOfficialAccountStatus(result);
       owner.snapshot={...owner.snapshot,status,busy:'',error:'',...(['logout','cancel'].includes(action)?{defaultRequest:0}:{})};
@@ -89,7 +113,7 @@ export async function performOfficialAccount(action:OfficialAccountAction,input?
     }catch(error){
       if(current(owner,revision)){owner.snapshot={...owner.snapshot,busy:'',defaultRequest:previousDefault,error:action==='start'?'无法打开官方登录，请检查网络或重试。':action==='status'?'无法读取官方账号，请刷新重试。':'官方账号操作未完成，请刷新重试。'};notify();}
       throw error instanceof SessionChangedError?error:new Error(action==='start'?'无法打开官方登录，请检查网络或重试。':'官方账号操作未完成，请刷新重试。');
-    }finally{if(current(owner,revision)){owner.pending=null;schedule(owner);}}
+    }finally{if(current(owner,revision)){owner.pending=null;owner.promptStatus=null;schedule(owner);}}
   });
   owner.pending=run;return run;
 }
