@@ -8,14 +8,14 @@
 
 - Goal: 修复系统浏览器完成官方授权后无法返回小伴的问题。
 - Ordering rule: issue顺序完成；同一issue内部可并行独立组件。
-- Current status: issue-1、issue-2、issue-3 done；issue-4待候选交付。
+- Current status: issue-1至issue-4全部done，dev.2候选已交付。
 
 ## Issue List
 
 - [x] issue-1 原生返程与授权生命周期修复
 - [x] issue-2 实际Android16验收与候选APK交付
 - [x] issue-3 手动回调输入与双通道单次处理
-- [ ] issue-4 备用入口实际验收与更新候选
+- [x] issue-4 备用入口实际验收与更新候选
 
 ## issue-1
 
@@ -48,7 +48,7 @@
 - 验收标准: 用户可手动粘贴最终回调地址；原文不进入JS/后端/日志；只接受本次登录，重复/双通道不重复兑换，取消输入不撤销等待，账号和Activity变化关闭失效输入框。
 - 状态: done
 - 验证方式: Java91项、前端/登录/桥/UI回归161项通过；TypeScript、Vite和原生编译通过。Android16完整26项原生验收25通过、Chrome首次初始化条款环境1跳过；其中真实产品WebView/Capacitor桥到原生输入框5项全部通过。覆盖双通道竞争、占用socket、重复回调收据、过期与invalid_grant；组件及最终差异自审完成。
-- commit: 本issue的fix(issue-3)实现提交
+- commit: 425ed1d
 
 ## issue-4
 
@@ -57,6 +57,6 @@
 - 范围: Android16原生对话框/桥/账户恢复实际验证，dev.2 code27构建、审核、公开候选下载。
 - 依赖: issue-3
 - 验收标准: APK同签名可覆盖dev.1及0.9.13，公网文件完整校验，正式Web/下载/升级清单保持，真机/官方授权边界准确。
-- 状态: todo
-- 验证方式: instrumentation/App验收、包完整审核和公网回读。
-- commit: pending
+- 状态: done
+- 验证方式: Android16完整26项原生验收25通过、Chrome首次初始化环境1跳过；真实产品WebView/Capacitor原生输入框5项及覆盖后真实React账号恢复通过。dev.2/code27全包审核、同签名、149446830字节公网完整回读及SHA通过；正式Web/下载/升级指针、旧候选保持，生产health0.9.13正常。自用fixture和AVD已停止，详见acceptance.md。
+- commit: 本issue的docs(issue-4)交付提交

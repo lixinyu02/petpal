@@ -26,3 +26,26 @@
 仍需用户在小米17 Pro Max／Android16覆盖安装候选，重新点击官方登录并在官方页面本人授权；若浏览器限制自动打开，请点击新页面“返回小伴”，再以App中真实账号验证结果为准。此次没有操作真实OpenAI授权、消耗真实套餐模型或修改用户已有官方账号。
 
 私有证据：`.data/android-official-return/` 的 `native-runtime.log`（原始Chrome初始化失败）、`native-final.log`、`browser-ui.xml`、`browser.png`、`app-restored.log`、`apk-audit/`、`delivery.json` 与 `acceptance.json`。不提交凭据或测试运行数据。
+
+## 追加交付：手动回调输入备用方案
+
+实现提交`425ed1d66e22e5c0046e9a90b2121ae5df1c55b6`，候选`0.9.14-dev.2`／versionCode27，同签名覆盖dev.1及正式0.9.13，不需要卸载。
+
+- 下载：<https://magicdatou.top:44318/client-preview/PetPal-0.9.14-dev.2-Android.apk>。
+- 大小149446830 bytes，SHA256 `b4bf26627e04db177ee0a660def64714896543192d83e9d26d3ad7e86c2ddb08`，已完成HTTPS全量回读一致。
+- 正式Web、0.9.13发布清单、签名更新清单及dev.1候选逐文件哈希保持；生产后端health正常、版本仍为0.9.13。
+
+使用：在App的官方账号设置开始“使用ChatGPT登录”，本人完成官方页面授权。若浏览器没有自动返回，复制最终`http://127.0.0.1:<本次端口>/auth/callback?...`完整地址，回到小伴点击“手动输入回调地址”，在原生输入框粘贴并验证。输入原文不传给JavaScript或中央服务器、不存入配置或日志。它只对应当前尚有效的授权；强关/取消/超时后需要重新登录。
+
+验证结果：
+
+1. Java策略91项、前端/登录/桥/UI相关回归161项通过；TypeScript、Vite、原生及仪器测试编译通过。
+2. Android16/API36完整原生26项验收25通过、Chrome首次初始化条款环境1跳过。其中新增5项通过真实产品packaged WebView和真实Capacitor消息桥打开原生输入框，覆盖提交、取消、浏览器先完成时关闭、换账号清除、Plugin销毁清除且保留application授权等待。没有新增测试JSInterface或放宽可信页面策略。
+3. 原生合成授权覆盖严格目标地址、state/issued client ID、重复输入只读真实状态、双通道仅兑换一次、partial HTTP socket、收据过期及invalid_grant不重兑。输入框不保存view状态、禁止autofill及键盘学习，窗口FLAG_SECURE，关闭后文本和引用清空。
+4. 实际code27覆盖安装后，使用真实React页面和合成普通后端的强关后账号恢复通过；原有加密账号保留。完整APK审核涵盖ZIP/CRC、zipalign、32个原生类、288个Web资产及原生内核和许可；签名与dev.1一致。
+
+两次先期仪器运行失败是测试文档初始化问题：关闭JS后再注入exporter没有原生message listener；同源`loadDataWithBaseURL`夹具也未进入预期文档。最终恢复旧Activity测试的已通过初始化，新输入框测试改用真实产品页面并等待登录门禁和listener稳定后绑定合成scope。原失败日志保留；其中第二次结尾的`Process crashed`是验收者主动force-stop中断无效测试，不作为产品闪退证据。最终完整运行无失败。
+
+私有证据：`.data/android-official-manual/`下`node-tests.log`、`native-acceptance.log`、`native-dialog-final.log`、`app-restored.log`、`login-app-restored.json`、`apk-audit/`、`delivery.json`、`cleanup.json`；失败证据为`native-runtime.log`和`native-final.log`。自用合成服务45321和PetPal_Sync_20261016模拟器已停止，未停止生产服务或删除目录。
+
+边界：官方token/验签/回调使用合成夹具；没有操作真实OpenAI授权。真实小米17 Pro Max／Android16和浏览器最终地址粘贴仍需用户本人验收，不将模拟器结果称为真机或真实官方账号验证通过。
