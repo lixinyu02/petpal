@@ -13,7 +13,7 @@ const name = (version = '0.9.7', suffix = 'Windows-x64.zip') => `PetPal-${versio
 const target = filename => filename.includes('-Windows-') ? 'windows-' + filename.match(/Windows-(x64|arm64)/)[1] :
   filename.includes('-Ubuntu-') ? 'ubuntu-' + filename.match(/Ubuntu-(x64|arm64)/)[1] : filename.includes('-Web.') ? 'web' : 'android';
 const githubRelease = (version, names) => ({ tag_name: 'v' + version, draft: false, prerelease: false,
-  published_at: '2026-10-04T00:00:00Z', assets: names.map((filename, index) => ({ name: filename, id: index + 1, state: 'uploaded',
+  published_at: '2026-10-04T00:00:00Z', assets: names.map((filename, index) => ({ name: filename, id: Number(version.replaceAll('.',''))*100+index+1, state: 'uploaded',
     size: 100, browser_download_url: `${DOWNLOAD_RELEASES_URL}/download/v${version}/${filename}` })) });
 
 async function fixture(t) {
@@ -157,13 +157,67 @@ test('same-version GitHub packages supply fallback links and only missing local 
   assert.equal(ubuntu.source, 'github'); assert.ok(ubuntu.url.startsWith(DOWNLOAD_RELEASES_URL)); assert.ok(result.notices.length);
 });
 
-test('a known newer GitHub stable release cannot be replaced by an older locally available package', async t => {
+test('a newer stable release with no advertised package leaves unchanged local platform slots available', async t => {
   const f = await fixture(t); await f.publish();
   const catalog = f.catalog({ fetchImpl: async () => new Response(JSON.stringify([githubRelease('0.9.8', [])])) });
   t.after(() => catalog.close());
   await catalog.list(); await new Promise(resolve => setImmediate(resolve));
-  const result = await catalog.list(); assert.equal(result.latestVersion, '0.9.8'); assert.deepEqual(result.packages, []);
-  assert.equal(await catalog.localFile(name()), null);
+  const result = await catalog.list(); assert.equal(result.latestVersion, '0.9.8'); assert.equal(result.packages.length,1);assert.equal(result.packages[0].version,'0.9.7');
+  assert.ok(await catalog.localFile(name()));
+});
+
+test('Android and Web hotfix retain verified Windows/Ubuntu per architecture and format without exposing archived Android',async t=>{
+  const f=await fixture(t),suffixes=['Windows-x64.zip','Windows-x64.exe','Ubuntu-x64.tar.gz','Ubuntu-arm64.tar.gz','Android-debug.apk','Web.zip'];
+  await f.publish('0.9.11',suffixes.map(suffix=>name('0.9.11',suffix)));await f.publish('0.9.12',suffixes.map(suffix=>name('0.9.12',suffix)));await f.publish('0.9.13',[name('0.9.13','Android-debug.apk'),name('0.9.13','Web.zip')]);
+  const catalog=f.local();t.after(()=>catalog.close());const result=await catalog.list();assert.equal(result.error,null);assert.equal(result.latestVersion,'0.9.13');assert.equal(result.packages.length,5);
+  assert.equal(result.packages.find(item=>item.platform==='android').version,'0.9.13');assert.ok(result.packages.filter(item=>item.platform!=='android').every(item=>item.version==='0.9.12'));
+  for(const suffix of ['Windows-x64.zip','Windows-x64.exe','Ubuntu-x64.tar.gz','Ubuntu-arm64.tar.gz'])assert.ok(await catalog.file(name('0.9.12',suffix)));
+  for(const suffix of suffixes)assert.equal(await catalog.file(name('0.9.11',suffix)),null);
+  assert.equal(await catalog.file(name('0.9.12','Android-debug.apk')),null);assert.equal(await catalog.file(name('0.9.12','Web.zip')),null);assert.ok(await catalog.file(name('0.9.13','Web.zip')));
+});
+
+test('a corrupt Android hotfix or checksum list blocks older Android while retaining unrelated desktop slots',async t=>{
+  for(const fault of ['missing','corrupt','checksum']){
+    const f=await fixture(t);await f.publish('0.9.12',[name('0.9.12','Android-debug.apk'),name('0.9.12','Windows-x64.zip')]);const current=await f.publish('0.9.13',[name('0.9.13','Android-debug.apk')]);
+    if(fault==='missing')await fs.unlink(path.join(f.directory,current.files[0].name));
+    else if(fault==='corrupt')await fs.writeFile(path.join(f.directory,current.files[0].name),Buffer.alloc(current.files[0].bytes,42));
+    else await fs.writeFile(path.join(f.directory,'SHA256SUMS-0.9.13.txt'),`${'0'.repeat(64)}  ${current.files[0].name}\n`);
+    const catalog=f.local();t.after(()=>catalog.close());const result=await catalog.list();assert.ok(result.error);assert.equal(result.packages.length,1);assert.equal(result.packages[0].platform,'windows');assert.equal(result.packages[0].version,'0.9.12');
+    assert.equal(await catalog.file(name('0.9.12','Android-debug.apk')),null);assert.equal(await catalog.file(name('0.9.13','Android-debug.apk')),null);assert.ok(await catalog.file(name('0.9.12','Windows-x64.zip')));
+  }
+});
+
+test('cross-source platform floors hide only old Android and keep same-version server preference and GitHub fallback',async t=>{
+  const f=await fixture(t);const old=[name('0.9.12','Android-debug.apk'),name('0.9.12','Windows-x64.zip'),name('0.9.12','Ubuntu-arm64.tar.gz')];await f.publish('0.9.12',old);
+  const current=name('0.9.13','Android-debug.apk'),releases=[githubRelease('0.9.12',old),githubRelease('0.9.13',[current])],catalog=f.catalog({fetchImpl:async()=>new Response(JSON.stringify(releases))});t.after(()=>catalog.close());
+  await catalog.list();await new Promise(resolve=>setImmediate(resolve));const result=await catalog.list();assert.equal(result.packages.length,3);assert.equal(result.packages.find(item=>item.platform==='android').version,'0.9.13');assert.equal(result.packages.find(item=>item.platform==='android').source,'github');
+  assert.deepEqual(result.latestVersions,{'android/universal/apk':'0.9.13','windows/x64/portable-zip':'0.9.12','ubuntu/arm64/tar.gz':'0.9.12'});assert.equal(result.catalogFloorVersion,null);
+  for(const platform of ['windows','ubuntu']){const item=result.packages.find(value=>value.platform===platform);assert.equal(item.version,'0.9.12');assert.equal(item.source,'server');assert.ok(item.fallbackUrl);assert.ok(await catalog.localFile(item.filename));}
+  assert.equal(await catalog.localFile(name('0.9.12','Android-debug.apk')),null);
+});
+
+test('combined metadata exposes each source slot maximum independently and returns isolated copies',async t=>{
+  const f=await fixture(t);await f.publish('0.9.12',[name('0.9.12','Android-debug.apk'),name('0.9.12','Web.zip')]);await f.publish('0.9.14',[name('0.9.14','Windows-x64.zip')]);
+  const releases=[githubRelease('0.9.13',[name('0.9.13','Android-debug.apk'),name('0.9.13','Windows-x64.zip')]),githubRelease('0.9.11',[name('0.9.11','Ubuntu-x64.tar.gz')])];
+  const catalog=f.catalog({fetchImpl:async()=>new Response(JSON.stringify(releases))});t.after(()=>catalog.close());await catalog.list();await new Promise(resolve=>setImmediate(resolve));
+  const expected={'android/universal/apk':'0.9.13','web/universal/zip':'0.9.12','windows/x64/portable-zip':'0.9.14','ubuntu/x64/tar.gz':'0.9.11'},result=await catalog.list();
+  assert.deepEqual(result.latestVersions,expected);assert.equal(result.latestVersion,'0.9.14');assert.equal(result.catalogFloorVersion,null);
+  assert.equal(result.packages.find(item=>item.platform==='windows').version,'0.9.14');assert.equal(result.packages.find(item=>item.platform==='ubuntu').version,'0.9.11');
+  result.latestVersions['android/universal/apk']='9.9.9';delete result.latestVersions['windows/x64/portable-zip'];assert.deepEqual((await catalog.list()).latestVersions,expected);
+});
+
+test('combined metadata exposes the maximum conservative catalog floor from both sources',async t=>{
+  const f=await fixture(t);await f.publish('0.9.12');await fs.writeFile(path.join(f.directory,'release-manifest-0.9.13.json'),'invalid manifest fixture');
+  const malformed=githubRelease('0.9.14',[]);delete malformed.published_at;
+  const releases=[malformed,githubRelease('0.9.15',[name('0.9.15','Android-debug.apk')])],catalog=f.catalog({fetchImpl:async()=>new Response(JSON.stringify(releases))});t.after(()=>catalog.close());
+  await catalog.list();await new Promise(resolve=>setImmediate(resolve));const result=await catalog.list();
+  assert.equal(result.catalogFloorVersion,'0.9.14');assert.deepEqual(result.latestVersions,{'android/universal/apk':'0.9.15'});assert.equal(result.latestVersion,'0.9.15');
+  assert.equal(result.packages.length,1);assert.equal(result.packages[0].platform,'android');assert.equal(await catalog.localFile(name('0.9.12')),null);
+});
+
+test('invalid newer GitHub Android metadata prevents direct old-Android download without blocking Windows',async t=>{
+  const f=await fixture(t);await f.publish('0.9.12',[name('0.9.12','Android-debug.apk'),name('0.9.12','Windows-x64.zip')]);const current=githubRelease('0.9.13',[name('0.9.13','Android-debug.apk')]);current.assets[0].browser_download_url='https://other.example.test/package.apk';
+  const catalog=f.catalog({fetchImpl:async()=>new Response(JSON.stringify([current]))});t.after(()=>catalog.close());await catalog.list();await new Promise(resolve=>setImmediate(resolve));const result=await catalog.list();assert.equal(result.packages.length,1);assert.equal(result.packages[0].platform,'windows');assert.equal(await catalog.localFile(name('0.9.12','Android-debug.apk')),null);assert.ok(await catalog.localFile(name('0.9.12','Windows-x64.zip')));
 });
 
 test('invalid newest local metadata prevents a lower GitHub fallback but permits a genuinely newer stable release', async t => {

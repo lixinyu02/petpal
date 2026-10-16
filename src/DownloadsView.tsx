@@ -25,12 +25,19 @@ const packageLabel = (item: Package) => `v${item.version} · ${item.arch === 'un
 const architectureRank = (arch: Package['arch']) => arch === 'x64' ? 0 : arch === 'arm64' ? 1 : 2;
 const architectureLabel = (arch:DownloadArchitecture) => arch === 'arm64' ? 'ARM64' : arch === 'x64' ? 'x64' : '通用';
 /** Also protect upgraded clients still connected to an older mixed catalog. */
-export function latestStableDownloadPackages(packages: Package[], newestKnown?: string | null) {
+export function latestStableDownloadPackages(packages: Package[], newestKnown?: string | null | Record<string,string>, catalogFloor?:string|null) {
   const stable = packages.filter(item => item.channel === 'stable' && /^(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})$/.test(item.version));
   const compare = (a: string, b: string) => {
     const left = a.split('.').map(Number), right = b.split('.').map(Number);
     return left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
   };
+  if(newestKnown&&typeof newestKnown==='object'){
+    const key=(item:Package)=>`${item.platform}/${item.arch}/${item.format}`;
+    const valid=(value:unknown):value is string=>typeof value==='string'&&/^(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})$/.test(value);
+    const latest=new Map<string,string>();
+    for(const item of stable){const slot=key(item);latest.set(slot,[latest.get(slot),newestKnown[slot],catalogFloor,item.version].filter(valid).sort(compare).at(-1)!);}
+    return stable.filter(item=>item.version===latest.get(key(item)));
+  }
   const versions = stable.map(item => item.version);
   if (newestKnown && /^(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})\.(?:0|[1-9]\d{0,8})$/.test(newestKnown)) versions.push(newestKnown);
   const latest = versions.sort(compare).at(-1);
@@ -68,7 +75,7 @@ export default function DownloadsView() {
     const timer = setTimeout(() => setClock(Date.now()), 1000); return () => clearTimeout(timer);
   }, [retrySeconds, clock]);
   const failure = error || catalog?.error;
-  const latestPackages = latestStableDownloadPackages(catalog?.packages || [], catalog?.latestVersion);
+  const latestPackages = latestStableDownloadPackages(catalog?.packages || [], catalog?.latestVersions || catalog?.latestVersion, catalog?.catalogFloorVersion);
   const downloadUrl = (item: Package) => item.url.startsWith('/downloads/') ? `${getConnection().url}${item.url}` : item.url;
   return <section ref={entrance} className="downloads-view" aria-labelledby="downloads-title" aria-busy={loading}>
     <header className="downloads-heading"><div><span className="downloads-eyebrow">小伴 · PetPal</span><h2 id="downloads-title">下载客户端</h2><p>仅提供最新正式版，选择适合设备的架构与格式。</p></div>

@@ -1,4 +1,4 @@
-import { createLocalDownloads, compareDownloadVersions } from './local-downloads.mjs';
+import { createLocalDownloads, compareDownloadVersions, downloadPackageKey } from './local-downloads.mjs';
 
 export const DOWNLOAD_REPOSITORY = 'lixinyu02/petpal';
 export const DOWNLOAD_RELEASES_URL = `https://github.com/${DOWNLOAD_REPOSITORY}/releases`;
@@ -15,28 +15,30 @@ const compareVersions = (a, b) => {
 const latestStableVersion = releases => releases.map(stableVersion).filter(Boolean).sort(compareVersions).at(-1) || null;
 
 /** Metadata becomes a link only when both its name and its exact download destination match. */
-export function publishedDownloadPackages(releases) {
+function publishedDownloadCatalog(releases) {
   if (!Array.isArray(releases) || releases.length > 100) throw new Error('Invalid release list');
-  // Select across platforms before inspecting assets. A missing/bad asset in
-  // the newest stable release must never silently resurrect an older package.
-  const latestVersion = releases.map(stableVersion).filter(Boolean).sort(compareVersions).at(-1);
-  if (!latestVersion) return [];
-  const packages = [], seen = new Set();
-  for (const release of releases) {
+  const latestVersion = latestStableVersion(releases), latestVersions = {}, candidates = [], seen = new Set();
+  let catalogFloorVersion = null;
+  for (const release of [...releases].sort((a,b) => compareVersions(stableVersion(b) || '0.0.0',stableVersion(a) || '0.0.0'))) {
     const version = stableVersion(release);
-    if (version !== latestVersion || !Array.isArray(release.assets)) continue;
+    if (!version) continue;
     const publishedAt = timestamp(release.published_at);
-    if (!version || !publishedAt || release.assets.length > 100) continue;
+    if (!publishedAt || !Array.isArray(release.assets) || release.assets.length > 100) {
+      catalogFloorVersion = [catalogFloorVersion,version].filter(Boolean).sort(compareVersions).at(-1);continue;
+    }
     for (const asset of release.assets) {
-      if (!asset || typeof asset.name !== 'string' || asset.name.length > 200 || asset.state !== 'uploaded' || !Number.isSafeInteger(asset.id) || asset.id <= 0 || !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > 2 * 1024 ** 3) continue;
+      if (!asset || typeof asset.name !== 'string' || asset.name.length > 200) continue;
       const match = assetPattern.exec(asset.name);
-      if (!match || match[1] !== version) continue;
+      if (!match) continue;
+      const platform = match[3] ? 'windows' : match[5] ? 'ubuntu' : 'android';
+      const format = platform === 'windows' ? match[4] === 'zip' ? 'portable-zip' : 'portable-exe' : platform === 'android' ? 'apk' : match[6] === 'AppImage' ? 'appimage' : match[6];
+      const descriptor = { platform, arch: match[3] || match[5] || 'universal', format }, key = downloadPackageKey(descriptor);
+      latestVersions[key] = [latestVersions[key],version].filter(Boolean).sort(compareVersions).at(-1);
+      if (match[1] !== version || asset.state !== 'uploaded' || !Number.isSafeInteger(asset.id) || asset.id <= 0 || !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > 2 * 1024 ** 3) continue;
       const url = `${DOWNLOAD_RELEASES_URL}/download/${release.tag_name}/${asset.name}`;
       if (asset.browser_download_url !== url || seen.has(asset.id)) continue;
       seen.add(asset.id);
-      const platform = match[3] ? 'windows' : match[5] ? 'ubuntu' : 'android';
-      const format = platform === 'windows' ? match[4] === 'zip' ? 'portable-zip' : 'portable-exe' : platform === 'android' ? 'apk' : match[6] === 'AppImage' ? 'appimage' : match[6];
-      packages.push({ id: String(asset.id), platform, arch: match[3] || match[5] || 'universal', version,
+      candidates.push({ id: String(asset.id), ...descriptor, version,
         channel: 'stable', format, filename: asset.name, url,
         releaseUrl: `${DOWNLOAD_RELEASES_URL}/tag/${release.tag_name}`, bytes: asset.size, publishedAt,
         ...(/^sha256:[a-f\d]{64}$/i.test(asset.digest || '') ? { sha256: asset.digest.slice(7).toLowerCase() } : {}),
@@ -44,11 +46,14 @@ export function publishedDownloadPackages(releases) {
       });
     }
   }
-  return packages.sort((a, b) => a.platform.localeCompare(b.platform) || a.arch.localeCompare(b.arch)
+  const packages = candidates.filter(item => item.version === latestVersions[downloadPackageKey(item)] && (!catalogFloorVersion || compareVersions(item.version,catalogFloorVersion) >= 0));
+  packages.sort((a, b) => a.platform.localeCompare(b.platform) || a.arch.localeCompare(b.arch)
     || (a.platform === 'windows' && b.platform === 'windows' && a.releaseUrl === b.releaseUrl && a.arch === b.arch
       ? Number(b.format === 'portable-zip') - Number(a.format === 'portable-zip') : 0)
     || a.filename.localeCompare(b.filename));
+  return {latestVersion, latestVersions, catalogFloorVersion, packages};
 }
+export function publishedDownloadPackages(releases) { return publishedDownloadCatalog(releases).packages; }
 
 function abortable(promise, signal) {
   return new Promise((resolve, reject) => {
@@ -73,9 +78,9 @@ async function readJson(response, signal, limit) {
 }
 
 function createGithubDownloadsCatalog({ fetchImpl = globalThis.fetch, now = Date.now, cacheMs = 300000, errorCacheMs = 15000, timeoutMs = 10000, responseLimit = 2 * 1024 ** 2 } = {}) {
-  let cache = null, latestVersion = null, cachedAt = 0, retryAt = 0, error = null, pending, controller, closed = false;
+  let cache = null, latestVersion = null, latestVersions = {}, catalogFloorVersion = null, cachedAt = 0, retryAt = 0, error = null, pending, controller, closed = false;
   const snapshot = () => ({ repository: DOWNLOAD_REPOSITORY, releasesUrl: DOWNLOAD_RELEASES_URL,
-    latestVersion,
+    latestVersion, latestVersions:structuredClone(latestVersions), catalogFloorVersion,
     checkedAt: cache ? new Date(cachedAt).toISOString() : null, stale: Boolean(error && cache), error,
     retryAt: error && retryAt > now() ? new Date(retryAt).toISOString() : null, packages: structuredClone(cache || []),
   });
@@ -96,7 +101,7 @@ function createGithubDownloadsCatalog({ fetchImpl = globalThis.fetch, now = Date
         void response.body?.cancel().catch(() => {}); throw new Error('Incomplete release metadata');
       }
       const releases = await readJson(response, active.signal, responseLimit); active.signal.throwIfAborted();
-      cache = publishedDownloadPackages(releases); latestVersion = latestStableVersion(releases); cachedAt = now(); error = null; retryAt = 0;
+      const catalog = publishedDownloadCatalog(releases); cache = catalog.packages; latestVersion = catalog.latestVersion; latestVersions = catalog.latestVersions; catalogFloorVersion = catalog.catalogFloorVersion; cachedAt = now(); error = null; retryAt = 0;
     } catch {
       if (!closed) {
         error = rateLimited ? 'GitHub 请求额度暂时用完，请稍后重试。' : '暂时无法读取 GitHub 发布列表，请稍后重试。';
@@ -132,8 +137,17 @@ export function createDownloadsCatalog({ localDirectory, localOptions, ...github
   }
   function combine(localSnapshot) {
     const latestVersion = [localSnapshot.latestVersion, githubSnapshot?.latestVersion].filter(Boolean).sort(compareDownloadVersions).at(-1) || null;
-    const serverPackages = localSnapshot.packages.filter(item => item.version === latestVersion);
-    const upstreamPackages = (githubSnapshot?.packages || []).filter(item => item.version === latestVersion);
+    const latestVersions = { ...localSnapshot.latestVersions };
+    for (const [key,version] of Object.entries(githubSnapshot?.latestVersions || {})) {
+      latestVersions[key] = [latestVersions[key],version].filter(Boolean).sort(compareDownloadVersions).at(-1);
+    }
+    const catalogFloorVersion = [localSnapshot.catalogFloorVersion,githubSnapshot?.catalogFloorVersion].filter(Boolean).sort(compareDownloadVersions).at(-1) || null;
+    const permitted = item => {
+      const floor = [latestVersions[downloadPackageKey(item)],catalogFloorVersion].filter(Boolean).sort(compareDownloadVersions).at(-1);
+      return !floor || compareDownloadVersions(item.version,floor) >= 0;
+    };
+    const serverPackages = localSnapshot.packages.filter(permitted);
+    const upstreamPackages = (githubSnapshot?.packages || []).filter(permitted);
     const byName = new Map(upstreamPackages.map(item => [item.filename, { ...item, source: 'github' }]));
     for (const item of serverPackages) {
       const fallback = byName.get(item.filename);
@@ -147,7 +161,7 @@ export function createDownloadsCatalog({ localDirectory, localOptions, ...github
     if (localSnapshot.error) notices.push('部分服务器安装包暂未通过校验；已校验文件仍可下载，缺失项可使用同版 GitHub 备用。');
     if (hasServer && githubSnapshot?.error) notices.push('GitHub 备用列表暂不可用；服务器已校验的安装包仍可下载。');
     const error = !packages.length ? localSnapshot.error || githubSnapshot?.error || null : !hasServer ? githubSnapshot?.error || null : null;
-    return { repository: DOWNLOAD_REPOSITORY, releasesUrl: DOWNLOAD_RELEASES_URL, latestVersion,
+    return { repository: DOWNLOAD_REPOSITORY, releasesUrl: DOWNLOAD_RELEASES_URL, latestVersion, latestVersions, catalogFloorVersion,
       source: hasServer && hasGithub ? 'mixed' : hasServer ? 'server' : hasGithub ? 'github' : 'none',
       checkedAt: hasServer || localSnapshot.latestVersion ? localSnapshot.checkedAt : githubSnapshot?.checkedAt || null,
       stale: hasGithub && Boolean(githubSnapshot?.stale), error, notices,
@@ -166,8 +180,12 @@ export function createDownloadsCatalog({ localDirectory, localOptions, ...github
       if (closed) return null;
       const file = await local.file(filename);
       if (!file) return null;
-      const newestKnown = [file.version, githubSnapshot?.latestVersion].filter(Boolean).sort(compareDownloadVersions).at(-1);
-      return file.version === newestKnown ? file : null;
+      const keys = file.packageKey ? [file.packageKey] : file.packageKeys || [];
+      const permitted = keys.some(key => {
+        const floor = [file.version,githubSnapshot?.latestVersions?.[key],githubSnapshot?.catalogFloorVersion].filter(Boolean).sort(compareDownloadVersions).at(-1);
+        return file.version === floor;
+      });
+      return permitted ? file : null;
     },
     async close() { closed = true; await Promise.allSettled([local.close(), github.close(), githubPending]); },
   };

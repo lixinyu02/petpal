@@ -28,7 +28,7 @@ export type DownloadPackage = {
   bytes:number;publishedAt:string;sha256?:string;debug:boolean;source?:'server'|'github';fallbackUrl?:string;
 };
 export type DownloadsCatalog = {repository:string;releasesUrl:string;checkedAt:string|null;stale:boolean;error:string|null;
-  retryAt:string|null;packages:DownloadPackage[];latestVersion?:string|null;source?:'server'|'github'|'mixed'|'none';notices?:string[]};
+  retryAt:string|null;packages:DownloadPackage[];latestVersion?:string|null;latestVersions?:Record<string,string>;catalogFloorVersion?:string|null;source?:'server'|'github'|'mixed'|'none';notices?:string[]};
 export type Message = { id: string; role: 'user' | 'assistant'; content: string; model?: string; status?: string; createdAt?: string; attachments?:Attachment[]; steered?:boolean; assistantTaskId?:string; assistantTaskReport?:'progress'|'result' };
 export type AgentQueueEntry = { id:string; submissionId:string; revision:number; content:string; attachmentIds:string[]; permissions:AgentPermissions; providerId:string|null; model:string; effort:string; createdAt:string;hostId?:string;hostName?:string;projectDirectory?:string };
 export type AgentRun = { id:string; submissionId:string; status:'running'|'stopping'|'completed'|'cancelled'|'error'|'unknown'; turnId:string|null; permissions:AgentPermissions; providerId:string|null; model:string; effort:string; startedAt:string; finishedAt?:string;message?:string; error?:string;errorCode?:string;hostId?:string;hostName?:string;projectDirectory?:string;approvalReview?:AgentApprovalReview };

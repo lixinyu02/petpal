@@ -17,6 +17,7 @@ export function compareDownloadVersions(a, b) {
   const left = a.split('.').map(Number), right = b.split('.').map(Number);
   return left[0] - right[0] || left[1] - right[1] || left[2] - right[2];
 }
+export const downloadPackageKey = value => `${value.platform}/${value.arch}/${value.format}`;
 
 function describe(name) {
   const match = typeof name === 'string' && packagePattern.exec(name);
@@ -60,7 +61,7 @@ function validateChecksums(text, files) {
  * size, mtime/ctime and expected hash; every request still checks the filesystem. */
 export function createLocalDownloads({ directory, releasesUrl, fsImpl = fs, now = Date.now } = {}) {
   const root = path.resolve(directory);
-  let result = { latestVersion: null, checkedAt: null, error: null, packages: [] }, files = new Map(),
+  let result = { latestVersion: null, latestVersions: {}, catalogFloorVersion: null, checkedAt: null, error: null, packages: [] }, files = new Map(),
     hashCache = new Map(), pending, controller, closed = false;
   const snapshot = () => structuredClone(result);
 
@@ -99,7 +100,7 @@ export function createLocalDownloads({ directory, releasesUrl, fsImpl = fs, now 
     const cached = hashCache.get(record.filename);
     if (cached?.fingerprint === identity && cached.sha256 === record.sha256) {
       if (!cached.valid) throw new Error('Local package digest differs');
-      return { path: file, fingerprint: identity, bytes: record.bytes, sha256: record.sha256, version: record.version };
+      return { path: file, fingerprint: identity, bytes: record.bytes, sha256: record.sha256, version: record.version, packageKey: downloadPackageKey(record) };
     }
     const handle = await fsImpl.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
     let digest;
@@ -114,12 +115,12 @@ export function createLocalDownloads({ directory, releasesUrl, fsImpl = fs, now 
     } finally { await handle.close(); }
     hashCache.set(record.filename, { fingerprint: identity, sha256: record.sha256, valid: digest === record.sha256 });
     if (digest !== record.sha256) throw new Error('Local package digest differs');
-    return { path: file, fingerprint: identity, bytes: record.bytes, sha256: record.sha256, version: record.version };
+    return { path: file, fingerprint: identity, bytes: record.bytes, sha256: record.sha256, version: record.version, packageKey: downloadPackageKey(record) };
   }
 
   async function refresh() {
     const active = new AbortController(); controller = active;
-    const next = { latestVersion: null, checkedAt: new Date(now()).toISOString(), error: null, packages: [] };
+    const next = { latestVersion: null, latestVersions: {}, catalogFloorVersion: null, checkedAt: new Date(now()).toISOString(), error: null, packages: [] };
     const nextFiles = new Map();
     try {
       const info = await fsImpl.lstat(root);
@@ -127,30 +128,53 @@ export function createLocalDownloads({ directory, releasesUrl, fsImpl = fs, now 
       const candidates = (await fsImpl.readdir(root)).map(name => ({ name, match: manifestPattern.exec(name) }))
         .filter(item => item.match).sort((a, b) => compareDownloadVersions(b.match[1], a.match[1]));
       if (candidates.length > 100) throw new Error('Too many local release manifests');
-      let selected, manifestBytes;
+      const selected = new Map(), manifests = new Map();
       for (const candidate of candidates) {
         active.signal.throwIfAborted();
-        next.latestVersion = candidate.match[1]; // Invalid newest metadata must not revive an older version.
-        const data = await readMetadata(candidate.name), parsed = JSON.parse(data.text);
-        if (parsed?.channel === 'preview' && parsed.version === candidate.match[1]) { next.latestVersion = null; continue; }
-        selected = validateManifest(parsed, candidate.match[1]); manifestBytes = data;
-        break;
+        const version = candidate.match[1];
+        try {
+          const data = await readMetadata(candidate.name), parsed = JSON.parse(data.text);
+          if (parsed?.channel === 'preview' && parsed.version === version) continue;
+          next.latestVersion ??= version;
+          const manifest = validateManifest(parsed, version);
+          // An advertised but missing/corrupt package sets its own slot's floor;
+          // older Android must not reappear during an Android-only hotfix.
+          for (const record of manifest.files) {
+            const key = downloadPackageKey(record);
+            if (!Object.hasOwn(next.latestVersions, key)) next.latestVersions[key] = version;
+          }
+          let checksums;
+          try { checksums = await readMetadata(`SHA256SUMS-${version}.txt`); validateChecksums(checksums.text, manifest.files); }
+          catch { active.signal.throwIfAborted();next.error = privateError();continue; }
+          manifests.set(version, { manifest, data, checksums });
+          for (const record of manifest.files) {
+            const key = downloadPackageKey(record);
+            if (next.latestVersions[key] === version && !selected.has(key)) selected.set(key, record);
+          }
+        } catch {
+          active.signal.throwIfAborted();next.latestVersion ??= version;next.catalogFloorVersion = version;next.error = privateError();
+          // A malformed manifest cannot tell us which platforms it intended.
+          // Keep only already validated newer slots; never guess below it.
+          break;
+        }
       }
-      if (selected) {
-        const checksumName = `SHA256SUMS-${selected.version}.txt`, checksums = await readMetadata(checksumName);
-        validateChecksums(checksums.text, selected.files);
-        nextFiles.set(`release-manifest-${selected.version}.json`, { ...manifestBytes, version: selected.version });
-        nextFiles.set(checksumName, { ...checksums, version: selected.version });
-        for (const record of selected.files) {
+      if (selected.size) {
+        for (const [version, { manifest, data, checksums }] of manifests) {
+          const packageKeys = manifest.files.filter(record => selected.get(downloadPackageKey(record)) === record).map(downloadPackageKey);
+          if (!packageKeys.length) continue;
+          nextFiles.set(`release-manifest-${version}.json`, { ...data, version, packageKeys });
+          nextFiles.set(`SHA256SUMS-${version}.txt`, { ...checksums, version, packageKeys });
+        }
+        for (const record of selected.values()) {
           active.signal.throwIfAborted();
           try {
             const verified = await verifyPackage(record, active.signal); nextFiles.set(record.filename, verified);
             if (record.platform !== 'web') next.packages.push({ ...record, id: `server:${record.filename}`, channel: 'stable',
-              source: 'server', url: `/downloads/${record.filename}`, releaseUrl: `${releasesUrl}/tag/v${selected.version}`,
-              publishedAt: selected.publishedAt });
+              source: 'server', url: `/downloads/${record.filename}`, releaseUrl: `${releasesUrl}/tag/v${record.version}`,
+              publishedAt: manifests.get(record.version).manifest.publishedAt });
           } catch { active.signal.throwIfAborted(); next.error = privateError(); }
         }
-        const keep = new Set(selected.files.map(file => file.filename));
+        const keep = new Set([...selected.values()].map(file => file.filename));
         for (const filename of hashCache.keys()) if (!keep.has(filename)) hashCache.delete(filename);
       }
     } catch (error) {

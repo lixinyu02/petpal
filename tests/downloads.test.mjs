@@ -40,8 +40,10 @@ test('Windows ZIP and EXE packages keep their architecture, with ZIP preferred o
   const fixture = release(tag, names.map((name, id) => asset(name, tag, { id: id + 80, ...(name.endsWith('.zip') ? { digest: `sha256:${zipDigest}` } : {}) })));
   const current = release('v0.9.2', [asset('PetPal-0.9.2-Windows-x64.exe', 'v0.9.2', { id: 90 })], { published_at: '2026-09-30T01:00:00Z' });
   const newest = publishedDownloadPackages([fixture, current]);
-  assert.equal(newest.length, 1);
-  assert.equal(newest[0].version, '0.9.2', 'an older ZIP or architecture must not fill a newer release');
+  assert.equal(newest.length, 4);
+  assert.equal(newest.find(item=>item.arch==='x64'&&item.format==='portable-exe').version, '0.9.2');
+  assert.equal(newest.find(item=>item.arch==='x64'&&item.format==='portable-zip').version, '0.9.1', 'an unchanged format keeps its actual latest stable version');
+  assert.ok(newest.filter(item=>item.arch==='arm64').every(item=>item.version==='0.9.1'));
   const packages = publishedDownloadPackages([fixture]);
   for (const arch of ['x64', 'arm64']) {
     const sameRelease = packages.filter(item => item.version === '0.9.1' && item.arch === arch);
@@ -54,23 +56,34 @@ test('Windows ZIP and EXE packages keep their architecture, with ZIP preferred o
   assert.equal(packages.filter(item => item.format === 'portable-exe').length, 2, 'EXE remains selectable');
 });
 
-test('global highest numeric stable version wins over release dates, order, lexical sorting and misleading preview flags', () => {
-  const old=release('v0.9.99',[asset('PetPal-0.9.99-Windows-x64.zip','v0.9.99',{id:11})],{published_at:'2026-10-03T15:00:00Z'});
+test('each package slot uses numeric stable versions despite dates, order and misleading preview flags', () => {
+  const old=release('v0.9.99',[asset('PetPal-0.9.99-Windows-x64.zip','v0.9.99',{id:11}),asset('PetPal-0.9.99-Android-debug.apk','v0.9.99',{id:16})],{published_at:'2026-10-03T15:00:00Z'});
   const current=release('v0.10.0',[asset('PetPal-0.10.0-Android-release.apk','v0.10.0',{id:12})],{published_at:'2026-01-01T00:00:00Z'});
   const higherDraft=release('v1.0.0',[asset('PetPal-1.0.0-Windows-x64.zip','v1.0.0',{id:13})],{draft:true});
   const higherPreview=release('v2.0.0',[asset('PetPal-2.0.0-Windows-x64.zip','v2.0.0',{id:14})],{prerelease:true});
   const suffixes=['v3.0.0-preview.1','v3.0.0-rc1','v3.0.0-alpha','v3.0.0+build.1','v03.0.0'].map(tag=>release(tag,[asset(`PetPal-${tag.slice(1)}-Windows-x64.zip`,tag,{id:15})]));
   const all=[old,higherDraft,current,higherPreview,...suffixes];
   for(const list of [all,[...all].reverse()]){
-    const packages=publishedDownloadPackages(list);assert.equal(packages.length,1);assert.equal(packages[0].version,'0.10.0');assert.equal(packages[0].platform,'android');assert.equal(packages[0].debug,false);
+    const packages=publishedDownloadPackages(list);assert.equal(packages.length,2);assert.equal(packages.find(item=>item.platform==='android').version,'0.10.0');assert.equal(packages.find(item=>item.platform==='android').debug,false);assert.equal(packages.find(item=>item.platform==='windows').version,'0.9.99');
   }
   assert.deepEqual(publishedDownloadPackages([higherDraft,higherPreview,...suffixes]),[]);
 });
 
-test('a latest stable release with absent or invalid assets stays empty instead of falling back', () => {
+test('an advertised invalid newest slot never falls back while an intentionally absent platform remains available', () => {
   const previous=release('v0.9.6',[asset('PetPal-0.9.6-Windows-x64.zip','v0.9.6')]);
   const current=release('v0.9.7',[asset('PetPal-0.9.7-Windows-x64.zip','v0.9.7',{browser_download_url:'https://evil.test/package.zip'})]);
-  for(const patch of [{},{assets:[]},{assets:null},{published_at:null},{assets:Array(101).fill(current.assets[0])}])assert.deepEqual(publishedDownloadPackages([previous,{...current,...patch}]),[]);
+  for(const patch of [{},{assets:null},{published_at:null},{assets:Array(101).fill(current.assets[0])}])assert.deepEqual(publishedDownloadPackages([previous,{...current,...patch}]),[]);
+  assert.equal(publishedDownloadPackages([previous,{...current,assets:[]}])[0].version,'0.9.6');
+});
+
+test('Android-only stable hotfix retains Windows and Ubuntu stable assets and hides older Android even when new metadata is bad',()=>{
+  const previous=release('v0.9.12',['Android-debug.apk','Windows-x64.zip','Windows-x64.exe','Ubuntu-x64.tar.gz','Ubuntu-arm64.tar.gz'].map((suffix,index)=>asset(`PetPal-0.9.12-${suffix}`,'v0.9.12',{id:500+index})));
+  const current=release('v0.9.13',[asset('PetPal-0.9.13-Android-debug.apk','v0.9.13',{id:600})]);
+  const packages=publishedDownloadPackages([previous,current]);assert.equal(packages.length,5);assert.equal(packages.find(item=>item.platform==='android').version,'0.9.13');assert.ok(packages.filter(item=>item.platform!=='android').every(item=>item.version==='0.9.12'));
+  for(const patch of [{state:'new'},{size:0},{browser_download_url:'https://other.example.test/private.apk'}]){
+    const invalid=publishedDownloadPackages([previous,{...current,assets:[{...current.assets[0],...patch}]}]);
+    assert.equal(invalid.some(item=>item.platform==='android'),false);assert.equal(invalid.length,4);assert.ok(invalid.every(item=>item.version==='0.9.12'));
+  }
 });
 
 test('one latest version keeps all supported platforms, architectures and Windows formats', () => {

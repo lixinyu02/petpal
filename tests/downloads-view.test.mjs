@@ -33,6 +33,13 @@ test('the UI rejects preview flags and semantic suffixes even when an older serv
   assert.deepEqual(latestStableDownloadPackages([...invalid,stable]),[stable]);
   assert.deepEqual(latestStableDownloadPackages([]),[]);
 });
+test('a platform-scoped catalog retains desktop packages during an Android hotfix without reviving older Android',()=>{
+  const source=[item('old','0.9.12','android'),item('new','0.9.13','android'),item('windows','0.9.12','windows'),item('ubuntu','0.9.12','ubuntu',{format:'tar.gz'})];
+  const floors={'android/universal/apk':'0.9.13','windows/x64/portable-zip':'0.9.12','ubuntu/x64/tar.gz':'0.9.12'};
+  assert.deepEqual(latestStableDownloadPackages(source,floors).map(value=>value.id),['new','windows','ubuntu']);
+  assert.deepEqual(latestStableDownloadPackages(source.filter(value=>value.id!=='new'),floors).map(value=>value.id),['windows','ubuntu']);
+  assert.deepEqual(latestStableDownloadPackages(source,floors,'0.9.14'),[]);
+});
 
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function nodes(tree){if(Array.isArray(tree))return tree.flatMap(nodes);if(!tree||typeof tree!=='object')return[];return[tree,...nodes(tree.props?.children)];}
