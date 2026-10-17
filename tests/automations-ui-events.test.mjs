@@ -23,7 +23,7 @@ const job = (extra = {}) => ({ id: '00000000-0000-4000-8000-000000000201', title
 
 /** Execute the component's actual effects and event handlers. Only lifecycle,
  * child pickers and HTTP are fixtures; payload and concurrency decisions remain in TSX. */
-function fixture({ initial = [], connectedUser = user, request, availableHosts = hosts, defaultHostId = '00000000-0000-4000-8000-000000000101', reviewProviders = [] } = {}) {
+function fixture({ mode = 'automations', initial = [], connectedUser = user, request, availableHosts = hosts, defaultHostId = '00000000-0000-4000-8000-000000000101', reviewProviders = [] } = {}) {
   let epoch = 1, identity = { instanceId: 'server-one', userId: connectedUser?.id || 'user-one' }, index = 0, tree, dirty = false, mounted = true, afterUnmountUpdates = 0, sequence = 0;
   let actual = clone(initial), preferences = { allowAgentCreate: true };
   const hooks = [], effects = [], requests = [], editing = [], opened = [], refreshes = [], timers = new Map();
@@ -64,7 +64,7 @@ function fixture({ initial = [], connectedUser = user, request, availableHosts =
     setTimeout(callback) { const id = ++sequence; timers.set(id, callback); return id; }, clearTimeout: id => timers.delete(id),
     require: name => { if (name.endsWith('.css')) return {}; assert.ok(Object.hasOwn(modules, name), `Unexpected dependency ${name}`); return modules[name]; },
   });
-  const props = { user: connectedUser, providers, reviewProviders, hosts: availableHosts, defaultHostId, hostsLoading: false, hostsError: '', onRefreshHosts: () => refreshes.push(true),
+  const props = { mode, user: connectedUser, providers, reviewProviders, hosts: availableHosts, defaultHostId, hostsLoading: false, hostsError: '', onRefreshHosts: () => refreshes.push(true),
     onOpenConversation: id => opened.push(id), onEditingChange: value => editing.push(clone(value)) };
   const find = (type, predicate = () => true) => nodes(tree).find(node => node.type === type && predicate(node.props));
   const render = () => { index = 0; dirty = false; effects.length = 0; tree = module.exports.default(props); for (const effect of effects) effect(); return tree; };
@@ -385,4 +385,125 @@ test('an inline acknowledgement prompt blocks old create and preference events s
   const f = fixture({ initial: [job({ enabled: false, nextRunAt: null, runs: [unknownRun] })] }); t.after(() => f.close()); await f.flush(); f.click('确认任务已停止', { rerender: false });
   f.click('新建自动化', { rerender: false }); f.type('允许 Agent 创建自动化', false, { rerender: false }); f.render(); assert.ok(f.dialog()); assert.equal(f.find('form'), undefined); assert.ok(f.requests.every(item => item.method === 'GET'));
   f.click('保留待确认'); assert.equal(f.dialog(), undefined); assert.equal(f.lastEditing.dirty, false);
+});
+
+test('shortcuts lists only explicitly marked records while the default automation page keeps all existing records',async t=>{
+  const records=[job({title:'原有计划'}),job({id:'00000000-0000-4000-8000-000000000202',title:'北蔡天气',quickLaunch:true,enabled:false,nextRunAt:null})];
+  const quick=fixture({mode:'shortcuts',initial:records});t.after(()=>quick.close());await quick.flush();
+  assert.equal(text(quick.find('h1').props.children),'快捷入口');assert.equal(quick.button('编辑快捷任务：原有计划'),undefined);
+  assert.ok(quick.button('立即执行：北蔡天气'));assert.match(quick.text(),/仅手动运行/);assert.doesNotMatch(quick.text(),/已暂停/);
+  assert.equal(quick.field('允许 Agent 创建自动化'),undefined);assert.equal(nodes(quick.tree).filter(node=>node.type==='button'&&node.props['aria-label']?.startsWith('创建快捷任务：')).length,3);
+  assert.ok(quick.requests.every(call=>call.method==='GET'));
+  const normal=fixture({initial:records});t.after(()=>normal.close());await normal.flush();
+  assert.ok(normal.button('编辑自动化：原有计划'));assert.ok(normal.button('编辑自动化：北蔡天气'));assert.ok(normal.field('允许 Agent 创建自动化'));
+});
+
+test('the Beicai weather template creates only an editable manual draft and saves official location instructions without running',async t=>{
+  const f=fixture({mode:'shortcuts',request:call=>call.method==='POST'?{automation:job({...call.body})}:undefined});t.after(()=>f.close());await f.flush();
+  f.click('创建快捷任务：查天气');
+  assert.equal(f.field('天气地点').props.value,'上海浦东新区北蔡镇');assert.equal(f.field('加入快捷入口').props.checked,true);assert.equal(f.field('保存后启用定时').props.checked,false);
+  assert.equal(f.find(f.controls.ExecutionHostPicker).props.value,hosts[0].id);assert.equal(f.find(f.controls.ModelPicker).props.value,'responses-one');
+  assert.deepEqual(clone(f.find(f.permissions).props.value),{access:'read-only',approval:'ask'});assert.ok(f.requests.every(call=>call.method==='GET'));
+  f.submit();await f.flush();const writes=f.requests.filter(call=>call.method==='POST');assert.equal(writes.length,1);
+  assert.equal(writes[0].path,'/automations');assert.equal(writes[0].body.quickLaunch,true);assert.equal(writes[0].body.enabled,false);
+  assert.match(writes[0].body.prompt,/上海浦东新区北蔡镇/);assert.match(writes[0].body.prompt,/101020600001/);assert.match(writes[0].body.prompt,/weathercn search/);
+  assert.match(writes[0].body.prompt,/published_at/);assert.match(writes[0].body.prompt,/freshness/);assert.match(writes[0].body.prompt,/coverage="gapped"/);assert.match(writes[0].body.prompt,/coverage_gaps/);assert.match(writes[0].body.prompt,/不可插值或推断缺失小时/);assert.match(writes[0].body.prompt,/不编造/);
+  assert.equal(f.requests.some(call=>call.path.endsWith('/run')),false);assert.match(f.text(),/仅手动运行/);
+});
+
+test('changing the weather location keeps custom instructions and cannot silently reuse the Beicai location ID',async t=>{
+  const f=fixture({mode:'shortcuts',request:call=>call.method==='POST'?{automation:job({...call.body})}:undefined});t.after(()=>f.close());await f.flush();f.click('创建快捷任务：查天气');
+  const instructions=f.field('任务指令').props.value+' 另外提醒是否需要带伞。';f.type('任务指令',instructions);f.type('天气地点','北京市朝阳区');
+  assert.equal(f.field('任务指令').props.value,instructions);assert.equal(f.lastEditing.dirty,true);f.submit();await f.flush();
+  const saved=f.requests.find(call=>call.method==='POST');assert.match(saved.body.prompt,/查询北京市朝阳区/);assert.match(saved.body.prompt,/先消歧/);assert.match(saved.body.prompt,/是否需要带伞/);assert.doesNotMatch(saved.body.prompt,/101020600001/);
+});
+
+test('music and custom templates open drafts without installing, dispatching or enabling a schedule',async t=>{
+  const f=fixture({mode:'shortcuts'});t.after(()=>f.close());await f.flush();f.click('创建快捷任务：打开音乐');
+  assert.match(f.field('任务指令').props.value,/QQ 音乐.*网易云音乐/);assert.match(f.field('任务指令').props.value,/核实播放状态/);assert.equal(f.field('保存后启用定时').props.checked,false);
+  f.click('取消编辑');f.click('创建快捷任务：自定义');assert.equal(f.field('自动化名称').props.value,'');assert.equal(f.field('任务指令').props.value,'');
+  assert.equal(f.field('加入快捷入口').props.checked,true);assert.equal(f.field('保存后启用定时').props.checked,false);assert.ok(f.requests.every(call=>call.method==='GET'));
+});
+
+test('shortcut defaults never select a central server or someone else desktop for an ordinary user',async t=>{
+  const central={...hosts[0],id:'central',kind:'central'},foreign={...hosts[0],id:'foreign-desktop',isOwn:false};
+  const f=fixture({mode:'shortcuts',availableHosts:[central,foreign,...hosts],defaultHostId:'central'});t.after(()=>f.close());await f.flush();f.click('创建快捷任务：自定义');
+  assert.equal(f.find(f.controls.ExecutionHostPicker).props.value,hosts[0].id);assert.equal(f.find(f.controls.ExecutionHostPicker).props.canAccessAllHosts,false);
+  f.type('自动化名称','只用我的电脑');f.type('任务指令','测试');f.chooseHost('central');f.submit();await f.flush();
+  assert.match(f.text(),/有权使用的执行电脑/);assert.ok(f.requests.every(call=>call.method==='GET'));
+});
+
+test('a saved manual shortcut has a top-level single-click run with synchronous duplicate protection',async t=>{
+  const writing=deferred(),record=job({quickLaunch:true,enabled:false,nextRunAt:null}),run={id:'00000000-0000-4000-8000-000000000401',status:'queued',startedAt:'2026-10-18T08:00:00Z',trigger:'manual'};
+  const f=fixture({mode:'shortcuts',initial:[record],request:call=>call.path.endsWith('/run')?writing.promise:undefined});t.after(()=>f.close());await f.flush();
+  const topActions=f.find('div',props=>props.className==='automation-row-actions');assert.ok(nodes(topActions).some(node=>node.props?.['aria-label']==='立即执行：日报'));
+  assert.equal(f.button('立即执行：日报').props.disabled,false);f.click('立即执行：日报',{rerender:false});f.click('立即执行：日报',{rerender:false});
+  const requests=f.requests.filter(call=>call.path.endsWith('/run'));assert.equal(requests.length,1);assert.deepEqual(Object.keys(requests[0].body),['requestId']);
+  writing.resolve({run});await f.flush();assert.equal(f.button('立即执行：日报').props.disabled,true);assert.match(f.text(),/排队中/);assert.equal(f.requests.some(call=>call.method==='PATCH'),false);
+});
+
+test('an unknown shortcut run requires receipt confirmation with the original request ID and never automatically retries',async t=>{
+  let count=0;const f=fixture({mode:'shortcuts',initial:[job({quickLaunch:true,enabled:false})],request:call=>{if(call.path.endsWith('/run')){if(++count===1)throw new TypeError('synthetic network acknowledgement lost');return{run:{id:'00000000-0000-4000-8000-000000000401',status:'queued',startedAt:'2026-10-18T08:00:00Z',trigger:'manual'}};}}});t.after(()=>f.close());await f.flush();
+  f.click('立即执行：日报');await f.flush();assert.equal(f.lastEditing.busy,true);f.render();await f.flush();assert.equal(count,1);
+  f.click('确认结果');await f.flush();const calls=f.requests.filter(call=>call.path.endsWith('/run'));assert.equal(calls.length,2);assert.deepEqual(calls[1].body,calls[0].body);assert.equal(f.lastEditing.busy,false);
+});
+
+test('shortcuts keep offline and unknown tasks blocked without substituting another execution computer',async t=>{
+  for(const record of [job({quickLaunch:true,hostId:hosts[1].id}),job({quickLaunch:true,runs:[unknownRun]})]){
+    const f=fixture({mode:'shortcuts',initial:[record]});t.after(()=>f.close());await f.flush();assert.equal(f.button('立即执行：日报').props.disabled,true);
+    f.click('立即执行：日报');await f.flush();assert.ok(f.requests.every(call=>call.method==='GET'));
+  }
+});
+
+test('the latest shortcut result is reachable directly without opening execution history or dispatching again',async t=>{
+  const older={...unknownRun,id:'00000000-0000-4000-8000-000000000402',status:'completed',startedAt:'2026-10-17T08:00:00Z'},latest={...older,id:'00000000-0000-4000-8000-000000000403',conversationId:'00000000-0000-4000-8000-000000000503',startedAt:'2026-10-18T08:00:00Z'};
+  const f=fixture({mode:'shortcuts',initial:[job({quickLaunch:true,enabled:false,runs:[older,latest]})]});t.after(()=>f.close());await f.flush();
+  f.click('查看最近结果：日报');await f.flush();assert.deepEqual(f.opened,[latest.conversationId]);assert.ok(f.requests.every(call=>call.method==='GET'));
+});
+
+test('shortcut scheduling opens the existing editor and requires an explicit enable before it becomes scheduled',async t=>{
+  const original=job({quickLaunch:true,enabled:false,nextRunAt:null});let saved=original;
+  const f=fixture({mode:'shortcuts',initial:[original],request:call=>{if(call.method==='PATCH'){saved={...saved,...call.body,revision:saved.revision===revisionOne?revisionTwo:revisionThree};f.setJobs([saved]);return{automation:saved};}}});t.after(()=>f.close());await f.flush();
+  f.click('设置定时：日报');assert.equal(f.field('保存后启用定时').props.checked,false);assert.ok(f.requests.every(call=>call.method==='GET'));
+  f.type('执行时间','weekdays');f.type('每日时间','07:30');f.type('计划时区','Asia/Shanghai');f.submit();await f.flush();
+  assert.equal(f.requests.find(call=>call.method==='PATCH').body.enabled,false);assert.match(f.text(),/仅手动运行/);
+  f.click('设置定时：日报');f.type('保存后启用定时',true);f.submit();await f.flush();const mutations=f.requests.filter(call=>call.method==='PATCH');
+  assert.equal(mutations[1].body.enabled,true);assert.equal(mutations[1].body.revision,revisionTwo);assert.deepEqual(mutations[1].body.schedule,{kind:'weekly',time:'07:30',timezone:'Asia/Shanghai',weekdays:[1,2,3,4,5]});
+  assert.equal(f.requests.some(call=>call.path.endsWith('/run')),false);assert.match(f.text(),/定时已开启/);
+});
+
+test('a normal automation can enter shortcuts while retaining its existing schedule and permissions',async t=>{
+  const original=job(),f=fixture({initial:[original],request:call=>call.method==='PATCH'?{automation:{...original,...call.body,revision:revisionTwo}}:undefined});t.after(()=>f.close());await f.flush();
+  f.click('编辑自动化：日报');assert.equal(f.field('加入快捷入口').props.checked,false);f.type('加入快捷入口',true);f.submit();await f.flush();const saved=f.requests.find(call=>call.method==='PATCH');
+  assert.equal(saved.body.quickLaunch,true);assert.equal(saved.body.enabled,true);assert.deepEqual(saved.body.schedule,original.schedule);assert.deepEqual(saved.body.permissions,original.permissions);
+});
+
+test('unmarking a shortcut reconciles a lost save response even when a legacy readback omits false flags',async t=>{
+  const original=job({quickLaunch:true,enabled:false});let writes=0;
+  const f=fixture({mode:'shortcuts',initial:[original],request:call=>{if(call.method==='PATCH'){writes++;const saved={...original,...call.body,revision:revisionTwo};delete saved.quickLaunch;f.setJobs([saved]);throw new TypeError('synthetic save receipt lost');}}});t.after(()=>f.close());await f.flush();
+  f.click('编辑快捷任务：日报');f.type('加入快捷入口',false);f.submit();await f.flush();assert.equal(f.lastEditing.busy,true);f.click('确认结果');await f.flush();
+  assert.equal(writes,1);assert.equal(f.lastEditing.busy,false);assert.equal(f.find('form'),undefined);assert.equal(f.button('立即执行：日报'),undefined);
+});
+
+test('an expired one-time shortcut can be edited with scheduling off but cannot be re-enabled at an expired time',async t=>{
+  const original=job({quickLaunch:true,enabled:false,nextRunAt:null,schedule:{kind:'once',at:'2020-01-01T08:00:00.000Z'}});
+  const f=fixture({mode:'shortcuts',initial:[original],request:call=>call.method==='PATCH'?{automation:{...original,...call.body,revision:revisionTwo}}:undefined});t.after(()=>f.close());await f.flush();
+  f.click('编辑快捷任务：日报');f.type('自动化名称','过期后仍可手动执行');f.submit();await f.flush();const saved=f.requests.find(call=>call.method==='PATCH');
+  assert.equal(saved.body.enabled,false);assert.deepEqual(saved.body.schedule,original.schedule);
+  f.click('设置定时：过期后仍可手动执行');f.type('保存后启用定时',true);f.submit();await f.flush();
+  assert.match(f.text(),/未来的一次执行时间/);assert.equal(f.requests.filter(call=>call.method==='PATCH').length,1);
+});
+
+test('weather draft edits retain navigation protection and stale shortcut events cannot cross an account change',async t=>{
+  const f=fixture({mode:'shortcuts'});t.after(()=>f.close());await f.flush();f.click('创建快捷任务：查天气');f.type('天气地点','上海浦东新区张江镇');f.click('取消编辑');
+  assert.ok(f.dialog());f.click('继续编辑');assert.equal(f.field('天气地点').props.value,'上海浦东新区张江镇');assert.equal(f.lastEditing.dirty,true);
+  const stale=fixture({mode:'shortcuts',initial:[job({quickLaunch:true})]});t.after(()=>stale.close());await stale.flush();stale.changeSession({notify:false});
+  stale.click('创建快捷任务：查天气',{rerender:false});stale.click('立即执行：日报',{rerender:false});await stale.flush();assert.equal(stale.find('form'),undefined);assert.equal(stale.requests.length,1);
+});
+
+test('shortcut templates respect account Agent permission and the account-wide fifty-record limit',async t=>{
+  for(const options of [{connectedUser:{...user,canUseCodex:false}},{initial:Array.from({length:50},(_,index)=>job({id:`existing-${index}`}))}]){
+    const f=fixture({mode:'shortcuts',...options});t.after(()=>f.close());await f.flush();assert.equal(f.button('新建快捷任务').props.disabled,true);
+    assert.equal(f.button('创建快捷任务：查天气').props.disabled,true);assert.ok(f.requests.every(call=>call.method==='GET'));
+  }
 });

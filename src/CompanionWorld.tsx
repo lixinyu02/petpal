@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, AudioLines, Check, Loader2, MessageCircle, Mic, Monitor, Settings2, Square, Terminal, X } from 'lucide-react';
+import { ArrowUpRight, AudioLines, Check, Loader2, MessageCircle, Mic, Monitor, Settings2, Square, Terminal, X, Zap } from 'lucide-react';
 import BrandMark from './BrandMark';
 import CompanionScene from './avatar/CompanionScene';
 import MessageMarkdown from './MessageMarkdown';
@@ -81,7 +81,7 @@ export default function CompanionWorld() {
   return <main className={`companion-world companion-${kind}${voiceOpen ? ' companion-voice-open' : ''}`} data-ready={ready} data-companion-kind={kind} data-voice-phase={voice.phase}>
     <header className="companion-header">
       <a className="companion-brand" href="/" aria-label="小伴首页"><BrandMark size={32}/><span>小伴<small>PetPal</small></span></a>
-      <nav aria-label="工作台入口">{user?.canUseCodex && <a className="companion-codex" aria-label="Agent 工作台" href="/?chat=1&mode=codex"><Terminal size={18} aria-hidden="true"/><span>Agent</span></a>}<a className="companion-settings" href="/?chat=1&settings=1" aria-label="连接与设置"><Settings2 size={18} aria-hidden="true"/></a><a className="companion-chat" href="/?chat=1"><MessageCircle size={18} aria-hidden="true"/>聊聊天<ArrowUpRight size={15} aria-hidden="true"/></a></nav>
+      <nav aria-label="工作台入口"><a className="companion-settings" href="/?chat=1&shortcuts=1" aria-label="快捷入口" title="快捷入口"><Zap size={18} aria-hidden="true"/></a>{user?.canUseCodex && <a className="companion-codex" aria-label="Agent 工作台" href="/?chat=1&mode=codex"><Terminal size={18} aria-hidden="true"/><span>Agent</span></a>}<a className="companion-settings" href="/?chat=1&settings=1" aria-label="连接与设置"><Settings2 size={18} aria-hidden="true"/></a><a className="companion-chat" href="/?chat=1"><MessageCircle size={18} aria-hidden="true"/>聊聊天<ArrowUpRight size={15} aria-hidden="true"/></a></nav>
     </header>
     <section className="companion-space" aria-label="伙伴陪伴空间" data-action={action}>
       <div ref={introEntrance} className="companion-intro"><span className="companion-presence"><i/>{action === 'sleep' ? '安心睡着，也在陪你' : '在你身边'}</span><h1>{name}</h1></div>

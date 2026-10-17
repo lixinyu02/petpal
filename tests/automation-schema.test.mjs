@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { automationInstant, nextAutomationRun, normalizeAutomationSchedule, normalizeAutomationSpec, validateStoredAutomations } from '../server/automation-schema.mjs';
+import { randomUUID } from 'node:crypto';
+import { automationInstant, nextAutomationRun, normalizeAutomationSchedule, normalizeAutomationSpec, publicAutomation, validateStoredAutomations } from '../server/automation-schema.mjs';
 
 test('schedule normalization rejects extra identity fields, bad calendars, clocks and intervals', () => {
   for (const value of [null, {}, { kind: 'interval', minutes: 4 }, { kind: 'interval', minutes: 10081 }, { kind: 'interval', minutes: 5.1 }, { kind: 'daily', time: '9:05', timezone: 'UTC' }, { kind: 'daily', time: '24:00', timezone: 'UTC' }, { kind: 'daily', time: '09:00', timezone: 'Missing/Zone' }, { kind: 'daily', time: '09:00', timezone: '+08:00' }, { kind: 'weekly', time: '09:00', timezone: 'UTC', weekdays: [1, 1] }, { kind: 'weekly', time: '09:00', timezone: 'UTC', weekdays: [] }, { kind: 'weekly', time: '09:00', timezone: 'UTC', weekdays: [7] }, { kind: 'once', at: '2026-02-30T10:00:00Z' }, { kind: 'once', at: '2026-10-05T10:00:00' }, { kind: 'once', at: '2026-10-05T10:00:00Z', userId: 'spoof' }]) assert.throws(() => normalizeAutomationSchedule(value), { status: 400 });
@@ -60,4 +61,19 @@ test('execution scope canonicalizes supported Windows and POSIX paths without wi
     assert.equal(normalizeAutomationSpec({ ...base, projectDirectory: input }).projectDirectory, expected);
   }
   for (const projectDirectory of ['\\\\server\\share', 'E:relative', '../repo']) assert.throws(() => normalizeAutomationSpec({ ...base, projectDirectory }));
+});
+
+test('quick-launch markers are optional in legacy storage, boolean when present and independent of schedules', () => {
+  const userId=randomUUID(),job={id:randomUUID(),userId,title:'Legacy plan',prompt:'Fixture only',hostId:'central',providerId:null,projectDirectory:'',permissions:{access:'read-only',approval:'ask'},schedule:{kind:'interval',minutes:5},enabled:false,revision:randomUUID(),createdBy:'user',createdAt:'2026-10-18T00:00:00.000Z',updatedAt:'2026-10-18T00:00:00.000Z',nextRunAt:null,runs:[]};
+  const state={users:[{id:userId}],executionHosts:[],conversations:[],automations:{version:1,accounts:[],jobs:[job],requests:[]}},legacy=JSON.stringify(state);
+  assert.equal(validateStoredAutomations(state,{restore:false}),false);assert.equal(JSON.stringify(state),legacy);assert.equal(Object.hasOwn(job,'quickLaunch'),false);assert.equal(publicAutomation(job).quickLaunch,false);
+  for(const quickLaunch of [true,false])for(const enabled of [true,false]){
+    const candidate=structuredClone(state);Object.assign(candidate.automations.jobs[0],{quickLaunch,enabled,nextRunAt:enabled?'2026-10-18T00:05:00.000Z':null});
+    assert.doesNotThrow(()=>validateStoredAutomations(candidate,{restore:false}));assert.equal(publicAutomation(candidate.automations.jobs[0]).quickLaunch,quickLaunch);
+  }
+  for(const quickLaunch of [undefined,null,'true','false',0,1,[],{}]){
+    const candidate=structuredClone(state);candidate.automations.jobs[0].quickLaunch=quickLaunch;
+    assert.throws(()=>validateStoredAutomations(candidate,{restore:false}),/本地自动化/);
+  }
+  assert.equal(JSON.stringify(state),legacy);
 });

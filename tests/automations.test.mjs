@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { JsonStore, defaultSettings } from '../server/store.mjs';
 import { defaultVoiceSettings } from '../server/voice.mjs';
@@ -74,6 +74,45 @@ test('parallel create retries are durable idempotent and conflicting fingerprint
   assert.equal((await f.saved()).automations.requests.length, 1);
   await f.service.remove(f.ownerId, jobs[0].id, { revision: jobs[0].revision });
   await assert.rejects(f.service.create(f.ownerId, body), { status: 410 });
+});
+
+test('false or omitted quick-launch flags preserve legacy create fingerprints and receipts after restart',async t=>{
+  const f=await fixture(t),body=f.input(),created=await f.service.create(f.ownerId,body);
+  const legacyFingerprint=createHash('sha256').update(JSON.stringify({title:'Daily fixture',prompt:'Isolated fixed task',hostId:'central',providerId:f.providerId,projectDirectory:'/workspace',permissions:{access:'read-only',approval:'ask'},schedule:{kind:'interval',minutes:5},enabled:true,source:'user'})).digest('hex');
+  assert.equal((await f.saved()).automations.requests[0].fingerprint,legacyFingerprint);assert.equal(created.quickLaunch,false);assert.equal(created.enabled,true);
+  assert.equal((await f.service.create(f.ownerId,{...body,quickLaunch:false})).id,created.id);
+  await assert.rejects(f.service.create(f.ownerId,{...body,quickLaunch:true}),{status:409});
+  await f.service.close();const saved=await f.saved();delete saved.automations.jobs[0].quickLaunch;await writeFile(f.store.file,JSON.stringify(saved));const legacyBytes=await readFile(f.store.file,'utf8');
+  const restored=await new JsonStore(f.directory).init();assert.equal(await readFile(f.store.file,'utf8'),legacyBytes);const restarted=f.make(restored);
+  assert.equal(restarted.list(f.ownerId).automations[0].quickLaunch,false);assert.equal((await restarted.create(f.ownerId,{...body,quickLaunch:false})).id,created.id);assert.equal((await restarted.create(f.ownerId,body)).id,created.id);
+  assert.equal(restored.state.automations.requests[0].fingerprint,legacyFingerprint);
+});
+
+test('shortcuts default to manual-only, retain durable single-run receipts and schedule only after explicit enable',async t=>{
+  const f=await fixture(t),job=await f.create({quickLaunch:true});assert.equal(job.quickLaunch,true);assert.equal(job.enabled,false);assert.equal(job.nextRunAt,null);
+  f.advance(300000);await f.service.tick();assert.equal(f.calls.length,0);
+  const requestId=randomUUID(),runs=await Promise.all(Array.from({length:8},()=>f.service.run(f.ownerId,job.id,{requestId})));assert.equal(new Set(runs.map(run=>run.id)).size,1);
+  await until(()=>f.calls.length===1&&f.service.list(f.ownerId).automations[0].runs[0].status==='running');assert.equal(f.calls[0].run.trigger,'manual');
+  f.outcomes.set(runs[0].id,{status:'completed'});await f.service.tick();let current=f.service.list(f.ownerId).automations[0];assert.equal(current.quickLaunch,true);assert.equal(current.enabled,false);assert.equal(current.nextRunAt,null);
+  const replay=await f.service.run(f.ownerId,job.id,{requestId});assert.equal(replay.id,runs[0].id);assert.equal(f.calls.length,1);
+  current=await f.service.update(f.ownerId,job.id,{revision:current.revision,enabled:true});assert.equal(current.quickLaunch,true);assert.equal(current.nextRunAt,'2026-10-05T00:10:00.000Z');
+  const markedOff=await f.service.update(f.ownerId,job.id,{revision:current.revision,quickLaunch:false});assert.equal(markedOff.enabled,true);assert.equal(markedOff.nextRunAt,current.nextRunAt);assert.deepEqual(markedOff.schedule,current.schedule);
+  f.advance(300000);await f.service.tick();assert.equal(f.calls.length,2);assert.equal(f.calls[1].run.trigger,'scheduled');
+});
+
+test('quick-launch edits preserve schedule and enablement while invalid markers never change durable state',async t=>{
+  const f=await fixture(t),legacy=await f.create(),quick=await f.service.update(f.ownerId,legacy.id,{revision:legacy.revision,quickLaunch:true});
+  assert.equal(quick.enabled,legacy.enabled);assert.equal(quick.nextRunAt,legacy.nextRunAt);assert.deepEqual(quick.schedule,legacy.schedule);
+  const renamed=await f.service.update(f.ownerId,quick.id,{revision:quick.revision,title:'Same scheduled shortcut'});assert.equal(renamed.quickLaunch,true);
+  const saved=await readFile(f.store.file,'utf8');
+  for(const quickLaunch of [undefined,null,'true','false',0,1,[],{}]){
+    await assert.rejects(f.create({quickLaunch}),{status:400});await assert.rejects(f.service.update(f.ownerId,quick.id,{revision:renamed.revision,quickLaunch}),{status:400});
+  }
+  assert.equal(await readFile(f.store.file,'utf8'),saved);assert.equal(f.service.list(f.ownerId).automations[0].quickLaunch,true);
+  for(const work of [()=>f.service.update(f.member.id,quick.id,{revision:renamed.revision,quickLaunch:false}),()=>f.service.run(f.member.id,quick.id,{requestId:randomUUID()})])await assert.rejects(work(),{status:404});
+  await assert.rejects(f.service.create(f.member.id,f.input({quickLaunch:true})),{status:403});
+  await assert.rejects(f.create({quickLaunch:true,providerId:randomUUID()}),{status:403});
+  assert.equal(await readFile(f.store.file,'utf8'),saved);
 });
 
 test('CAS edits reject stale revisions and preserve running snapshot while pause affects future work', async t => {

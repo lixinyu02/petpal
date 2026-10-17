@@ -121,7 +121,7 @@ export function publicAutomationRun(run) {
 }
 export function publicAutomation(job) {
   const result = Object.fromEntries(['id', 'title', 'prompt', 'hostId', 'providerId', 'projectDirectory', 'permissions', 'schedule', 'enabled', 'revision', 'createdBy', 'sourceConversationId', 'createdAt', 'updatedAt', 'nextRunAt', 'hostName', 'providerName'].filter(key => job[key] !== undefined).map(key => [key, structuredClone(job[key])]));
-  result.runs = job.runs.map(publicAutomationRun); return result;
+  result.quickLaunch = job.quickLaunch === true; result.runs = job.runs.map(publicAutomationRun); return result;
 }
 
 /** Validate without clearing corrupt records or replaying interrupted work. */
@@ -141,7 +141,7 @@ export function validateStoredAutomations(state, { restore = true, clock = Date.
     accounts.add(account.userId);
   }
   for (const job of data.jobs) {
-    if (!fields(job, ['id', 'userId', 'title', 'prompt', 'hostId', 'providerId', 'projectDirectory', 'permissions', 'schedule', 'enabled', 'revision', 'createdBy', 'sourceConversationId', 'sourceRunId', 'createdAt', 'updatedAt', 'nextRunAt', 'runs', 'hostName', 'providerName']) || !automationUUID(job.id) || ids.has(job.id) || !users.has(job.userId) || typeof job.title !== 'string' || !job.title.trim() || job.title.length > 120 || typeof job.enabled !== 'boolean' || !automationUUID(job.revision) || !['user', 'agent'].includes(job.createdBy) || job.sourceConversationId !== undefined && !automationUUID(job.sourceConversationId) || job.sourceRunId !== undefined && !automationUUID(job.sourceRunId) || !stamp(job.createdAt) || !stamp(job.updatedAt) || job.nextRunAt !== null && !stamp(job.nextRunAt) || !Array.isArray(job.runs) || job.runs.length > AUTOMATION_RUN_LIMIT || job.hostName !== undefined && (typeof job.hostName !== 'string' || job.hostName.length > 200) || job.providerName !== undefined && (typeof job.providerName !== 'string' || job.providerName.length > 200)) invalid();
+    if (!fields(job, ['id', 'userId', 'title', 'prompt', 'hostId', 'providerId', 'projectDirectory', 'permissions', 'schedule', 'enabled', 'quickLaunch', 'revision', 'createdBy', 'sourceConversationId', 'sourceRunId', 'createdAt', 'updatedAt', 'nextRunAt', 'runs', 'hostName', 'providerName']) || !automationUUID(job.id) || ids.has(job.id) || !users.has(job.userId) || typeof job.title !== 'string' || !job.title.trim() || job.title.length > 120 || typeof job.enabled !== 'boolean' || Object.hasOwn(job, 'quickLaunch') && typeof job.quickLaunch !== 'boolean' || !automationUUID(job.revision) || !['user', 'agent'].includes(job.createdBy) || job.sourceConversationId !== undefined && !automationUUID(job.sourceConversationId) || job.sourceRunId !== undefined && !automationUUID(job.sourceRunId) || !stamp(job.createdAt) || !stamp(job.updatedAt) || job.nextRunAt !== null && !stamp(job.nextRunAt) || !Array.isArray(job.runs) || job.runs.length > AUTOMATION_RUN_LIMIT || job.hostName !== undefined && (typeof job.hostName !== 'string' || job.hostName.length > 200) || job.providerName !== undefined && (typeof job.providerName !== 'string' || job.providerName.length > 200)) invalid();
     ids.add(job.id);
     try {
       storedSpec({ prompt: job.prompt, hostId: job.hostId, providerId: job.providerId, projectDirectory: job.projectDirectory, permissions: job.permissions }); normalizeAutomationSchedule(job.schedule);

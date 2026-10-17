@@ -145,7 +145,7 @@ export function parseTownForecast(html, parent, id, now = new Date()) {
   if (blocks.length !== 7) throw new Error('乡镇七日预报内容不完整。');
   const dateLabels = Array.from(html.matchAll(/<li\b[^>]*class=["'][^"']*\bdate-item\b[^"']*["'][^>]*>([\s\S]*?)<\/li>/gi), m => htmlText(/<p\b[^>]*class=["']date["'][^>]*>(.*?)<\/p>/s.exec(m[1])?.[1]));
   if (dateLabels.length !== 8) throw new Error('乡镇预报日期标签不完整。');
-  const intervals = [], daily = [];
+  const intervals = [], daily = [], groupStarts = new Set();
   const base = datePart(weatherTime(raw[0]?.[0]?.jf));
   if (!base) throw new Error('乡镇预报缺少完整日期。');
   for (const [i, points] of raw.entries()) {
@@ -154,6 +154,7 @@ export function parseTownForecast(html, parent, id, now = new Date()) {
     if (!firstTime) throw new Error('乡镇预报缺少完整日期。');
     if (datePart(firstTime) !== dayAt(base, i)) throw new Error('乡镇预报每日分组日期不一致。');
     if (Number(dateLabels[i + 1]?.match(/^(\d+)日/)?.[1]) !== Number(datePart(firstTime).slice(-2))) throw new Error('乡镇预报日期标签与分组日期不一致。');
+    if (i > 0) groupStarts.add(intervals.length);
     const block = blocks[i][2];
     const weather = /<p\b[^>]*class=["']weather-info["'][^>]*title=["']([^"']*)["']/.exec(block)?.[1];
     daily.push({ date: datePart(firstTime), weather: cleanWeatherText(weather), high_c: weatherNumber(highs[i + 1]), low_c: weatherNumber(lows[i + 1]),
@@ -164,18 +165,23 @@ export function parseTownForecast(html, parent, id, now = new Date()) {
       intervals.push({ valid_at: validAt, temperature_c: weatherNumber(point.jb), weather_code: cleanWeatherText(point.ja), wind_level_code: cleanWeatherText(point.jc), wind_direction_code: cleanWeatherText(point.jd) });
     }
   }
-  const gaps = new Set();
+  const gaps = new Set(), coverageGaps = [];
   for (let i = 1; i < intervals.length; i++) {
     const gap = (Date.parse(intervals[i].valid_at) - Date.parse(intervals[i - 1].valid_at)) / 3600000;
-    if (gap <= 0 || gap > 3) throw new Error('乡镇分时预报时间顺序异常。');
-    gaps.add(gap);
+    // The official hourly -> three-hour horizon can leave a sparse join between
+    // adjacent dated groups. Preserve that hole explicitly; never sort, dedupe,
+    // interpolate, or accept an internal gap/reversed/whole-day missing group.
+    if (gap <= 0 || gap > (groupStarts.has(i) ? 24 : 3)) throw new Error('乡镇分时预报时间顺序异常。');
+    if (groupStarts.has(i)) {
+      if (gap > 3) coverageGaps.push({ after: intervals[i - 1].valid_at, before: intervals[i].valid_at, duration_hours: gap });
+    } else gaps.add(gap);
   }
   const location = { ...parent, location_id: id, parent_id: parent.location_id, parent_name: parent.name, name, full_name: `${parent.full_name} / ${name}`, precision: 'town-or-subdistrict-forecast', source_url: townUrl(id) };
   return { location, source: '中国天气网乡镇街道预报', source_url: townUrl(id), fetched_at: now.toISOString(), timezone: 'Asia/Shanghai',
     published_at: null, freshness: { status: 'unknown', age_hours: null },
     valid_from: intervals[0].valid_at, valid_to: intervals.at(-1).valid_at, coverage_status: Date.parse(intervals.at(-1).valid_at) < now.getTime() ? 'expired' : 'includes-future',
-    daily, intervals: { temporal_resolution_hours: [...gaps].sort(), entries: intervals },
-    notes: ['乡镇街道页面未提供可信数据发布时间；网页显示更新时间由浏览器时钟合成，不作为发布或新鲜度证据。', '这是乡镇街道地点预报，未提供网格分辨率，不代表小区/门牌实况。', '分时天气/风为来源数字代码；不猜测未核实代码含义。'] };
+    daily, intervals: { temporal_resolution_hours: [...gaps].sort((a, b) => a - b), coverage: coverageGaps.length ? 'gapped' : 'continuous', coverage_gaps: coverageGaps, entries: intervals },
+    notes: ['乡镇街道页面未提供可信数据发布时间；网页显示更新时间由浏览器时钟合成，不作为发布或新鲜度证据。', '这是乡镇街道地点预报，未提供网格分辨率，不代表小区/门牌实况。', '分时天气/风为来源数字代码；不猜测未核实代码含义。', ...(coverageGaps.length ? ['分时预报在逐日分组交界存在缺口，详见 intervals.coverage_gaps；未插值补齐，不能推断缺口内天气或视为连续覆盖。'] : [])] };
 }
 
 export async function runChinaWeatherQuery(request, { now = new Date() } = {}) {

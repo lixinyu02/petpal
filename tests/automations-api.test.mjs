@@ -107,6 +107,31 @@ test('account APIs require login, isolate histories and retain exact administrat
   assert.doesNotMatch(visible, /grantId|snapshot|sessionHash|private-fixture|private-provider|sourceRunId/);
 });
 
+test('shortcut API defaults to manual execution, deduplicates clicks and enables scheduling independently',async t=>{
+  const f=await fixture(t),body=f.body({quickLaunch:true}),created=await f.request('/automations',{method:'POST',body});assert.equal(created.status,201);const job=created.data.automation;
+  assert.equal(job.quickLaunch,true);assert.equal(job.enabled,false);assert.equal(job.nextRunAt,null);
+  const repeat=await f.request('/automations',{method:'POST',body:{...body,enabled:false}});assert.equal(repeat.status,201);assert.equal(repeat.data.automation.id,job.id);
+  f.advance(5);await f.app.automations.tick();assert.equal(f.calls.length,0);
+  const runBody={requestId:randomUUID()},runs=await Promise.all(Array.from({length:5},()=>f.request(`/automations/${job.id}/run`,{method:'POST',body:runBody})));assert.ok(runs.every(run=>run.status===200));assert.equal(new Set(runs.map(run=>run.data.run.id)).size,1);
+  await until(()=>f.calls.length===1);await f.completed(job,0);let current=(await f.jobs()).find(item=>item.id===job.id);assert.equal(current.quickLaunch,true);assert.equal(current.enabled,false);assert.equal(current.nextRunAt,null);
+  const enabled=await f.request(`/automations/${job.id}`,{method:'PATCH',body:{revision:current.revision,enabled:true}});assert.equal(enabled.status,200);current=enabled.data.automation;assert.equal(current.quickLaunch,true);assert.ok(current.nextRunAt);
+  const removed=await f.request(`/automations/${job.id}`,{method:'PATCH',body:{revision:current.revision,quickLaunch:false}});assert.equal(removed.status,200);assert.equal(removed.data.automation.enabled,true);assert.equal(removed.data.automation.nextRunAt,current.nextRunAt);
+  f.advance(5);await f.app.automations.tick();await until(()=>f.calls.length===2);assert.equal((await f.jobs()).find(item=>item.id===job.id).runs.at(-1).trigger,'scheduled');
+});
+
+test('shortcut flags preserve legacy idempotency and never bypass account or input validation',async t=>{
+  const f=await fixture(t),body=f.body(),created=await f.request('/automations',{method:'POST',body});assert.equal(created.status,201);const job=created.data.automation;assert.equal(job.quickLaunch,false);
+  const replay=await f.request('/automations',{method:'POST',body:{...body,quickLaunch:false}});assert.equal(replay.status,201);assert.equal(replay.data.automation.id,job.id);
+  assert.equal((await f.request('/automations',{method:'POST',body:{...body,quickLaunch:true}})).status,409);
+  const before=JSON.stringify((await f.saved()).automations);
+  for(const quickLaunch of [null,'true','false',1,0,[],{}]){
+    assert.equal((await f.request('/automations',{method:'POST',body:f.body({quickLaunch})})).status,400);assert.equal((await f.request(`/automations/${job.id}`,{method:'PATCH',body:{revision:job.revision,quickLaunch}})).status,400);
+  }
+  assert.equal(JSON.stringify((await f.saved()).automations),before);
+  const member=await f.member('shortcut-foreign');assert.equal((await f.request(`/automations/${job.id}`,{token:member.token,method:'PATCH',body:{revision:job.revision,quickLaunch:true}})).status,404);assert.equal((await f.request(`/automations/${job.id}/run`,{token:member.token,method:'POST',body:{requestId:randomUUID()}})).status,404);
+  assert.equal((await f.request('/automations',{token:member.token,method:'POST',body:f.body({quickLaunch:true})})).status,403);assert.equal((await f.request('/automations',{token:'',method:'POST',body:f.body({quickLaunch:true})})).status,401);
+});
+
 test('scheduled Agent dispatch resolves its fixed independent reviewer without storing review credentials in the run', async t => {
   const f = await fixture(t), permissions = { access: 'read-only', approval: 'review', reviewProviderId: f.foreign.id };
   const job = await f.create(bootstrap, { permissions });

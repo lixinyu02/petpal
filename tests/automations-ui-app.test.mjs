@@ -55,12 +55,12 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
     useMemo:callback=>callback(),useCallback:callback=>callback,useSyncExternalStore:(_subscribe,snapshot)=>snapshot(),
     lazy:loader=>({fixtureLazy:true,loader}),
   };
-  const element=(type,props)=>{
+  const element=(type,props,key)=>{
     if(type?.fixtureLazy){
       if(!type.pending)type.pending=type.loader().then(module=>{type.resolved=module.default;});
       type=type.resolved||type;
     }
-    return{type,props};
+    return{type,props,...(key===undefined?{}:{key:String(key)})};
   },component=name=>({__esModule:true,default:Symbol(name)});
   const controls=Object.fromEntries(['ModelPicker','ExecutionTarget','AgentOnboarding'].map(name=>[name,Symbol(name)]));
   class SessionChangedError extends Error {constructor(){super('Fixture account changed');this.name='SessionChangedError';}}
@@ -164,8 +164,11 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
   };
   const deferredChildren=['AutomationsView','DownloadsView','UpdatesSettings','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','OfficialAccountSettings','ClientBehaviorSettings','CentralServerSettings'];
   for(const name of [...deferredChildren,'BrandMark','CompanionOptions','ChatMessages','ChatScrollDock','ConversationHistory','AgentQueue','AgentUserInput','CatV2','WorkspaceDisclosure'])modules[`./${name}`]=component(name);
+  const urlChanges=[],location={search,origin:'https://fixture.invalid',pathname:'/',hash:'',assign:path=>navigations.push(path)};
+  Object.defineProperty(location,'href',{get:()=>`${location.origin}${location.pathname}${location.search}${location.hash}`});
+  window.location=location;window.history={replaceState(_state,_title,value){const next=new URL(value,location.href);assert.equal(next.origin,location.origin,'workspace history sync must remain on the current service');Object.assign(location,{pathname:next.pathname,search:next.search,hash:next.hash});urlChanges.push(next.href);}};
   const module={exports:{}},context={module,exports:module.exports,require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);if(deferredChildren.some(child=>name===`./${child}`))lazyLoads.push(name);return modules[name];},
-    window,document,location:{search,origin:'https://fixture.invalid',assign:path=>navigations.push(path)},URL,URLSearchParams,AbortController,DOMException,crypto:{randomUUID:()=>`fixture-submission-${requests.length}`},
+    window,document,location,URL,URLSearchParams,AbortController,DOMException,crypto:{randomUUID:()=>`fixture-submission-${requests.length}`},
     setTimeout(callback){const id=++timerId;timers.set(id,callback);return id;},clearTimeout:id=>timers.delete(id)};
   Object.defineProperty(context,'localStorage',{get:readStorage});
   // Execute the actual hook bridge without a documentElement, preserving the off path.
@@ -177,7 +180,7 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
   const find=(type,predicate=()=>true)=>nodes(tree).find(node=>node.type===type&&predicate(node.props));
   render();
   const deferred=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return{promise,resolve};};
-  return{find,calls,requests,streams,navigations,attachments,hydrations,startupSignals,lazyLoads,get lateStateWrites(){return lateStateWrites;},get getterReads(){return getterReads;},text:()=>text(tree),
+  return{find,calls,requests,streams,navigations,attachments,hydrations,startupSignals,lazyLoads,get currentUrl(){return new URL(location.href);},get urlChanges(){return [...urlChanges];},get lateStateWrites(){return lateStateWrites;},get getterReads(){return getterReads;},text:()=>text(tree),
     setHidden(hidden){document.hidden=hidden;document.dispatchEvent(new Event('visibilitychange'));},
     fireTimers(){const pending=[...timers.values()];timers.clear();for(const callback of pending)callback();},
     get timerCount(){return timers.size;},
@@ -201,7 +204,7 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
     changeSession(){sessionEpoch++;},
     automation(){return nodes(tree).find(node=>typeof node.props?.onEditingChange==='function'&&typeof node.props?.onOpenConversation==='function');},
     automationEditing(value,{rerender=true}={}){const node=this.automation();assert.ok(node,'automation view is mounted');node.props.onEditingChange(value);if(rerender)render();},
-    automationResult(id){this.automation().props.onOpenConversation(id);render();},
+    automationResult(id){const pending=this.automation().props.onOpenConversation(id);render();return pending;},
     click(label){const node=find('button',props=>props['aria-label']===label||text(props.children)===label);assert.ok(node,`Missing button ${label}`);const pending=node.props.onClick();render();return pending;},
     component(name){return find(controls[name]||modules[`./${name}`]?.default||modules['./ChatAssistant'][name]);},
     deleteHistory(id){find(modules['./ConversationHistory'].default).props.onDelete(id);render();},
@@ -371,6 +374,77 @@ test('automation navigation mounts an account-bound independent view and keeps C
   assert.equal(f.back(), true); await f.ready();
   assert.equal(f.automation(), undefined); assert.equal(f.find('textarea', props => props['aria-label'] === '消息').props.value, '尚未发送的 Chat 文字');
   assert.equal(f.attachments.clearCount, 0); assert.ok(f.requests.every(item => item.method === 'GET'));
+});
+
+test('a direct shortcuts URL mounts its own lazy mode and workspace navigation keeps page URLs in sync',async t=>{
+  const saved=conversation('shortcut-linked-chat');
+  const f=workspaceFixture({canUseCodex:true,initialConversations:[saved],search:`?chat=1&shortcuts=1&campaign=fixture&conversation=${saved.id}&mode=chat`});t.after(()=>f.close());await f.ready();
+  assert.ok(f.automation());assert.equal(f.automation().props.mode,'shortcuts');assert.equal(f.automation().key,'shortcuts');
+  assert.equal(f.automation().props.user.id,'fixture-user');assert.deepEqual(f.lazyLoads,['./AutomationsView']);
+  assert.equal(f.find('button',props=>props['aria-label']==='快捷入口'||text(props.children)==='快捷入口').props.className,'active');
+  assert.equal(f.currentUrl.searchParams.get('shortcuts'),'1');assert.equal(f.currentUrl.searchParams.get('campaign'),'fixture');
+  for(const [label,page]of [['自动化','automations'],['下载客户端','downloads'],['连接与设置','settings'],['对话',null],['快捷入口','shortcuts']]){
+    f.openView(label);await f.ready();
+    assert.equal(f.currentUrl.searchParams.get('chat'),'1');assert.equal(f.currentUrl.searchParams.get('campaign'),'fixture');assert.equal(f.currentUrl.searchParams.get('conversation'),saved.id);assert.equal(f.currentUrl.searchParams.get('mode'),'chat');
+    for(const candidate of ['shortcuts','automations','downloads','settings'])assert.equal(f.currentUrl.searchParams.get(candidate),candidate===page?'1':null,`${label} must replace the prior page parameter`);
+    if(page==='automations'||page==='shortcuts'){assert.equal(f.automation().props.mode,page);assert.equal(f.automation().key,page);}
+  }
+  assert.equal(f.lazyLoads.filter(name=>name==='./AutomationsView').length,1,'both modes share the same deferred module');
+  assert.ok(f.requests.every(item=>item.method==='GET'),'opening shortcuts cannot create or run a task');assert.deepEqual(f.navigations,[]);
+});
+
+test('opening shortcuts and coming back keeps the selected Chat, unsent text and image drafts',async t=>{
+  const saved=conversation('chat-before-shortcuts',{messages:[{id:'earlier',role:'assistant',content:'原有聊天内容',status:'complete'}]});
+  const f=workspaceFixture({canUseCodex:true,initialConversations:[saved]});t.after(()=>f.close());await f.ready();f.selectHistory(saved.id);await f.ready();
+  const image={id:'shortcut-unsent-image',name:'unsent.png',mimeType:'image/png'};f.typeDraft('先保留这段没有发出的想法');f.setAttachments([image]);const cleared=f.attachments.clearCount;
+  f.openView('快捷入口');await f.ready();assert.equal(f.automation().props.mode,'shortcuts');assert.equal(f.selectedId,saved.id);assert.equal(f.find('section',props=>props.role==='dialog'),undefined);
+  assert.equal(f.attachments.clearCount,cleared);assert.deepEqual(f.attachments.items,[image]);assert.equal(f.back(),true);await f.ready();
+  assert.equal(f.automation(),undefined);assert.equal(f.selectedId,saved.id);assert.equal(f.find('textarea',props=>props['aria-label']==='消息').props.value,'先保留这段没有发出的想法');
+  assert.deepEqual(f.attachments.items,[image]);assert.equal(f.attachments.clearCount,cleared);assert.deepEqual(f.component('ChatMessages').props.messages,saved.messages);
+  assert.equal(f.currentUrl.searchParams.has('shortcuts'),false);assert.equal(f.streams.length,0);assert.ok(f.requests.every(item=>item.method==='GET'));
+});
+
+for(const [from,to,mode,targetMode]of [['自动化','快捷入口','automations','shortcuts'],['快捷入口','自动化','shortcuts','automations']]){
+  test(`dirty ${mode} edits require an explicit decision before opening ${targetMode}`,async t=>{
+    const f=workspaceFixture({canUseCodex:true});t.after(()=>f.close());await f.ready();f.openView(from);await f.ready();
+    f.automationEditing({dirty:true,busy:false});const originalUrl=f.currentUrl.href;f.openView(to);await f.ready();
+    assert.equal(f.automation().props.mode,mode);assert.equal(f.automation().key,mode);assert.equal(f.currentUrl.href,originalUrl);assert.ok(f.find('section',props=>props.role==='dialog'));
+    f.cancel();await f.ready();assert.equal(f.automation().props.mode,mode);assert.equal(f.find('section',props=>props.role==='dialog'),undefined);
+    f.openView(to);f.confirm();await f.ready();assert.equal(f.automation().props.mode,targetMode);assert.equal(f.automation().key,targetMode);
+    assert.equal(f.currentUrl.searchParams.get(targetMode),'1');assert.equal(f.currentUrl.searchParams.has(mode),false);assert.ok(f.requests.every(item=>item.method==='GET'));
+  });
+  test(`an in-flight ${mode} save blocks ${targetMode}, home and native back before rerender`,async t=>{
+    const f=workspaceFixture({canUseCodex:true});t.after(()=>f.close());await f.ready();f.openView(from);await f.ready();
+    const originalUrl=f.currentUrl.href;f.automationEditing({dirty:false,busy:true},{rerender:false});f.openView(to);assert.equal(f.clickHome(),true);assert.equal(f.back(),true);await f.ready();
+    assert.equal(f.automation().props.mode,mode);assert.equal(f.automation().key,mode);assert.equal(f.currentUrl.href,originalUrl);assert.deepEqual(f.navigations,[]);
+    const discard=f.find('button',props=>text(props.children)==='丢弃并切换');assert.ok(!discard||discard.props.disabled);assert.ok(f.requests.every(item=>item.method==='GET'));
+  });
+}
+
+test('shortcuts cannot interrupt a Chat reply and become reachable after the reply completes',async t=>{
+  const f=workspaceFixture({canUseCodex:true,holdStream:true});t.after(()=>f.close());await f.ready();f.typeDraft('正在回复的原对话');const sending=f.submit();await f.ready();
+  assert.equal(f.streams.length,1);const selected=f.selectedId;f.openView('快捷入口');await f.ready();
+  assert.equal(f.automation(),undefined);assert.equal(f.currentUrl.searchParams.has('shortcuts'),false);assert.equal(f.streams[0].signal.aborted,false);assert.equal(f.selectedId,selected);
+  f.streams[0].complete();await sending;await f.ready();f.openView('快捷入口');await f.ready();assert.equal(f.automation().props.mode,'shortcuts');assert.equal(f.selectedId,selected);assert.equal(f.streams.length,1);
+});
+
+test('shortcut result actions reopen the original read-only conversation without duplicating or redispatching it',async t=>{
+  const result=conversation('shortcut-stored-result',{mode:'codex',automationId:'shortcut-one',messages:[{id:'weather-result',role:'assistant',status:'complete',content:'已返回带时间和来源的天气结果'}],
+    agent:{revision:1,paused:false,queue:[],submissions:[],approvals:[],run:{id:'shortcut-run',status:'completed',providerId:'model',model:'fixture-model',hostId:'pc-one',permissions:{access:'read-only',approval:'ask'}}}});
+  const f=workspaceFixture({canUseCodex:true,initialConversations:[result],registeredAutomationIds:['shortcut-one'],search:'?chat=1&shortcuts=1'});t.after(()=>f.close());await f.ready();
+  assert.deepEqual(f.history(),[]);await f.automationResult(result.id);await f.ready();assert.equal(f.selectedId,result.id);assert.equal(f.automation(),undefined);
+  assert.equal(f.component('ChatMessages').props.conversationId,result.id);assert.deepEqual(f.component('ChatMessages').props.messages,result.messages);assert.equal(f.find('textarea'),undefined);
+  f.openView('快捷入口');await f.ready();assert.equal(f.automation().props.mode,'shortcuts');await f.automationResult(result.id);await f.ready();
+  assert.equal(f.selectedId,result.id);assert.deepEqual(f.component('ChatMessages').props.messages,result.messages);assert.deepEqual(f.history(),[]);
+  assert.ok(f.requests.some(item=>item.path===`/conversations/${result.id}`&&item.method==='GET'));assert.ok(f.requests.every(item=>item.method==='GET'),'result navigation cannot create a new conversation or execute a new run');assert.equal(f.streams.length,0);
+});
+
+test('shortcut result navigation protects editor changes and keeps Chat drafts when the user stays',async t=>{
+  const result=conversation('shortcut-edited-result',{mode:'codex',automationId:'shortcut-edited'});
+  const f=workspaceFixture({canUseCodex:true,initialConversations:[result],registeredAutomationIds:['shortcut-edited']});t.after(()=>f.close());await f.ready();
+  f.typeDraft('结果先不打开，保留我的聊天文字');f.openView('快捷入口');await f.ready();f.automationEditing({dirty:true,busy:false});await f.automationResult(result.id);await f.ready();
+  assert.equal(f.automation().props.mode,'shortcuts');assert.equal(f.selectedId,null);assert.ok(f.find('section',props=>props.role==='dialog'));f.cancel();f.automationEditing({dirty:false,busy:false});f.back();await f.ready();
+  assert.equal(f.find('textarea',props=>props['aria-label']==='消息').props.value,'结果先不打开，保留我的聊天文字');assert.equal(f.selectedId,null);assert.ok(f.requests.every(item=>item.method==='GET'));assert.equal(f.streams.length,0);
 });
 
 test('registered automation results stay out of backend recent history while orphan results remain reachable', async t => {

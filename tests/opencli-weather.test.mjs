@@ -104,6 +104,15 @@ function townFixture({ base = '2026-12-31', townName = '花木街道', parentNam
   return `<title>${parentName}${townName}天气预报</title><a href="/town/weathern/${navigationId}.shtml">7天</a><script>var villages=${JSON.stringify([{ id, name: townName }])};var hour3data=${JSON.stringify(raw)};var eventDay=${JSON.stringify(highs ?? [90, 21, 22, 23, 24, 25, 26, 27])};var eventNight=${JSON.stringify(lows ?? [89, 11, 12, 13, 14, 15, 16, 17])};</script><ul class="date-container">${dateItems}</ul><ul class="blue-container">${items}</ul>`;
 }
 
+function mixedTownPoints() {
+  const start=Date.parse('2026-12-31T20:00:00+08:00');
+  // Synthetic version of the official hourly/three-hour horizon transition:
+  // 12+24+24 hourly points, then 8 three-hour points in each remaining group.
+  return Array.from({length:7},(_,group)=>Array.from({length:group===0?12:group<3?24:8},(_,index)=>({
+    jf:compactHour(start+(group===0?index:group<3?12+(group-1)*24+index:group*24+index*3)*3600000),ja:'00',jb:20+index,jc:'0',jd:'8',
+  })));
+}
+
 test('weather adds exactly six public queries while all 23 pinned upstream queries remain intact', async () => {
   const catalog = await loadOpenCliCatalog();
   assert.equal(OPENCLI_QUERY_POLICIES.length, 23);
@@ -298,8 +307,35 @@ test('town interval coverage crosses month/year and daily highs exclude yesterda
   assert.deepEqual(data.daily.map(row => row.low_c), [11, 12, 13, 14, 15, 16, 17]);
   assert.equal(data.intervals.entries.length, 56);
   assert.deepEqual(data.intervals.temporal_resolution_hours, [3]);
+  assert.equal(data.intervals.coverage,'continuous');assert.deepEqual(data.intervals.coverage_gaps,[]);
   assert.equal(data.intervals.entries[6].valid_at, '2027-01-01T02:00:00+08:00');
   assert.equal(data.intervals.entries[8].valid_at, '2027-01-01T08:00:00+08:00');
+});
+
+test('town hourly to three-hour joins retain explicit coverage holes without interpolation or changing freshness',()=>{
+  const points=mixedTownPoints(),data=parseTownForecast(townFixture({points}),COUNTY,TOWN_ID,NOW);
+  assert.equal(data.intervals.entries.length,92);assert.deepEqual(data.intervals.temporal_resolution_hours,[1,3]);assert.equal(data.intervals.coverage,'gapped');
+  assert.deepEqual(data.intervals.coverage_gaps,[{after:'2027-01-03T07:00:00+08:00',before:'2027-01-03T20:00:00+08:00',duration_hours:13}]);
+  assert.deepEqual(data.intervals.entries.map(point=>point.valid_at),points.flatMap(group=>group.map(point=>weatherTime(point.jf))));
+  assert.equal(data.intervals.entries.some(point=>point.valid_at==='2027-01-03T12:00:00+08:00'),false);assert.equal(data.daily.length,7);assert.equal(data.published_at,null);assert.equal(data.freshness.status,'unknown');
+  assert.match(data.notes.join(' '),/缺口.*未插值.*不能推断/);
+});
+
+test('town gap tolerance is restricted to dated group boundaries and still rejects duplicates, reversals and gaps over a day',()=>{
+  const internal=mixedTownPoints();internal[1].splice(6,4);assert.throws(()=>parseTownForecast(townFixture({points:internal}),COUNTY,TOWN_ID,NOW),/时间顺序/);
+  const start=Date.parse('2026-12-31T08:00:00+08:00'),normal=()=>Array.from({length:7},(_,group)=>Array.from({length:8},(_,index)=>({jf:compactHour(start+(group*24+index*3)*3600000),jb:20,ja:'00',jc:'0',jd:'8'})));
+  for(const reverse of [false,true]){
+    const points=normal();points[0].push({...points[1][0]});if(reverse)points[1][0].jf=compactHour(start+21*3600000);
+    assert.throws(()=>parseTownForecast(townFixture({points}),COUNTY,TOWN_ID,NOW),/时间顺序/);
+  }
+  const overDay=mixedTownPoints();overDay[0]=[{...overDay[0][0],jf:'2026123100'}];assert.throws(()=>parseTownForecast(townFixture({points:overDay}),COUNTY,TOWN_ID,NOW),/时间顺序/);
+  const dayBoundary=mixedTownPoints();dayBoundary[0]=[{...dayBoundary[0][0],jf:'2026123108'}];const bounded=parseTownForecast(townFixture({points:dayBoundary}),COUNTY,TOWN_ID,NOW);assert.equal(bounded.intervals.coverage_gaps[0].duration_hours,24);
+  const wrongDate=mixedTownPoints();wrongDate[3][0].jf='2027010420';assert.throws(()=>parseTownForecast(townFixture({points:wrongDate}),COUNTY,TOWN_ID,NOW),/分组日期/);
+});
+
+test('the isolated weather worker preserves explicit town gaps in its real output envelope',async()=>{
+  const child=await runFixtureWorker(request('forecast',{location_id:TOWN_ID}),{[DIRECTORY_URL]:{body:DIRECTORY},[TOWN_URL]:{body:townFixture({points:mixedTownPoints()})}});
+  assert.equal(child.status,0,child.stderr);const row=JSON.parse(child.stdout).rows[0];assert.equal(row.intervals.coverage,'gapped');assert.equal(row.intervals.coverage_gaps[0].duration_hours,13);assert.deepEqual(row.intervals.temporal_resolution_hours,[1,3]);assert.equal(row.intervals.entries.length,92);
 });
 
 test('town dates cannot repeat across day groups even when interval ordering is superficially valid', () => {

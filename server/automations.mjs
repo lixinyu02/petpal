@@ -219,10 +219,12 @@ export function createAutomationService({ store, authorize, dispatch, observe = 
     list(userId) { checkUser(userId); return { allowAgentCreate: preference(durable, userId), automations: durable.jobs.filter(job => job.userId === userId).map(publicAutomation) }; },
     async create(userId, input, { source = 'user', sourceConversationId, context, guard } = {}) {
       const agent = source === 'agent';
-      if (!['user', 'agent'].includes(source) || !allowed(input, ['requestId', 'title', 'prompt', 'schedule', 'enabled', ...(agent ? [] : ['hostId', 'providerId', 'projectDirectory', 'permissions'])]) || !uuid(input.requestId) || input.enabled !== undefined && typeof input.enabled !== 'boolean') throw fail(400, '自动化创建字段或 requestId 无效。');
+      if (!['user', 'agent'].includes(source) || !allowed(input, ['requestId', 'title', 'prompt', 'schedule', 'enabled', ...(agent ? [] : ['hostId', 'providerId', 'projectDirectory', 'permissions', 'quickLaunch'])]) || !uuid(input.requestId) || input.enabled !== undefined && typeof input.enabled !== 'boolean' || Object.hasOwn(input, 'quickLaunch') && typeof input.quickLaunch !== 'boolean') throw fail(400, '自动化创建字段或 requestId 无效。');
       if (agent && (!object(context) || !uuid(context.sourceRunId) || !uuid(sourceConversationId))) throw fail(403, 'Agent 自动化缺少真实任务上下文。');
       const spec = normalizeAutomationSpec({ prompt: input.prompt, hostId: agent ? context.hostId : input.hostId, providerId: agent ? context.providerId : input.providerId, projectDirectory: agent ? context.projectDirectory ?? '' : input.projectDirectory === undefined ? '' : input.projectDirectory, permissions: agent ? context.permissions : input.permissions });
-      const normalized = { title: title(input.title), ...spec, schedule: normalizeAutomationSchedule(input.schedule), enabled: input.enabled ?? true, source, ...(agent ? { sourceConversationId, sourceRunId: context.sourceRunId } : {}) };
+      // False/omitted flags retain the exact old create fingerprint. Only new
+      // shortcuts default to manual execution unless scheduling is explicit.
+      const normalized = { title: title(input.title), ...spec, schedule: normalizeAutomationSchedule(input.schedule), enabled: input.enabled ?? !input.quickLaunch, source, ...(agent ? { sourceConversationId, sourceRunId: context.sourceRunId } : {}), ...(input.quickLaunch === true ? { quickLaunch: true } : {}) };
       const fingerprint = hash(normalized); let result;
       await guardedPersist(guard, data => {
         checkUser(userId);
@@ -240,14 +242,14 @@ export function createAutomationService({ store, authorize, dispatch, observe = 
         if (data.jobs.filter(item => item.userId === userId).length >= AUTOMATION_LIMIT) throw fail(409, '每账号最多保存 50 个自动化。');
         const names = checkScope(userId, spec, false), now = stamp(), nextRunAt = normalized.enabled ? nextAutomationRun(normalized.schedule, clock(), now) : null;
         if (normalized.enabled && !nextRunAt) throw fail(400, '一次性计划必须晚于当前时间。');
-        result = { id: randomUUID(), userId, title: normalized.title, ...spec, schedule: normalized.schedule, enabled: normalized.enabled, revision: randomUUID(), createdBy: source, ...(agent ? { sourceConversationId, sourceRunId: context.sourceRunId } : {}), createdAt: now, updatedAt: now, nextRunAt, runs: [] };
+        result = { id: randomUUID(), userId, title: normalized.title, ...spec, schedule: normalized.schedule, enabled: normalized.enabled, quickLaunch: input.quickLaunch === true, revision: randomUUID(), createdBy: source, ...(agent ? { sourceConversationId, sourceRunId: context.sourceRunId } : {}), createdAt: now, updatedAt: now, nextRunAt, runs: [] };
         for (const key of ['hostName', 'providerName']) if (typeof names?.[key] === 'string') result[key] = names[key].slice(0, 200);
         data.jobs.push(result); data.requests.push({ userId, kind: 'create', requestId: input.requestId, fingerprint, jobId: result.id, ...(agent ? { sourceRunId: context.sourceRunId } : {}), createdAt: now });
       });
       return publicAutomation(result);
     },
     async update(userId, id, body, { guard } = {}) {
-      if (!allowed(body, ['revision', 'title', 'prompt', 'hostId', 'providerId', 'projectDirectory', 'permissions', 'schedule', 'enabled']) || body.enabled !== undefined && typeof body.enabled !== 'boolean') throw fail(400, '自动化编辑字段无效。');
+      if (!allowed(body, ['revision', 'title', 'prompt', 'hostId', 'providerId', 'projectDirectory', 'permissions', 'schedule', 'enabled', 'quickLaunch']) || body.enabled !== undefined && typeof body.enabled !== 'boolean' || Object.hasOwn(body, 'quickLaunch') && typeof body.quickLaunch !== 'boolean') throw fail(400, '自动化编辑字段无效。');
       let result;
       await guardedPersist(guard, data => {
         const job = find(data, userId, id); cas(job, body.revision);
@@ -257,7 +259,7 @@ export function createAutomationService({ store, authorize, dispatch, observe = 
         const reset = body.schedule !== undefined || body.enabled === true && !job.enabled;
         const nextRunAt = enabled ? reset ? nextAutomationRun(schedule, clock(), stamp()) : job.nextRunAt : null;
         if (enabled && !nextRunAt) throw fail(400, '一次性计划必须晚于当前时间。');
-        Object.assign(job, spec, { title: body.title === undefined ? job.title : title(body.title), schedule, enabled, nextRunAt });
+        Object.assign(job, spec, { title: body.title === undefined ? job.title : title(body.title), schedule, enabled, quickLaunch: body.quickLaunch ?? (job.quickLaunch === true), nextRunAt });
         for (const key of ['hostName', 'providerName']) if (typeof names?.[key] === 'string') job[key] = names[key].slice(0, 200);
         revise(job); result = job;
       }); return publicAutomation(result);
