@@ -81,7 +81,54 @@ test('server management is lazy and requires the current administrator identity'
   const f=fixture({kind:'admin'});t.after(()=>f.close());await f.flush();assert.equal(f.calls.length,0);f.open();await f.flush();assert.deepEqual(f.calls.map(call=>call.action).sort(),['adminList','users']);assert.match(f.text(),/测试服务器配置/);
 });
 test('admin creation sends the explicitly assigned users and deduplicates submission before rerender',async t=>{
-  const wait=deferred(),f=fixture({kind:'admin',handlers:{create:()=>wait.promise}});t.after(()=>f.close());f.open();await f.flush();f.click('添加配置');await f.flush();f.change(f.find('input',props=>props.required===true),'New profile');f.change(f.find('textarea'),'proxies: []');const bob=f.findAll('input',props=>props.type==='checkbox')[1];bob.props.onChange({target:{checked:true}});f.render();const submit=f.find('form').props.onSubmit;submit({preventDefault(){}});submit({preventDefault(){}});assert.equal(f.calls.filter(call=>call.action==='create').length,1);assert.deepEqual(f.calls.at(-1).input.userIds,['alice','bob']);assert.equal(f.calls.at(-1).input.yaml,'proxies: []');await f.flush();assert.equal(f.find('textarea').props.value,'');wait.resolve({});await f.flush();assert.equal(f.find('form'),undefined);assert.match(f.text(),/配置已保存/);
+  const wait=deferred(),f=fixture({kind:'admin',handlers:{create:()=>wait.promise}});t.after(()=>f.close());f.open();await f.flush();f.click('添加配置');await f.flush();f.change(f.find('input',props=>props.required===true),'New profile');f.change(f.find('textarea'),'proxies: []');const bob=f.find('input',props=>props['aria-label']==='分配给 bob');bob.props.onChange({target:{checked:true}});f.render();const submit=f.find('form').props.onSubmit;submit({preventDefault(){}});submit({preventDefault(){}});assert.equal(f.calls.filter(call=>call.action==='create').length,1);assert.deepEqual(f.calls.at(-1).input.userIds,['alice','bob']);assert.equal(f.calls.at(-1).input.allUsers,false);assert.equal(f.calls.at(-1).input.yaml,'proxies: []');await f.flush();assert.equal(f.find('textarea').props.value,'');wait.resolve({});await f.flush();assert.equal(f.find('form'),undefined);assert.match(f.text(),/配置已保存/);
+});
+
+test('legacy profile metadata defaults to private while sharing preserves and restores every explicit user choice',async t=>{
+  const f=fixture({kind:'admin',profiles:[{...profile,userIds:['alice','bob']}]});t.after(()=>f.close());f.open();await f.flush();
+  assert.match(f.text(),/2 个账号/);assert.doesNotMatch(f.text(),/所有账号/);f.click('编辑');await f.flush();
+  const shared=()=>f.find('input',props=>props['aria-label']==='所有账号（包括以后新增）');
+  const account=name=>f.find('input',props=>props['aria-label']===`分配给 ${name}`);
+  assert.equal(shared().props.checked,false);assert.equal(account('bob').props.disabled,false);
+  shared().props.onChange({target:{checked:true}});f.render();
+  assert.equal(shared().props.checked,true);
+  for(const name of ['alice','bob']){assert.equal(account(name).props.checked,true);assert.equal(account(name).props.disabled,true);}
+  // A stale/programmatic checkbox event cannot discard an explicit grant while shared.
+  account('bob').props.onChange({target:{checked:false}});f.render();assert.equal(account('bob').props.checked,true);
+  shared().props.onChange({target:{checked:false}});f.render();
+  for(const name of ['alice','bob']){assert.equal(account(name).props.checked,true);assert.equal(account(name).props.disabled,false);}
+  assert.equal(f.calls.some(call=>call.action==='update'),false,'a sharing toggle is saved only by the form submission');
+  f.submit();await f.flush();const update=f.calls.find(call=>call.action==='update');
+  assert.equal(update.input.allUsers,false);assert.deepEqual(update.input.userIds,['alice','bob']);
+});
+
+test('an existing all-account profile is labelled shared and keeps its explicit grants when saved unchanged',async t=>{
+  const f=fixture({kind:'admin',profiles:[{...profile,allUsers:true}]});t.after(()=>f.close());f.open();await f.flush();
+  assert.match(f.text(),/所有账号（包括以后新增） · 默认规则模式/);f.click('编辑');await f.flush();
+  assert.equal(f.find('input',props=>props['aria-label']==='所有账号（包括以后新增）').props.checked,true);
+  assert.equal(f.find('input',props=>props['aria-label']==='分配给 alice').props.checked,true);
+  assert.equal(f.find('input',props=>props['aria-label']==='分配给 bob').props.checked,false);
+  assert.equal(f.find('input',props=>props['aria-label']==='分配给 bob').props.disabled,true);
+  f.submit();await f.flush();const update=f.calls.find(call=>call.action==='update');
+  assert.equal(update.input.allUsers,true);assert.deepEqual(update.input.userIds,['alice']);assert.equal(update.input.revision,profile.revision);
+  assert.equal(Object.hasOwn(update.input,'yaml'),false);assert.deepEqual(update.input.selections,profile.selections);
+});
+
+test('a new profile can explicitly grant all future accounts without expanding or losing its saved user list',async t=>{
+  const f=fixture({kind:'admin'});t.after(()=>f.close());f.open();await f.flush();f.click('添加配置');await f.flush();
+  f.change(f.find('input',props=>props.required===true),'Shared profile');f.change(f.find('textarea'),'proxies: []');
+  const shared=f.find('input',props=>props['aria-label']==='所有账号（包括以后新增）');assert.equal(shared.props.checked,false);
+  shared.props.onChange({target:{checked:true}});f.render();f.submit();await f.flush();
+  const create=f.calls.find(call=>call.action==='create');assert.equal(create.input.allUsers,true);assert.deepEqual(create.input.userIds,['alice']);assert.equal(create.input.yaml,'proxies: []');
+});
+
+test('an administrator can revoke sharing and continue editing the preserved explicit assignments',async t=>{
+  const f=fixture({kind:'admin',profiles:[{...profile,allUsers:true,userIds:['bob']}]});t.after(()=>f.close());f.open();await f.flush();f.click('编辑');await f.flush();
+  f.find('input',props=>props['aria-label']==='所有账号（包括以后新增）').props.onChange({target:{checked:false}});f.render();
+  const alice=f.find('input',props=>props['aria-label']==='分配给 alice');assert.equal(alice.props.checked,false);assert.equal(alice.props.disabled,false);
+  assert.equal(f.find('input',props=>props['aria-label']==='分配给 bob').props.checked,true);
+  alice.props.onChange({target:{checked:true}});f.render();f.submit();await f.flush();
+  const update=f.calls.find(call=>call.action==='update');assert.equal(update.input.allUsers,false);assert.deepEqual(update.input.userIds,['bob','alice']);
 });
 test('editing metadata retains the existing file and forwards the exact revision; deletion is explicit',async t=>{
   const f=fixture({kind:'admin'});t.after(()=>f.close());f.open();await f.flush();f.click('编辑');await f.flush();f.submit();await f.flush();const update=f.calls.find(call=>call.action==='update');assert.equal(update.input.revision,'revision-1');assert.equal(Object.hasOwn(update.input,'yaml'),false);assert.equal(f.calls.filter(call=>call.action==='delete').length,0);f.click('删除');await f.flush();assert.match(f.text(),/撤销账号访问/);f.click('删除并撤销');await f.flush();assert.deepEqual(f.calls.find(call=>call.action==='delete').input,{id:profile.id,revision:profile.revision});

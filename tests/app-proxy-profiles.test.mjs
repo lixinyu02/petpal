@@ -51,14 +51,72 @@ test('valid remote or inline providers allow dynamic default nodes while static 
 
 test('profile grants are explicit and metadata exposes no YAML credentials or unauthorized IDs',async t=>{
   const f=await fixture(t),created=await f.create({mode:'global',selections:{地点:'东京'}});
+  assert.equal(created.allUsers,false);
   assert.deepEqual(created.userIds,[f.users[0].id]);assert.equal(created.mode,'global');assert.deepEqual(created.selections,{地点:'东京'});
   assert.equal(f.repository.list(f.users[0].id).profiles.length,1);assert.deepEqual(f.repository.list(f.users[1].id),{profiles:[]});
   assert.throws(()=>f.repository.get(created.id,f.users[1].id),{status:404});assert.throws(()=>f.repository.config(created.id,f.users[1].id,created.revision),{status:404});
   for(const response of [created,f.repository.listAdmin(),f.repository.list(f.users[0].id),f.repository.get(created.id,f.users[0].id)])assert.doesNotMatch(JSON.stringify(response),/yaml|synthetic-profile-password|proxy\.example\.test/);
-  assert.equal(Object.hasOwn(f.repository.get(created.id,f.users[0].id),'userIds'),false);
+  assert.equal(Object.hasOwn(f.repository.get(created.id,f.users[0].id),'userIds'),false);assert.equal(Object.hasOwn(f.repository.get(created.id,f.users[0].id),'allUsers'),false);
   assert.match(f.repository.config(created.id,f.users[0].id,created.revision).yaml,/synthetic-profile-password/);
   const nobody=await f.create({name:'未分配',userIds:[]});assert.equal(f.repository.list(f.users[0].id).profiles.some(value=>value.id===nobody.id),false);
   const granted=await f.create({name:'明确分配',userIds:[f.users[1].id,f.users[1].id]});assert.deepEqual(granted.userIds,[f.users[1].id]);
+});
+
+test('all-user grants follow the live active account table without copying IDs or widening other profiles',async t=>{
+  const f=await fixture(t),privateProfile=await f.create(),shared=await f.create({name:'所有账号可用',allUsers:true}),saved=await readFile(f.repository.file,'utf8');
+  assert.equal(shared.allUsers,true);assert.deepEqual(shared.userIds,[f.users[0].id]);
+  assert.deepEqual(f.repository.list(f.users[1].id).profiles.map(profile=>profile.id),[shared.id]);
+  const newcomer={id:randomUUID(),disabled:false};f.users.push(newcomer);
+  assert.deepEqual(f.repository.list(newcomer.id).profiles.map(profile=>profile.id),[shared.id]);
+  const metadata=f.repository.get(shared.id,newcomer.id);assert.equal(Object.hasOwn(metadata,'allUsers'),false);assert.equal(Object.hasOwn(metadata,'userIds'),false);
+  assert.equal(f.repository.config(shared.id,newcomer.id,shared.revision).sha256,shared.sha256);assert.throws(()=>f.repository.get(privateProfile.id,newcomer.id),{status:404});
+  for(const invalid of [undefined,null,'',randomUUID()]){assert.deepEqual(f.repository.list(invalid),{profiles:[]});assert.throws(()=>f.repository.config(shared.id,invalid,shared.revision),{status:404});}
+  newcomer.disabled=true;assert.deepEqual(f.repository.list(newcomer.id),{profiles:[]});assert.throws(()=>f.repository.get(shared.id,newcomer.id),{status:404});assert.throws(()=>f.repository.config(shared.id,newcomer.id,shared.revision),{status:404});
+  newcomer.disabled=false;assert.equal(f.repository.get(shared.id,newcomer.id).id,shared.id);
+  f.users.splice(f.users.indexOf(newcomer),1);assert.throws(()=>f.repository.get(shared.id,newcomer.id),{status:404});
+  assert.equal(await readFile(f.repository.file,'utf8'),saved);assert.deepEqual(f.repository.listAdmin().profiles[1].userIds,[f.users[0].id]);
+});
+
+test('revoking all-user sharing retains explicit grants, YAML and default strategies',async t=>{
+  const f=await fixture(t),shared=await f.create({allUsers:true,userIds:[f.users[0].id,f.users[1].id],selections:{地点:'东京'}}),yaml=f.repository.config(shared.id,f.users[2].id,shared.revision).yaml;
+  const revoked=await f.repository.mutate(shared.id,{revision:shared.revision,allUsers:false});
+  assert.equal(revoked.allUsers,false);assert.deepEqual(revoked.userIds,shared.userIds);assert.equal(revoked.sha256,shared.sha256);assert.deepEqual(revoked.selections,shared.selections);assert.notEqual(revoked.revision,shared.revision);
+  assert.equal(f.repository.config(shared.id,f.users[1].id,revoked.revision).yaml,yaml);assert.deepEqual(f.repository.list(f.users[2].id),{profiles:[]});assert.throws(()=>f.repository.config(shared.id,f.users[2].id,revoked.revision),{status:404});
+  f.users[1].disabled=true;assert.throws(()=>f.repository.get(shared.id,f.users[1].id),{status:404});assert.deepEqual(f.repository.list(f.users[1].id),{profiles:[]});
+  f.users[1].disabled=false;assert.equal(f.repository.get(shared.id,f.users[1].id).id,shared.id);
+});
+
+test('all-user flags require a boolean and omitted updates retain the existing authorization',async t=>{
+  const f=await fixture(t),first=await f.create({allUsers:true}),saved=await readFile(f.repository.file,'utf8');
+  for(const invalid of [null,undefined,'true','false',1,0,[],{}]){
+    await assert.rejects(f.create({allUsers:invalid}),{status:400});await assert.rejects(f.repository.mutate(first.id,{revision:first.revision,allUsers:invalid}),{status:400});
+  }
+  assert.equal(await readFile(f.repository.file,'utf8'),saved);
+  const renamed=await f.repository.mutate(first.id,{revision:first.revision,name:'只改名称'});assert.equal(renamed.allUsers,true);assert.deepEqual(renamed.userIds,first.userIds);
+});
+
+test('legacy ten-field storage stays private and upgrades only on an authorized write',async t=>{
+  const f=await fixture(t),first=await f.create(),saved=JSON.parse(await readFile(f.repository.file,'utf8'));delete saved.profiles[0].allUsers;assert.equal(Object.keys(saved.profiles[0]).length,10);
+  const legacyBytes=JSON.stringify(saved);await writeFile(f.repository.file,legacyBytes);
+  const legacy=await new AppProxyProfiles({dataDir:f.directory,users:()=>f.users}).init();
+  try{
+    assert.equal(legacy.listAdmin().profiles[0].allUsers,false);assert.deepEqual(legacy.list(f.users[1].id),{profiles:[]});assert.equal(await readFile(f.repository.file,'utf8'),legacyBytes);
+    const shared=await legacy.mutate(first.id,{revision:first.revision,allUsers:true});assert.equal(Object.keys(JSON.parse(await readFile(legacy.file,'utf8')).profiles[0]).length,11);
+    const restarted=await new AppProxyProfiles({dataDir:f.directory,users:()=>f.users}).init();
+    try{assert.deepEqual(restarted.listAdmin().profiles,[shared]);const newcomer={id:randomUUID(),disabled:false};f.users.push(newcomer);assert.equal(restarted.get(shared.id,newcomer.id).id,shared.id);}finally{await restarted.close();}
+  }finally{await legacy.close();}
+});
+
+test('invalid sharing flags and unknown storage fields fail closed without rewriting stored bytes',async t=>{
+  const f=await fixture(t);await f.create();const original=JSON.parse(await readFile(f.repository.file,'utf8'));
+  for(const invalid of [null,'true',1,[],{}]){
+    const saved=structuredClone(original);saved.profiles[0].allUsers=invalid;const bytes=JSON.stringify(saved);await writeFile(f.repository.file,bytes);
+    await assert.rejects(new AppProxyProfiles({dataDir:f.directory,users:()=>f.users}).init(),{status:500});assert.equal(await readFile(f.repository.file,'utf8'),bytes);
+  }
+  for(const corrupt of [profile=>{profile.unrecognized=true;},profile=>{delete profile.yaml;profile.unrecognized='synthetic-profile-password';}]){
+    const saved=structuredClone(original);corrupt(saved.profiles[0]);const bytes=JSON.stringify(saved);await writeFile(f.repository.file,bytes);
+    await assert.rejects(new AppProxyProfiles({dataDir:f.directory,users:()=>f.users}).init(),error=>error.status===500&&!error.message.includes('synthetic-profile-password'));assert.equal(await readFile(f.repository.file,'utf8'),bytes);
+  }
 });
 
 test('metadata-only edits retain exact YAML, change revision, enforce revision-bound downloads and revoke grants',async t=>{
@@ -93,9 +151,9 @@ test('precommit authorization loss and IO failure preserve exact previous bytes 
   const arrived=deferred(),release=deferred();let blocking=false,throwIo=false;
   const f=await fixture(t,{beforeCommit:async()=>{if(throwIo)throw new Error('/private/synthetic-profile-password');if(blocking){arrived.resolve();await release.promise;}}});
   const first=await f.create(),saved=await readFile(f.repository.file,'utf8');let authorized=true;blocking=true;
-  const mutation=f.repository.mutate(first.id,{revision:first.revision,name:'拒绝迟到写入'},{authorize:()=>{if(!authorized)throw Object.assign(new Error('登录失效'),{status:401});}});
+  const mutation=f.repository.mutate(first.id,{revision:first.revision,name:'拒绝迟到写入',allUsers:true},{authorize:()=>{if(!authorized)throw Object.assign(new Error('登录失效'),{status:401});}});
   await arrived.promise;authorized=false;release.resolve();await assert.rejects(mutation,{status:401});blocking=false;
-  assert.equal(await readFile(f.repository.file,'utf8'),saved);assert.equal(f.repository.listAdmin().profiles[0].name,first.name);
+  assert.equal(await readFile(f.repository.file,'utf8'),saved);assert.equal(f.repository.listAdmin().profiles[0].name,first.name);assert.equal(f.repository.listAdmin().profiles[0].allUsers,false);assert.deepEqual(f.repository.list(f.users[1].id),{profiles:[]});
   throwIo=true;await assert.rejects(f.repository.mutate(first.id,{revision:first.revision,name:'磁盘错误'}),error=>error.status===500&&!error.message.includes('/private/'));
   assert.equal(await readFile(f.repository.file,'utf8'),saved);assert.deepEqual(await readdir(f.repository.directory),['profiles.json']);
   throwIo=false;assert.equal((await f.repository.mutate(first.id,{revision:first.revision,name:'后续正常写入'})).name,'后续正常写入');

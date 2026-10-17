@@ -75,7 +75,7 @@ function selections(value,groups){
   }return result;
 }
 function publicProfile(value,admin=false){
-  return{id:value.id,name:value.name,revision:value.revision,sha256:value.sha256,updatedAt:value.updatedAt,mode:value.mode,selections:{...value.selections},groups:value.groups.map(group=>({name:group.name,choices:[...group.choices],...(group.dynamic?{dynamic:true}:{})})),...(admin?{userIds:[...value.userIds]}:{})};
+  return{id:value.id,name:value.name,revision:value.revision,sha256:value.sha256,updatedAt:value.updatedAt,mode:value.mode,selections:{...value.selections},groups:value.groups.map(group=>({name:group.name,choices:[...group.choices],...(group.dynamic?{dynamic:true}:{})})),...(admin?{userIds:[...value.userIds],allUsers:value.allUsers===true}:{})};
 }
 
 /** Independent private repository; failed or revoked writes never change committed memory. */
@@ -95,16 +95,17 @@ export class AppProxyProfiles{
       const saved=JSON.parse(await readFile(this.file,'utf8'));
       if(!plain(saved)||Object.keys(saved).length!==2||saved.version!==1||!Array.isArray(saved.profiles)||saved.profiles.length>APP_PROXY_PROFILE_LIMITS.profiles)throw new Error();
       const ids=new Set();for(const entry of saved.profiles){
-        if(!plain(entry)||Object.keys(entry).length!==10||!id(entry.id)||ids.has(entry.id)||!id(entry.revision)||!cleanName(entry.name)||!modes.has(entry.mode)||typeof entry.updatedAt!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(entry.updatedAt)||new Date(entry.updatedAt).toISOString()!==entry.updatedAt||!Array.isArray(entry.userIds)||entry.userIds.length>APP_PROXY_PROFILE_LIMITS.users||entry.userIds.some(userId=>!id(userId))||new Set(entry.userIds).size!==entry.userIds.length)throw new Error();
+        const fields=['id','name','revision','sha256','updatedAt','mode','selections','groups','userIds','yaml'];
+        if(!plain(entry)||!fields.every(key=>Object.hasOwn(entry,key))||Object.keys(entry).some(key=>!fields.includes(key)&&key!=='allUsers')||Object.hasOwn(entry,'allUsers')&&typeof entry.allUsers!=='boolean'||!id(entry.id)||ids.has(entry.id)||!id(entry.revision)||!cleanName(entry.name)||!modes.has(entry.mode)||typeof entry.updatedAt!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(entry.updatedAt)||new Date(entry.updatedAt).toISOString()!==entry.updatedAt||!Array.isArray(entry.userIds)||entry.userIds.length>APP_PROXY_PROFILE_LIMITS.users||entry.userIds.some(userId=>!id(userId))||new Set(entry.userIds).size!==entry.userIds.length)throw new Error();
         const normalized=normalizeServerProxyYaml(entry.yaml),legacyGroups=normalized.groups.map(({name,choices})=>({name,choices}));
         if(normalized.yaml!==entry.yaml||entry.sha256!==normalized.sha256||![JSON.stringify(normalized.groups),JSON.stringify(legacyGroups)].includes(JSON.stringify(entry.groups)))throw new Error();
-        entry.groups=normalized.groups;
+        entry.groups=normalized.groups;entry.allUsers??=false;
         selections(entry.selections,normalized.groups);ids.add(entry.id);
       }this.profiles=saved.profiles;return this;
     }catch{throw fail(500,'服务器代理配置存储无法读取，请保留原文件并检查备份。');}
   }
   _available(){if(this.closed)throw fail(503,'服务器正在退出。');}
-  _visible(profile,userId){return profile&&profile.userIds.includes(userId);}
+  _visible(profile,userId){return profile&&this.users().some(user=>user.id===userId&&!user.disabled)&&(profile.allUsers===true||profile.userIds.includes(userId));}
   list(userId){this._available();return{profiles:this.profiles.filter(profile=>this._visible(profile,userId)).map(profile=>publicProfile(profile))};}
   listAdmin(){this._available();return{profiles:this.profiles.map(profile=>publicProfile(profile,true))};}
   get(profileId,userId){this._available();const profile=this.profiles.find(value=>value.id===profileId);if(!this._visible(profile,userId))throw fail(404,'服务器代理配置不存在或未分配给此账号。');return publicProfile(profile);}
@@ -135,7 +136,7 @@ export class AppProxyProfiles{
   mutate(profileId,input,{creatorId,authorize=()=>{}}={}){return this._serialize(async()=>{
     await authorize();const existing=profileId?this.profiles.find(profile=>profile.id===profileId):null;
     if(profileId&&!existing)throw fail(404,'服务器代理配置不存在。');
-    const allowed=['name','yaml','mode','selections','userIds',...(existing?['revision']:[])];
+    const allowed=['name','yaml','mode','selections','userIds','allUsers',...(existing?['revision']:[])];
     if(!plain(input)||Object.keys(input).some(key=>!allowed.includes(key)))throw fail(400,'服务器代理配置请求格式无效。');
     if(existing&&(!id(input.revision)||input.revision!==existing.revision))throw fail(409,'服务器代理配置已更新，请刷新后重试。');
     if(!existing&&this.profiles.length>=APP_PROXY_PROFILE_LIMITS.profiles)throw fail(400,'服务器代理配置数量已达上限。');
@@ -143,8 +144,10 @@ export class AppProxyProfiles{
     const normalized=normalizeServerProxyYaml(input.yaml??existing?.yaml),mode=input.mode??existing?.mode??normalized.mode;
     if(!modes.has(mode))throw fail(400,'代理模式只支持 rule、global 或 direct。');
     const selected=selections(input.selections??existing?.selections??{},normalized.groups);
+    const allUsers=Object.hasOwn(input,'allUsers')?input.allUsers:existing?.allUsers??false;
+    if(typeof allUsers!=='boolean')throw fail(400,'所有账号授权选项须为布尔值。');
     const userIds=this._userIds(input.userIds??existing?.userIds??[creatorId]);
-    const profile={id:existing?.id||randomUUID(),name,revision:randomUUID(),sha256:normalized.sha256,updatedAt:new Date().toISOString(),mode,selections:selected,groups:normalized.groups,userIds,yaml:normalized.yaml};
+    const profile={id:existing?.id||randomUUID(),name,revision:randomUUID(),sha256:normalized.sha256,updatedAt:new Date().toISOString(),mode,selections:selected,groups:normalized.groups,userIds,allUsers,yaml:normalized.yaml};
     const next=existing?this.profiles.map(value=>value.id===existing.id?profile:value):[...this.profiles,profile];
     await this._save(next,authorize,()=>this._userIds(userIds));return publicProfile(profile,true);
   });}

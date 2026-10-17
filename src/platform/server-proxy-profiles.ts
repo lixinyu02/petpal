@@ -1,8 +1,8 @@
 import {api} from '../api';
 
 export type ServerProxyProfile={id:string;name:string;revision:string;sha256:string;updatedAt:string;mode:'rule'|'global'|'direct';selections:Record<string,string>;groups:Array<{name:string;choices:string[];dynamic?:true}>};
-export type ServerProxyAdminProfile=ServerProxyProfile&{userIds:string[]};
-export type ServerProxyProfileInput={name:string;yaml:string;mode?:ServerProxyProfile['mode'];selections?:Record<string,string>;userIds?:string[]};
+export type ServerProxyAdminProfile=ServerProxyProfile&{userIds:string[];allUsers?:boolean};
+export type ServerProxyProfileInput={name:string;yaml:string;mode?:ServerProxyProfile['mode'];selections?:Record<string,string>;userIds?:string[];allUsers?:boolean};
 export type ServerProxyProfilePatch=Partial<ServerProxyProfileInput>&{revision:string};
 const id=(value:string)=>{if(!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value))throw new Error('服务器代理配置标识无效。');return value;};
 export async function listServerProxyProfiles(signal?:AbortSignal){return api<{profiles:ServerProxyProfile[]}>('/app-proxy/profiles',{signal});}

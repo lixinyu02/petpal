@@ -29,10 +29,38 @@ test('profile HTTP routes require login and an administrator for mutations and a
   for(const route of ['/app-proxy/profiles','/app-proxy/admin/profiles',`/app-proxy/profiles/${profile.id}`,`/app-proxy/profiles/${profile.id}/config`]){
     const response=await f.request(route,{token:''});assert.equal(response.status,401);await response.arrayBuffer();
   }
-  for(const [method,route,body]of [['POST','/app-proxy/profiles',{name:'拒绝',yaml:synthetic}],['PUT',`/app-proxy/profiles/${profile.id}`,{revision:profile.revision,name:'拒绝'}],['DELETE',`/app-proxy/profiles/${profile.id}`,{revision:profile.revision}],['GET','/app-proxy/admin/profiles',undefined]]){
+  for(const [method,route,body]of [['POST','/app-proxy/profiles',{name:'拒绝',yaml:synthetic,allUsers:true}],['PUT',`/app-proxy/profiles/${profile.id}`,{revision:profile.revision,name:'拒绝',allUsers:true}],['DELETE',`/app-proxy/profiles/${profile.id}`,{revision:profile.revision}],['GET','/app-proxy/admin/profiles',undefined]]){
     const response=await f.request(route,{token:f.userToken,method,body});assert.equal(response.status,403);await response.arrayBuffer();
   }
   assert.equal((await(await f.request('/app-proxy/profiles')).json()).profiles.length,1);
+});
+
+test('shared profile authorization covers future accounts while keeping private profiles and grants unchanged',async t=>{
+  const f=await fixture(t),privateProfile=await f.create(),shared=await f.create({name:'共享配置',allUsers:true,userIds:[f.ownerId,f.userId]}),file=path.join(f.directory,'app-proxy-profiles','profiles.json'),saved=await readFile(file,'utf8');
+  assert.equal(privateProfile.allUsers,false);assert.equal(shared.allUsers,true);
+  const ordinary=(await(await f.request('/app-proxy/profiles',{token:f.userToken})).json()).profiles;assert.deepEqual(ordinary.map(profile=>profile.id),[shared.id]);assert.equal(Object.hasOwn(ordinary[0],'allUsers'),false);assert.equal(Object.hasOwn(ordinary[0],'userIds'),false);
+  const account=await f.request('/admin/users',{method:'POST',body:{username:'new-shared-member',password:'isolated-shared-password-123',role:'user'}});assert.equal(account.status,201);const userId=(await account.json()).user.id;
+  const login=await f.request('/auth/login',{token:'',method:'POST',body:{username:'new-shared-member',password:'isolated-shared-password-123'}});assert.equal(login.status,200);const token=(await login.json()).token;
+  assert.deepEqual((await(await f.request('/app-proxy/profiles',{token})).json()).profiles.map(profile=>profile.id),[shared.id]);assert.equal(await readFile(file,'utf8'),saved);
+  const hidden=await f.request(`/app-proxy/profiles/${privateProfile.id}`,{token});assert.equal(hidden.status,404);await hidden.arrayBuffer();
+  const download=await f.request(`/app-proxy/profiles/${shared.id}/config`,{token,headers:{'If-Match':`"${shared.revision}"`}});assert.equal(download.status,200);assert.equal(createHash('sha256').update(await download.text()).digest('hex'),shared.sha256);
+  const disable=await f.request(`/admin/users/${userId}`,{method:'PATCH',body:{disabled:true}});assert.equal(disable.status,200);await disable.arrayBuffer();
+  for(const route of ['/app-proxy/profiles',`/app-proxy/profiles/${shared.id}`,`/app-proxy/profiles/${shared.id}/config`]){const response=await f.request(route,{token,headers:{'If-Match':`"${shared.revision}"`}});assert.equal(response.status,401);await response.arrayBuffer();}
+  const revoke=await f.request(`/app-proxy/profiles/${shared.id}`,{method:'PUT',body:{revision:shared.revision,allUsers:false}});assert.equal(revoke.status,200);const revoked=(await revoke.json()).profile;
+  assert.equal(revoked.allUsers,false);assert.deepEqual(revoked.userIds,shared.userIds);assert.equal(revoked.sha256,shared.sha256);
+  assert.deepEqual((await(await f.request('/app-proxy/profiles',{token:f.userToken})).json()).profiles.map(profile=>profile.id),[shared.id]);
+  const delegatedDenied=await f.request(`/app-proxy/profiles/${shared.id}/config`,{token:f.delegatedToken,headers:{'If-Match':`"${revoked.revision}"`}});assert.equal(delegatedDenied.status,404);await delegatedDenied.arrayBuffer();
+  const anonymous=await f.request(`/app-proxy/profiles/${shared.id}/config`,{token:'',headers:{'If-Match':`"${revoked.revision}"`}});assert.equal(anonymous.status,401);await anonymous.arrayBuffer();
+});
+
+test('sharing flags reject non-booleans and remain visible only in administrator metadata',async t=>{
+  const f=await fixture(t),shared=await f.create({allUsers:true}),file=path.join(f.directory,'app-proxy-profiles','profiles.json'),saved=await readFile(file,'utf8');
+  for(const value of [null,'true','false',1,0,[],{}])for(const [method,route,body]of [['POST','/app-proxy/profiles',{name:'无效授权',yaml:synthetic,allUsers:value}],['PUT',`/app-proxy/profiles/${shared.id}`,{revision:shared.revision,allUsers:value}]]){
+    const response=await f.request(route,{method,body});assert.equal(response.status,400);assert.doesNotMatch(await response.text(),/synthetic-http-profile-password/);
+  }
+  assert.equal(await readFile(file,'utf8'),saved);
+  const admins=(await(await f.request('/app-proxy/admin/profiles')).json()).profiles;assert.equal(admins[0].allUsers,true);assert.deepEqual(admins[0].userIds,shared.userIds);
+  for(const route of ['/app-proxy/profiles',`/app-proxy/profiles/${shared.id}`]){const response=await f.request(route,{token:f.userToken});assert.equal(response.status,200);const text=await response.text();assert.doesNotMatch(text,/allUsers|userIds|"yaml"|synthetic-http-profile-password/);}
 });
 
 test('grants hide existence including config preconditions and never leak YAML into metadata or bootstrap',async t=>{
@@ -76,7 +104,7 @@ test('large valid configuration uses dedicated body parser while over-limit and 
 test('logout during atomic profile IO prevents a late mutation and leaves no granted configuration',async t=>{
   const arrived=deferred(),release=deferred();let block=false;
   const f=await fixture(t,{appProxyProfilesOptions:{beforeCommit:async()=>{if(block){arrived.resolve();await release.promise;}}}});const first=await f.create(),file=path.join(f.directory,'app-proxy-profiles','profiles.json'),saved=await readFile(file,'utf8');
-  block=true;const updating=f.request(`/app-proxy/profiles/${first.id}`,{method:'PUT',body:{revision:first.revision,userIds:[f.userId]}});await arrived.promise;
+  block=true;const updating=f.request(`/app-proxy/profiles/${first.id}`,{method:'PUT',body:{revision:first.revision,allUsers:true}});await arrived.promise;
   const logout=await f.request('/auth/logout',{method:'POST'});assert.equal(logout.status,200);await logout.arrayBuffer();release.resolve();
   const response=await updating;assert.equal(response.status,401);await response.arrayBuffer();assert.equal(await readFile(file,'utf8'),saved);
   assert.deepEqual(await(await f.request('/app-proxy/profiles',{token:f.userToken})).json(),{profiles:[]});
@@ -85,7 +113,7 @@ test('logout during atomic profile IO prevents a late mutation and leaves no gra
 test('demoting a delegated administrator during IO cannot commit a pending profile grant',async t=>{
   const arrived=deferred(),release=deferred();let block=false;
   const f=await fixture(t,{appProxyProfilesOptions:{beforeCommit:async()=>{if(block){arrived.resolve();await release.promise;}}}}),first=await f.create(),file=path.join(f.directory,'app-proxy-profiles','profiles.json'),saved=await readFile(file,'utf8');
-  block=true;const updating=f.request(`/app-proxy/profiles/${first.id}`,{token:f.delegatedToken,method:'PUT',body:{revision:first.revision,userIds:[f.userId]}});await arrived.promise;
+  block=true;const updating=f.request(`/app-proxy/profiles/${first.id}`,{token:f.delegatedToken,method:'PUT',body:{revision:first.revision,allUsers:true}});await arrived.promise;
   const demoted=await f.request(`/admin/users/${f.delegatedId}`,{method:'PATCH',body:{role:'user'}});assert.equal(demoted.status,200);await demoted.arrayBuffer();release.resolve();
   const response=await updating;assert.equal(response.status,401);await response.arrayBuffer();assert.equal(await readFile(file,'utf8'),saved);
 });
