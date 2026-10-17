@@ -106,11 +106,12 @@ export function createOpenCliHandlers(executor, isAllowed) {
 export class DesktopExecutor {
   constructor({ dataDir, musicMcpDataDir = path.join(dataDir || '.', 'music'), fetchImpl = globalThis.fetch, bridgeFactory = options => new CodexBridge(options),
     toolsFactory = options => createDesktopTools(options), resolveCommand = resolveCodexCommand,
-    name = hostname(), platform = process.platform, arch = process.arch, retryWait = delay } = {}) {
+    name = hostname(), platform = process.platform, arch = process.arch, retryWait = delay, memory = null } = {}) {
     if (typeof dataDir !== 'string' || !path.isAbsolute(dataDir)) throw new Error('执行电脑数据目录必须是绝对路径。');
     if (typeof musicMcpDataDir !== 'string' || !path.isAbsolute(musicMcpDataDir)) throw new Error('音乐 MCP 数据目录必须是绝对路径。');
     this.dataDir = dataDir; this.fetch = fetchImpl; this.bridgeFactory = bridgeFactory;
     this.musicMcpDataDir = musicMcpDataDir;
+    this.memory = memory; this.memoryTransition = Promise.resolve();
     this.toolsFactory = toolsFactory; this.resolveCommand = resolveCommand;
     this.metadata = { name: String(name).replace(/[\x00-\x1f\x7f]/g, '').slice(0, 120) || 'PetPal PC', platform, arch };
     this.current = null; this.generation = 0; this.transition = Promise.resolve(); this.closed = false;
@@ -259,10 +260,29 @@ export class DesktopExecutor {
   _queue(work) { const result = this.transition.catch(() => {}).then(work); this.transition = result.catch(() => {}); return result; }
   _assert(ctx) { if (this.closed || this.current !== ctx || ctx.generation !== this.generation || ctx.controller.signal.aborted) throw stopped(); }
   _invalidate() {
+    // Explicit account changes/logout retire memory even when the worker is
+    // already reconnecting. Transient transport failures retain the binding so
+    // the account's local journal can continue and synchronize on recovery.
+    this._unbindMemory();
     const old = this.current || this.recovery?.ctx;
     this.recovery?.controller.abort(); this.recovery = null;
     if (old) { old.controller.abort(); old.run?.controller.abort(); void old.run?.bridge?.close().catch(() => {}); }
     return old;
+  }
+
+  _unbindMemory() {
+    const pending = this.memoryTransition.catch(() => {}).then(() => this.memory?.unbindRemote?.());
+    this.memoryTransition = pending.catch(() => {}); return pending;
+  }
+
+  _bindMemory(ctx) {
+    const pending = this.memoryTransition.catch(() => {}).then(async () => {
+      this._assert(ctx);
+      if (this.memory?.bindRemote) await this.memory.bindRemote({ ...ctx.connection });
+      this._assert(ctx);
+    });
+    // Optional memory availability must not prevent desktop Agent registration.
+    this.memoryTransition = pending.catch(() => {}); return pending.catch(() => {});
   }
 
   connect(input) {
@@ -293,6 +313,7 @@ export class DesktopExecutor {
         const identity = await this._json(ctx, '/api/auth/me'); this._assert(ctx);
         if (identity.instanceId !== connection.instanceId || identity.user?.id !== connection.userId || !identity.user?.canUseCodex) throw new Error('当前账号身份或 Agent 授权无效，请重新登录。');
         ctx.account = identity.user;
+        await this._bindMemory(ctx); this._assert(ctx);
         ctx.deviceId = await loadExecutorDeviceId(this.dataDir); this._assert(ctx);
         ctx.directory = path.join(this.dataDir, 'accounts', hash(`${connection.url}\n${connection.instanceId}\n${connection.userId}`));
         await mkdir(path.join(ctx.directory, 'receipts'), { recursive: true, mode: 0o700 }); this._assert(ctx);
@@ -317,7 +338,7 @@ export class DesktopExecutor {
     if (this.blocked) this.blocked.token = '';
     this.desired = this.blocked = null;
     this.visible = { state: 'disconnected', ...this.metadata };
-    return this._queue(() => this._retire(old));
+    return this._queue(async () => { await this._retire(old); await this.memoryTransition; });
   }
   close() { this.closed = true; return this.disconnect(); }
 
@@ -644,6 +665,7 @@ export class DesktopExecutor {
     this.current = null;
     const desired = this.desired;
     if (!desired || !retryable(error, Boolean(ctx.connectionId))) {
+      this._unbindMemory();
       this.blocked = desired ? { ...desired.connection } : null;
       if (desired) desired.connection.token = '';
       this.desired = null;

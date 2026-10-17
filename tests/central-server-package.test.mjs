@@ -27,8 +27,19 @@ const evaluate = (node, tree) => [...vm.runInNewContext(node.getText(tree))];
 
 test('Linux and Windows builders ship all central modules present in the real native smoke source receipt', async () => {
   const linux = await parsed('scripts/linux-package.mjs');
-  const files = find(linux, node => ts.isPropertyAssignment(node) && node.name.getText(linux) === 'files' && stringArray(node.initializer));
-  const linuxFiles = evaluate(files.initializer, linux);
+  const files = find(linux, node => ts.isPropertyAssignment(node) && node.name.getText(linux) === 'files' && ts.isArrayLiteralExpression(node.initializer));
+  // The builder derives its closure from the actual source inventory. Evaluate
+  // its literal declarations/pushes and final filter instead of requiring an
+  // obsolete all-literal files property (which silently missed new modules).
+  const inventory = find(linux, node => ts.isVariableDeclaration(node) && node.name.getText(linux) === 'requiredApplicationSource' && stringArray(node.initializer));
+  const inventoryContext = vm.createContext({});
+  vm.runInContext(`const requiredApplicationSource = ${inventory.initializer.getText(linux)};`, inventoryContext);
+  for (const statement of linux.statements) {
+    if (!ts.isExpressionStatement(statement) || !ts.isCallExpression(statement.expression) || statement.expression.expression.getText(linux) !== 'requiredApplicationSource.push') continue;
+    assert.ok(statement.expression.arguments.every(ts.isStringLiteral), 'The package inventory must remain statically reviewable');
+    vm.runInContext(statement.getText(linux), inventoryContext);
+  }
+  const linuxFiles = [...vm.runInContext(files.initializer.getText(linux), inventoryContext)];
   const windows = yaml.load(await readFile(new URL('../desktop/electron-builder.yml', import.meta.url), 'utf8'));
   const main = await parsed('desktop/main.cjs');
   const smoke = find(main, node => stringArray(node) && node.elements.some(item => item.text === 'desktop/main.cjs') && node.elements.some(item => item.text === 'node_modules/@jackwener/opencli/LICENSE'));
@@ -37,6 +48,15 @@ test('Linux and Windows builders ship all central modules present in the real na
     assert.ok(linuxFiles.includes(file), `Ubuntu builder drops ${file}`);
     assert.ok(windows.files.includes(file), `Windows builder drops ${file}`);
     assert.ok(smokeFiles.includes(file), `Native smoke source receipt omits ${file}`);
+  }
+  assert.ok(linuxFiles.includes('desktop/memory-ipc.cjs'));
+  assert.ok(windows.files.includes('desktop/memory-ipc.cjs'));
+  assert.ok(smokeFiles.includes('desktop/memory-ipc.cjs'));
+  for (const file of ['server/memobase-runtime.mjs', 'server/memobase-assets/env.py', 'server/memobase-assets/open_telemetry.py', 'server/memobase-assets/LICENSE', 'server/memobase-assets/PROVENANCE.json']) {
+    assert.ok(linuxFiles.includes('server/**'), `Ubuntu builder must retain ${file}`);
+    assert.ok(windows.files.includes('server/**'), `Windows builder must retain ${file}`);
+    assert.ok(smokeFiles.includes('server'), `Native smoke source receipt must retain ${file}`);
+    assert.ok((await readFile(path.join(root, file))).length > 0, `Missing source member: ${file}`);
   }
   assert.equal(linuxFiles.includes('desktop/**'), false, 'Private desktop runtime state must not be pulled in by a broad glob');
 });

@@ -92,3 +92,12 @@ The bundled Akari character artwork and model are original project assets.
 PSD2Live is an independent authoring tool, not bundled into the application.
 The self-contained GPL-3.0 authoring runner and its reproduction instructions
 are retained separately under scripts/authoring/ and docs/cubism/.
+
+Memobase
+--------
+Memobase v0.0.42, revision 358c16bbc6d687937d79bc2f984a11c3be8da901
+https://github.com/memodb-io/memobase
+License: Apache-2.0. The retained license, fixed image digests and provenance
+for the optional self-hosted runtime are in server/memobase-assets/. PetPal
+adapts credential-safe configuration logging and disables upstream telemetry;
+these small source patches are identified with hashes in PROVENANCE.json.

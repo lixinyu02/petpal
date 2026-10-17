@@ -1,3 +1,4 @@
+import type { MemoryRuntimeBridge } from './platform/memory';
 import { connectionFetch, type RemoteRequest, type RemoteEvent } from './auth/native-fetch';
 import { restoreTargetConnection } from './auth/connection-targets.mjs';
 import type { DesktopUpdates } from './platform/updates';
@@ -79,7 +80,7 @@ export type AppProxyStatus = {supported:true;state:'stopped'|'checking'|'startin
 export type AppProxyBridge = {status():Promise<AppProxyStatus>;importFile():Promise<AppProxyStatus>;importText(input:{yaml:string}):Promise<AppProxyStatus>;importUrl?(input:{url:string}):Promise<AppProxyStatus>;updateRemote?():Promise<AppProxyStatus>;start():Promise<AppProxyStatus>;stop():Promise<AppProxyStatus>;preferences(input:{autoStart:boolean}):Promise<AppProxyStatus>;select(input:{group:string;name:string}):Promise<AppProxyStatus>};
 export type DesktopRuntime = {readonly platform:string;readonly arch:string};
 declare global {
-  interface Window { petpal?: { readonly runtime?:DesktopRuntime; connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; remoteAck?(id:string,sequence:number):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; preferences?:PreferencesBridge; centralServer?:CentralServerBridge; updates?:DesktopUpdates; executor?:NativeExecutor; musicMcp?:DesktopMusicMcp; officialAccount?:OfficialAccountBridge; appProxy?:AppProxyBridge }; }
+  interface Window { petpal?: { readonly runtime?:DesktopRuntime; connection(): Promise<Connection>; remoteRequest?(request:RemoteRequest,onEvent:(event:RemoteEvent)=>void):Promise<void>; remoteAbort?(id:string):Promise<void>; remoteAck?(id:string,sequence:number):Promise<void>; showPet(): void; showMain(): void; hidePet(): void; preferences?:PreferencesBridge; centralServer?:CentralServerBridge; memoryRuntime?:MemoryRuntimeBridge; updates?:DesktopUpdates; executor?:NativeExecutor; musicMcp?:DesktopMusicMcp; officialAccount?:OfficialAccountBridge; appProxy?:AppProxyBridge }; }
   interface Window { petpalLoginSession?:LoginSessionBridge; }
 }
 const requests = createRequestScope();

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "upstream": {
+    "repository": "https://github.com/memodb-io/memobase",
+    "version": "0.0.42",
+    "commit": "358c16bbc6d687937d79bc2f984a11c3be8da901"
+  },
+  "images": {
+    "api": "ghcr.io/memodb-io/memobase:0.0.42@sha256:1647d7c706434273f9b5738cadec767ff9b90af0010156198740a191a1e0262f",
+    "db": "pgvector/pgvector:pg17@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d",
+    "redis": "redis:7.4@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85"
+  },
+  "architectures": [
+    "x64",
+    "arm64"
+  ],
+  "files": {
+    "env.py": "d098794f0d77e9af1ced2f7fa937c4505cc11f061e20940eb6987e7e73264da8",
+    "open_telemetry.py": "1c8279f5313bfb906fc65f144bb3acbf090e308ee435f01a757bede6bf48c4c4",
+    "LICENSE": "fa7f07ac6c5f017206e25c3ccced5949e2878de50055ca2495485bd8bece01d7"
+  },
+  "patches": [
+    {
+      "file": "env.py",
+      "upstreamPath": "src/server/api/memobase_server/env.py",
+      "upstreamSha256": "5c31205b451c43fac77495303daac4e2d3d5a2ee1fb35e29ce9a82e121c96043",
+      "change": "Redact upstream config dataclass log containing LLM credentials."
+    },
+    {
+      "file": "open_telemetry.py",
+      "upstreamPath": "src/server/api/memobase_server/telemetry/open_telemetry.py",
+      "upstreamSha256": "e9952d044794c574760bf4c4472dc3c454f409dcec8b9819da162b5527692303",
+      "change": "No-op metrics implementation; no Prometheus listener or OpenTelemetry provider."
+    }
+  ]
+}

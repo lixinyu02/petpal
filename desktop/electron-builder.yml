@@ -28,6 +28,7 @@ files:
   - desktop/official-account-ipc.cjs
   - desktop/central-server.cjs
   - desktop/central-server-ipc.cjs
+  - desktop/memory-ipc.cjs
   - desktop/central-server-smoke.cjs
   - desktop/remote-http.cjs
   - desktop/executor.mjs

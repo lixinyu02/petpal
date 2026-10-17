@@ -37,7 +37,7 @@ requiredApplicationSource.push('desktop/app-proxy.mjs', 'desktop/app-proxy-netwo
   'server/app-proxy-network.mjs', 'server/app-proxy-context.mjs');
 requiredApplicationSource.push('server/native/codex-review/models-0.143.0.json', 'server/native/codex-review/LICENSE', 'server/native/codex-review/PROVENANCE.json', 'server/native/codex-review/SHA256SUMS');
 requiredApplicationSource.push('server/approval-review.mjs', 'server/system-controls.mjs', 'server/native/system-windows.ps1');
-requiredApplicationSource.push('desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs');
+requiredApplicationSource.push('desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/memory-ipc.cjs', 'desktop/central-server-smoke.cjs');
 requiredApplicationSource.push('server/opencli-manager.mjs', 'server/opencli-sites.mjs', 'server/opencli-worker.mjs', 'server/opencli-routes.mjs');
 requiredApplicationSource.push("server/opencli-weather-common.mjs", "server/opencli-weather-policies.mjs", "server/opencli-weather-cn.mjs", "server/opencli-weather-nmc.mjs", "server/opencli-weather-adapters.mjs");
 requiredApplicationSource.push('server/opencli-browser-policies.mjs', 'server/opencli-browser-adapters.mjs', 'server/opencli-browser-setup.mjs');

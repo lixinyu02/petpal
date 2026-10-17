@@ -17,3 +17,5 @@ server/native/music-mcp/** -text
 server/native/codex-review/** -text -whitespace
 # Skill provenance validates original bytes on Windows and Linux.
 server/native/skills/** -text -whitespace
+# The optional Memobase runtime verifies original patch and license bytes.
+server/memobase-assets/** -text -whitespace

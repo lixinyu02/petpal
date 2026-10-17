@@ -56,6 +56,12 @@ function appProxyCall(action, value) {
   return ipcRenderer.invoke(`petpal:app-proxy:${action}`, connection, value);
 }
 
+function memoryRuntimeCall(action, value) {
+  let connection = null;
+  try { const saved = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); if (saved) connection = { url: saved.url === '' ? location.origin : saved.url, token: saved.token }; } catch { /* logged out */ }
+  return ipcRenderer.invoke(`petpal:memory-runtime:${action}`, connection, value);
+}
+
 contextBridge.exposeInMainWorld('petpal', Object.freeze({
   runtime: Object.freeze({ platform:typeof process !== 'undefined' && typeof process.platform === 'string' ? process.platform : '', arch:typeof process !== 'undefined' && typeof process.arch === 'string' ? process.arch : '' }),
   connection: () => ipcRenderer.invoke('petpal:connection'),
@@ -78,6 +84,13 @@ contextBridge.exposeInMainWorld('petpal', Object.freeze({
   centralServer: Object.freeze({
     status: () => centralServerCall('status'),
     update: patch => centralServerCall('update', patch),
+  }),
+  memoryRuntime: Object.freeze({
+    status: () => memoryRuntimeCall('status'),
+    prepare: () => memoryRuntimeCall('prepare'),
+    start: () => memoryRuntimeCall('start'),
+    stop: () => memoryRuntimeCall('stop'),
+    preferences: input => memoryRuntimeCall('preferences', input),
   }),
   officialAccount: Object.freeze({
     status: () => officialAccountCall('status'),

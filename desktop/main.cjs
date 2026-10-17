@@ -15,6 +15,7 @@ const { createCentralServer } = require('./central-server.cjs');
 const { createCentralServerHandlers } = require('./central-server-ipc.cjs');
 const { createOfficialAccountHandlers } = require('./official-account-ipc.cjs');
 const { createAppProxyHandlers } = require('./app-proxy-ipc.cjs');
+const { createMemoryRuntimeHandlers } = require('./memory-ipc.cjs');
 const { spawn } = require('node:child_process');
 
 let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
@@ -1120,6 +1121,13 @@ async function boot() {
   await startupMilestone('backend-listen');
   const port = await listenDesktopBackend(backend.server);
   origin = `http://127.0.0.1:${port}`;
+  const { MEMOBASE_RUNTIME_PUBLIC_MESSAGES } = await import(pathToFileURL(path.join(root, 'server/memobase-runtime.mjs')).href);
+  for (const [channel, handler] of Object.entries(createMemoryRuntimeHandlers({ manager: backend.memory.runtime,
+    isAllowed: event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting,
+    readConnection: event => event.sender.executeJavaScript(`(() => { try { const value = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); return value && { url: value.url === '' ? location.origin : value.url, token: value.token }; } catch { return null; } })()`),
+    verifyConnection: verifyPreferencesSessionConnection,
+    publicMessages: MEMOBASE_RUNTIME_PUBLIC_MESSAGES,
+  }))) ipcMain.handle(channel, handler);
   for(const [channel,handler] of Object.entries(createAppProxyHandlers({manager:appProxy,origin,
     isAllowed:event=>isTrusted(event)&&event.sender===mainWindow?.webContents&&!quitting,
     readConnection:event=>event.sender.executeJavaScript(`(() => { try { const value = JSON.parse(sessionStorage.getItem('petpal.connection') || 'null'); return value && { url: value.url === '' ? location.origin : value.url, token: value.token }; } catch { return null; } })()`),
@@ -1156,7 +1164,7 @@ async function boot() {
   }))) ipcMain.handle(channel, handler);
   await startupMilestone('executor-create');
   const executorModule = await import(pathToFileURL(path.join(__dirname, 'executor.mjs')).href);
-  executor = new executorModule.DesktopExecutor({ dataDir: path.join(app.getPath('userData'), 'executor'), musicMcpDataDir: path.join(app.getPath('userData'), 'data') });
+  executor = new executorModule.DesktopExecutor({ dataDir: path.join(app.getPath('userData'), 'executor'), musicMcpDataDir: path.join(app.getPath('userData'), 'data'), memory: backend.memory });
   for (const [channel, handler] of Object.entries(executorModule.createExecutorHandlers(executor,
     event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting))) ipcMain.handle(channel, handler);
   for (const [channel, handler] of Object.entries(executorModule.createMusicMcpHandlers(executor,
@@ -1408,7 +1416,7 @@ async function boot() {
       const bytes = await fs.readFile(absolute);
       return [{ path: relative.split(path.sep).join('/'), bytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }];
     };
-    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/official-auth.mjs', 'desktop/official-account.mjs', 'desktop/official-account-ipc.cjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/central-server-smoke.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
+    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/official-auth.mjs', 'desktop/official-account.mjs', 'desktop/official-account-ipc.cjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/memory-ipc.cjs', 'desktop/central-server-smoke.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
     if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'result.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
     if (!health.ok || !bridge.hasToken || !codex.available || !desktopTools.opencli.available || desktopTools.opencli.version !== '1.8.8') throw new Error('Desktop smoke prerequisite failed');
