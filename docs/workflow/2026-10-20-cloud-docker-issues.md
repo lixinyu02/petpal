@@ -13,7 +13,7 @@
 - 验收标准: 账号及目标隔离、任务确实在所选环境执行，未知状态不重放；真实配对与桌面协议可用，原有电脑与记忆能力保持。
 - 状态: done
 - 验证方式: 模块/HTTP/WS/UI/Agent 行为测试、隔离真实服务与 Docker、TS/Vite、包闭包及自审。
-- commit: 本提交 feat(issue-1)
+- commit: 885a85f
 
 ## issue-2
 
@@ -22,6 +22,6 @@
 - 范围: Chrome 桌面/手机布局、真实任务及桌面、业务保留、回退/guardian 与源码推送。
 - 依赖: issue-1
 - 验收标准: 实际能力及未验边界有证据；小伴上线不影响现有业务，不自动变更 Harbor/Platform 生产实例或安装包。
-- 状态: in_progress
+- 状态: done
 - 验证方式: 私有回执与截图、fresh idle、HTTPS/静态摘要/登录权限与业务保留。
-- commit: pending
+- commit: 本提交 fix(issue-2)

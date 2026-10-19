@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 export const CLOUD_DOCKER_IMAGE = 'petpal-cloud-agent:0.9.13-codex0.143.0';
-export const CLOUD_DOCKER_ASSET_REVISION = '20261020.5';
+export const CLOUD_DOCKER_ASSET_REVISION = '20261020.6';
 const failure = (message, code = 'cloud_docker_unavailable') => Object.assign(new Error(message), { status: 409, code });
 export function validateLocalTransport(value = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(k => !['wslDistro', 'dockerHost', 'nodeImage', 'debianMirror', 'debianSecurityMirror'].includes(k))) throw failure('Docker 连接配置无效。');
@@ -74,12 +74,18 @@ export function createLocalDocker({ transport = {}, spawnImpl = spawn, image = C
       const launchId = randomUUID();
       const child = launch(['exec', '-i', '--user', '10001:10001', '-e', `CODEX_HOME=${home}`, '-e', `CODEX_REMOTE_MODEL_PROVIDER_KEY=${token}`, record.containerName, 'node', '/opt/petpal/exec.mjs', launchId, ...args]);
       const ended = new Promise(resolve => child.once('close', resolve));
-      child.cloudStop = async () => {
+      let stopping;
+      child.cloudStop = () => stopping ??= (async () => {
         child.stdin.end();
-        const timer = setTimeout(() => { void run(['exec', '--user', '10001:10001', record.containerName, 'node', '-e', 'const f=require("fs");try{const n=Number(f.readFileSync(process.argv[1],"utf8"));if(Number.isSafeInteger(n)&&n>1)process.kill(-n,"SIGKILL");}catch{}', `/runtime/petpal-launch-${launchId}.pid`]).catch(() => {}); }, 3000);
-        try { await Promise.race([ended, new Promise((_, reject) => setTimeout(() => reject(failure('容器任务停止状态未知。', 'execution_unknown')), 10000).unref())]); }
+        const timer = setTimeout(() => { void run(['exec', '--user', '10001:10001', record.containerName, 'node', '-e', 'const f=require("fs");try{const n=Number(f.readFileSync(process.argv[1],"utf8"));if(Number.isSafeInteger(n)&&n>1)process.kill(n,"SIGTERM");}catch{}', `/runtime/petpal-launch-${launchId}.pid`]).catch(() => {}); }, 3000);
+        try {
+          await Promise.race([ended, new Promise((_, reject) => setTimeout(() => reject(failure('容器任务停止状态未知。', 'execution_unknown')), 10000).unref())]);
+          const receipt = JSON.parse(await run(['exec','--user','10001:10001',record.containerName,'node','-e','const f=require("fs"),p=process.argv[1];process.stdout.write(f.readFileSync(p,"utf8"));f.unlinkSync(p);',`/runtime/petpal-cleanup-${launchId}.json`]));
+          if(receipt.launchId!==launchId||receipt.cleanupConfirmed!==true)throw Error('Missing cleanup acknowledgement');
+          child.cleanupConfirmed=true;
+        } catch { child.cleanupConfirmed=false; throw failure('容器任务停止状态未知。','execution_unknown'); }
         finally { clearTimeout(timer); }
-      };
+      })();
       return child;
     },
     async desktop(record, instanceId) {

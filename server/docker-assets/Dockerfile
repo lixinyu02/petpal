@@ -30,7 +30,7 @@ RUN --network=none cp /usr/share/applications/petpal-browser.desktop /home/petpa
     && chmod 0755 /home/petpal/Desktop/Browser.desktop && chown 10001:10001 /home/petpal/Desktop/Browser.desktop \
     && dpkg-query -W > /opt/petpal/debian-packages.txt \
     && npm ls -g --json > /opt/petpal/npm-packages.json
-LABEL top.magicdatou.petpal.desktop-protocol="1" top.magicdatou.petpal.agent-protocol="1" top.magicdatou.petpal.asset-revision="20261020.5" \
+LABEL top.magicdatou.petpal.desktop-protocol="1" top.magicdatou.petpal.agent-protocol="1" top.magicdatou.petpal.asset-revision="20261020.6" \
     top.magicdatou.petpal.build-node-image="${NODE_IMAGE}" top.magicdatou.petpal.build-debian-mirror="${DEBIAN_MIRROR}" top.magicdatou.petpal.build-security-mirror="${DEBIAN_SECURITY_MIRROR}"
 ENV HOME=/home/petpal DISPLAY=:99
 USER 10001:10001

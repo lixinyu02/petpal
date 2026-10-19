@@ -1,15 +1,15 @@
 {
   "schema": "petpal-cloud-docker-assets.v1",
-  "assetRevision": "20261020.5",
+  "assetRevision": "20261020.6",
   "codexVersion": "0.143.0",
   "nodeImage": "node:24.19.0-bookworm-slim",
   "licenses": "Upstream licenses retained under /usr/share/doc and Node/npm package directories inside the image",
   "files": {
-    "Dockerfile": "d166d1dea2a0fc191e77e86193f460df9823672fea721bed6965b23217d7072d",
+    "Dockerfile": "30c860bf3e118b5db32658bcc201e673fcfc95c6e1ac5a5bc958574b7f72644e",
     "start.sh": "bb7a69217955f990c51335f86b85370639021edf6b8bf0f884e69841783fd67f",
-    "exec.mjs": "cbb0a9caab47bc85e65757678164db1d41bf24c0499bd93e164a911a41e0e2a2",
+    "exec.mjs": "bbbf1373b4cff4da22b65f3ccc82ee4dc7fbcdf973a5f52cf16ff00ce450ebac",
     "browser.sh": "1a8766a22c1f45cb9ce61e10e2394b8092f09faff1fbf399d6253fdcee9060c6",
     "browser.desktop": "1d91f955e461382ab758580419b9efabb0bd036dccdd65045ac19d94cdfd1708",
-    "README.md": "c677e51a173e919d6fddcfea498f8eb41643eeb13f95345e6da15f33d0e40825"
+    "README.md": "799e068788877ba2412b54472d7d64004cbe43803435986f4b1175f4ce3cea90"
   }
 }

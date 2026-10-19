@@ -7,4 +7,5 @@ CLI 固定为项目当前的 @openai/codex 0.143.0；模型凭据只由每次启
 本镜像未集成 OpenCLI Chrome 扩展或原生 Computer Use MCP，不能把这些宿主工具宣传为云端已可用。
 Chromium、Debian 组件及 Node/Codex 的许可随软件保留，构建后 /opt/petpal/debian-packages.txt 与 npm-packages.json 记录实际版本。
 镜像不含账号、API Key、主机配置、浏览器档案或项目数据。构建需要访问 Debian 与 npm 公共源。
+每轮 Agent 的命令子树由 Linux subreaper 监督，完成或取消后均清理本轮后代，再确认任务结束；不影响预先运行的桌面服务。长期服务应由容器内独立服务管理，不依赖 Agent 本轮后台命令存活。
 Ubuntu 使用本机 Docker；Windows 可选择已运行的 WSL Docker。ARM64 由基础镜像和 npm 对应二进制决定，需另行实机验证。

@@ -31,7 +31,7 @@ async function fixture(t, options={}) {
 
 test('accounts see only owned Docker hosts; administrators list all without reassigning ownership',async t=>{
   const f=await fixture(t), a=await f.create(), b=await f.create('bob');
-  assert.equal(a.kind,'docker');assert.equal(a.platform,'linux');assert.equal(a.online,true);
+  assert.equal(a.kind,'docker');assert.equal(a.platform,'linux');assert.equal(a.online,true);assert.equal(a.codex.authenticated,true);
   assert.equal(a.isOwn,true);assert.equal(f.cloud.hostFor('admin',a.id).isOwn,false);assert.match(a.requestId,/^[a-f0-9-]{36}$/);assert.equal(a.codex.approvalReview.available,true);
   assert.equal(f.cloud.has(a.id),true);assert.equal(f.cloud.list('alice').length,1);assert.equal(f.cloud.list('admin').length,2);
   assert.throws(()=>f.cloud.hostFor('alice',b.id),{status:404});assert.equal(f.cloud.hostFor('admin',b.id).userId,'bob');
@@ -69,6 +69,7 @@ test('restart never trusts saved online state; refresh adopts only the recorded 
 });
 test('stop/start remain explicit and a stopped target cannot silently execute on central or another host',async t=>{
   const f=await fixture(t), a=await f.create();await f.cloud.action('alice',a.id,'stop');
+  assert.equal(f.cloud.hostFor('alice',a.id).codex.authenticated,false);
   assert.throws(()=>f.cloud.bind(f.entry(a.id)),{code:'executor_offline'});
   await f.cloud.action('alice',a.id,'start');assert.equal(f.cloud.target('alice',a.id).hostId,a.id);
   await assert.rejects(f.cloud.action('bob',a.id,'stop'),{status:404});
@@ -120,14 +121,20 @@ test('changing Docker generation closes the old viewer and task binding',async t
 test('unconfirmed process cleanup durably pauses admission until the environment is stopped',async t=>{
   const child={cloudStop:async()=>{throw Error('no cleanup confirmation');}};
   const f=await fixture(t,{bridgeFactory:options=>({run:async()=>({text:'done'}),close:async()=>{await options.terminateProcess(child).catch(()=>{});}})}),a=await f.create(),bridge=f.cloud.bind(f.entry(a.id));
-  await bridge.run({prompt:'test'});await bridge.close();assert.throws(()=>f.cloud.target('alice',a.id),{code:'executor_offline'});
+  await assert.rejects(bridge.run({prompt:'test'}),{code:'execution_unknown'});await bridge.close();assert.throws(()=>f.cloud.target('alice',a.id),{code:'executor_offline'});
   await f.cloud.refresh('alice');assert.equal(f.cloud.hostFor('alice',a.id).docker.state,'unknown');await assert.rejects(f.cloud.action('alice',a.id,'start'),{code:'execution_unknown'});
   await f.cloud.close();const next=await createCloudDocker(f.settings);t.after(()=>next.close());await next.refresh('alice');assert.equal(next.hostFor('alice',a.id).online,false);
   await next.action('alice',a.id,'stop');await next.action('alice',a.id,'start');assert.equal(next.hostFor('alice',a.id).online,true);
 });
 test('closing a bridge remains busy until the exact same cleanup promise settles',async t=>{
   let release;const f=await fixture(t,{bridgeFactory:()=>({run:async()=>({text:'done'}),close:()=>new Promise(resolve=>release=resolve)})}),a=await f.create(),bridge=f.cloud.bind(f.entry(a.id));
-  await bridge.run({prompt:'test'});const first=bridge.close(),second=bridge.close();assert.equal(first,second);assert.equal(f.cloud.isBusy('alice',a.id),true);await assert.rejects(f.cloud.action('alice',a.id,'stop'),{code:'executor_busy'});release();await first;assert.equal(f.cloud.isBusy('alice',a.id),false);
+  const running=bridge.run({prompt:'test'});await new Promise(resolve=>setImmediate(resolve));const first=bridge.close(),second=bridge.close();assert.equal(first,second);assert.equal(f.cloud.isBusy('alice',a.id),true);await assert.rejects(f.cloud.action('alice',a.id,'stop'),{code:'executor_busy'});release();await Promise.all([first,running]);assert.equal(f.cloud.isBusy('alice',a.id),false);
+});
+
+test('each cloud task closes its native session before returning and unconfirmed cancellation becomes unknown',async t=>{
+  const child={cloudStop:async()=>{throw Error('unconfirmed real-process cleanup');}};
+  const f=await fixture(t,{bridgeFactory:options=>({run:async()=>{throw Object.assign(Error('cancelled'),{name:'AbortError'});},close:async()=>{await options.terminateProcess(child).catch(()=>{});}})}),a=await f.create(),bridge=f.cloud.bind(f.entry(a.id));
+  await assert.rejects(bridge.run({prompt:'test',signal:AbortSignal.abort()}),{code:'execution_unknown'});assert.equal(f.cloud.hostFor('alice',a.id).docker.state,'unknown');assert.equal(f.cloud.isBusy('alice',a.id),false);assert.throws(()=>f.cloud.target('alice',a.id),{code:'executor_offline'});
 });
 test('private state rejects hardlinked or symlinked ownership journals',async t=>{
   const f=await fixture(t);await f.cloud.close();const file=path.join(f.dataDir,'cloud-docker','state.json');await writeFile(file,'{"schema":"foreign"}');

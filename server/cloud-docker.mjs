@@ -57,7 +57,7 @@ export async function createCloudDocker({ dataDir, serviceLinks, authorizeUser, 
   function publicHost(r, viewerUserId) {
     const online=r.state==='running'&&!r.creationPending;
     return { id: r.id, requestId: r.requestId, userId: r.userId, isOwn: r.userId === viewerUserId, name: r.name, kind: 'docker', platform: 'linux', arch: 'unknown', online, capabilities,
-      codex: { available: online, configured: true, supportsSteer: true, images: false, independentReviewModel: false, approvalReview: approvalReviewCapability(true,online,false) },
+      codex: { available: online, authenticated: online, configured: true, supportsSteer: true, images: false, independentReviewModel: false, approvalReview: approvalReviewCapability(true,online,false) },
       docker: { state: r.state, source: r.source, bundle: r.bundle, creationPending: r.creationPending === true, desktopAvailable: r.desktopAvailable === true && r.state === 'running', generation: r.generation ?? '', ...(r.errorCode ? { errorCode: r.errorCode } : {}) } };
   }
   const list = userId => { const u = checkUser(userId); return state.records.filter(r => r.userId === userId || u.isAdmin).map(r=>publicHost(r,userId)); };
@@ -173,7 +173,12 @@ export async function createCloudDocker({ dataDir, serviceLinks, authorizeUser, 
           });
           try{return await bridge.run({...args,projectDirectory:cloudProjectDirectory(entry.projectDirectory),projectAccess:'workspace'});}
           catch(error){if(!args.signal?.aborted&&binding.child?.cleanupConfirmed===false)throw failure(409,'云端任务连接中断，执行状态未知；不会自动重试。','execution_unknown');throw error;}
-        } finally { binding.running=false; clearInterval(monitor); }
+        } finally {
+          clearInterval(monitor);
+          try { await binding.close(); }
+          finally { binding.running=false; }
+          if(record.executionUncertain)throw failure(409,'云端任务停止状态未确认；请先停止整个环境，不会自动重试。','execution_unknown');
+        }
       },
       async steer(args){assert();if(args.images?.length||args.attachmentIds?.length)throw failure(409,'云端引导暂不支持图片。','executor_images_unsupported');if(!bridge)throw failure(409,'任务尚未启动。','turn_not_active');return bridge.steer(args);},
       async approve(...args){assert();if(!bridge)throw failure(404,'审批已失效。');return bridge.approve(...args);},
