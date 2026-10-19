@@ -19,3 +19,7 @@ server/native/codex-review/** -text -whitespace
 server/native/skills/** -text -whitespace
 # The optional Memobase runtime verifies original patch and license bytes.
 server/memobase-assets/** -text -whitespace
+# Docker provenance is verified from the original asset bytes on every platform.
+server/docker-assets/** -text -whitespace
+# Upstream license notices retain their published bytes and original whitespace.
+public/third-party/novnc/** -text -whitespace

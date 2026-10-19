@@ -11,6 +11,7 @@ import {createChatDisplay,type ChatDisplay} from './chat-display.mjs';
 import {useChatScroll} from './useChatScroll';
 import {useUiEntrance} from './platform/ui-motion.ts';
 import {createVisiblePoll} from './platform/visible-poll.mjs';
+import {dockerDesktopReady,dockerHasDesktop,type CloudDockerHost} from './platform/cloud-docker';
 import { ModelPicker, ExecutionTarget, AgentOnboarding } from './WorkspaceControls';
 import AgentPermissions, { defaultAgentPermissions } from './AgentPermissions';
 import {approvalReviewLabel} from './approval-review-ui.mjs';
@@ -23,6 +24,7 @@ import {mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMes
 import { executionHostLock, readExecutionHost, resolveExecutionHostId, saveExecutionHost } from './execution-hosts.mjs';
 import { useAttachments, AttachmentInput, AttachmentDrafts, MessageImages } from './Attachments';
 import './workspace.css';
+import './cloud-docker.css';
 import { ConnectionDialog } from './auth/LoginGate';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type MouseEvent } from 'react';
 import { ArrowRight, ArrowUp, ArrowUpRight, AudioLines, CalendarClock, Download, ListOrdered, CornerDownRight, Check, ChevronDown, CircleHelp, Code2, Coffee, Globe2, History, Link2, Loader2, Menu, MessageCircle, Monitor, MoreHorizontal, PawPrint, Pencil, Plug, Plus, RefreshCw, Settings2, ShieldCheck, Sparkles, Square, Sun, Terminal, Trash2, Unplug, UserRound, Volume2, X, Zap } from 'lucide-react';
@@ -56,6 +58,9 @@ const UpdatesSettings = lazy(() => import('./UpdatesSettings'));
 const AccountsSettings = lazy(() => import('./AccountsSettings'));
 const VoiceSettings = lazy(() => import('./VoiceSettings'));
 const MemorySettings = lazy(() => import('./MemorySettings'));
+const CloudDockerView = lazy(() => import('./CloudDockerView'));
+const ServiceLinksSettings = lazy(() => import('./ServiceLinksSettings'));
+const RemoteDesktopPanel = lazy(() => import('./RemoteDesktopPanel'));
 const DesktopAssistantSettings = lazy(() => import('./DesktopAssistantSettings'));
 const MusicMcpSettings = lazy(() => import('./MusicMcpSettings'));
 const ComputerUseSettings = lazy(() => import('./ComputerUseSettings'));
@@ -71,8 +76,8 @@ const emptyState: State = { settings: { petName: '小伴', companionKind: 'anime
 type Approval = AgentApproval;
 const approvalExpired=(approval:Approval)=>approval.expiresAt!==undefined&&(!Number.isFinite(Date.parse(approval.expiresAt))||Date.parse(approval.expiresAt)<=Date.now());
 type ApprovalDecision = 'pending'|'consumed'|'uncertain';
-type WorkspaceView='chat'|'settings'|'downloads'|'automations'|'shortcuts';
-type PendingNavigation = {kind:'new';mode:'chat'|'codex'} | {kind:'conversation';id:string;conversation?:Conversation} | {kind:'home'} | {kind:'page';view:WorkspaceView;accounts?:boolean} | {kind:'connection'};
+type WorkspaceView='chat'|'settings'|'downloads'|'automations'|'shortcuts'|'cloud';
+type PendingNavigation = {kind:'new';mode:'chat'|'codex'} | {kind:'cloud';host:AgentHost;desktop?:boolean} | {kind:'conversation';id:string;conversation?:Conversation} | {kind:'home'} | {kind:'page';view:WorkspaceView;accounts?:boolean} | {kind:'connection'};
 const dateFormatter=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric'});
 function browserStorage():Storage|undefined{try{return window.localStorage;}catch{return undefined;}}
 
@@ -93,18 +98,18 @@ export default function App() {
   const [startupAttempt, setStartupAttempt] = useState(0);
   const [startupError,setStartupError]=useState('');
   const [connected, setConnected] = useState(false);
-  const [view, setView] = useState<WorkspaceView>(new URLSearchParams(location.search).has('shortcuts') ? 'shortcuts' : new URLSearchParams(location.search).has('automations') ? 'automations' : new URLSearchParams(location.search).has('downloads') ? 'downloads' : new URLSearchParams(location.search).has('settings') ? 'settings' : 'chat');
+  const [view, setView] = useState<WorkspaceView>(new URLSearchParams(location.search).has('cloud') ? 'cloud' : new URLSearchParams(location.search).has('shortcuts') ? 'shortcuts' : new URLSearchParams(location.search).has('automations') ? 'automations' : new URLSearchParams(location.search).has('downloads') ? 'downloads' : new URLSearchParams(location.search).has('settings') ? 'settings' : 'chat');
   const [automationEditing,setAutomationEditing]=useState({dirty:false,busy:false});
   const automationEditingRef=useRef(automationEditing);
   const updateAutomationEditing=useCallback((next:{dirty:boolean;busy:boolean})=>{automationEditingRef.current=next;setAutomationEditing(previous=>previous.dirty===next.dirty&&previous.busy===next.busy?previous:next);},[]);
   useEffect(()=>{
     if(typeof window.history?.replaceState!=='function')return;
     const params=new URLSearchParams(location.search);
-    for(const page of ['shortcuts','automations','settings','downloads'])params.delete(page);
+    for(const page of ['shortcuts','automations','settings','downloads','cloud'])params.delete(page);
     params.set('chat','1');if(view!=='chat')params.set(view,'1');
     window.history.replaceState(null,'',`${location.pathname||'/'}?${params}${location.hash||''}`);
   },[view]);
-  const [settingsTab, setSettingsTab] = useState<'models'|'pet'|'desktop'|'accounts'|'voice'|'assistant'|'updates'|'memory'>('models');
+  const [settingsTab, setSettingsTab] = useState<'models'|'pet'|'desktop'|'accounts'|'voice'|'assistant'|'updates'|'memory'|'services'>('models');
   const officialReturnAction=useRef<()=>void>(()=>{});
   officialReturnAction.current=()=>{setSettingsTab('models');requestNavigation({kind:'page',view:'settings'});window.dispatchEvent(new Event('petpal:official-native-change'));};
   useEffect(()=>{
@@ -143,6 +148,7 @@ export default function App() {
   const [petSay, setPetSay] = useState('我在这里，听你说。');
   const [mobileNav, setMobileNav] = useState(false);
   const [companionPanelOpen, setCompanionPanelOpen] = useState(() => window.matchMedia('(min-width: 1400px)').matches);
+  const [remoteDesktopHost,setRemoteDesktopHost]=useState<AgentHost|null>(null);
   const [companionPanelMounted,setCompanionPanelMounted]=useState(()=>companionPanelOpen||window.matchMedia('(max-width: 960px)').matches);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [approvals, setApprovals] = useState<Approval[]>([]);
@@ -195,6 +201,10 @@ export default function App() {
   const selectedHostId=resolveExecutionHostId({requestedId:agentHostId,lockedId:lockedHostId,localHostId,defaultHostId});
   const canUseHost=(host:AgentHost)=>!!(state.user?.isAdmin||state.user?.isOwner)||(host.kind!=='central'&&host.isOwn!==false);
   const selectedHost=agentHosts.find(host=>host.id===selectedHostId&&canUseHost(host));
+  const desktopTargetId=currentMode==='codex'?selectedHostId:chatAssistant.value.hostId;
+  const desktopTarget=agentHosts.find(host=>host.id===desktopTargetId&&host.kind==='docker'&&dockerHasDesktop(host)&&canUseHost(host));
+  const shownDesktopHost=remoteDesktopHost?.id===desktopTargetId&&remoteDesktopHost.kind==='docker'&&connected&&canUseHost(remoteDesktopHost)?remoteDesktopHost:null;
+  useEffect(()=>{setRemoteDesktopHost(previous=>previous?.id===desktopTargetId&&view==='chat'?previous:null);},[desktopTargetId,view,hostScope]);
   const hostBusy=agentRunning||agentUnknown||!!conversation?.agent?.queue.length;
   const conversationProjectHostId=conversation?.agentHostId||conversation?.threadHostId||'central';
   const projectDirectory=useProjectDirectory({scope:hostScope,hostId:selectedHostId,conversationId:conversation?.mode==='codex'?conversation.id:'',conversationValue:conversation?.mode==='codex'&&conversationProjectHostId===selectedHostId&&(conversation.messages.length||conversation.agent?.run||conversation.threadHostId)?(conversation.agentProjectDirectory??conversation.threadProjectDirectory??''):undefined});
@@ -202,7 +212,7 @@ export default function App() {
   const projectIssue=projectDirectoryIssue(activeProjectDirectory,selectedHost);
   const selectedCodex=useMemo(()=>selectedHost?.codex?{...state.codex,...selectedHost.codex}:state.codex,[state.codex,selectedHost?.codex]);
   const activeAgentProvider=state.providers.find(item=>item.id===activeProviderId);
-  const agentSupportsImages=activeAgentProvider?.supportsImages!==false;
+  const agentSupportsImages=activeAgentProvider?.supportsImages!==false&&selectedCodex.images!==false&&selectedCodex.supportsImages!==false&&(selectedHost as CloudDockerHost|undefined)?.capabilities?.images!==false;
   const canSendAgent=!!selectedHost?.online&&!!selectedCodex.available&&!hostsError&&!agentUnknown&&!projectIssue;
   const officialWorkspace=useRef({state,conversationId:conversation?.id,draft,attachments:attachments.items.length,working,hostBusy,unconfirmed});
   officialWorkspace.current={state,conversationId:conversation?.id,draft,attachments:attachments.items.length,working,hostBusy,unconfirmed};
@@ -423,6 +433,11 @@ export default function App() {
     if(target.kind==='page'){stopPresentation();if(target.accounts)setSettingsTab('accounts');setView(target.view);setMobileNav(false);return;}
     if(target.kind==='connection'){stopPresentation();setConnectionOpen(true);setMobileNav(false);return;}
     if(target.kind==='new'){startNewChat(target.mode);return;}
+    if(target.kind==='cloud'){
+      if(!target.host.online||target.host.kind!=='docker'||!canUseHost(target.host)||!state.user?.canUseCodex){setNotice('这个云端环境尚未连接，执行目标保持不变。');return;}
+      setAgentHosts(previous=>previous.some(host=>host.id===target.host.id)?previous.map(host=>host.id===target.host.id?target.host:host):[...previous,target.host]);
+      saveExecutionHost(browserStorage(),hostScope,target.host.id);startNewChat('codex');setAgentHostId(target.host.id);setRemoteDesktopHost(target.desktop?target.host:null);return;
+    }
     if(target.kind==='conversation'){
       const next=target.conversation||state.conversations.find(item=>item.id===target.id);
       if(!next){setNotice('这段对话已不可用，输入内容仍已保留。');return;}
@@ -791,6 +806,7 @@ export default function App() {
         <button className={view === 'chat' ? 'active' : ''} onClick={() => requestNavigation({kind:'page',view:'chat'})}><MessageCircle size={18} aria-hidden="true"/>对话</button>
         <button className={view === 'shortcuts' ? 'active' : ''} aria-label="快捷入口" onClick={() => requestNavigation({kind:'page',view:'shortcuts'})}><Zap size={18} aria-hidden="true"/>快捷入口</button>
         <button className={view === 'automations' ? 'active' : ''} onClick={() => requestNavigation({kind:'page',view:'automations'})}><CalendarClock size={18} aria-hidden="true"/>自动化</button>
+        {state.user?.canUseCodex&&<button className={view === 'cloud' ? 'active' : ''} onClick={()=>requestNavigation({kind:'page',view:'cloud'})}><Monitor size={18} aria-hidden="true"/>云端环境</button>}
       </nav>
       <ConversationHistory conversations={historyConversations} projects={projects} projectFilter={projectFilter} archived={historyArchived} selectedId={selected} active={view==='chat'} busy={busy||deleteBusy} onFilter={filterHistory} onSelect={selectHistory} onDelete={deleteHistory} onOrganize={organizeHistory} onCreateProject={createHistoryProject} onRenameProject={renameHistoryProject} onDeleteProject={deleteHistoryProject}/>
       <div className="sidebar-bottom"><button className={`settings-link ${view==='downloads'?'active':''}`} onClick={()=>requestNavigation({kind:'page',view:'downloads'})}><Download size={18} aria-hidden="true"/>下载客户端</button>
@@ -801,8 +817,8 @@ export default function App() {
 
     <main className="main-area">
       {ready&&startupError&&<div className="error-banner" role="alert"><span>{startupError}</span><button className="secondary-button" onClick={()=>setStartupAttempt(value=>value+1)}>重试连接</button></div>}
-      <header className="topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileNav(true)}><Menu size={21} aria-hidden="true"/></button><span className="breadcrumb">我的空间</span><span className="breadcrumb-divider">/</span><strong ref={titleEntrance} className="ui-title-enter">{view === 'settings' ? '连接与设置' : view==='downloads'?'下载客户端':view==='automations'?'自动化':view==='shortcuts'?'快捷入口':currentMode === 'codex' ? 'Agent · 执行任务' : 'Chat · 聊天'}</strong></div><div className="topbar-actions">{view === 'chat' && <button type="button" className="companion-panel-toggle" aria-label={companionPanelOpen ? '收起伙伴栏' : '展开伙伴栏'} aria-expanded={companionPanelOpen} aria-controls="workspace-companion-panel" onClick={() => setCompanionPanelOpen(value => !value)}><PawPrint size={16} aria-hidden="true"/><span>{companionPanelOpen ? '收起伙伴' : '伙伴'}</span></button>}<span className="today">{todayLabel}</span><button className="avatar account-entry" aria-label="我的账号" onClick={() => requestNavigation({kind:'page',view:'settings',accounts:true})}>{state.user?.displayName?.slice(0,1) || '我'}</button><a className="single-companion-return" href="/" onClick={homeClick} aria-label="回到伙伴身边"><PawPrint size={20} aria-hidden="true"/></a></div></header>
-      {!ready ? <div className="loading-view"><Loader2 className="spin" aria-hidden="true"/>正在准备你的小伴…</div> : (view==='automations'||view==='shortcuts')?<Suspense fallback={<div className="loading-view" role="status"><Loader2 className="spin" aria-hidden="true"/>{view==='shortcuts'?'正在打开快捷入口…':'正在打开自动化…'}</div>}><AutomationsView key={view} mode={view==='shortcuts'?'shortcuts':'automations'} user={state.user} providers={agentProviders} reviewProviders={reviewProviders} hosts={agentHosts} localHostId={localHostId} defaultHostId={selectedHostId||defaultHostId} hostsLoading={hostsLoading} hostsError={hostsError} onRefreshHosts={()=>setHostRefresh(value=>value+1)} onOpenConversation={openAutomationConversation} onEditingChange={updateAutomationEditing}/></Suspense>:view==='downloads'?<Suspense fallback={<div className="loading-view" role="status"><Loader2 className="spin" aria-hidden="true"/>正在打开下载页面…</div>}><DownloadsView/></Suspense>:view === 'settings' ? <SettingsView state={state} connected={connected} refresh={refresh} notice={setNotice} connect={() => setConnectionOpen(true)} initialTab={settingsTab} hasDraft={!!draft.trim()||!!attachments.items.length||working} onDownload={()=>setView('downloads')} onPrepareBrowser={prepareBrowser} prepareBrowserDisabled={working||hostBusy||hostsLoading||!state.user?.canUseCodex||!!draft.trim()||!!attachments.items.length||!!unconfirmed}/> : <div className={`workspace${companionPanelOpen ? ' workspace-companion-visible' : ''}`}>
+      <header className="topbar"><div className="topbar-title"><button className="mobile-menu icon-button" aria-label="打开导航" onClick={() => setMobileNav(true)}><Menu size={21} aria-hidden="true"/></button><span className="breadcrumb">我的空间</span><span className="breadcrumb-divider">/</span><strong ref={titleEntrance} className="ui-title-enter">{view === 'settings' ? '连接与设置' : view==='downloads'?'下载客户端':view==='automations'?'自动化':view==='shortcuts'?'快捷入口':view==='cloud'?'云端环境':currentMode === 'codex' ? 'Agent · 执行任务' : 'Chat · 聊天'}</strong></div><div className="topbar-actions">{view==='chat'&&desktopTarget&&<button className="remote-desktop-open-toggle" aria-label={shownDesktopHost?'收起远程桌面':'打开远程桌面'} aria-expanded={!!shownDesktopHost} disabled={!dockerDesktopReady(desktopTarget)} onClick={()=>setRemoteDesktopHost(previous=>previous?.id===desktopTarget.id?null:desktopTarget)}><Monitor size={16}/><span>远程桌面</span></button>}{view === 'chat' && <button type="button" className="companion-panel-toggle" aria-label={companionPanelOpen&&!shownDesktopHost ? '收起伙伴栏' : '展开伙伴栏'} aria-expanded={companionPanelOpen&&!shownDesktopHost} aria-controls="workspace-companion-panel" onClick={() => {setRemoteDesktopHost(null);setCompanionPanelOpen(value => shownDesktopHost?true:!value);}}><PawPrint size={16} aria-hidden="true"/><span>{companionPanelOpen&&!shownDesktopHost ? '收起伙伴' : '伙伴'}</span></button>}<span className="today">{todayLabel}</span><button className="avatar account-entry" aria-label="我的账号" onClick={() => requestNavigation({kind:'page',view:'settings',accounts:true})}>{state.user?.displayName?.slice(0,1) || '我'}</button><a className="single-companion-return" href="/" onClick={homeClick} aria-label="回到伙伴身边"><PawPrint size={20} aria-hidden="true"/></a></div></header>
+      {!ready ? <div className="loading-view"><Loader2 className="spin" aria-hidden="true"/>正在准备你的小伴…</div> : (view==='automations'||view==='shortcuts')?<Suspense fallback={<div className="loading-view" role="status"><Loader2 className="spin" aria-hidden="true"/>{view==='shortcuts'?'正在打开快捷入口…':'正在打开自动化…'}</div>}><AutomationsView key={view} mode={view==='shortcuts'?'shortcuts':'automations'} user={state.user} providers={agentProviders} reviewProviders={reviewProviders} hosts={agentHosts} localHostId={localHostId} defaultHostId={selectedHostId||defaultHostId} hostsLoading={hostsLoading} hostsError={hostsError} onRefreshHosts={()=>setHostRefresh(value=>value+1)} onOpenConversation={openAutomationConversation} onEditingChange={updateAutomationEditing}/></Suspense>:view==='cloud'?<Suspense fallback={<div className="loading-view" role="status"><Loader2 className="spin"/>正在打开云端环境…</div>}><CloudDockerView connected={connected} user={state.user} onUse={host=>requestNavigation({kind:'cloud',host})} onDesktop={host=>requestNavigation({kind:'cloud',host,desktop:true})} onConfigure={()=>{setSettingsTab('services');requestNavigation({kind:'page',view:'settings'});}} onChanged={()=>setHostRefresh(value=>value+1)}/></Suspense>:view==='downloads'?<Suspense fallback={<div className="loading-view" role="status"><Loader2 className="spin" aria-hidden="true"/>正在打开下载页面…</div>}><DownloadsView/></Suspense>:view === 'settings' ? <SettingsView state={state} connected={connected} refresh={refresh} notice={setNotice} connect={() => setConnectionOpen(true)} initialTab={settingsTab} hasDraft={!!draft.trim()||!!attachments.items.length||working} onDownload={()=>setView('downloads')} onPrepareBrowser={prepareBrowser} prepareBrowserDisabled={working||hostBusy||hostsLoading||!state.user?.canUseCodex||!!draft.trim()||!!attachments.items.length||!!unconfirmed}/> : <div className={`workspace${companionPanelOpen ? ' workspace-companion-visible' : ''}${shownDesktopHost?' workspace-remote-visible':''}`}>
         <section className="chat-area">
           <div className={`workspace-controls is-${currentMode==='chat'?'chat':'agent'}`}>
             <div className="workspace-mode-row">
@@ -844,6 +860,7 @@ export default function App() {
           </div>}
 
         </section>
+        {shownDesktopHost&&<Suspense fallback={<div className="loading-view" role="status">正在打开远程桌面…</div>}><RemoteDesktopPanel key={shownDesktopHost.id} host={shownDesktopHost} user={state.user} connected={connected} onClose={()=>setRemoteDesktopHost(null)}/></Suspense>}
         <aside className="pet-panel" id="workspace-companion-panel"><div className="pet-panel-heading"><span>你的小伙伴</span><span className="live-tag"><span/>{mood === 'sleep' ? '打盹中' : speech.active ? '朗读中' : responsePerformance.phase === 'speaking' ? '回应中' : working ? '思考中' : '在你身边'}</span></div><div className="pet-scene"><div className="scene-circle"/><svg className="scene-leaf" viewBox="0 0 90 120" aria-hidden="true"><path d="M42 118V44m0 50C3 85 8 54 42 75m0-9c33-6 40-31 8-28m-8 4C17 32 24 5 42 15" fill="#b7c8a5" stroke="#9bad8a" strokeWidth="2"/><path d="M26 100h34l-5 20H31z" fill="#d9cbb5" stroke="none"/></svg><div className="pet-touch">{companionPanelMounted&&<Cat performanceInput={performanceInput} onState={companionState} onInteract={companionInteract}/>}</div><div className="scene-floor"/></div><div className="pet-name"><h2>{state.settings.petName}</h2><span>{companionKind === 'anime' ? '温柔的二次元伙伴' : '一只喜欢陪着你的小猫'}</span></div><div className="pet-speech">{mood !== 'sleep' && working ? '让我想一想，马上就好…' : petSay}</div><p className="pet-interaction-hint">轻触回应 · 长按休息</p><a className="motion-preview-link" href="/" onClick={homeClick}>回到伙伴身边 <ArrowUpRight size={16} aria-hidden="true"/></a><div className="pet-panel-bottom"><div className="quiet-note"><Sparkles size={16} aria-hidden="true"/><p>不用每一刻都很有生产力。<br/>有我陪着，发会儿呆也很好。</p></div>{window.petpal ? <button className="desktop-pet-button" onClick={() => window.petpal?.showPet()}><Monitor size={16} aria-hidden="true"/>放到桌面上<ArrowUpRight size={16} aria-hidden="true"/></button> : Capacitor.isNativePlatform() ? <button className="desktop-pet-button" onClick={() => setView('settings')}><Monitor size={16} aria-hidden="true"/>开启悬浮伙伴<ArrowUpRight size={16} aria-hidden="true"/></button> : <div className="platform-note"><Monitor size={14} aria-hidden="true"/><span>桌面版支持透明悬浮伙伴</span></div>}</div></aside>
       </div>}
     </main>
@@ -854,7 +871,7 @@ export default function App() {
   </div>;
 }
 
-function SettingsView({ state, connected, refresh, notice, connect, initialTab, hasDraft, onDownload, onPrepareBrowser, prepareBrowserDisabled }: { state: State; connected: boolean; refresh(): Promise<State>; notice(message: string): void; connect(): void; hasDraft:boolean; initialTab: 'models'|'pet'|'desktop'|'accounts'|'voice'|'assistant'|'updates'|'memory'; onDownload():void; onPrepareBrowser():void; prepareBrowserDisabled:boolean }) {
+function SettingsView({ state, connected, refresh, notice, connect, initialTab, hasDraft, onDownload, onPrepareBrowser, prepareBrowserDisabled }: { state: State; connected: boolean; refresh(): Promise<State>; notice(message: string): void; connect(): void; hasDraft:boolean; initialTab: 'models'|'pet'|'desktop'|'accounts'|'voice'|'assistant'|'updates'|'memory'|'services'; onDownload():void; onPrepareBrowser():void; prepareBrowserDisabled:boolean }) {
   const canManageMusicMcp = !!(state.user?.isAdmin||state.user?.isOwner) || ((!!nativeMusicMcp()||!!nativeComputerUse()) && !!state.user?.canUseCodex && state.user.agentAccess === 'full');
   const voiceIdentity=getIdentity();
   const voiceScope=state.instanceId&&state.user?`${state.instanceId}:${state.user.id}`:voiceIdentity?`${voiceIdentity.instanceId}:${voiceIdentity.userId}`:`guest:${getConnection().url||location.origin}`;
@@ -877,8 +894,9 @@ function SettingsView({ state, connected, refresh, notice, connect, initialTab, 
   const settingsEntrance = useUiEntrance<HTMLDivElement>(`settings:${tab}`);
   const providerDialogEntrance = useUiEntrance<HTMLDivElement>(editing?.id || 'new-provider', !!editing);
   const removeProviderEntrance = useUiEntrance<HTMLDivElement>(removeId || '', !!removeId);
-  return <div ref={settingsEntrance} className="settings-page"><div className="settings-heading"><h1>连接与偏好</h1><p>管理模型、语音、设备和账号。</p></div><div className="settings-tabs" role="tablist"><button role="tab" aria-selected={tab === 'models'} className={tab === 'models' ? 'active' : ''} onClick={() => setTab('models')}><Plug size={18} aria-hidden="true"/>模型连接</button><button role="tab" aria-selected={tab === 'pet'} className={tab === 'pet' ? 'active' : ''} onClick={() => setTab('pet')}><PawPrint size={18} aria-hidden="true"/>小伴个性</button><button role="tab" aria-selected={tab === 'desktop'} className={tab === 'desktop' ? 'active' : ''} onClick={() => setTab('desktop')}><Monitor size={18} aria-hidden="true"/>设备连接</button>{canManageMusicMcp && <button role="tab" aria-selected={tab === 'assistant'} className={tab === 'assistant' ? 'active' : ''} onClick={() => setTab('assistant')}><Terminal size={18} aria-hidden="true"/>电脑助手</button>}<button role="tab" aria-selected={tab === 'memory'} className={tab === 'memory' ? 'active' : ''} onClick={()=>setTab('memory')}><History size={18} aria-hidden="true"/>记忆</button><button role="tab" aria-selected={tab === 'voice'} className={tab === 'voice' ? 'active' : ''} onClick={()=>setTab('voice')}><AudioLines size={18} aria-hidden="true"/>语音与设备</button><button role="tab" aria-selected={tab === 'accounts'} className={tab === 'accounts' ? 'active' : ''} onClick={()=>setTab('accounts')}><UserRound size={18} aria-hidden="true"/>账号</button><button role="tab" aria-selected={tab === 'updates'} className={tab === 'updates' ? 'active' : ''} onClick={()=>setTab('updates')}><RefreshCw size={18} aria-hidden="true"/>软件更新</button></div>{error && <div className="error-banner" role="alert"><span>{error}</span><button className="icon-button" aria-label="关闭设置错误" onClick={() => setError('')}><X size={15} aria-hidden="true"/></button></div>}{!connected && <div className="setup-notice"><Unplug size={19} aria-hidden="true"/><span>先连接个人服务，才能保存设置。</span><button className="secondary-button" onClick={connect}>连接服务</button></div>}
+  return <div ref={settingsEntrance} className="settings-page"><div className="settings-heading"><h1>连接与偏好</h1><p>管理模型、语音、设备和账号。</p></div><div className="settings-tabs" role="tablist"><button role="tab" aria-selected={tab === 'models'} className={tab === 'models' ? 'active' : ''} onClick={() => setTab('models')}><Plug size={18} aria-hidden="true"/>模型连接</button><button role="tab" aria-selected={tab === 'pet'} className={tab === 'pet' ? 'active' : ''} onClick={() => setTab('pet')}><PawPrint size={18} aria-hidden="true"/>小伴个性</button><button role="tab" aria-selected={tab === 'desktop'} className={tab === 'desktop' ? 'active' : ''} onClick={() => setTab('desktop')}><Monitor size={18} aria-hidden="true"/>设备连接</button>{canManageMusicMcp && <button role="tab" aria-selected={tab === 'assistant'} className={tab === 'assistant' ? 'active' : ''} onClick={() => setTab('assistant')}><Terminal size={18} aria-hidden="true"/>电脑助手</button>}<button role="tab" aria-selected={tab === 'memory'} className={tab === 'memory' ? 'active' : ''} onClick={()=>setTab('memory')}><History size={18} aria-hidden="true"/>记忆</button><button role="tab" aria-selected={tab === 'voice'} className={tab === 'voice' ? 'active' : ''} onClick={()=>setTab('voice')}><AudioLines size={18} aria-hidden="true"/>语音与设备</button><button role="tab" aria-selected={tab === 'accounts'} className={tab === 'accounts' ? 'active' : ''} onClick={()=>setTab('accounts')}><UserRound size={18} aria-hidden="true"/>账号</button>{(state.user?.isAdmin||state.user?.isOwner)&&<button role="tab" aria-selected={tab==='services'} className={tab==='services'?'active':''} onClick={()=>setTab('services')}><Link2 size={18} aria-hidden="true"/>服务配对</button>}<button role="tab" aria-selected={tab === 'updates'} className={tab === 'updates' ? 'active' : ''} onClick={()=>setTab('updates')}><RefreshCw size={18} aria-hidden="true"/>软件更新</button></div>{error && <div className="error-banner" role="alert"><span>{error}</span><button className="icon-button" aria-label="关闭设置错误" onClick={() => setError('')}><X size={15} aria-hidden="true"/></button></div>}{!connected && <div className="setup-notice"><Unplug size={19} aria-hidden="true"/><span>先连接个人服务，才能保存设置。</span><button className="secondary-button" onClick={connect}>连接服务</button></div>}
     <Suspense key={tab} fallback={settingsLoading}>
+    {tab==='services'&&(state.user?.isAdmin||state.user?.isOwner)&&<ServiceLinksSettings connected={connected} user={state.user}/>}
     {tab === 'updates' && <UpdatesSettings connected={connected} user={state.user} hasDraft={hasDraft}/>}
     {tab === 'assistant' && (state.user?.isAdmin||state.user?.isOwner) && <DesktopAssistantSettings connected={connected} user={state.user} onConfigSaved={refresh}/>}
     {tab === 'assistant' && canManageMusicMcp && <div className="settings-section desktop-assistant"><MusicMcpSettings connected={connected} user={state.user}/><ComputerUseSettings connected={connected} user={state.user}/><OpenCliSettings connected={connected} user={state.user} onPrepareBrowser={onPrepareBrowser} prepareBrowserDisabled={prepareBrowserDisabled}/></div>}

@@ -1,0 +1,6 @@
+noVNC 1.5.0 is distributed unmodified as bundled browser code.
+Original source and notices:
+https://github.com/novnc/noVNC/tree/v1.5.0
+https://www.npmjs.com/package/@novnc/novnc/v/1.5.0
+Installed package integrity is retained in package-lock.json.
+The complete MPL 2.0 license and component licenses are included beside this file.

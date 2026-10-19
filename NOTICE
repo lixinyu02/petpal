@@ -101,3 +101,12 @@ License: Apache-2.0. The retained license, fixed image digests and provenance
 for the optional self-hosted runtime are in server/memobase-assets/. PetPal
 adapts credential-safe configuration logging and disables upstream telemetry;
 these small source patches are identified with hashes in PROVENANCE.json.
+
+noVNC 1.5.0
+-----------
+https://github.com/novnc/noVNC/tree/v1.5.0
+License: Mozilla Public License 2.0 and the component notices in the upstream
+distribution. The unmodified npm source is available as @novnc/novnc@1.5.0.
+The original notice, AUTHORS, complete MPL 2.0, BSD and pako MIT license texts
+and source locations are retained in public/third-party/novnc/ and served with
+the web application. The browser client is loaded only when opening a desktop.

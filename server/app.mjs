@@ -40,6 +40,11 @@ import { AppProxyProfiles } from './app-proxy-profiles.mjs';
 import { mountAppProxyProfileRoutes } from './app-proxy-profile-routes.mjs';
 import { createMemoryService } from './memory-service.mjs';
 import { createMemobaseRuntime } from './memobase-runtime.mjs';
+import {createServiceLinks} from './service-links.mjs';
+import {createServiceModels} from './service-models.mjs';
+import {createCloudDocker} from './cloud-docker.mjs';
+import {createCloudDesktop} from './cloud-desktop.mjs';
+import {mountCloudRoutes,mountCloudModelRoute} from './cloud-routes.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const now = () => new Date().toISOString();
@@ -66,12 +71,14 @@ function safeCodexStatus(value) {
   return value && typeof value === 'object' ? value : { available: false, error: 'Codex 状态不可用。' };
 }
 
-export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, officialAccounts, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, asrOptions, executorsOptions, automationOptions, mobileOfficialOptions, appProxyProfilesOptions, memoryOptions = {}, memoryRuntimeOptions = {}, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
+export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, officialAccounts, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, asrOptions, executorsOptions, automationOptions, mobileOfficialOptions, appProxyProfilesOptions, memoryOptions = {}, memoryRuntimeOptions = {}, serviceLinksOptions = {}, cloudDockerOptions = {}, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
   const codexPolicy = { allowedHttpOrigins: parseCodexHttpOrigins(codexHttpOrigins) };
   const store = await new JsonStore(dataDir).init();
   const accessToken = await store.token(token ?? process.env.PETPAL_TOKEN);
   const ownerTokenHash = tokenHash(accessToken);
   const state = store.state;
+  const serviceLinks=serviceLinksOptions.service??await createServiceLinks({...serviceLinksOptions,dataDir:path.resolve(dataDir)});
+  const serviceModels=createServiceModels({store,links:serviceLinks});await serviceModels.synchronize();
   const memoryRuntime = memoryRuntimeOptions.runtime ?? await createMemobaseRuntime({ ...memoryRuntimeOptions, directory: path.join(path.resolve(dataDir), 'memobase-runtime') });
   const memory = memoryOptions.service ?? await createMemoryService({ ...memoryOptions, dataDir: path.resolve(dataDir), instanceId: state.instanceId, runtime: memoryRuntime, scopeForUser: userId => { const user = state.users.find(item => item.id === userId && !item.disabled); if (!user) throw failure(401, '记忆账号已停用或不存在。'); return { instanceId: state.instanceId, userId }; } });
   const memoryContext = async (userId, query, signal) => {
@@ -118,7 +125,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const task = active.get(call?.conversationId), entry = task?.agentEntry;
     const conversation = state.conversations.find(item => item.id === call?.conversationId);
     if (!entry || task.controller.signal.aborted || entry.hostId !== 'central' || conversation?.agent?.run?.id !== entry.id || conversation.agent.run.status !== 'running') throw failure(401, '自动化工具只允许当前实际 Agent 任务调用，请使用任务入口。');
-    authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId, entry.projectDirectory, entry.permissions, entry);
+    authorizeAgentEntry(entry); targets.target(entry.auth.userId, entry.hostId, entry.projectDirectory, entry.permissions, entry);
     return entry;
   };
   const localTools = withAutomationTools(desktopTools ?? createDesktopTools({ dataDir,musicMcpScope:`${state.instanceId}:${state.ownerId}`,scopeForConversation:id=>{const conversation=state.conversations.find(item=>item.id===id);return conversation?`${state.instanceId}:${conversation.userId}`:null;} }), {
@@ -146,7 +153,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   };
   const redactCodex = value => {
     if (typeof value === 'string') {
-      for (const key of new Set([state.codexConfig.apiKey, ...state.providers.map(provider => provider.apiKey), ...officialProviders.secrets].filter(Boolean))) value = value.split(key).join('[已隐藏]');
+      for (const key of new Set([state.codexConfig.apiKey, ...state.providers.map(provider => provider.apiKey), ...officialProviders.secrets, ...serviceModels.secrets()].filter(Boolean))) value = value.split(key).join('[已隐藏]');
       return value;
     }
     if (Array.isArray(value)) return value.map(redactCodex);
@@ -205,6 +212,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   });
 
   app.get('/api/health', (req, res) => res.json({ ok: true, version: VERSION }));
+  mountCloudModelRoute(app,()=>cloudDocker);
   // Run credentials have a separate, narrow boundary and cannot call user APIs.
   app.post('/api/agent/executors/:connectionId/runs/:runId/model/responses', express.raw({ type: 'application/json', limit: MODEL_REQUEST_BYTES }), (req, res) => executors.relay(req, res));
   app.post('/api/agent/executors/:connectionId/runs/:runId/review/responses', express.raw({ type: 'application/json', limit: MODEL_REQUEST_BYTES }), (req, res) => executors.relay(req, res, { review: true }));
@@ -230,7 +238,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const isOwner = user => user.id === state.ownerId;
   const settingsFor = user => isOwner(user) ? state.settings : user.settings;
   const canUseProvider = (user, id) => isAdministrator(user) || user.providerIds.includes(id);
-  const visibleProvider = (provider, user) => isOfficialProvider(provider) ? publicOfficialProvider(provider) : ({ ...publicProvider(provider), editable: isAdministrator(user), testable: true });
+  const visibleProvider = (provider, user) => isOfficialProvider(provider) ? publicOfficialProvider(provider) : ({ ...publicProvider(provider), editable: isAdministrator(user)&&!serviceModels.isManaged(provider.id), testable: true, ...(provider.source==='api-harbor'?{source:'api-harbor'}:{}) });
   const visibleUser = user => publicUser(user, state.ownerId);
   const managedUser = user => ({ ...visibleUser(user), disabled: user.disabled, providerIds: isAdministrator(user) ? state.providers.map(provider => provider.id) : [...user.providerIds], hasPassword: Boolean(user.password), createdAt: user.createdAt });
   const requireAdmin = user => { if (!isAdministrator(user)) throw failure(403, '仅管理员可管理账号和模型。'); };
@@ -257,16 +265,19 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     return { userId: user.id, sessionHash, bootstrap };
   };
   const conversationById = (id, user) => { const result = state.conversations.find(item => item.id === id && item.userId === user.id); if (!result) throw failure(404, '会话不存在。'); return result; };
-  const providersFor = user => [...state.providers.filter(provider => canUseProvider(user, provider.id)), ...officialProviders.forUser(user.id)];
+  const providersFor = user => [...state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider=>serviceModels.resolve(provider)).filter(Boolean), ...officialProviders.forUser(user.id)];
   const providerById = (id, user, { existing = false } = {}) => {
     const result = providersFor(user).find(item => item.id === id) ?? (existing ? officialAccounts?.providerFor?.(user.id, id) : undefined);
     if (!result) throw failure(404, '模型连接不存在或未获授权。');
     if (isOfficialProvider(result) && result.apiKey) officialProviders.secrets.add(result.apiKey);
     return result;
   };
-  const eligibleProviders = user => providersFor(user).filter(provider => isOfficialProvider(provider) || state.codexConfig.mode === 'api' && state.codexConfig.baseUrl && provider.protocol === 'responses' && normalizeBaseUrl(provider.baseUrl, 'responses') === normalizeBaseUrl(state.codexConfig.baseUrl, 'responses')).map(provider => provider.id);
+  const eligibleProviders = user => providersFor(user).filter(provider => isOfficialProvider(provider) || provider.protocol==='responses'&&provider.source==='api-harbor' || state.codexConfig.mode === 'api' && state.codexConfig.baseUrl && provider.protocol === 'responses' && normalizeBaseUrl(provider.baseUrl, 'responses') === normalizeBaseUrl(state.codexConfig.baseUrl, 'responses')).map(provider => provider.id);
   const reviewProviders = user => providersFor(user).filter(provider => provider.protocol === 'responses').map(provider => provider.id);
   const agentConfigFor = (userId, providerId, { existing = false } = {}) => {
+    const person=state.users.find(user=>user.id===userId);
+    const managed=providerId&&person&&providersFor(person).find(provider=>provider.id===providerId&&provider.source==='api-harbor');
+    if(managed)return{mode:'api',protocol:'responses',baseUrl:managed.baseUrl,apiKey:managed.apiKey,model:managed.model,reasoningEffort:managed.reasoningEffort,revision:managed.linkRevision};
     const provider = providerId && (officialProviders.forUser(userId).find(item => item.id === providerId) ?? (existing ? officialAccounts?.providerFor?.(userId, providerId) : undefined));
     return provider ? officialProviders.config(provider, userId, state.codexConfig.revision) : state.codexConfig;
   };
@@ -378,7 +389,11 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       const { user, expiresAt } = authorizeAgentIdentity(entry.auth);
       if (entry.auth.automation !== undefined) automations.authorizePrincipal(entry.auth, entry);
       requirePermissions(user, entry.permissions);
-      executors.hostFor(user.id, entry.hostId ?? 'central');
+      const executionHost=targets.hostFor(user.id, entry.hostId ?? 'central');
+      if(executionHost.kind==='docker'){
+        if(entry.attachmentIds?.length&&executionHost.codex?.images===false)throw failure(409,'当前云端环境不支持图片附件，请选择实体机执行。');
+        if(entry.permissions.approval==='review'&&entry.permissions.reviewProviderId&&executionHost.codex?.independentReviewModel===false)throw failure(409,'当前云端环境不支持独立命令审查模型，请沿用主模型或选择实体机。');
+      }
       const conversation = state.conversations.find(item => item.id === entry.conversationId && item.userId === user.id);
       if (!conversation || conversation.mode !== 'codex' || conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Agent 会话已删除或配置已变化，请新建会话。');
       assertAvailable(conversation.id);
@@ -407,6 +422,37 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const executors = createExecutors({ ...executorsOptions, store, authorizeSession: authorizeExecutorSession, authorizeEntry: authorizeAgentEntry, readAttachment: imageAttachments.read, getConfig: getAgentConfig, getConfigForUser, getReviewConfig: getAgentReviewConfig, redact: redactCodex,
     automationTool: (name, args, call) => { authorizeAgentEntry(call.entry); return executeAutomationTool(automations, call.entry, name, args, call); },
   });
+  const cloudDocker=cloudDockerOptions.service??await createCloudDocker({...cloudDockerOptions,dataDir:path.resolve(dataDir),serviceLinks,
+    authorizeUser:userId=>{const user=state.users.find(item=>item.id===userId&&!item.disabled);if(!user)throw failure(401,'账号已停用或不存在。');requireCodex(user);return{...user,isAdmin:isAdministrator(user),enabled:true};},
+    authorizeEntry:authorizeAgentEntry,getConfig:getAgentConfig,
+    publicOrigin:typeof cloudDockerOptions.publicOrigin==='function'?cloudDockerOptions.publicOrigin:()=>cloudDockerOptions.publicOrigin||allowedOrigins.find(origin=>origin.startsWith('https://')&&!origin.startsWith('https://localhost'))||'',
+  });
+  const targets={
+    hasDocker:id=>cloudDocker.has(id),
+    hostFor:(userId,id)=>cloudDocker.has(id)?cloudDocker.hostFor(userId,id):executors.hostFor(userId,id),
+    target:(userId,id,...args)=>cloudDocker.has(id)?cloudDocker.target(userId,id,...args):executors.target(userId,id,...args),
+    list:userId=>[...executors.list(userId),...cloudDocker.list(userId)],
+    isBusy:(userId,id)=>cloudDocker.has(id)?cloudDocker.isBusy(userId,id):executors.isBusy(userId,id),
+    canAccess:(userId,id)=>{try{if(cloudDocker.has(id)){cloudDocker.hostFor(userId,id);return true;}return canAccessExecutionHost(state,userId,id);}catch{return false;}},
+  };
+  const syncCloudIndex=async()=>{
+    if(shuttingDown)return;let changed=false;
+    for(const user of state.users.filter(item=>!item.disabled)){
+      let hosts;try{hosts=cloudDocker.list(user.id);}catch{continue;}
+      for(const host of hosts.filter(item=>item.userId===user.id)){
+        const existing=state.executionHosts.find(item=>item.id===host.id);
+        if(existing&&existing.kind!=='docker')throw failure(503,'云端环境索引与实体机发生冲突。');
+        if(!existing){state.executionHosts.push({id:host.id,userId:user.id,deviceId:host.id,kind:'docker',name:host.name,platform:'linux',arch:host.arch||'unknown',createdAt:now(),lastSeenAt:now()});changed=true;}
+        else if(existing.name!==host.name){existing.name=host.name;changed=true;}
+      }
+    }
+    if(changed)await store.save();
+  };
+  await syncCloudIndex();
+  const cloudDesktop=createCloudDesktop({cloud:cloudDocker,authorize:authorizeExecutorSession,allowOrigin:req=>{
+    const origin=req.headers.origin;if(!origin||typeof origin!=='string')return false;
+    return origins.has(origin)||allowedOrigins.includes(origin)||origin===`${req.socket.encrypted?'https':'http'}://${req.headers.host}`||req.petpalHostingOrigin===origin;
+  }});
   const notifications = createNotificationService({ store, authorize: auth => {
     if (auth?.automation !== undefined) throw failure(401, '自动化执行凭据不能用于通知设备注册。');
     const identity = authorizeAgentIdentity(auth); requireCodex(identity.user);
@@ -427,14 +473,14 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (task.agentEntry) authorizeAgentEntry(task.agentEntry);
     else { const identity = authorizeAgentIdentity({ userId: task.userId, sessionHash: task.sessionHash, bootstrap: task.bootstrap }); requireCodex(identity.user); }
   } });
-  const agentTasks = createAgentTasks({ store, active, approvals, userInputs: agentUserInputs, memory, getBridge: entry => entry?.hostId && entry.hostId !== 'central' ? new RemoteCodexBridge(executors, entry) : getAgentBridge(entry), redact: redactCodex, resolveModel: resolveAgentModel, resolveReview: resolveAgentReview, getReviewConfig: getAgentReviewConfig, resolveImages: imageAttachments.images, resolveHost: executors.target,
+  const agentTasks = createAgentTasks({ store, active, approvals, userInputs: agentUserInputs, memory, getBridge: entry => cloudDocker.has(entry?.hostId)?cloudDocker.bind(entry):entry?.hostId && entry.hostId !== 'central' ? new RemoteCodexBridge(executors, entry) : getAgentBridge(entry), redact: redactCodex, resolveModel: resolveAgentModel, resolveReview: resolveAgentReview, getReviewConfig: getAgentReviewConfig, resolveImages: imageAttachments.images, resolveHost: targets.target,
     resolveProject: (userId, hostId, value) => {
-      const host = executors.hostFor(userId, hostId), projectDirectory = normalizeProjectDirectory(value, host.platform);
+      const host = targets.hostFor(userId, hostId), projectDirectory = normalizeProjectDirectory(value, host.platform);
       if (!projectDirectory) return {};
-      executors.target(userId, hostId, projectDirectory);
+      targets.target(userId, hostId, projectDirectory);
       return { projectDirectory, projectAccess: 'full' };
     },
-    authorize: entry => { const expiresAt = authorizeAgentEntry(entry); executors.target(entry.auth.userId, entry.hostId ?? 'central', entry.projectDirectory, entry.permissions, entry); return expiresAt; },
+    authorize: entry => { const expiresAt = authorizeAgentEntry(entry); targets.target(entry.auth.userId, entry.hostId ?? 'central', entry.projectDirectory, entry.permissions, entry); return expiresAt; },
     authorizeRemoval: entry => authorizeAgentIdentity(entry.auth).expiresAt,
     authorizeContextRepair: entry => { const identity = authorizeAgentIdentity(entry.auth); requireCodex(identity.user); return identity.expiresAt; },
     getConfigRevision: () => state.codexConfig.revision,
@@ -447,10 +493,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (config.mode !== 'api' || !config.model) throw failure(409, '自动化需要配置可用的 Responses Agent 模型。');
     resolveAgentModel(userId, spec.providerId);
     resolveAgentReview(userId, spec.permissions);
-    const host = executors.hostFor(userId, spec.hostId);
+    const host = targets.hostFor(userId, spec.hostId);
     normalizeProjectDirectory(spec.projectDirectory, host.platform);
-    if (online) executors.target(userId, spec.hostId, spec.projectDirectory, spec.permissions);
-    if (dispatch && (spec.hostId === 'central' ? [...active.values()].some(task => task.mode === 'codex' && (task.agentEntry?.hostId ?? 'central') === 'central') : executors.isBusy(userId, spec.hostId))) throw failure(409, '固定执行电脑正在运行其他任务，本次计划已跳过。', 'executor_busy');
+    if (online) targets.target(userId, spec.hostId, spec.projectDirectory, spec.permissions);
+    if (dispatch && (spec.hostId === 'central' ? [...active.values()].some(task => task.mode === 'codex' && (task.agentEntry?.hostId ?? 'central') === 'central') : targets.isBusy(userId, spec.hostId))) throw failure(409, '固定执行电脑正在运行其他任务，本次计划已跳过。', 'executor_busy');
     return { hostName: host.name, providerName: spec.providerId ? providerById(spec.providerId, user).name : '默认 Agent 模型' };
   };
   automations = createAutomationService({ ...automationOptions, store, authorize: authorizeAutomation, redact: redactCodex,
@@ -517,12 +563,12 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const chatAssistant = createChatAssistant({ store, agentTasks, revision: () => state.codexConfig.revision,
     resolveHost: (userId, hostId, options) => {
       if (options?.requireOnline === false) {
-        executors.hostFor(userId, hostId);
-        const host = executors.list(userId).find(item => item.id === hostId);
+        targets.hostFor(userId, hostId);
+        const host = targets.list(userId).find(item => item.id === hostId);
         if (!host) throw failure(404, '执行电脑不存在或不属于当前账号。');
         return { hostId: host.id, hostName: host.name };
       }
-      return executors.target(userId, hostId);
+      return targets.target(userId, hostId);
     },
     authorize: (auth, options, conversation) => {
       const { user, expiresAt } = authorizeAgentIdentity(auth);
@@ -531,8 +577,8 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       resolveAgentModel(user.id, options.providerId);
       if (options.permissions.approval === 'review' && options.permissions.reviewProviderId && agentConfigFor(user.id, options.providerId).mode !== 'api') throw failure(400, '独立命令审查模型需要所选 Agent 使用 Responses API 模式。');
       resolveAgentReview(user.id, options.permissions);
-      executors.hostFor(user.id, options.hostId);
-      const host = executors.list(user.id).find(host => host.id === options.hostId);
+      targets.hostFor(user.id, options.hostId);
+      const host = targets.list(user.id).find(host => host.id === options.hostId);
       if (!host) throw failure(404, '执行电脑不存在或不属于当前账号。');
       if (options.projectDirectory) { normalizeProjectDirectory(options.projectDirectory, host.platform); if (host.kind !== 'central' && !host.codex?.projectDirectory) throw failure(409, '所选电脑客户端尚不支持项目目录，请升级客户端或使用默认工作区。'); }
       return expiresAt;
@@ -632,7 +678,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (!Object.keys(req.body).length || req.body.enabled !== undefined && typeof req.body.enabled !== 'boolean') throw failure(400, '记忆服务配置无效。');
     if (req.body.providerId !== undefined) {
       if (Object.keys(req.body).length !== 1 || typeof req.body.providerId !== 'string') throw failure(400, '请选择单个已保存的记忆抽取模型。');
-      const provider = state.providers.find(item => item.id === req.body.providerId);
+      const provider = providersFor(req.user).find(item => item.id === req.body.providerId);
       if (!provider || !provider.apiKey || !['responses', 'chat-completions'].includes(provider.protocol)) throw failure(400, '记忆抽取需要已保存 API Key 的 API 模型，不能使用官方账号授权模型。');
       await memoryRuntime.configureModel({ baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: provider.model }, { authorize: () => { requireCurrentAuth(req); requireAdmin(req.user); } });
     } else {
@@ -669,8 +715,24 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (Object.keys(req.query).length || Object.keys(req.body).length) throw failure(400, '通知设备撤销不接受附加字段。');
     res.json(await notifications.remove(executorAuth(req), req.params.deviceId));
   });
+  const syncServiceModels=async()=>{
+    if(shuttingDown)return{changed:[],models:0};
+    const result=await serviceModels.synchronize();
+    if(result.changed.length)await stopTasks(task=>result.changed.includes(task.providerId));
+    return result;
+  };
+  let refreshingServiceLinks=false;
+  const serviceLinkTimer=setInterval(async()=>{
+    if(shuttingDown||refreshingServiceLinks)return;refreshingServiceLinks=true;
+    try{const status=await serviceLinks.status();if(['ready','offline'].includes(status.links?.['api-harbor']?.state)){try{await serviceLinks.refresh('api-harbor');}finally{await syncServiceModels();}}}catch{}finally{refreshingServiceLinks=false;}
+  },60000);serviceLinkTimer.unref?.();
+  mountCloudRoutes({app,cloud:cloudDocker,links:serviceLinks,desktop:cloudDesktop,
+    auth:req=>{requireCurrentAuth(req);requireCodex(req.user);},admin:req=>{requireCurrentAuth(req);requireAdmin(req.user);},executorAuth,
+    syncModels:syncServiceModels,syncHosts:syncCloudIndex,
+    stopHostWork:async id=>{await Promise.all(state.conversations.filter(conversation=>active.has(conversation.id)&&active.get(conversation.id).agentEntry?.hostId===id).map(conversation=>agentTasks.stop(conversation,{clear:false})));},
+  });
   app.get('/api/agent/hosts', async (req, res) => {
-    requireCodex(req.user); const hosts = executors.list(req.user.id);
+    requireCodex(req.user); const hosts = targets.list(req.user.id);
     const central = hosts.find(host => host.id === 'central');
     if (central) central.codex = { ...await userCodexStatus(req.user), projectDirectory: true, automations: true };
     requireCurrentAuth(req); res.json({ hosts });
@@ -786,7 +848,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (settings.defaultProviderId && !canUseProvider(user, settings.defaultProviderId)) settings.defaultProviderId = null;
     if (revoked) state.sessions = state.sessions.filter(session => session.userId !== user.id);
     if (revoked) await stopTasks(task => task.userId === user.id);
-    const clearHost = settings.chatAssistantHostId !== null && !canAccessExecutionHost(state, user.id, settings.chatAssistantHostId);
+    const clearHost = settings.chatAssistantHostId !== null && !targets.canAccess(user.id, settings.chatAssistantHostId);
     await store.save(clearHost ? { chatAssistantDefaultHost: { userId: user.id, hostId: null } } : undefined); res.json({ user: managedUser(user) });
   });
   app.get('/api/voice', (req, res) => res.json(publicVoiceSettings(req.user.voice)));
@@ -974,7 +1036,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
         requireCodex(req.user);
         // A saved target is a preference. Offline hosts remain selected, and
         // choosing it never grants permission or starts a task.
-        executors.hostFor(req.user.id, id);
+        targets.hostFor(req.user.id, id);
       };
       authorizeDefaultHost();
       defaultHostOperation = { userId: req.user.id, hostId: id, authorize: authorizeDefaultHost };
@@ -987,6 +1049,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     requireAdmin(req.user);
     const body = req.body ?? {};
     const existing = body.id === undefined ? undefined : providerById(string(body.id, '连接 ID', 128), req.user);
+    if(existing&&serviceModels.isManaged(existing.id))throw failure(409,'此模型由 API Harbor 管理，请在服务互联中刷新目录。');
     if (isOfficialProvider(existing)) throw failure(400, '官方模型由本人官方账号管理，不能修改为 API 连接。');
     if (!existing && state.providers.length >= 32) throw failure(400, '最多保存 32 个模型连接。');
     const protocol = body.protocol ?? existing?.protocol;
@@ -1007,6 +1070,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     await store.save(); res.json(visibleProvider(provider, req.user));
   });
   app.delete('/api/providers/:id', async (req, res) => {
+    if(serviceModels.isManaged(req.params.id)){requireAdmin(req.user);throw failure(409,'此模型由 API Harbor 管理，请在 Harbor 侧调整分配。');}
     requireAdmin(req.user);
     const provider = providerById(req.params.id, req.user);
     if (isOfficialProvider(provider)) throw failure(400, '请在官方账号设置中退出或切换账号。');
@@ -1235,7 +1299,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (collaborationOptions && conversation.mode !== 'chat') throw failure(400, 'Chat + Agent 仅用于聊天会话。');
     if (conversation.mode === 'codex') {
       requireCodex(req.user);
-      executors.hostFor(req.user.id, 'central');
+      targets.hostFor(req.user.id, 'central');
       if (conversation.agent?.run?.status === 'unknown') throw failure(409, '上次远程执行状态未知，本会话不会开始新任务。');
       if (conversation.agent?.submissions?.some(item => item.status === 'uncertain')) throw failure(409, '仍有指令送达状态未知，请先检查并确认原任务已停止。', 'agent_execution_uncertain');
       if ([conversation.agentHostId, conversation.threadHostId, ...conversation.agent?.queue?.map(entry => entry.hostId) ?? []].some(hostId => hostId && hostId !== 'central')) throw failure(409, '这个会话包含桌面执行任务，请使用支持执行电脑选择的 Agent 客户端。');
@@ -1412,7 +1476,11 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     listener.headersTimeout = 15000;
     listener.requestTimeout = 30000;
     listener.on('connect', (_req, socket) => socket.destroy());
-    listener.on('upgrade', (_req, socket) => socket.destroy());
+    listener.on('upgrade', (req, socket, head) => {
+      if(shuttingDown||network&&!hostingStatus().ownerHasPassword){socket.destroy();return;}
+      req.petpalHostingOrigin=network?policy.publicUrl:'';
+      void cloudDesktop.upgrade(req,socket,head);
+    });
     listeners.add(listener);
     if (network) hostingPolicies.set(listener, policy);
     listener.on('listening', () => {
@@ -1448,6 +1516,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   let closing;
   const close = () => closing ??= (async () => {
     shuttingDown = true;
+    clearInterval(serviceLinkTimer);await cloudDesktop.close();
     await automations.close();
     const closingListeners = [...listeners];
     const httpClosed = Promise.all(closingListeners.map(listener => listener.listening ? new Promise((resolve, reject) => {
@@ -1460,7 +1529,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (configSwap) await configSwap.catch(() => {});
     const results = await Promise.allSettled([appProxyProfiles.close(), mobileOfficial.close(), notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), ...[...officialBridges.values()].map(item => item.bridge.close()), codexStatusProbe?.promise.catch(() => {}), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
     // Completed turns finish their durable journal writes before memory closes.
-    for (const service of [memory, memoryRuntime]) results.push(...await Promise.allSettled([service.close()]));
+    for (const service of [cloudDocker,serviceModels,serviceLinks,memory, memoryRuntime]) results.push(...await Promise.allSettled([service.close()]));
     let saveError;
     try { await store.queue; } catch (error) { saveError = error; }
     finally { for (const listener of closingListeners) listener.closeAllConnections(); await httpClosed; }
@@ -1488,5 +1557,5 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     unbindRemote: () => memory.unbindRemote(),
     runtime: memoryRuntime,
   };
-  return { server, token: accessToken, close, updates, hosting, automations, officialAccountChanged, memory: nativeMemory };
+  return { server, token: accessToken, close, updates, hosting, automations, officialAccountChanged, memory: nativeMemory, cloudDocker,serviceLinks };
 }

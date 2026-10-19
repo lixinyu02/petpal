@@ -1,0 +1,13 @@
+import { spawn } from 'node:child_process';
+import { writeFileSync, unlinkSync } from 'node:fs';
+const [identity, ...args] = process.argv.slice(2);
+if (!/^[a-f0-9-]{36}$/.test(identity) || args[0] !== 'app-server') process.exit(2);
+const file = `/runtime/petpal-launch-${identity}.pid`;
+const child = spawn('codex', args, { detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+let ending = false, timer;
+const stop = () => { if (ending) return; ending = true; try { process.kill(-child.pid, 'SIGTERM'); } catch {} timer = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }, 1500); };
+if (child.pid) writeFileSync(file, String(child.pid), { mode: 0o600, flag: 'wx' });
+process.stdin.pipe(child.stdin); child.stdout.pipe(process.stdout); child.stderr.pipe(process.stderr);
+child.stdin.on('error', stop); process.stdin.on('end', stop); process.on('SIGTERM', stop); process.on('SIGINT', stop);
+child.on('error', () => process.exit(1));
+child.on('close', code => { clearTimeout(timer); try { process.kill(-child.pid, 'SIGKILL'); } catch {} try { unlinkSync(file); } catch {} process.exit(code ?? 1); });

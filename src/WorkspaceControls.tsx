@@ -141,7 +141,7 @@ export function ExecutionHostPicker({hosts,value,onChange,disabled=false,loading
   }
   return <div ref={container} className="workspace-execution-target" aria-busy={loading}>
     <WorkspaceDisclosure className="workspace-host-picker" label={`${label}：${selectionLabel}${disabled?'，暂时不能切换':''}`} summary={<>
-      {selected?.kind==='central'?<Cloud size={18} aria-hidden="true"/>:<Monitor size={18} aria-hidden="true"/>}
+      {selected?.kind==='central'||selected?.kind==='docker'?<Cloud size={18} aria-hidden="true"/>:<Monitor size={18} aria-hidden="true"/>}
       <span className="workspace-host-current"><small>{label}</small><strong title={selectionLabel}>{selectionLabel}</strong></span>
       {selected&&<span className={`workspace-host-connection${unavailable?' is-offline':''}`} aria-hidden="true"/>}
     </>}>
@@ -151,7 +151,7 @@ export function ExecutionHostPicker({hosts,value,onChange,disabled=false,loading
       <div className="workspace-host-groups">
         {groups.map(group=><section className="workspace-host-group" key={group.id} aria-labelledby={`${id}-${group.id}`}><h4 id={`${id}-${group.id}`}>{group.label}<span>{group.choices.length}</span></h4>
           {group.choices.map(choice=><button type="button" className={`workspace-host-option${choice.id===value?' is-selected':''}`} key={choice.id} aria-pressed={choice.id===value} disabled={!selectable(choice)} onClick={event=>choose(choice,event)}>
-            <span className="workspace-host-option-icon">{choice.kind==='central'?<Cloud size={17} aria-hidden="true"/>:<Monitor size={17} aria-hidden="true"/>}</span>
+            <span className="workspace-host-option-icon">{choice.kind==='central'||choice.kind==='docker'?<Cloud size={17} aria-hidden="true"/>:<Monitor size={17} aria-hidden="true"/>}</span>
             <span className="workspace-host-option-copy"><strong title={choice.name}>{choice.name}</strong><span>{choice.platformLabel}{choice.isLocal?' · 此电脑':''} · {choice.missing?'未连接':choice.online?'已连接':'离线'}{choice.disambiguator&&<> · {choice.disambiguator}</>}</span>{choice.ownerLabel&&<span className="workspace-host-owner">{choice.isOwn?'我的电脑':'所属用户'} · {choice.ownerLabel}</span>}<small>{choice.note}</small></span>
             <span className="workspace-host-selected">{choice.id===value&&<Check size={17} aria-label="已选中"/>}</span>
           </button>)}
