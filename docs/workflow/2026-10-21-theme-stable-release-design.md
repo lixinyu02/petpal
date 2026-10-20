@@ -2,7 +2,7 @@
 
 - Date: 2026-10-21
 - Complexity: L2
-- Status: building-and-validating
+- Status: released-and-verified
 
 ## Goal / Scope
 
@@ -29,3 +29,7 @@
 ## Validation
 
 主题对比度/颜色、设置与账号隔离、旧客户端兼容、手机键盘/安全区和字体、原生系统栏；最终Web/Windows/Ubuntu/Android包验证；当前签名继承、更新序列单调递增、GitHub与服务器正式下载可达、业务/记忆/代理保留。具体结果写同日期verification。
+
+## Release Result
+
+0.9.14 已正式发布，产品源码和 `v0.9.14` tag 固定为 `7b8f84f5b3962efaebbacb3d5af72cecdc790e59`。GitHub Release `418674946` 为最新正式版；服务器下载目录仅展示 0.9.14，Windows 优先 ZIP；GitHub/服务器升级清单均为 sequence16，沿用原公钥。十项 GitHub 发布资产及六个服务器正式下载文件均完成全字节回读/哈希核验。网页、后端和业务保留复核通过，详细证据与实机验收边界见 `2026-10-21-theme-stable-release-verification.md`。
