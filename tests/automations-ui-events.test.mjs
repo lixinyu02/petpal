@@ -23,7 +23,7 @@ const job = (extra = {}) => ({ id: '00000000-0000-4000-8000-000000000201', title
 
 /** Execute the component's actual effects and event handlers. Only lifecycle,
  * child pickers and HTTP are fixtures; payload and concurrency decisions remain in TSX. */
-function fixture({ mode = 'automations', initial = [], connectedUser = user, request, availableHosts = hosts, defaultHostId = '00000000-0000-4000-8000-000000000101', reviewProviders = [] } = {}) {
+function fixture({ mode = 'automations', selectedRunId, initial = [], connectedUser = user, request, availableHosts = hosts, defaultHostId = '00000000-0000-4000-8000-000000000101', reviewProviders = [] } = {}) {
   let epoch = 1, identity = { instanceId: 'server-one', userId: connectedUser?.id || 'user-one' }, index = 0, tree, dirty = false, mounted = true, afterUnmountUpdates = 0, sequence = 0;
   let actual = clone(initial), preferences = { allowAgentCreate: true };
   const hooks = [], effects = [], requests = [], editing = [], opened = [], refreshes = [], timers = new Map();
@@ -38,7 +38,7 @@ function fixture({ mode = 'automations', initial = [], connectedUser = user, req
     useSyncExternalStore(_subscribe, snapshot) { index++; return snapshot(); },
   };
   react.useLayoutEffect = react.useEffect;
-  const controls = { ModelPicker: Symbol('ModelPicker'), ExecutionHostPicker: Symbol('ExecutionHostPicker') }, permissions = Symbol('AgentPermissions');
+  const controls = { ModelPicker: Symbol('ModelPicker'), ExecutionHostPicker: Symbol('ExecutionHostPicker') }, permissions = Symbol('AgentPermissions'),dailyCompanion=Symbol('DailyCompanionSettings');
   const api = {
     getSessionEpoch: () => epoch, getIdentity: () => identity, subscribeSession: () => () => {}, isSessionChanged: error => error?.name === 'SessionChangedError',
     api: async (path, options = {}) => {
@@ -53,6 +53,7 @@ function fixture({ mode = 'automations', initial = [], connectedUser = user, req
     react, 'react/jsx-runtime': { jsx: element, jsxs: element }, 'lucide-react': new Proxy({}, { get: (_target, name) => Symbol.for(String(name)) }),
     './api': api, './WorkspaceControls': controls, './AgentPermissions': { __esModule: true, default: permissions, defaultAgentPermissions: { access: 'read-only', approval: 'ask' } },
     './project-directory-preferences.mjs': projectPreferences,
+    './DailyCompanionSettings': {__esModule:true,default:dailyCompanion},
   };
   const window = new EventTarget(), document = new EventTarget();
   const nativeConfirmCalls = [];
@@ -64,7 +65,7 @@ function fixture({ mode = 'automations', initial = [], connectedUser = user, req
     setTimeout(callback) { const id = ++sequence; timers.set(id, callback); return id; }, clearTimeout: id => timers.delete(id),
     require: name => { if (name.endsWith('.css')) return {}; assert.ok(Object.hasOwn(modules, name), `Unexpected dependency ${name}`); return modules[name]; },
   });
-  const props = { mode, user: connectedUser, providers, reviewProviders, hosts: availableHosts, defaultHostId, hostsLoading: false, hostsError: '', onRefreshHosts: () => refreshes.push(true),
+  const props = { mode, selectedRunId, user: connectedUser, providers, reviewProviders, hosts: availableHosts, defaultHostId, hostsLoading: false, hostsError: '', onRefreshHosts: () => refreshes.push(true),
     onOpenConversation: id => opened.push(id), onEditingChange: value => editing.push(clone(value)) };
   const find = (type, predicate = () => true) => nodes(tree).find(node => node.type === type && predicate(node.props));
   const render = () => { index = 0; dirty = false; effects.length = 0; tree = module.exports.default(props); for (const effect of effects) effect(); return tree; };
@@ -77,10 +78,12 @@ function fixture({ mode = 'automations', initial = [], connectedUser = user, req
   };
   render();
   return {
-    flush, find, button, field, requests, editing, opened, refreshes, render, controls, permissions,
+    flush, find, button, field, requests, editing, opened, refreshes, render, controls, permissions,dailyCompanion,
     text: () => text(tree), get tree() { return tree; }, get afterUnmountUpdates() { return afterUnmountUpdates; },
     get lastEditing() { return editing.at(-1); },
     setJobs(value) { actual = clone(value); },
+    selectedRun(value){props.selectedRunId=value;render();},
+    companionEditing(value,{rerender=true}={}){const child=find(dailyCompanion);assert.ok(child,'daily companion tab is mounted');child.props.onEditingChange(value);if(rerender)render();},
     click(label, { rerender = true } = {}) { const node = button(label); assert.ok(node, `Missing button ${label}`); const result = node.props.onClick?.({ preventDefault() {}, stopPropagation() {} }); if (rerender) render(); return result; },
     type(label, value, { rerender = true } = {}) { const node = field(label); assert.ok(node, `Missing field ${label}`); node.props.onChange({ target: { value, checked: value } }); if (rerender) render(); },
     chooseHost(value) { find(controls.ExecutionHostPicker).props.onChange(value); render(); },
@@ -506,4 +509,33 @@ test('shortcut templates respect account Agent permission and the account-wide f
     const f=fixture({mode:'shortcuts',...options});t.after(()=>f.close());await f.flush();assert.equal(f.button('新建快捷任务').props.disabled,true);
     assert.equal(f.button('创建快捷任务：查天气').props.disabled,true);assert.ok(f.requests.every(call=>call.method==='GET'));
   }
+});
+
+test('daily companionship has an independent tab available without Agent permission',async t=>{
+  const f=fixture({connectedUser:{...user,canUseCodex:false}});t.after(()=>f.close());await f.flush();assert.equal(f.button('每日陪伴').props.disabled,false);f.click('每日陪伴');assert.ok(f.find(f.dailyCompanion));assert.equal(f.button('新建自动化'),undefined);assert.equal(f.requests.some(call=>call.method!=='GET'),false);assert.equal(f.button('每日陪伴').props['aria-pressed'],true);
+});
+
+test('a selected greeting opens the companion tab with that exact run id and shortcuts do not mount it',async t=>{
+  const f=fixture({selectedRunId:'owned-greeting-run'});t.after(()=>f.close());await f.flush();assert.equal(f.find(f.dailyCompanion).props.selectedRunId,'owned-greeting-run');assert.equal(f.button('Agent 计划').props['aria-pressed'],false);
+  const shortcuts=fixture({mode:'shortcuts',selectedRunId:'owned-greeting-run'});t.after(()=>shortcuts.close());await shortcuts.flush();assert.equal(shortcuts.find(shortcuts.dailyCompanion),undefined);assert.equal(shortcuts.button('每日陪伴'),undefined);assert.ok(shortcuts.button('新建快捷任务'));
+});
+
+test('idle companion and Agent tabs can switch without modifying or dispatching plans',async t=>{
+  const f=fixture();t.after(()=>f.close());await f.flush();f.click('每日陪伴');assert.ok(f.find(f.dailyCompanion));f.click('Agent 计划');assert.equal(f.find(f.dailyCompanion),undefined);assert.ok(f.button('新建自动化'));assert.equal(f.requests.some(call=>call.method!=='GET'),false);
+});
+
+test('Agent draft edits block even a captured companion tab handler before rerendering',async t=>{
+  const f=fixture();t.after(()=>f.close());await f.flush();const switchTab=f.button('每日陪伴').props.onClick;f.click('新建自动化');f.type('自动化名称','不能隐藏的草稿',{rerender:false});switchTab();f.render();assert.equal(f.find(f.dailyCompanion),undefined);assert.equal(f.field('自动化名称').props.value,'不能隐藏的草稿');assert.equal(f.button('每日陪伴').props.disabled,true);assert.equal(f.lastEditing.dirty,true);
+});
+
+test('companion editing blocks a captured Agent tab handler until the child reports it is safe',async t=>{
+  const f=fixture();t.after(()=>f.close());await f.flush();f.click('每日陪伴');const switchTab=f.button('Agent 计划').props.onClick;f.companionEditing(true,{rerender:false});switchTab();f.render();assert.ok(f.find(f.dailyCompanion));assert.equal(f.button('Agent 计划').props.disabled,true);assert.equal(f.lastEditing.dirty,true);f.companionEditing(false);f.click('Agent 计划');assert.equal(f.find(f.dailyCompanion),undefined);
+});
+
+test('a new selected greeting cannot hide an unsaved Agent editor',async t=>{
+  const f=fixture();t.after(()=>f.close());await f.flush();f.click('新建自动化');f.type('任务指令','保留此处正在编辑的内容');f.selectedRun('new-notification-run');await f.flush();assert.equal(f.find(f.dailyCompanion),undefined);assert.equal(f.field('任务指令').props.value,'保留此处正在编辑的内容');assert.equal(f.lastEditing.dirty,true);
+});
+
+test('a captured tab handler from the previous account cannot enter companion settings',async t=>{
+  const f=fixture();t.after(()=>f.close());await f.flush();const switchTab=f.button('每日陪伴').props.onClick;f.changeSession({notify:false});switchTab();f.render();assert.equal(f.find(f.dailyCompanion),undefined);assert.equal(f.requests.some(call=>call.method!=='GET'),false);
 });

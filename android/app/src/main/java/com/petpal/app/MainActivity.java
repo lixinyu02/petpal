@@ -57,7 +57,6 @@ public class MainActivity extends BridgeActivity {
             @Override public void handleOnBackPressed() { requestPageBack(); }
         };
         getOnBackPressedDispatcher().addCallback(this, nativeBack);
-        captureTaskNavigation(getIntent());
         openRequestedChat(getIntent());
         openOfficialSettings();
     }
@@ -69,13 +68,32 @@ public class MainActivity extends BridgeActivity {
         super.onNewIntent(intent);
         backNavigation.cancel();
         setIntent(intent);
-        captureTaskNavigation(intent);
         openRequestedChat(intent);
         openOfficialSettings();
     }
 
     private void sanitizeOfficialIntent(Intent intent) {
         if (intent == null) return;
+        if (PetTaskNotificationService.OPEN.equals(intent.getAction())) {
+            boolean accepted = false;
+            try {
+                android.content.ComponentName component = intent.getComponent();
+                Bundle extras = intent.getExtras();
+                boolean knownExtras = extras != null;
+                if (extras != null) for (String key : extras.keySet()) if (!PetTaskNotificationService.TAG_EXTRA.equals(key)
+                    && !PetTaskNotificationService.EPOCH_EXTRA.equals(key) && !OPEN_CHAT.equals(key)) { knownExtras = false; break; }
+                boolean canonical = component != null && getPackageName().equals(component.getPackageName()) && MainActivity.class.getName().equals(component.getClassName())
+                    && intent.getClipData() == null && intent.getSelector() == null && knownExtras
+                    && (intent.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)) == 0
+                    && TaskNotificationIntentPolicy.matches(intent.getAction(), intent.getDataString(), intent.getStringExtra(PetTaskNotificationService.TAG_EXTRA), intent.getStringExtra(PetTaskNotificationService.EPOCH_EXTRA));
+                if (canonical) accepted = TaskNotificationState.capture(this, intent.getStringExtra(PetTaskNotificationService.TAG_EXTRA), intent.getStringExtra(PetTaskNotificationService.EPOCH_EXTRA));
+            } catch (Exception ignored) { }
+            // Capture only an existing encrypted current-account route. Never
+            // publish its URI to Capacitor or let external OAuth links use it.
+            clearExternalIntent(intent);
+            if (accepted) intent.putExtra(OPEN_CHAT, true);
+            return;
+        }
         if (PetOfficialAccountService.OPEN_SETTINGS.equals(intent.getAction())) {
             // Opening this fixed settings page has no authentication side effects.
             officialSettingsRequested = true;
@@ -85,6 +103,10 @@ public class MainActivity extends BridgeActivity {
             boolean accepted = host != null && host.runtime().consumeReturn(value);
             if (accepted) officialSettingsRequested = true;
         } else return;
+        clearExternalIntent(intent);
+    }
+
+    private void clearExternalIntent(Intent intent) {
         intent.setData(null); intent.setClipData(null); intent.replaceExtras((Bundle) null); intent.setSelector(null); intent.setAction(Intent.ACTION_MAIN);
         intent.setFlags(intent.getFlags() & ~(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION));
     }
@@ -137,13 +159,6 @@ public class MainActivity extends BridgeActivity {
         nativeBack.setEnabled(false);
         try { getOnBackPressedDispatcher().onBackPressed(); }
         finally { if (!isDestroyed()) nativeBack.setEnabled(true); }
-    }
-
-    private void captureTaskNavigation(Intent intent) {
-        if (intent == null || !PetTaskNotificationService.OPEN.equals(intent.getAction())) return;
-        String tag = intent.getStringExtra(PetTaskNotificationService.TAG_EXTRA), epoch = intent.getStringExtra(PetTaskNotificationService.EPOCH_EXTRA);
-        intent.removeExtra(PetTaskNotificationService.TAG_EXTRA); intent.removeExtra(PetTaskNotificationService.EPOCH_EXTRA); intent.setAction(null);
-        try { TaskNotificationState.capture(this, tag, epoch); } catch (Exception ignored) { }
     }
 
     private void openRequestedChat(Intent intent) {

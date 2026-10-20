@@ -31,6 +31,9 @@ import { mountComputerUseMcpRoutes } from './computer-use-mcp-routes.mjs';
 import { mountOpenCliRoutes } from './opencli-routes.mjs';
 import { MODEL_REQUEST_BYTES } from './model-request-limits.mjs';
 import { createNotificationService } from './notifications.mjs';
+import { createCompanionRoutineService } from './companion-routines.mjs';
+import { createCompanionPersonalizer } from './companion-personalization.mjs';
+import { closeCompanionWeatherQueries } from './companion-weather.mjs';
 import { createAutomationService } from './automations.mjs';
 import { executeAutomationTool, withAutomationTools } from './automation-tools.mjs';
 import { organizationPatch, organizationText, visibleProject } from './conversation-organization.mjs';
@@ -71,12 +74,14 @@ function safeCodexStatus(value) {
   return value && typeof value === 'object' ? value : { available: false, error: 'Codex 状态不可用。' };
 }
 
-export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, officialAccounts, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, asrOptions, executorsOptions, automationOptions, mobileOfficialOptions, appProxyProfilesOptions, memoryOptions = {}, memoryRuntimeOptions = {}, serviceLinksOptions = {}, cloudDockerOptions = {}, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
+export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR || path.resolve('.data'), token, staticDir, allowedOrigins = [], workspaceRoot = process.cwd(), codex, codexFactory, officialAccounts, desktopTools, updatesOptions, downloadsOptions, cosyvoiceOptions, asrOptions, executorsOptions, automationOptions, companionOptions = {}, mobileOfficialOptions, appProxyProfilesOptions, memoryOptions = {}, memoryRuntimeOptions = {}, serviceLinksOptions = {}, cloudDockerOptions = {}, codexHttpOrigins = process.env.PETPAL_CODEX_HTTP_ORIGINS } = {}) {
   const codexPolicy = { allowedHttpOrigins: parseCodexHttpOrigins(codexHttpOrigins) };
   const store = await new JsonStore(dataDir).init();
   const accessToken = await store.token(token ?? process.env.PETPAL_TOKEN);
   const ownerTokenHash = tokenHash(accessToken);
   const state = store.state;
+  let personalizedCompanion;
+  const companionRoutines=await createCompanionRoutineService({...companionOptions,directory:path.resolve(dataDir),instanceId:state.instanceId,users:()=>state.users,autoStart:false,buildContent:companionOptions.buildContent??((settings,context)=>personalizedCompanion(settings,context))});
   const serviceLinks=serviceLinksOptions.service??await createServiceLinks({...serviceLinksOptions,dataDir:path.resolve(dataDir)});
   const serviceModels=createServiceModels({store,links:serviceLinks});await serviceModels.synchronize();
   const memoryRuntime = memoryRuntimeOptions.runtime ?? await createMemobaseRuntime({ ...memoryRuntimeOptions, directory: path.join(path.resolve(dataDir), 'memobase-runtime') });
@@ -266,6 +271,17 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   };
   const conversationById = (id, user) => { const result = state.conversations.find(item => item.id === id && item.userId === user.id); if (!result) throw failure(404, '会话不存在。'); return result; };
   const providersFor = user => [...state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider=>serviceModels.resolve(provider)).filter(Boolean), ...officialProviders.forUser(user.id)];
+  personalizedCompanion=createCompanionPersonalizer({
+    recall:memoryContext,
+    isActive:userId=>!shuttingDown&&state.users.some(user=>user.id===userId&&!user.disabled),
+    getProvider:userId=>{
+      const user=state.users.find(item=>item.id===userId&&!item.disabled);if(!user)return null;
+      const available=providersFor(user),preferred=settingsFor(user).defaultProviderId;
+      const selected=preferred?available.find(provider=>provider.id===preferred):available[0];
+      // A phone/PC official-account session must never be borrowed by the server.
+      return selected&&!isOfficialProvider(selected)?selected:null;
+    },
+  });
   const providerById = (id, user, { existing = false } = {}) => {
     const result = providersFor(user).find(item => item.id === id) ?? (existing ? officialAccounts?.providerFor?.(user.id, id) : undefined);
     if (!result) throw failure(404, '模型连接不存在或未获授权。');
@@ -610,6 +626,11 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     res.json({ token: sessionToken, user: visibleUser(user) });
   });
   // Native background credentials are deliberately excluded from session auth.
+  app.get('/api/notifications/companion-feed',(req,res)=>{
+    const device=notifications.devicePrincipal(req.headers.authorization);
+    res.setHeader('Cache-Control','no-store');
+    res.json({...companionRoutines.feed(device.userId,req.query),deviceId:device.deviceId,expiresAt:device.expiresAt});
+  });
   app.get('/api/notifications/device/feed', async (req, res) => {
     const controller = new AbortController(); const close = () => { if (!res.writableEnded) controller.abort(); }; res.once('close', close);
     try { const result = await notifications.feed(req.headers.authorization, req.query, controller.signal); if (!res.destroyed) res.json(result); }
@@ -634,6 +655,17 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     req.user = user; req.sessionHash = hash; req.bootstrap = bootstrap; next();
   });
   const executorAuth = req => ({ userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap });
+  app.use('/api/companion-routine',(_req,res,next)=>{res.setHeader('Cache-Control','no-store');next();});
+  const routineRequest=req=>{requireCurrentAuth(req);if(Object.keys(req.query).length)throw failure(400,'每日陪伴接口不接受附加查询字段。');};
+  app.get('/api/companion-routine',(req,res)=>{routineRequest(req);res.json(companionRoutines.catalog(req.user.id));});
+  app.put('/api/companion-routine',async(req,res)=>{routineRequest(req);const result=await companionRoutines.configure(req.user.id,req.body,{guard:()=>requireCurrentAuth(req)});requireCurrentAuth(req);res.json(result);});
+  app.get('/api/companion-routine/locations',async(req,res)=>{
+    requireCurrentAuth(req);if(Object.keys(req.query).some(key=>key!=='query'))throw failure(400,'天气搜索字段无效。');
+    const result=await companionRoutines.locations(req.user.id,req.query.query);requireCurrentAuth(req);res.json(result);
+  });
+  app.post('/api/companion-routine/preview',async(req,res)=>{routineRequest(req);const result=await companionRoutines.preview(req.user.id,req.body);requireCurrentAuth(req);res.json(result);});
+  app.post('/api/companion-routine/run',async(req,res)=>{routineRequest(req);const result=await companionRoutines.run(req.user.id,req.body,{guard:()=>requireCurrentAuth(req)});requireCurrentAuth(req);res.status(202).json(result);});
+  app.get('/api/companion-routine/runs/:id',(req,res)=>{routineRequest(req);res.json(companionRoutines.runView(req.user.id,req.params.id));});
   mountAppProxyProfileRoutes({app,profiles:appProxyProfiles,requireAdmin,requireCurrentAuth});
   const memoryRequest = (req, bodyKeys = [], queryKeys = []) => {
     requireCurrentAuth(req);
@@ -1518,6 +1550,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     shuttingDown = true;
     clearInterval(serviceLinkTimer);await cloudDesktop.close();
     await automations.close();
+    await companionRoutines.close();await closeCompanionWeatherQueries();
     const closingListeners = [...listeners];
     const httpClosed = Promise.all(closingListeners.map(listener => listener.listening ? new Promise((resolve, reject) => {
       listener.close(error => error ? reject(error) : resolve()); listener.closeIdleConnections();
@@ -1538,6 +1571,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (saveError) throw saveError;
   })();
   if (automationOptions?.autoStart !== false) await automations.start();
+  if((companionOptions.autoStart??automationOptions?.autoStart)!==false)await companionRoutines.start();
   const officialAccountChanged = async (userId, { identityChanged = false, previousProviderIds = [] } = {}) => {
     if (!officialAccounts || shuttingDown) return;
     officialProviders.forUser(userId);
@@ -1557,5 +1591,5 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     unbindRemote: () => memory.unbindRemote(),
     runtime: memoryRuntime,
   };
-  return { server, token: accessToken, close, updates, hosting, automations, officialAccountChanged, memory: nativeMemory, cloudDocker,serviceLinks };
+  return { server, token: accessToken, close, updates, hosting, automations, companionRoutines, officialAccountChanged, memory: nativeMemory, cloudDocker,serviceLinks };
 }

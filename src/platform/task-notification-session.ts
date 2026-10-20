@@ -1,5 +1,5 @@
 import { api, getConnection, getIdentity, getSessionEpoch, subscribeSession, type Conversation, type State } from '../api';
-import { createTaskNotificationController, type TaskNotificationSession } from './task-notification-controller.mjs';
+import { createTaskNotificationController, type CompanionNotificationRunResponse, type TaskNotificationSession } from './task-notification-controller.mjs';
 import { PetTaskNotifications, supportsTaskNotifications, type TaskNotificationDevice } from './task-notifications';
 import { connectionFetch } from '../auth/native-fetch';
 
@@ -22,6 +22,7 @@ export const taskNotificationSession=createTaskNotificationController({
   },
   refreshState:signal=>api<State>('/state',{signal}),
   fetchConversation:(id,signal)=>api<Conversation>(`/conversations/${encodeURIComponent(id)}`,{signal}),
+  fetchCompanionRun:(id,signal)=>api<CompanionNotificationRunResponse>(`/companion-routine/runs/${encodeURIComponent(id)}`,{signal}),
   foreground:()=>document.visibilityState==='visible',
 });
 

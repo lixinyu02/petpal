@@ -8,12 +8,23 @@ export function notificationServerUrl(value){
   return url.href.replace(/\/+$/,'');
 }
 export function notificationNavigation(value){
+  if(value?.source==='companion'){
+    if(!['runId','eventId'].every(key=>safeId(value[key])))throw new Error('通知中的每日问候定位无效。');
+    return {source:'companion',runId:value.runId,eventId:value.eventId};
+  }
   if(!value||!['agent','chat-agent'].includes(value.source)||!['conversationId','agentConversationId','runId','eventId'].every(key=>safeId(value[key])))throw new Error('通知中的会话定位无效。');
   return Object.fromEntries(['conversationId','agentConversationId','runId','eventId','source'].map(key=>[key,value[key]]));
 }
+const validTimestamp=value=>typeof value==='string'&&Number.isFinite(Date.parse(value));
+const validCompanionRun=(run,id)=>run?.id===id&&run.status==='completed'&&['manual','scheduled'].includes(run.trigger)
+  &&(run.scheduledFor===null||validTimestamp(run.scheduledFor))
+  &&['createdAt','finishedAt','validUntil'].every(key=>validTimestamp(run[key]))
+  &&typeof run.title==='string'&&run.title.trim().length>0&&run.title.length<=500
+  &&typeof run.content==='string'&&run.content.trim().length>0&&run.content.length<=100000
+  &&Array.isArray(run.warnings)&&run.warnings.length<=50&&run.warnings.every(item=>typeof item==='string'&&item.length<=2000);
 
 /** Framework/API-independent controller. Credentials never enter its public snapshot. */
-export function createTaskNotificationController({native,session,register,revoke,refreshState,fetchConversation,foreground}){
+export function createTaskNotificationController({native,session,register,revoke,refreshState,fetchConversation,fetchCompanionRun,foreground}){
   let generation=0,operation=null,pending=null,processing=null,knownScope=null;
   let value={status:null,busy:false,error:'',navigation:null};
   const listeners=new Set();
@@ -49,10 +60,21 @@ export function createTaskNotificationController({native,session,register,revoke
       }
       if(!sameSession(pending.scope,scope)){pending=null;return;}
       const navigation=pending.navigation;
-      // Refresh account-owned summaries, then read the exact conversation under the
-      // same credentials. An event/URL alone never authorizes opening a conversation.
+      // Refresh the verified account, then read its exact record under the same
+      // credentials. An event/URL alone never authorizes opening private content.
       const state=await refreshState(controller.signal);assertCurrent(scope,revision);
       if(state?.instanceId!==scope.instanceId||state?.user?.id!==scope.userId)throw sessionError();
+      if(navigation.source==='companion'){
+        if(typeof fetchCompanionRun!=='function')throw Object.assign(new Error('请更新应用后打开每日问候。'),{terminal:true});
+        let result;
+        try{result=await fetchCompanionRun(navigation.runId,controller.signal);}
+        catch(error){if([403,404,410].includes(error?.status))throw Object.assign(new Error('这条每日问候已删除，或不属于当前账号。'),{terminal:true});throw error;}
+        assertCurrent(scope,revision);
+        if(!sameScope(result,scope)||!validCompanionRun(result?.run,navigation.runId))throw Object.assign(new Error('每日问候的账号或记录身份不一致。'),{terminal:true});
+        pending=null;
+        publish({error:'',navigation:{...navigation,epoch:scope.epoch,instanceId:scope.instanceId,userId:scope.userId,companionRun:result.run,state}});
+        return;
+      }
       const summary=state.conversations?.find(item=>item.id===navigation.conversationId);
       let conversation;
       try{conversation=await fetchConversation(navigation.conversationId,controller.signal);}

@@ -33,10 +33,12 @@ final class TaskNotificationState {
     static final class Snapshot {
         final String url, token, deviceId, instanceId, userId, epoch, expiresAt;
         final long cursor, expiry;
+        final Long companionCursor;
         Snapshot(JSONObject value) throws Exception {
             url = TaskNotificationPolicy.baseUrl(value.getString("url")); token = TaskNotificationPolicy.token(value.getString("token"));
             deviceId = TaskNotificationPolicy.deviceId(value.getString("deviceId")); instanceId = TaskNotificationPolicy.id(value.getString("instanceId")); userId = TaskNotificationPolicy.id(value.getString("userId"));
             epoch = TaskNotificationPolicy.deviceId(value.getString("epoch")); cursor = TaskNotificationPolicy.cursor(value.getLong("cursor"));
+            companionCursor = value.has("companionCursor") ? TaskNotificationPolicy.parseCursor(value.get("companionCursor")) : null;
             expiresAt = value.getString("expiresAt"); expiry = TaskNotificationPolicy.expires(expiresAt);
         }
     }
@@ -47,7 +49,7 @@ final class TaskNotificationState {
     private static JSONObject state;
     private static long generation;
     private static HttpURLConnection activeConnection;
-    private static String connection = "disabled", message = "";
+    private static String connection = "disabled", message = "", companionConnection = "idle", companionMessage = "";
     private static WeakReference<Listener> listener = new WeakReference<>(null);
     private TaskNotificationState() { }
     static synchronized void listen(Listener value) { listener = new WeakReference<>(value); }
@@ -94,13 +96,13 @@ final class TaskNotificationState {
     }
     static synchronized void clear(String nextConnection, String nextMessage) {
         ++generation; state = null; if (activeConnection != null) activeConnection.disconnect(); activeConnection = null;
-        connection = nextConnection; message = nextMessage;
+        connection = nextConnection; message = nextMessage; companionConnection = "idle"; companionMessage = "";
         if (context != null) {
             // Delete the key as well: a failed preference deletion cannot resurrect credentials.
             try { KeyStore keys = KeyStore.getInstance("AndroidKeyStore"); keys.load(null); keys.deleteEntry(KEY); } catch (Exception ignored) { }
             prefs().edit().remove("vault").commit();
             NotificationManager manager = context.getSystemService(NotificationManager.class);
-            if (manager != null) for (android.service.notification.StatusBarNotification item : manager.getActiveNotifications()) if (item.getTag() != null && item.getTag().startsWith("petpal-agent-")) manager.cancel(item.getTag(), 0);
+            if (manager != null) for (android.service.notification.StatusBarNotification item : manager.getActiveNotifications()) if (item.getTag() != null && (item.getTag().startsWith("petpal-agent-") || item.getTag().startsWith("petpal-companion-"))) manager.cancel(item.getTag(), 0);
         }
         emit("status");
     }
@@ -109,18 +111,29 @@ final class TaskNotificationState {
     static synchronized void disconnect(HttpURLConnection value) { if (activeConnection == value) activeConnection = null; value.disconnect(); }
     static synchronized void reconnect() { if (activeConnection != null) activeConnection.disconnect(); }
     static synchronized void note(String epoch, String nextConnection, String nextMessage) { if (matches(epoch)) { connection = nextConnection; message = nextMessage; emit("status"); } }
+    static synchronized void noteCompanion(String epoch, String nextConnection, String nextMessage) { if (matches(epoch)) { companionConnection = nextConnection; companionMessage = nextMessage; emit("status"); } }
     static synchronized void permissionAsked(Context value) { init(value); prefs().edit().putBoolean("permission_requested", true).commit(); }
     static boolean permission(Context value) {
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(value, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return false;
         if (!NotificationManagerCompat.from(value).areNotificationsEnabled()) return false;
-        if (Build.VERSION.SDK_INT >= 26) { android.app.NotificationChannel channel = value.getSystemService(NotificationManager.class).getNotificationChannel(PetTaskNotificationService.RESULT_CHANNEL); if (channel != null && channel.getImportance() == NotificationManager.IMPORTANCE_NONE) return false; }
+        if (!channelAllowed(value, PetTaskNotificationService.RESULT_CHANNEL) && !channelAllowed(value, PetTaskNotificationService.COMPANION_CHANNEL)) return false;
         return true;
+    }
+    static boolean channelAllowed(Context value, String id) {
+        if (Build.VERSION.SDK_INT < 26) return true;
+        android.app.NotificationChannel channel = value.getSystemService(NotificationManager.class).getNotificationChannel(id);
+        return channel == null || channel.getImportance() != NotificationManager.IMPORTANCE_NONE;
     }
     static synchronized JSONObject status(Context value) throws Exception {
         Snapshot config = snapshot(value); String permission = permission(value) ? "granted" : Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(value, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED && !prefs().getBoolean("permission_requested", false) ? "prompt" : "denied";
         JSONObject result = new JSONObject().put("enabled", config != null).put("running", PetTaskNotificationService.running).put("permission", permission).put("connection", connection);
         if (!message.isEmpty()) result.put("error", message);
-        if (config != null) result.put("url", config.url).put("deviceId", config.deviceId).put("instanceId", config.instanceId).put("userId", config.userId).put("cursor", config.cursor).put("expiresAt", config.expiresAt);
+        result.put("companionConnection", companionConnection);
+        if (!companionMessage.isEmpty()) result.put("companionError", companionMessage);
+        if (config != null) {
+            result.put("url", config.url).put("deviceId", config.deviceId).put("instanceId", config.instanceId).put("userId", config.userId).put("cursor", config.cursor).put("expiresAt", config.expiresAt);
+            if (config.companionCursor != null) result.put("companionCursor", config.companionCursor);
+        }
         return result;
     }
     static synchronized void deliver(String epoch, JSONObject event, Poster poster) throws Exception {
@@ -144,23 +157,71 @@ final class TaskNotificationState {
         }, () -> poster.post(tag, route), () -> { next.put("cursor", sequence); persist(next); });
     }
     static synchronized void advance(String epoch, long cursor) throws Exception { if (matches(epoch) && cursor > state.getLong("cursor")) persist(new JSONObject(state.toString()).put("cursor", TaskNotificationPolicy.cursor(cursor))); }
-    static synchronized void capture(Context value, String tag, String epoch) throws Exception {
-        init(value); if (tag == null || epoch == null || !matches(epoch)) return;
+    static synchronized void advanceCompanion(String epoch, long cursor, boolean reset) throws Exception {
+        if (!matches(epoch)) return;
+        cursor = TaskNotificationPolicy.cursor(cursor);
+        Snapshot config = new Snapshot(state);
+        if (!reset && config.companionCursor != null && cursor <= config.companionCursor) return;
+        JSONObject next = new JSONObject(state.toString()).put("companionCursor", cursor);
+        if (reset) {
+            JSONArray keep = new JSONArray(), routes = next.getJSONArray("routes");
+            for (int i = 0; i < routes.length(); i++) {
+                JSONObject route = routes.getJSONObject(i);
+                if (!"companion".equals(route.optString("source"))) keep.put(route);
+                else {
+                    context.getSystemService(NotificationManager.class).cancel(route.getString("tag"), 0);
+                    if (route.getString("tag").equals(next.optString("pending"))) next.remove("pending");
+                }
+            }
+            next.put("routes", keep);
+        }
+        persist(next);
+    }
+    static synchronized void deliverCompanion(String epoch, JSONObject event, Poster poster) throws Exception {
+        if (!matches(epoch)) return;
+        Snapshot config = new Snapshot(state); long sequence = TaskNotificationPolicy.parseCursor(event.get("seq"));
+        if (config.companionCursor == null || sequence <= config.companionCursor) return;
+        if (!CompanionNotificationPolicy.eligible(event.getString("createdAt"), event.getString("validUntil"), System.currentTimeMillis())
+            || !channelAllowed(context, PetTaskNotificationService.COMPANION_CHANNEL)) { advanceCompanion(epoch, sequence, false); return; }
+        JSONObject next = new JSONObject(state.toString()), route = new JSONObject().put("source", "companion").put("seq", sequence)
+            .put("id", TaskNotificationPolicy.id(event.getString("id"))).put("runId", TaskNotificationPolicy.id(event.getString("runId")))
+            .put("createdAt", event.getString("createdAt")).put("validUntil", event.getString("validUntil"))
+            .put("title", CompanionNotificationPolicy.title(event.getString("title"))).put("body", CompanionNotificationPolicy.body(event.getString("body")))
+            .put("epoch", epoch).put("instanceId", config.instanceId).put("userId", config.userId);
+        String tag = CompanionNotificationPolicy.tag(config.instanceId, config.userId, route.getString("id")); route.put("tag", tag);
+        JSONArray routes = next.getJSONArray("routes"); boolean seen = false;
+        for (int i = 0; i < routes.length(); i++) if (tag.equals(routes.getJSONObject(i).getString("tag"))) { seen = true; break; }
+        final boolean prepared = seen;
+        TaskNotificationDelivery.deliver(config.companionCursor, sequence, () -> {
+            if (!prepared) {
+                if (routes.length() >= 100) { context.getSystemService(NotificationManager.class).cancel(routes.getJSONObject(0).getString("tag"), 0); routes.remove(0); }
+                routes.put(route); persist(next);
+            }
+        }, () -> poster.post(tag, route), () -> { next.put("companionCursor", sequence); persist(next); });
+    }
+    static synchronized boolean capture(Context value, String tag, String epoch) throws Exception {
+        init(value); if (tag == null || epoch == null || !matches(epoch)) return false;
         Snapshot config = new Snapshot(state); JSONArray routes = state.getJSONArray("routes");
         for (int index = 0; index < routes.length(); index++) {
             JSONObject route = routes.getJSONObject(index);
             if (tag.equals(route.getString("tag")) && TaskNotificationPolicy.scopeMatches(route.optString("epoch", null), config.epoch,
                 route.optString("instanceId", null), config.instanceId, route.optString("userId", null), config.userId)) {
-                persist(new JSONObject(state.toString()).put("pending", tag)); emit("navigation"); return;
+                if ("companion".equals(route.optString("source")) && TaskNotificationPolicy.expires(route.getString("validUntil")) <= System.currentTimeMillis()) return false;
+                persist(new JSONObject(state.toString()).put("pending", tag)); emit("navigation"); return true;
             }
         }
+        return false;
     }
     static synchronized JSONObject consume(Context value, String instance, String user) throws Exception {
         Snapshot config = snapshot(value); if (config == null || !config.instanceId.equals(instance) || !config.userId.equals(user)) return new JSONObject();
         String pending = state.optString("pending", ""); JSONArray routes = state.getJSONArray("routes");
         for (int index = 0; index < routes.length(); index++) { JSONObject route = routes.getJSONObject(index); if (pending.equals(route.getString("tag"))
             && TaskNotificationPolicy.scopeMatches(route.optString("epoch", null), config.epoch, route.optString("instanceId", null), instance, route.optString("userId", null), user)) {
-            JSONObject navigation = new JSONObject().put("conversationId", TaskNotificationPolicy.id(route.getString("conversationId"))).put("agentConversationId", TaskNotificationPolicy.id(route.getString("agentConversationId")))
+            JSONObject navigation;
+            if ("companion".equals(route.optString("source"))) {
+                if (TaskNotificationPolicy.expires(route.getString("validUntil")) <= System.currentTimeMillis()) { JSONObject next = new JSONObject(state.toString()); next.remove("pending"); persist(next); return new JSONObject(); }
+                navigation = new JSONObject().put("source", "companion").put("runId", TaskNotificationPolicy.id(route.getString("runId"))).put("eventId", TaskNotificationPolicy.id(route.getString("id")));
+            } else navigation = new JSONObject().put("conversationId", TaskNotificationPolicy.id(route.getString("conversationId"))).put("agentConversationId", TaskNotificationPolicy.id(route.getString("agentConversationId")))
                 .put("runId", TaskNotificationPolicy.id(route.getString("runId"))).put("eventId", TaskNotificationPolicy.id(route.getString("id"))).put("source", TaskNotificationPolicy.source(route.getString("source")));
             JSONObject next = new JSONObject(state.toString()); next.remove("pending"); persist(next); return new JSONObject().put("navigation", navigation);
         } }

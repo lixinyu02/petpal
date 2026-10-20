@@ -5,13 +5,14 @@ import {ExecutionHostPicker,ModelPicker} from './WorkspaceControls';
 import AgentPermissions,{defaultAgentPermissions} from './AgentPermissions';
 import {projectDirectoryIssue} from './project-directory-preferences.mjs';
 import './automations.css';
+import DailyCompanionSettings from './DailyCompanionSettings';
 
 type Preset='once'|'daily'|'weekdays'|'weekly'|'interval';
 type Editor={id?:string;revision?:string;title:string;prompt:string;hostId:string;providerId:string;projectDirectory:string;permissions:Permissions;preset:Preset;at:string;time:string;timezone:string;weekdays:number[];minutes:string;enabled:boolean;quickLaunch?:boolean;weatherLocation?:string};
 type ShortcutTemplate='weather'|'music'|'custom';
 type Mutation={kind:'save'|'run'|'toggle'|'delete'|'preference'|'acknowledge';path:string;method:string;body:Record<string,unknown>;jobId?:string};
 type Confirmation={kind:'cancel'}|{kind:'reload';job:Automation}|{kind:'ack';job:Automation;run:AutomationRun};
-type Props={mode?:'automations'|'shortcuts';user?:User;providers:Provider[];reviewProviders?:Provider[];hosts:AgentHost[];localHostId?:string;defaultHostId?:string;hostsLoading?:boolean;hostsError?:string;onRefreshHosts?():void;onOpenConversation(id:string):void|Promise<void>;onEditingChange(value:{dirty:boolean;busy:boolean}):void};
+type Props={mode?:'automations'|'shortcuts';selectedRunId?:string;user?:User;providers:Provider[];reviewProviders?:Provider[];hosts:AgentHost[];localHostId?:string;defaultHostId?:string;hostsLoading?:boolean;hostsError?:string;onRefreshHosts?():void;onOpenConversation(id:string):void|Promise<void>;onEditingChange(value:{dirty:boolean;busy:boolean}):void};
 const runLabels:Record<AutomationRun['status'],string>={claiming:'准备派发',queued:'排队中',running:'执行中',completed:'已完成',error:'执行失败',skipped:'已跳过',unknown:'状态待确认',cancelled:'已取消'};
 const weekdayNames=['日','一','二','三','四','五','六'];
 const weatherLocation='上海浦东新区北蔡镇';
@@ -28,7 +29,8 @@ function knownRejection(error:unknown){const status=(error as {status?:number})?
 function comparableSavedField(key:string,value:unknown){if(key==='quickLaunch')return value===true;if(key!=='permissions'||!value||typeof value!=='object'||Array.isArray(value))return value;const permissions={...value as Record<string,unknown>};if(permissions.reviewProviderId==null||permissions.reviewProviderId==='')delete permissions.reviewProviderId;return permissions;}
 function sameSaved(job:Automation,body:Record<string,unknown>){return Object.entries(body).filter(([key])=>!['revision','requestId'].includes(key)).every(([key,value])=>JSON.stringify(comparableSavedField(key,(job as unknown as Record<string,unknown>)[key]??(key==='projectDirectory'?'':undefined)))===JSON.stringify(comparableSavedField(key,value)));}
 
-export default function AutomationsView({mode='automations',user,providers,reviewProviders=[],hosts,localHostId='',defaultHostId='',hostsLoading=false,hostsError='',onRefreshHosts,onOpenConversation,onEditingChange}:Props){
+export default function AutomationsView({mode='automations',selectedRunId,user,providers,reviewProviders=[],hosts,localHostId='',defaultHostId='',hostsLoading=false,hostsError='',onRefreshHosts,onOpenConversation,onEditingChange}:Props){
+  const [section,setSection]=useState(selectedRunId?'companion':'agent');
   const shortcuts=mode==='shortcuts',canAccessAllHosts=!!(user?.isAdmin||user?.isOwner),permittedHosts=hosts.filter(host=>canAccessAllHosts||host.kind!=='central'&&host.isOwn!==false);
   const epoch=useRef(getSessionEpoch()).current,alive=useRef(true),loadSequence=useRef(0),mutationLock=useRef(false),callback=useRef(onEditingChange);callback.current=onEditingChange;
   const [catalog,setCatalog]=useState<AutomationCatalog>({allowAgentCreate:true,automations:[]}),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -37,6 +39,8 @@ export default function AutomationsView({mode='automations',user,providers,revie
   const [confirmation,setConfirmation]=useState<Confirmation|null>(null),confirmationRef=useRef<Confirmation|null>(null),confirmationElement=useRef<HTMLDivElement>(null),returnFocus=useRef<HTMLElement|null>(null),createButton=useRef<HTMLButtonElement>(null);
   const guard=useRef({dirty:false,busy:false}),catalogRef=useRef(catalog);catalogRef.current=catalog;
   const current=()=>alive.current&&epoch===getSessionEpoch();
+  useEffect(()=>{if(selectedRunId&&current()&&!guard.current.dirty&&!guard.current.busy&&!mutationLock.current&&!uncertainRef.current&&!confirmationRef.current)setSection('companion');},[selectedRunId,editor,pending,uncertain,confirmation]);
+  function changeSection(value:string){if(!current()||guard.current.dirty||guard.current.busy||mutationLock.current||uncertainRef.current||confirmationRef.current)return;setSection(value);}
   function editingState(dirty=guard.current.dirty,busy=guard.current.busy){guard.current={dirty,busy};callback.current(guard.current);}
   function changeEditor(next:Editor|null){editorRef.current=next;setEditor(next);editingState(!!next&&JSON.stringify(next)!==baseline.current);setError('');}
   function patchEditor(change:Partial<Editor>){if(!current()||mutationLock.current||uncertainRef.current||confirmationRef.current||!editorRef.current)return;changeEditor({...editorRef.current,...change});}
@@ -82,7 +86,10 @@ export default function AutomationsView({mode='automations',user,providers,revie
   function runJob(job:Automation){if(!current()||mutationLock.current||uncertainRef.current||confirmationRef.current||editorRef.current||!user?.canUseCodex||job.runs.some(run=>['claiming','queued','running','unknown'].includes(run.status))||!permittedHosts.some(host=>host.id===job.hostId&&host.online))return;void mutate({kind:'run',path:`/automations/${encodeURIComponent(job.id)}/run`,method:'POST',body:{requestId:crypto.randomUUID()},jobId:job.id});}
   async function openConversation(id:string){if(!current()||mutationLock.current||uncertainRef.current||confirmationRef.current||editorRef.current||opening)return;setOpening(id);setError('');try{await onOpenConversation(id);}catch(e){if(current()&&!isSessionChanged(e))setError((e as Error).message);}finally{if(current())setOpening('');}}
   const disabled=!!pending||!!uncertain||!!confirmation,editing=!!editor,host=permittedHosts.find(item=>item.id===editor?.hostId),allJobs=catalog.automations,jobs=shortcuts?allJobs.filter(job=>job.quickLaunch===true):allJobs;
+  const tabs=!shortcuts&&<nav className="automation-sections" aria-label="自动化类型"><button type="button" aria-pressed={section==='companion'} disabled={guard.current.dirty||guard.current.busy} onClick={()=>changeSection('companion')}><CloudSun size={17}/>每日陪伴</button><button type="button" aria-pressed={section==='agent'} disabled={guard.current.dirty||guard.current.busy} onClick={()=>changeSection('agent')}><Monitor size={17}/>Agent 计划</button></nav>;
+  if(!shortcuts&&section==='companion')return <section className="automation-hub">{tabs}<DailyCompanionSettings selectedRunId={selectedRunId} onEditingChange={value=>editingState(value,false)}/></section>;
   return <section className={`automations-view${shortcuts?' shortcuts-view':''}`} aria-label={shortcuts?'快捷任务':'自动化任务'} aria-busy={loading||!!pending}>
+    {tabs}
     <div className="automations-heading"><div><span className="automations-eyebrow">{shortcuts?<Zap size={16} aria-hidden="true"/>:<CalendarClock size={16} aria-hidden="true"/>}{shortcuts?'常用的小事，点一下':'让小伴按时帮忙'}</span><h1>{shortcuts?'快捷入口':'自动化'}</h1><p>{shortcuts?'选好执行电脑和模型，随时运行，也能设置定时。':'固定电脑，按计划执行。结果会保存在独立的运行记录中。'}</p></div><button type="button" className="primary-button" ref={createButton} disabled={disabled||editing||loading||!user?.canUseCodex||allJobs.length>=50} onClick={()=>openEditor()}><Plus size={17} aria-hidden="true"/>{shortcuts?'新建快捷任务':'新建自动化'}</button></div>
     {!user?.canUseCodex&&<p className="automations-feedback" role="status">你的账号尚未开通 Agent。请联系管理员分配权限后创建自动化。</p>}
     {shortcuts?<div className="shortcuts-toolbar"><span>{jobs.length} 项快捷任务</span><button type="button" className="icon-button" aria-label="刷新快捷任务" disabled={disabled||loading} onClick={()=>void load().catch(e=>{if(current()&&!isSessionChanged(e))setError(e.message);})}><RefreshCw size={17} aria-hidden="true"/></button></div>:<div className="automations-preference"><label><input type="checkbox" checked={catalog.allowAgentCreate} disabled={disabled||loading||!user?.canUseCodex} onChange={event=>void mutate({kind:'preference',path:'/automations/preferences',method:'PATCH',body:{allowAgentCreate:event.target.checked}})}/><span>允许 Agent 创建自动化<small>继承当前任务的电脑、模型与权限；创建的计划会显示在这里。</small></span></label><button type="button" className="icon-button" aria-label="刷新自动化" disabled={disabled||loading} onClick={()=>void load().catch(e=>{if(current()&&!isSessionChanged(e))setError(e.message);})}><RefreshCw size={17} aria-hidden="true"/></button></div>}

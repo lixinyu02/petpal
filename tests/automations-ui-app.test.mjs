@@ -24,6 +24,12 @@ const source=ts.transpileModule(await readFile(new URL('../src/App.tsx',import.m
 const motionSource=ts.transpileModule(await readFile(new URL('../src/platform/ui-motion.ts',import.meta.url),'utf8'),{
   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true},
 }).outputText;
+const cloudSource=ts.transpileModule(await readFile(new URL('../src/platform/cloud-docker.ts',import.meta.url),'utf8'),{
+  fileName:'cloud-docker.ts',compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true},
+}).outputText;
+// The prior Docker feature added this pure module to App; exercise its real
+// predicates rather than substituting permissions or desktop decisions.
+const cloudModule={exports:{}};vm.runInNewContext(cloudSource,{module:cloudModule,exports:cloudModule.exports});
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const nodes=tree=>Array.isArray(tree)?tree.flatMap(nodes):!tree||typeof tree!=='object'?[]:[tree,...nodes(tree.props?.children)];
 const text=tree=>Array.isArray(tree)?tree.map(text).join(''):tree==null||typeof tree==='boolean'?'':typeof tree!=='object'?String(tree):text(tree.props?.children);
@@ -147,7 +153,8 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
     ...(officialSession?{'./platform/official-account':officialSession}:{}),
     './platform/visible-poll.mjs':{createVisiblePoll:options=>createVisiblePoll({...options,setTimeoutFn:callback=>{const id=++timerId;timers.set(id,callback);return id;},clearTimeoutFn:id=>timers.delete(id)})},
     react,'react/jsx-runtime':{jsx:element,jsxs:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
-    '@capacitor/core':{Capacitor:{isNativePlatform:()=>native}},'./api':api,'./WorkspaceControls':controls,'./composer-keyboard.mjs':{composerKeyAction},
+    '@capacitor/core':{Capacitor:{isNativePlatform:()=>native,getPlatform:()=>native?'android':'web',isPluginAvailable:()=>false}},'./api':api,'./WorkspaceControls':controls,'./composer-keyboard.mjs':{composerKeyAction},
+    './platform/cloud-docker':cloudModule.exports,
     './companion-mount.mjs':{watchCompanionBreakpoint},'./chat-display.mjs':{createChatDisplay},'./useChatScroll':{useChatScroll:()=>({contentRef:{current:null},onScroll(){},latest(){},showLatest:false})},
     './AgentPermissions':{...component('AgentPermissions'),defaultAgentPermissions:permissions},
     './ProjectDirectory':{...component('ProjectDirectory'),useProjectDirectory:()=>({value:'',change(){}})},
@@ -162,7 +169,7 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
     './platform/task-notification-session':{taskNotificationSession:{subscribe(){},snapshot:()=>notificationSnapshot,takeNavigation(){notificationTakes++;const previous=notificationSnapshot.navigation;notificationSnapshot={navigation:null};return previous;}}},'./desktop-settings.mjs':{reasoningEfforts},
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
   };
-  const deferredChildren=['AutomationsView','DownloadsView','UpdatesSettings','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','OfficialAccountSettings','ClientBehaviorSettings','CentralServerSettings'];
+  const deferredChildren=['AutomationsView','DownloadsView','UpdatesSettings','AccountsSettings','VoiceSettings','MemorySettings','CloudDockerView','ServiceLinksSettings','RemoteDesktopPanel','AppProxySettings','AndroidAppProxySettings','ServerProxyProfilesSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','OfficialAccountSettings','ClientBehaviorSettings','CentralServerSettings'];
   for(const name of [...deferredChildren,'BrandMark','CompanionOptions','ChatMessages','ChatScrollDock','ConversationHistory','AgentQueue','AgentUserInput','CatV2','WorkspaceDisclosure'])modules[`./${name}`]=component(name);
   const urlChanges=[],location={search,origin:'https://fixture.invalid',pathname:'/',hash:'',assign:path=>navigations.push(path)};
   Object.defineProperty(location,'href',{get:()=>`${location.origin}${location.pathname}${location.search}${location.hash}`});
@@ -220,7 +227,8 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
     suggestion(label){find('button',props=>text(props.children)===label).props.onClick();render();},
     prepareBrowser(){nodes(tree).find(node=>typeof node.props?.onPrepareBrowser==='function').props.onPrepareBrowser();render();},
     setAttachments(items=[],uploading=false){attachments.items=[...items];attachments.uploading=uploading;render();},
-    notify(conversation){const visible=publicConversations().filter(item=>item.id!==conversation.id);if(!registeredAutomationIds.includes(conversation.automationId))visible.push(conversation);notificationSnapshot={navigation:{epoch:1,...identity,state:{...state,projects:structuredClone(backendProjects),conversations:visible},conversation}};render();},
+    notify(conversation){const visible=publicConversations().filter(item=>item.id!==conversation.id);if(!registeredAutomationIds.includes(conversation.automationId))visible.push(conversation);notificationSnapshot={navigation:{epoch:1,...identity,state:{...state,projects:structuredClone(backendProjects),conversations:visible},conversation,source:'agent'}};render();},
+    notifyGreeting(runId,patch={}){notificationSnapshot={navigation:{epoch:1,...identity,source:'companion',runId,...patch}};render();},
     get notificationTakes(){return notificationTakes;},
     selectedHost:()=>find(controls.ExecutionTarget)?.props.value,
     chooseHost(id){find(controls.ExecutionTarget).props.onChange(id);render();},
@@ -771,4 +779,28 @@ test('organization responses belonging to an earlier account cannot publish meta
   const saved=conversation('epoch-fenced');const f=workspaceFixture({initialConversations:[saved]});t.after(()=>f.close());await f.ready();
   const delayed=f.delayNext(`/conversations/${saved.id}/organization`,'PATCH');const pending=f.organize(saved.id,{title:'旧账号迟来的改名'});await delayed.started;f.changeSession();delayed.release();
   await assert.rejects(pending,error=>error.name==='SessionChangedError');await f.ready();assert.equal(f.history()[0].title,saved.title);assert.equal(f.history()[0].customTitle,undefined);
+});
+
+test('a direct greeting URL opens the owned companion record entry without requiring Agent access',async t=>{
+  const f=workspaceFixture({search:'?chat=1&greeting=owned-morning-run'});t.after(()=>f.close());await f.ready();assert.equal(f.automation().props.selectedRunId,'owned-morning-run');assert.equal(f.automation().props.user.canUseCodex,false);assert.equal(f.currentUrl.searchParams.get('automations'),'1');assert.equal(f.currentUrl.searchParams.get('greeting'),'owned-morning-run');assert.equal(f.requests.some(call=>call.path.includes('/agent/submit')||call.path==='/companion-routine/run'),false);
+});
+
+test('companion notifications consume a run-only navigation once without replacing Chat state',async t=>{
+  const existing=conversation('preserved-chat',{mode:'chat'}),f=workspaceFixture({initialConversations:[existing]});t.after(()=>f.close());await f.ready();const writes=f.requests.filter(call=>call.method!=='GET').length;f.notifyGreeting('owned-notified-run');await f.ready();assert.equal(f.automation().props.selectedRunId,'owned-notified-run');assert.equal(f.notificationTakes,1);assert.equal(f.requests.filter(call=>call.method!=='GET').length,writes);assert.equal(f.currentUrl.searchParams.get('greeting'),'owned-notified-run');await f.ready();assert.equal(f.notificationTakes,1);f.openView('对话');await f.ready();assert.equal(f.history().some(item=>item.id===existing.id),true);assert.equal(f.currentUrl.searchParams.has('greeting'),false,'returning to Chat must not reopen a stale greeting after reload');
+});
+
+for(const editing of [{dirty:true,busy:false},{dirty:true,busy:true}])test(`companion notifications preserve ${editing.busy?'saving':'dirty'} automation edits until safe`,async t=>{
+  const f=workspaceFixture({search:'?chat=1&automations=1'});t.after(()=>f.close());await f.ready();f.automationEditing(editing);f.notifyGreeting('waiting-morning-run');await f.ready();assert.equal(f.notificationTakes,0);assert.equal(f.automation().props.selectedRunId,'');assert.match(f.text(),/修改已保留/);f.automationEditing({dirty:false,busy:false});await f.ready();assert.equal(f.notificationTakes,1);assert.equal(f.automation().props.selectedRunId,'waiting-morning-run');
+});
+
+test('companion notification navigation waits for the current Chat draft and attachments',async t=>{
+  const f=workspaceFixture();t.after(()=>f.close());await f.ready();f.typeDraft('还没说完的话');f.setAttachments([{id:'draft-image',name:'draft.png',mimeType:'image/png'}]);f.notifyGreeting('after-edit-run');await f.ready();assert.equal(f.notificationTakes,0);assert.equal(f.automation(),undefined);assert.equal(f.find('textarea',props=>props['aria-label']==='消息').props.value,'还没说完的话');f.typeDraft('');await f.ready();assert.equal(f.notificationTakes,0);f.setAttachments([]);await f.ready();assert.equal(f.notificationTakes,1);assert.equal(f.automation().props.selectedRunId,'after-edit-run');
+});
+
+test('a companion notification waits for an active Chat response and never aborts the stream',async t=>{
+  const f=workspaceFixture({holdStream:true});t.after(()=>f.close());await f.ready();f.typeDraft('问一句话');const sending=f.submit();await f.ready();const stream=f.streams[0];assert.ok(stream);f.notifyGreeting('after-response-run');await f.ready();assert.equal(f.notificationTakes,0);assert.equal(stream.signal.aborted,false);stream.complete();await sending;await f.ready();assert.equal(f.notificationTakes,1);assert.equal(f.automation().props.selectedRunId,'after-response-run');
+});
+
+for(const patch of [{epoch:0},{instanceId:'foreign-server'},{userId:'foreign-user'}])test(`companion navigation rejects a mismatched ${Object.keys(patch)[0]} without reading or consuming it`,async t=>{
+  const f=workspaceFixture();t.after(()=>f.close());await f.ready();const before=f.requests.length;f.notifyGreeting('foreign-run',patch);await f.ready();assert.equal(f.notificationTakes,0);assert.equal(f.automation(),undefined);assert.equal(f.requests.length,before);
 });

@@ -1,6 +1,8 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
-export type TaskNotificationStatus={enabled:boolean;running:boolean;permission:'granted'|'denied'|'prompt';connection:string;instanceId?:string;userId?:string;deviceId?:string;url?:string;cursor?:number;expiresAt?:string;error?:string};
-export type TaskNotificationNavigation={conversationId:string;agentConversationId:string;runId:string;eventId:string;source:'agent'|'chat-agent'};
+export type TaskNotificationStatus={enabled:boolean;running:boolean;permission:'granted'|'denied'|'prompt';connection:string;instanceId?:string;userId?:string;deviceId?:string;url?:string;cursor?:number;companionCursor?:number;companionConnection?:string;companionError?:string;expiresAt?:string;error?:string};
+export type TaskAgentNotificationNavigation={conversationId:string;agentConversationId:string;runId:string;eventId:string;source:'agent'|'chat-agent'};
+export type CompanionNotificationNavigation={runId:string;eventId:string;source:'companion'};
+export type TaskNotificationNavigation=TaskAgentNotificationNavigation|CompanionNotificationNavigation;
 export type TaskNotificationDevice={deviceId:string;token:string;instanceId:string;userId:string;cursor:number;expiresAt:string};
 export type BackgroundSettingsKind='battery'|'autostart'|'notifications'|'app';
 export type PhoneVendor='xiaomi'|'huawei'|'honor'|'oppo'|'vivo'|'samsung'|'meizu'|'asus'|'generic';

@@ -10,7 +10,7 @@ export default function SessionNotifications(){
   useEffect(()=>{
     const target=notification.navigation,identity=getIdentity();
     if(new URLSearchParams(location.search).has('chat')||!target||target.epoch!==getSessionEpoch()||target.instanceId!==identity?.instanceId||target.userId!==identity?.userId)return;
-    const query=new URLSearchParams({chat:'1',conversation:target.conversation.id,mode:target.conversation.mode});
+    const query=new URLSearchParams(target.source==='companion'?{chat:'1',greeting:target.runId}:{chat:'1',conversation:target.conversation.id,mode:target.conversation.mode});
     taskNotificationSession.takeNavigation();
     location.assign(`${location.pathname}?${query.toString()}`);
   },[notification.navigation,epoch]);

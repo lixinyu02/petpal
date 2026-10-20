@@ -148,6 +148,9 @@ export function createNotificationService({ store, authorize, clock = Date.now }
   };
   const save = operation => store.save({ notification: operation });
   return {
+    // Read-only identity for the separately versioned companion notification feed.
+    // A device capability still cannot use normal account APIs or edit a plan.
+    devicePrincipal(value) { const device=check(value);return {deviceId:device.deviceId,instanceId:device.instanceId,userId:device.userId,expiresAt:new Date(device.expiresAt).toISOString()}; },
     async register(auth, body) {
       if (!fields(body, ['deviceId']) || !deviceId(body.deviceId)) throw fail(400, '通知设备标识必须是安装 UUID。');
       const source = authorize(auth);

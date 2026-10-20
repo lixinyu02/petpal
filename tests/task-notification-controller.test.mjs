@@ -183,3 +183,85 @@ test('late status cannot restore a listener after invalidation; navigation IDs c
   const refresh=h.controller.refresh();await h.controller.invalidate();late.resolve({enabled:true,running:true});await refresh;assert.equal(h.controller.snapshot().status.enabled,false);
   for(const patch of [{conversationId:'https://attacker.example'},{eventId:'../old-user'},{runId:'a'.repeat(161)},{source:'chat'}])assert.throws(()=>notificationNavigation({...navigation,...patch}));
 });
+
+const companionNavigation={source:'companion',runId:'greeting-run',eventId:'greeting-event'};
+const companionRun={id:'greeting-run',status:'completed',trigger:'manual',scheduledFor:null,createdAt:'2026-10-20T00:00:00.000Z',finishedAt:'2026-10-20T00:00:01.000Z',validUntil:'2026-10-21T00:00:00.000Z',title:'早上好',content:'愿今天也有一些值得期待的事。',warnings:[]};
+const companionResult=run=>({run,instanceId:'instance-one',userId:'user-one'});
+
+test('companion navigation contains only its real run target and never fabricates a conversation',()=>{
+  assert.deepEqual(notificationNavigation({...companionNavigation,conversationId:'fake',agentConversationId:'fake',url:'https://untrusted.example'}),companionNavigation);
+  for(const patch of [{runId:'https://untrusted.example'},{eventId:'../run'},{runId:''},{eventId:'e'.repeat(161)},{source:'companion-other'}])assert.throws(()=>notificationNavigation({...companionNavigation,...patch}));
+});
+
+test('companion tap verifies owned state and exact completed run without reading or creating a conversation',async()=>{
+  const h=harness({fetchCompanionRun:async(id,signal)=>{h.calls.push(['companion',id,signal]);return companionResult(companionRun);}});
+  h.pending=companionNavigation;await h.controller.consume();
+  assert.deepEqual(h.calls.filter(Array.isArray).map(call=>call[0]),['consume','state','companion']);
+  const result=h.controller.takeNavigation();
+  assert.deepEqual({source:result.source,runId:result.runId,eventId:result.eventId},companionNavigation);
+  assert.equal(result.companionRun,companionRun);assert.equal(result.epoch,h.scope.epoch);assert.equal(result.instanceId,h.scope.instanceId);assert.equal(result.userId,h.scope.userId);
+  assert.equal(Object.hasOwn(result,'conversation'),false);assert.equal(Object.hasOwn(result,'conversationId'),false);assert.equal(h.controller.snapshot().navigation,null);
+});
+
+test('companion validation checks current server and account before the exact record is fetched',async()=>{
+  for(const patch of [{instanceId:'other-instance'},{user:{id:'other-user'}}]){
+    let fetched=false;
+    const h=harness({refreshState:async()=>({instanceId:'instance-one',user:{id:'user-one'},conversations:[],...patch}),fetchCompanionRun:async()=>{fetched=true;return companionResult(companionRun);}});
+    h.pending=companionNavigation;await h.controller.consume();assert.equal(fetched,false);assert.equal(h.controller.takeNavigation(),null);
+  }
+});
+
+test('companion exact response must belong to the same server and user and contain the matching completed run',async()=>{
+  const cases=[
+    {...companionResult(companionRun),instanceId:'other-instance'},
+    {...companionResult(companionRun),userId:'other-user'},
+    {run:companionRun},
+    ...[{id:'other-run'},{status:'running'},{status:'error'},{trigger:'agent'},{scheduledFor:'invalid'},{createdAt:null},{finishedAt:'invalid'},{validUntil:''},{title:''},{content:''},{warnings:null},{warnings:[{}]}].map(patch=>companionResult({...companionRun,...patch})),
+  ];
+  for(const result of cases){
+    const h=harness({fetchCompanionRun:async()=>result});h.pending=companionNavigation;
+    await h.controller.consume();assert.equal(h.controller.takeNavigation(),null);assert.match(h.controller.snapshot().error,/身份不一致/);
+  }
+});
+
+test('scheduled companion records and already expired historical records remain viewable after an authenticated tap',async()=>{
+  const run={...companionRun,trigger:'scheduled',scheduledFor:companionRun.createdAt,validUntil:'2020-01-01T00:00:00.000Z'};
+  const h=harness({fetchCompanionRun:async()=>companionResult(run)});h.pending=companionNavigation;
+  await h.controller.consume();assert.equal(h.controller.takeNavigation().companionRun,run);
+});
+
+test('a late companion read is discarded when any session credential or server connection changes',async()=>{
+  for(const patch of [{epoch:4},{userId:'other-user'},{instanceId:'other-instance'},{url:'https://other.example'},{token:'new-session-token'}]){
+    const read=deferred();let signal;
+    const h=harness({fetchCompanionRun:async(_id,nextSignal)=>{signal=nextSignal;return read.promise;}});h.pending=companionNavigation;
+    const consumed=h.controller.consume();await new Promise(resolve=>setImmediate(resolve));assert.ok(signal);
+    h.scope={...h.scope,...patch};read.resolve(companionResult(companionRun));await consumed;
+    assert.equal(h.controller.takeNavigation(),null);assert.equal(h.controller.snapshot().navigation,null);
+  }
+});
+
+test('logout aborts an in-flight companion read and cannot publish the old account result',async()=>{
+  const read=deferred();let signal;
+  const h=harness({fetchCompanionRun:async(_id,nextSignal)=>{signal=nextSignal;return read.promise;}});h.pending=companionNavigation;
+  const consumed=h.controller.consume();await new Promise(resolve=>setImmediate(resolve));
+  h.scope=null;await h.controller.invalidate();assert.equal(signal.aborted,true);
+  read.resolve(companionResult(companionRun));await consumed;assert.equal(h.controller.takeNavigation(),null);
+});
+
+test('companion transient read failures retry the retained target, while deleted or unauthorized results are terminal',async()=>{
+  let attempt=0;
+  const h=harness({fetchCompanionRun:async()=>{if(++attempt===1)throw new Error('network unavailable');return companionResult(companionRun);}});h.pending=companionNavigation;
+  await h.controller.consume();assert.match(h.controller.snapshot().error,/network unavailable/);await h.controller.consume();assert.ok(h.controller.takeNavigation());
+  assert.equal(h.calls.filter(call=>Array.isArray(call)&&call[0]==='consume').length,1);
+  for(const status of [403,404,410]){
+    const denied=harness({fetchCompanionRun:async()=>{throw Object.assign(new Error('not found'),{status});}});denied.pending=companionNavigation;
+    await denied.controller.consume();assert.match(denied.controller.snapshot().error,/已删除|不属于/);assert.equal(denied.controller.takeNavigation(),null);
+    await denied.controller.consume();assert.equal(denied.calls.filter(call=>Array.isArray(call)&&call[0]==='consume').length,2);
+  }
+});
+
+test('an older controller dependency fixture still supports Agent but cannot treat companion as an Agent conversation',async()=>{
+  const h=harness();h.pending=companionNavigation;await h.controller.consume();
+  assert.equal(h.controller.takeNavigation(),null);assert.match(h.controller.snapshot().error,/更新应用/);assert.equal(h.calls.some(call=>Array.isArray(call)&&call[0]==='conversation'),false);
+  h.pending=navigation;await h.controller.consume();assert.equal(h.controller.takeNavigation().conversation.id,navigation.conversationId);
+});

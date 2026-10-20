@@ -28,8 +28,8 @@ import org.json.JSONObject;
 
 /** Explicitly enabled, visible and stoppable listener; never a desktop executor. */
 public class PetTaskNotificationService extends Service {
-    static final String RESULT_CHANNEL = "petpal_agent_results", WATCH_CHANNEL = "petpal_agent_listener";
-    static final String STOP = "com.petpal.app.STOP_TASK_NOTIFICATIONS", OPEN = "com.petpal.app.OPEN_AGENT_NOTIFICATION";
+    static final String RESULT_CHANNEL = "petpal_agent_results", WATCH_CHANNEL = "petpal_agent_listener", COMPANION_CHANNEL = "petpal_companion_routines";
+    static final String STOP = "com.petpal.app.STOP_TASK_NOTIFICATIONS", OPEN = TaskNotificationIntentPolicy.OPEN;
     static final String TAG_EXTRA = "petpal_notification_tag", EPOCH_EXTRA = "petpal_notification_epoch";
     private static final int WATCH_ID = 52061;
     static volatile boolean running;
@@ -45,6 +45,9 @@ public class PetTaskNotificationService extends Service {
             NotificationManager manager = context.getSystemService(NotificationManager.class);
             manager.createNotificationChannel(new NotificationChannel(WATCH_CHANNEL, "后台任务监听", NotificationManager.IMPORTANCE_LOW));
             manager.createNotificationChannel(new NotificationChannel(RESULT_CHANNEL, "Agent 任务结果", NotificationManager.IMPORTANCE_DEFAULT));
+            NotificationChannel companion = new NotificationChannel(COMPANION_CHANNEL, "每日陪伴", NotificationManager.IMPORTANCE_HIGH);
+            companion.setLockscreenVisibility(NotificationCompat.VISIBILITY_PRIVATE);
+            manager.createNotificationChannel(companion);
         }
     }
     private Notification ongoing() {
@@ -52,7 +55,7 @@ public class PetTaskNotificationService extends Service {
         PendingIntent show = PendingIntent.getActivity(this, WATCH_ID, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         PendingIntent stop = PendingIntent.getService(this, WATCH_ID + 1, new Intent(this, PetTaskNotificationService.class).setAction(STOP), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new NotificationCompat.Builder(this, WATCH_CHANNEL).setSmallIcon(R.drawable.ic_pet_notification).setContentTitle("小伴正在监听任务结果")
-            .setContentText("Agent 完成或失败时提醒。可随时停止后台监听。").setContentIntent(show).setOngoing(true).setOnlyAlertOnce(true)
+            .setContentText("接收任务结果与每日问候，可随时停止后台监听。").setContentIntent(show).setOngoing(true).setOnlyAlertOnce(true)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).addAction(R.drawable.ic_pet_notification, "停止提醒", stop).build();
     }
     @Override public void onCreate() {
@@ -100,8 +103,11 @@ public class PetTaskNotificationService extends Service {
         return TaskNotificationPolicy.parseCursor(object.get(field));
     }
     private JSONObject request(TaskNotificationState.Snapshot config, String path, JSONObject body) throws Exception {
+        return request(config, path, body, false);
+    }
+    private JSONObject request(TaskNotificationState.Snapshot config, String path, JSONObject body, boolean companion) throws Exception {
         HttpsURLConnection connection = (HttpsURLConnection) PetNetwork.open(new URL(config.url + path));
-        connection.setInstanceFollowRedirects(false); connection.setConnectTimeout(10000); connection.setReadTimeout(33000);
+        connection.setInstanceFollowRedirects(false); connection.setConnectTimeout(10000); connection.setReadTimeout(companion ? 10000 : 33000);
         connection.setRequestProperty("Authorization", "Bearer " + config.token); connection.setRequestProperty("Accept", "application/json");
         if (!TaskNotificationState.connection(config.epoch, connection)) throw new InterruptedException();
         try {
@@ -112,6 +118,7 @@ public class PetTaskNotificationService extends Service {
             }
             int code = connection.getResponseCode();
             if (code == 401 || code == 403) throw new CredentialExpired();
+            if (companion && code == 404) return null;
             if (code >= 300 && code < 400) throw new InvalidFeed();
             if (code < 200 || code >= 300) throw new java.io.IOException();
             if (connection.getContentLength() > TaskNotificationPolicy.MAX_RESPONSE_BYTES) throw new InvalidFeed();
@@ -137,6 +144,55 @@ public class PetTaskNotificationService extends Service {
             .setPublicVersion(new NotificationCompat.Builder(this, RESULT_CHANNEL).setSmallIcon(R.drawable.ic_pet_notification).setContentTitle("小伴有新的任务结果").build()).build();
         getSystemService(NotificationManager.class).notify(tag, 0, notification);
     }
+    private void companionResult(String tag, JSONObject route) throws Exception {
+        Intent open = new Intent(this, MainActivity.class).setAction(OPEN).setData(Uri.parse("petpal-internal://notification/" + tag))
+            .putExtra(TAG_EXTRA, tag).putExtra(EPOCH_EXTRA, route.getString("epoch")).putExtra(MainActivity.OPEN_CHAT, true)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent show = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        Notification notification = new NotificationCompat.Builder(this, COMPANION_CHANNEL).setSmallIcon(R.drawable.ic_pet_notification)
+            .setContentTitle(route.getString("title")).setContentText(route.getString("body"))
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(route.getString("body")))
+            .setPriority(NotificationCompat.PRIORITY_HIGH).setContentIntent(show).setAutoCancel(true).setOnlyAlertOnce(true)
+            .setTimeoutAfter(Math.max(1, TaskNotificationPolicy.expires(route.getString("validUntil")) - System.currentTimeMillis()))
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(new NotificationCompat.Builder(this, COMPANION_CHANNEL).setSmallIcon(R.drawable.ic_pet_notification).setContentTitle("小伴有新的每日问候").build()).build();
+        getSystemService(NotificationManager.class).notify(tag, 0, notification);
+    }
+    private void companionFeed(TaskNotificationState.Snapshot config) throws Exception {
+        String path = "/api/notifications/companion-feed?limit=" + CompanionNotificationPolicy.MAX_EVENTS;
+        if (config.companionCursor != null) path += "&after=" + config.companionCursor;
+        JSONObject feed = request(config, path, null, true);
+        if (!TaskNotificationState.matches(config.epoch)) throw new InterruptedException();
+        if (feed == null) { TaskNotificationState.noteCompanion(config.epoch, "unsupported", ""); return; }
+        if (!config.deviceId.equals(feed.getString("deviceId")) || !config.instanceId.equals(feed.getString("instanceId")) || !config.userId.equals(feed.getString("userId"))) throw new InvalidFeed();
+        if (!(feed.get("resetRequired") instanceof Boolean)) throw new InvalidFeed();
+        long next = integer(feed, "nextCursor"), high = integer(feed, "highWater"), minimum = integer(feed, "minCursor");
+        boolean reset = feed.getBoolean("resetRequired"), baseline = config.companionCursor == null;
+        TaskNotificationPolicy.feedRange(baseline ? next : config.companionCursor, next, high, minimum, reset);
+        long expiry = TaskNotificationPolicy.expires(feed.getString("expiresAt"));
+        if (expiry <= System.currentTimeMillis() || expiry > config.expiry) throw new CredentialExpired();
+        JSONArray events = feed.getJSONArray("events");
+        if (events.length() > CompanionNotificationPolicy.MAX_EVENTS) throw new InvalidFeed();
+        if (baseline || reset) {
+            if (events.length() != 0 || next != high) throw new InvalidFeed();
+            TaskNotificationState.advanceCompanion(config.epoch, next, true);
+            TaskNotificationState.noteCompanion(config.epoch, "connected", ""); return;
+        }
+        long previous = config.companionCursor;
+        // Validate the whole batch before changing this feed's independent cursor.
+        for (int i = 0; i < events.length(); i++) {
+            JSONObject event = events.getJSONObject(i); long seq = integer(event, "seq");
+            TaskNotificationPolicy.eventSequence(previous, seq, next); previous = seq;
+            for (String field : new String[] {"id", "runId", "createdAt", "validUntil", "title", "body"}) if (!(event.get(field) instanceof String)) throw new InvalidFeed();
+            TaskNotificationPolicy.id(event.getString("id")); TaskNotificationPolicy.id(event.getString("runId"));
+            CompanionNotificationPolicy.title(event.getString("title")); CompanionNotificationPolicy.body(event.getString("body"));
+            CompanionNotificationPolicy.eligible(event.getString("createdAt"), event.getString("validUntil"), System.currentTimeMillis());
+        }
+        TaskNotificationPolicy.feedEnd(previous, next);
+        for (int i = 0; i < events.length(); i++) TaskNotificationState.deliverCompanion(config.epoch, events.getJSONObject(i), this::companionResult);
+        TaskNotificationState.advanceCompanion(config.epoch, next, false);
+        TaskNotificationState.noteCompanion(config.epoch, "connected", "");
+    }
     private void watch(String epoch) {
         long delay = 1000, acknowledgedCursor = -1;
         while (TaskNotificationState.matches(epoch) && !Thread.currentThread().isInterrupted()) {
@@ -144,6 +200,10 @@ public class PetTaskNotificationService extends Service {
                 TaskNotificationState.Snapshot config = TaskNotificationState.snapshot(this); if (config == null || !config.epoch.equals(epoch)) break;
                 if (config.expiry <= System.currentTimeMillis()) throw new CredentialExpired();
                 if (!TaskNotificationState.permission(this)) { TaskNotificationState.clearIf(epoch, "permission-denied", "系统通知已关闭，请重新开启提醒。"); revoke(config); break; }
+                try { companionFeed(config); }
+                catch (CredentialExpired | InterruptedException terminal) { throw terminal; }
+                catch (IllegalArgumentException | org.json.JSONException | InvalidFeed invalid) { TaskNotificationState.noteCompanion(epoch, "error", "每日问候提醒返回无效数据，Agent 任务监听仍继续。"); }
+                catch (Exception unavailable) { TaskNotificationState.noteCompanion(epoch, "reconnecting", "每日问候提醒暂时无法连接，稍后重试。"); }
                 JSONObject feed = request(config, "/api/notifications/device/feed?after=" + config.cursor + "&wait=25&limit=50", null);
                 if (!TaskNotificationState.matches(epoch)) break;
                 if (!config.deviceId.equals(feed.getString("deviceId")) || !config.instanceId.equals(feed.getString("instanceId")) || !config.userId.equals(feed.getString("userId"))) throw new InvalidFeed();
