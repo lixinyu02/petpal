@@ -63,8 +63,10 @@ import org.junit.runner.RunWith;
  * revokes the server token separately. No task, run or companion event is made.
  *
  * A document-start gate disables app JavaScript/WebView network before any packaged
- * page executes. Only a script-free local document is shown. No real account,
- * backend, device registration or system permission is created or modified.
+ * page executes. Only a script-free local document is shown. The test creates
+ * no account, task, companion event or device registration, and changes no
+ * system permission. HTTPS acceptance may acknowledge only the fixture
+ * device's existing cursor; its registration/revocation belong to the runner.
  * Refuses a pre-existing notification vault, listener or running MainActivity;
  * cleanup clears only the two synthetic epochs owned by this test.
  */
