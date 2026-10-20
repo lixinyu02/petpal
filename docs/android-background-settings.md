@@ -14,7 +14,7 @@ Android 0.9.3 / versionCode 13 新增后台设置快捷入口。升级 APK 后�
 | --- | --- | --- |
 | 小米 / Redmi / POCO | 省电策略、后台自启动、通知 | MIUI 安全中心 |
 | 华为 | 应用启动管理、后台活动、通知 | 系统管家 |
-| 荣耀 | MagicOS 启动管理、后台活动、通知 | 应用详情回退 |
+| 荣耀 | MagicOS 启动管理、后台活动、电池优化、通知 | 荣耀系统管家候选；不可用时应用详情回退 |
 | OPPO / 一加 / realme | 耗电管理、自启动、通知 | ColorOS / OPPO 安全中心 |
 | vivo / iQOO | 后台耗电管理、自启动、通知 | 权限管理 / i管家 |
 | 三星 | 不受限制、休眠 / 深度休眠列表、通知 | 应用详情回退 |
@@ -26,6 +26,22 @@ Android 0.9.3 / versionCode 13 新增后台设置快捷入口。升级 APK 后�
 
 应用不读取全部已安装软件，也不自动改系统开关。强制停止或手机重启后需要重新打开小伴并检查后台提醒；允许自启动不表示自动开始监听。网页升级不能为旧 APK 增加这些原生入口。
 
+## 荣耀 Magic7 / MagicOS
+
+现代荣耀的系统管家使用独立的 `com.hihonor.systemmanager` 包。本轮为荣耀的“自启动设置”补入两条有开源代码依据的固定候选，依次尝试 `com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity` 和 `com.hihonor.systemmanager.startupmgr.ui.StartupAppListActivity`。它们属于厂商私有实现；存在、可导出、已启用、调用权限和系统应用身份均在手机本机检查，失败后依次进入小伴应用信息或系统设置。华为的 `com.huawei.systemmanager` 分支仍保留，不用它冒充现代荣耀已验证入口。
+
+手机上可按荣耀官方的说明手动检查：
+
+- **后台与启动管理**：在设置搜索“应用启动管理”，找到小伴；关闭自动管理后，按需允许自启动、关联启动和后台活动。也可从系统管家 → 启动管理进入，菜单名称随 MagicOS 版本变化。
+- **Android 电池优化**：在设置搜索“电池优化”，选择所有应用，找到小伴并选择不允许优化。部分版本把该选项简写为“不允许”，其含义是“不允许电池优化限制小伴”，不能理解为禁止小伴后台活动。
+- **最近任务**：按系统提示把小伴卡片下拉加锁，可减少一键清理造成的中断；它不等于后台服务永久保活。
+
+小伴的“已打开设置”仅表示页面跳转成功；`batteryExempt` 仅来自 Android 电池优化状态，不能据此推断 MagicOS 的自启动或后台活动开关已开启。本轮不增加权限、不自动更改系统开关、不启用开机广播，也不下载或安装系统管家。缺少相应厂商组件时仍可使用标准设置和手动路径。
+
+当前系统与机型来自 Android 公开 `Build.MANUFACTURER`、`Build.BRAND`、`Build.MODEL`、`Build.VERSION.RELEASE` 和 `SDK_INT`。原生识别不接受请求方指定品牌或型号；返回当前设备实际可解析的设置入口。型号为产品代码时原样显示，不把代码猜成市场名称，也不从 Android 版本推断 MagicOS 版本。旧 APK 没有 `model` 或 `androidRelease` 时，仅显示已有品牌与 Android API，其他设置功能保持可用。
+
+上述组件是有来源的候选与安全兜底适配，不是 Magic7 真机菜单可达或长期后台留存验收。普通 Android 模拟器不包含荣耀系统管家。
+
 ## 验证与来源
 
 Chrome 412×960 已验证布局、品牌指引、失败 / 回退提示、并发按钮禁用与账号切换后的迟到反馈丢弃。独立 Android 16 / API 36 模拟器用于标准设置实际打开、返回、非法动作拒绝及开关不变验收；OEM 私有页面仍需对应品牌实体手机确认。
@@ -36,3 +52,7 @@ Chrome 412×960 已验证布局、品牌指引、失败 / 回退提示、并发�
 - [AOSP 设置入口](https://github.com/aosp-mirror/platform_packages_apps_settings/blob/master/AndroidManifest.xml)
 - [AutoStarter 历史厂商组件](https://github.com/judemanutd/AutoStarter/blob/ea5fca55457facb6f97555e20dcd231b39c6995e/autostarter/src/main/java/com/judemanutd/autostarter/AutoStartPermissionHelper.kt)
 - [CRomAppWhitelist 历史组件](https://github.com/WanghongLin/CRomAppWhitelist/blob/master/cromappwhitelist/src/main/assets/default_appwhitelist.json)
+- [荣耀官方：应用无法后台运行](https://www.honor.com/cn/support/content/zh-cn00428704/)
+- [荣耀官方：后台运行后重新启动](https://www.honor.com/cn/support/content/zh-cn00406916/)
+- [OmniBot 的现代荣耀启动管理候选（固定提交）](https://github.com/omnimind-ai/OmniBot/blob/8203f5a428e15e3ae8ac47b3d9a0be4c7bcd4612/app/src/main/java/cn/com/omnimind/bot/util/AssistsUtil.kt#L118-L138)
+- [auto_start_flutter 的独立 HONOR/Huawei 候选（固定提交）](https://github.com/seena98/auto_start_flutter/blob/a2dd2fe8406cd687b3d884c5cf761cbf07a0c925/android/src/main/kotlin/co/techFlow/auto_start_flutter/AutoStartIntents.kt#L36-L42)

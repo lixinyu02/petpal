@@ -245,7 +245,7 @@ export async function verifyAndroidApk(options) {
   ensure(activity && manifestNumber(activity, 'launchMode') === 2 && manifestNumber(activity, 'windowSoftInputMode') === 0x10, 'Main activity lost singleTask or adjustResize behavior.');
   for (const action of ['VIEW_ADVANCED_POWER_USAGE_DETAIL', 'IGNORE_BATTERY_OPTIMIZATION_SETTINGS', 'APP_NOTIFICATION_SETTINGS', 'APPLICATION_DETAILS_SETTINGS', 'SETTINGS'])
     ensure(manifest.includes(`android.settings.${action}`), 'An Android background-settings route is missing.');
-  for (const pkg of ['com.miui.securitycenter', 'com.miui.powerkeeper', 'com.huawei.systemmanager', 'com.coloros.safecenter', 'com.oppo.safe', 'com.vivo.permissionmanager', 'com.iqoo.secure', 'com.samsung.android.lool', 'com.meizu.safe', 'com.asus.mobilemanager'])
+  for (const pkg of ['com.miui.securitycenter', 'com.miui.powerkeeper', 'com.huawei.systemmanager', 'com.hihonor.systemmanager', 'com.coloros.safecenter', 'com.oppo.safe', 'com.vivo.permissionmanager', 'com.iqoo.secure', 'com.samsung.android.lool', 'com.meizu.safe', 'com.asus.mobilemanager'])
     ensure(manifest.includes(pkg), 'A supported OEM background-settings query is missing.');
   const { files, archiveEntries, bytesRead } = await readApkArchive(apk), { needles, sources } = await privateNeedles(root), nativeDefinitions = new Set();
   const mihomo = verifyAndroidMihomoApk(files,{

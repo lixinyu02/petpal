@@ -7,7 +7,7 @@ export type TaskNotificationDevice={deviceId:string;token:string;instanceId:stri
 export type BackgroundSettingsKind='battery'|'autostart'|'notifications'|'app';
 export type PhoneVendor='xiaomi'|'huawei'|'honor'|'oppo'|'vivo'|'samsung'|'meizu'|'asus'|'generic';
 export type BackgroundSettingsRoute={available:boolean;direct:boolean;route:string;fallback:boolean};
-export type BackgroundSettingsStatus={manufacturer:string;brand:string;vendor:PhoneVendor;apiLevel:number;batteryExempt:boolean|null;routes:Record<BackgroundSettingsKind,BackgroundSettingsRoute>};
+export type BackgroundSettingsStatus={manufacturer:string;brand:string;vendor:PhoneVendor;model?:string;androidRelease?:string;apiLevel:number;batteryExempt:boolean|null;routes:Record<BackgroundSettingsKind,BackgroundSettingsRoute>};
 export type BackgroundSettingsOpened={opened:boolean;kind:BackgroundSettingsKind;route:string;fallback:boolean};
 export interface PetTaskNotificationsPlugin{
   installation():Promise<{deviceId:string}>;

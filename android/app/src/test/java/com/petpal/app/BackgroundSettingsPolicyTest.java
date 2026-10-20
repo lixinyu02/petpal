@@ -61,15 +61,34 @@ public class BackgroundSettingsPolicyTest {
         route = BackgroundSettingsPolicy.routes("autostart", "generic", 35).get(0);
         assertEquals("android-app-details", route.id); assertFalse(route.direct); assertTrue(route.fallback);
     }
-    @Test public void modernHonorAndUnknownVendorsDoNotBorrowUnverifiedHuaweiRoutes() {
-        for (String vendor : new String[] { "honor", "generic", null, "evil", "com.hihonor.systemmanager" }) {
+    @Test public void unknownVendorsDoNotBorrowOemRoutes() {
+        for (String vendor : new String[] { "generic", null, "evil", "com.hihonor.systemmanager" }) {
             List<BackgroundSettingsPolicy.Route> routes = BackgroundSettingsPolicy.routes("autostart", vendor, 35);
             assertEquals(2, routes.size()); assertEquals("android-app-details", routes.get(0).id);
             assertNull(routes.get(0).packageName); assertTrue(routes.get(0).fallback);
         }
     }
+    @Test public void modernHonorUsesItsOwnManagerBeforeSystemFallbackWithoutBorrowingHuawei() {
+        List<BackgroundSettingsPolicy.Route> routes = BackgroundSettingsPolicy.routes("autostart", "honor", 35);
+        assertEquals(4, routes.size());
+        assertEquals("com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity", routes.get(0).activityName);
+        assertEquals("com.hihonor.systemmanager.startupmgr.ui.StartupAppListActivity", routes.get(1).activityName);
+        for (int index = 0; index < 2; index++) {
+            BackgroundSettingsPolicy.Route route = routes.get(index);
+            assertEquals("honor-autostart", route.id);
+            assertEquals("com.hihonor.systemmanager", route.packageName);
+            assertTrue(route.direct); assertFalse(route.fallback);
+        }
+        for (BackgroundSettingsPolicy.Route route : routes) assertNotEquals("com.huawei.systemmanager", route.packageName);
+        BackgroundSettingsPolicy.Route selected = BackgroundSettingsPolicy.select(routes, route -> route.activityName != null && route.activityName.endsWith(".StartupAppListActivity"));
+        assertSame("Absent primary component can use the independently checked secondary", routes.get(1), selected);
+        selected = BackgroundSettingsPolicy.select(routes, route -> "android-app-details".equals(route.id));
+        assertTrue("Unavailable/denied OEM components preserve own application details fallback", selected.fallback);
+        assertFalse(selected.direct); assertTrue(selected.packageUri);
+        assertEquals("android-settings", routes.get(3).id);
+    }
     @Test public void verifiedOemAutostartEntriesStayInTheirOwnVendorAndHaveFallback() {
-        for (String vendor : new String[] { "xiaomi", "huawei", "oppo", "vivo", "meizu", "asus" }) {
+        for (String vendor : new String[] { "xiaomi", "huawei", "honor", "oppo", "vivo", "meizu", "asus" }) {
             List<BackgroundSettingsPolicy.Route> routes = BackgroundSettingsPolicy.routes("autostart", vendor, 35);
             BackgroundSettingsPolicy.Route first = routes.get(0);
             assertEquals(vendor + "-autostart", first.id); assertNotNull(first.packageName); assertNotNull(first.activityName);

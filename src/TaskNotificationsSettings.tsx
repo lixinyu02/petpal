@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { Battery, Bell, BellOff, ChevronDown, Loader2, RefreshCw, Settings2, Smartphone } from 'lucide-react';
 import { getConnection, getIdentity, getSessionEpoch, subscribeSession } from './api';
 import { PetTaskNotifications, supportsTaskNotifications, type BackgroundSettingsKind, type BackgroundSettingsStatus } from './platform/task-notifications';
-import { backgroundSettingsNotice, batteryOptimizationLabel, isBackgroundSettingsKind, phoneSettingsGuide } from './platform/background-settings-guide.mjs';
+import { backgroundSettingsNotice, batteryOptimizationLabel, isBackgroundSettingsKind, phoneDeviceLabel, phoneSettingsGuide, phoneSystemLabel } from './platform/background-settings-guide.mjs';
 import { taskNotificationSession } from './platform/task-notification-session';
 import { notificationServerUrl } from './platform/task-notification-controller.mjs';
 import './task-notifications.css';
@@ -46,6 +46,7 @@ export default function TaskNotificationsSettings({connected}:{connected:boolean
   const connection=needsRestart?'已停止，需要重新开启':status?.enabled&&!status.running&&status.connection==='connecting'?'正在启动':({connected:'已连接',online:'已连接',starting:'正在启动',connecting:'连接中',reconnecting:'重连中',waiting:'等待任务',offline:'等待网络',error:'连接异常',stopped:'已停止'} as Record<string,string>)[status?.connection||'']||(status?.running?'监听中':status?.enabled?'正在启动':'未开启');
   const error=systemError||state.error||status?.error;
   const guide=phoneSettingsGuide(device);
+  const backgroundActions=([['battery','省电限制',Battery],['autostart',guide.vendor==='honor'?'应用启动管理':guide.vendor==='generic'?'应用后台设置':'自启动设置',Settings2],['notifications','应用通知',Bell]] as const).filter(([kind])=>device?.routes?.[kind]?.available===true);
   function openSystemSettings(){
     if(document.visibilityState!=='visible'||launching.current||!connected)return;
     const generation=settingsGeneration.current,scope=backgroundSettingsScope();launching.current=true;setOpening('app');
@@ -63,9 +64,9 @@ export default function TaskNotificationsSettings({connected}:{connected:boolean
     }finally{if(generation===settingsGeneration.current){launching.current=false;setOpening(null);}}
   }
   return<details className="task-notification-settings">
-    <summary><Bell size={18} aria-hidden="true"/><span><strong>后台任务提醒</strong><small>{needsRestart?connection:status?.enabled?'已开启 · '+connection:'离开应用后提醒 Agent 任务结果'}</small></span><ChevronDown size={16} className="task-notification-chevron" aria-hidden="true"/></summary>
+    <summary><Bell size={18} aria-hidden="true"/><span><strong>后台任务提醒</strong><small>{needsRestart?connection:status?.enabled?'已开启 · '+connection:'离开应用后提醒任务结果与每日问候'}</small></span><ChevronDown size={16} className="task-notification-chevron" aria-hidden="true"/></summary>
     <div className="task-notification-body">
-      <p>收到远程 Agent 的完成或失败提醒，点击返回对应对话。Chat 派发的任务会回到原来的 Chat。</p>
+      <p>接收远程 Agent 任务结果和每日陪伴提醒，点击返回对应对话或问候记录。Chat 派发的任务会回到原来的 Chat。</p>
       <dl aria-label="任务提醒状态"><div><dt>通知权限</dt><dd>{permission}</dd></div><div><dt>后台监听</dt><dd>{status?.running?'正在运行':status?.enabled&&!needsRestart?'正在启动':'已停止'}</dd></div><div><dt>服务连接</dt><dd>{connection}</dd></div></dl>
       {!https&&<p className="form-error" role="alert">请先连接可信的 HTTPS 服务，再开启后台提醒。</p>}
       {error&&<p className="form-error" role="alert">{error}</p>}
@@ -73,9 +74,10 @@ export default function TaskNotificationsSettings({connected}:{connected:boolean
       <details className="task-reliability-settings">
         <summary><Battery size={17} aria-hidden="true"/><span><strong>让提醒更稳定</strong><small>{device?`${guide.name} · ${batteryOptimizationLabel(device.batteryExempt)}`:'检查手机的省电与后台设置'}</small></span><ChevronDown size={15} className="task-reliability-chevron" aria-hidden="true"/></summary>
         <div className="task-reliability-body" aria-busy={!!opening}>
-          <p className="task-phone-label"><Smartphone size={15} aria-hidden="true"/><strong>{guide.name}</strong></p>
+          <div className="task-phone-device" aria-label="当前手机识别"><Smartphone size={18} aria-hidden="true"/><div><strong>{phoneDeviceLabel(device)}</strong><span>{phoneSystemLabel(device)}</span></div></div>
+          <p className="task-phone-guide">当前设备设置指南：{guide.name}</p>
           <p className="field-help">系统电池优化：{batteryOptimizationLabel(device?.batteryExempt)}。此状态不代表厂商的自启动或后台运行开关已允许。</p>
-          <div className="task-reliability-actions">{([['battery','省电限制',Battery],['autostart','自启动设置',Settings2],['notifications','应用通知',Bell]] as const).map(([kind,label,Icon])=><button key={kind} className="secondary-button" disabled={!connected||state.busy||!!opening||device?.routes?.[kind]?.available===false} onClick={()=>void openBackgroundSettings(kind)}>{opening===kind?<Loader2 size={14} className="spin" aria-hidden="true"/>:<Icon size={14} aria-hidden="true"/>}{label}</button>)}</div>
+          {!!backgroundActions.length&&<div className="task-reliability-actions">{backgroundActions.map(([kind,label,Icon])=><button key={kind} className="secondary-button" disabled={!connected||state.busy||!!opening} onClick={()=>void openBackgroundSettings(kind)}>{opening===kind?<Loader2 size={14} className="spin" aria-hidden="true"/>:<Icon size={14} aria-hidden="true"/>}{label}</button>)}</div>}
           {settingsError&&<p className="form-error" role="alert">{settingsError}</p>}
           {settingsNotice&&<p className="task-settings-notice" role="status">{settingsNotice}</p>}
           <ol className="task-phone-paths"><li><strong>省电与后台</strong><span>{guide.battery}</span></li><li><strong>启动管理</strong><span>{guide.autostart}</span></li><li><strong>通知</strong><span>{guide.notifications}</span></li></ol>

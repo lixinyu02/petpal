@@ -1,6 +1,30 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BACKGROUND_SETTINGS_KINDS, backgroundSettingsNotice, batteryOptimizationLabel, isBackgroundSettingsKind, phoneSettingsGuide } from '../src/platform/background-settings-guide.mjs';
+import { BACKGROUND_SETTINGS_KINDS, backgroundSettingsNotice, batteryOptimizationLabel, isBackgroundSettingsKind, phoneDeviceLabel, phoneSettingsGuide, phoneSystemLabel } from '../src/platform/background-settings-guide.mjs';
+
+test('device labels use reported Build identity without inventing a retail model or MagicOS version',()=>{
+  const native={manufacturer:'HONOR',brand:'HONOR',model:'PTP-AN00',androidRelease:'15',apiLevel:35};
+  assert.equal(phoneDeviceLabel(native),'HONOR PTP-AN00');
+  assert.equal(phoneSystemLabel(native),'Android 15 · API 35');
+  assert.equal(phoneDeviceLabel({...native,model:'HONOR Magic7'}),'HONOR Magic7');
+  assert.equal(phoneDeviceLabel({...native,brand:'',model:'PTP-AN00'}),'HONOR PTP-AN00');
+  assert.equal(phoneSystemLabel({brand:'HONOR',model:'Magic7',apiLevel:36}),'Android · API 36');
+  assert.doesNotMatch(phoneSystemLabel(native),/MagicOS/);
+  assert.doesNotMatch(phoneDeviceLabel(native),/Magic7/);
+});
+
+test('older client identity remains usable and malformed metadata is bounded',()=>{
+  assert.equal(phoneDeviceLabel({manufacturer:'HONOR',brand:'HONOR',apiLevel:35}),'HONOR');
+  assert.equal(phoneSystemLabel({manufacturer:'HONOR',brand:'HONOR',apiLevel:35}),'Android · API 35');
+  assert.equal(phoneDeviceLabel(null),'Android 设备');
+  assert.equal(phoneSystemLabel(undefined),'Android');
+  assert.equal(phoneSystemLabel({androidRelease:'16',apiLevel:'36'}),'Android 16');
+  for(const apiLevel of [0,-1,Infinity,NaN,{},36.5])assert.equal(phoneSystemLabel({apiLevel}),'Android');
+  assert.equal(phoneDeviceLabel({brand:'\u0000HONOR\n',model:'\u202ePTP-AN00\u2066'}),'HONOR PTP-AN00');
+  assert.equal(phoneSystemLabel({androidRelease:'\u0000 16\n',apiLevel:36}),'Android 16 · API 36');
+  assert.ok(phoneDeviceLabel({brand:'x'.repeat(1000),model:'y'.repeat(1000)}).length<=129);
+  assert.ok(phoneSystemLabel({androidRelease:'x'.repeat(1000)}).length<=40);
+});
 
 test('phone guides recognize OEM and sub-brand names by exact normalized identity',()=>{
   const cases={Xiaomi:'xiaomi',Redmi:'xiaomi',POCO:'xiaomi',HUAWEI:'huawei',HONOR:'honor',OPPO:'oppo',OnePlus:'oppo',realme:'oppo',vivo:'vivo',iQOO:'vivo',samsung:'samsung',Meizu:'meizu',ASUS:'asus',Google:'generic'};
@@ -23,6 +47,28 @@ test('native recognized vendor selects its guide and callers cannot mutate share
   const first=phoneSettingsGuide({vendor:'xiaomi'});first.tips.push('mutated');first.name='mutated';
   const second=phoneSettingsGuide({vendor:'xiaomi'});
   assert.ok(!second.tips.includes('mutated'));assert.notEqual(second.name,'mutated');
+});
+
+test('Honor directions distinguish Android optimization from MagicOS startup switches',()=>{
+  const guide=phoneSettingsGuide({manufacturer:'HONOR',brand:'HONOR'});
+  assert.equal(guide.vendor,'honor');
+  assert.match(guide.name,/MagicOS/);
+  assert.match(guide.battery,/电池优化.*所有应用.*小伴.*不允许优化/);
+  assert.match(guide.autostart,/应用启动管理.*小伴.*关闭自动管理.*自启动.*关联启动.*后台活动/);
+  assert.match(guide.notifications,/小伴.*允许通知/);
+  assert.ok(guide.tips.some(tip=>/搜索.*应用启动管理/.test(tip)));
+  assert.ok(guide.tips.some(tip=>/最近任务.*下拉加锁/.test(tip)));
+  assert.ok(guide.tips.some(tip=>/重启.*强制停止.*重新打开/.test(tip)));
+  assert.doesNotMatch(Object.values(guide).join(' '),/已允许|已解除|已开启|永久后台|保证不被清理/);
+});
+
+test('Honor navigation feedback cannot be mistaken for enabled OEM permissions',()=>{
+  const direct=backgroundSettingsNotice({opened:true,kind:'autostart',route:'honor-autostart',fallback:false});
+  assert.match(direct,/已打开.*管理设置.*小伴/);
+  assert.doesNotMatch(direct,/已允许|已开启|已豁免|已解除/);
+  const denied=backgroundSettingsNotice({opened:true,kind:'autostart',route:'android-app-details',fallback:true});
+  assert.match(denied,/应用信息.*手动检查/);
+  assert.doesNotMatch(denied,/已打开启动/);
 });
 
 test('all supported OEM guides have app-scoped battery, startup and notification directions',()=>{

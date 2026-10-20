@@ -2,7 +2,7 @@
 const guides=Object.freeze({
   xiaomi:{name:'小米 / Redmi / POCO',battery:'设置 → 应用设置 → 应用管理 → 小伴 → 省电策略 → 无限制',autostart:'设置 → 应用 → 权限 → 后台自启动（或授权管理 → 自启动管理）→ 允许小伴',notifications:'设置 → 通知与状态栏 → 应用通知 → 小伴',tips:['在最近任务中长按小伴卡片，按系统提示锁定，减少一键清理造成的中断。']},
   huawei:{name:'华为',battery:'设置 → 应用和服务 → 应用启动管理 → 小伴 → 关闭自动管理，允许后台活动',autostart:'同一启动管理页中，按需允许自动启动、关联启动',notifications:'设置 → 通知和状态栏 → 应用通知管理 → 小伴',tips:['部分版本路径为“设置 → 电池 → 应用启动管理”。']},
-  honor:{name:'荣耀',battery:'设置 → 应用 → 应用启动管理（或电池 → 应用启动）→ 小伴 → 手动允许后台活动',autostart:'同一启动管理页中，按需允许自动启动、关联启动',notifications:'设置 → 通知和状态栏 → 应用通知 → 小伴',tips:['MagicOS 不同版本菜单名称可能不同。']},
+  honor:{name:'荣耀 / MagicOS',battery:'设置 → 搜索“电池优化” → 所有应用 → 小伴 → 不允许优化（部分版本显示“不允许”）',autostart:'设置 → 应用 → 应用启动管理 → 小伴 → 关闭自动管理，按需允许自启动、关联启动和后台活动',notifications:'设置 → 通知和状态栏 → 应用通知管理 → 小伴 → 允许通知',tips:['找不到启动管理时，可在设置中搜索“应用启动管理”，或进入系统管家 → 启动管理；MagicOS 菜单随版本变化。','可在最近任务中将小伴卡片下拉加锁，减少一键清理造成的中断；重启或强制停止后需重新打开小伴并检查后台提醒。']},
   oppo:{name:'OPPO / 一加 / realme',battery:'设置 → 应用 → 应用管理 → 小伴 → 耗电管理（或电池使用情况）→ 允许后台运行',autostart:'设置 → 应用 → 自启动（或应用管理 → 小伴 → 自启动）→ 允许小伴',notifications:'设置 → 通知与状态栏 → 应用通知 → 小伴',tips:['在最近任务中打开小伴卡片菜单，按系统提示锁定。']},
   vivo:{name:'vivo / iQOO',battery:'设置 → 电池 → 后台耗电管理 → 小伴 → 允许后台高耗电',autostart:'设置 → 应用与权限 → 权限管理 → 自启动 → 允许小伴',notifications:'设置 → 通知与状态栏 → 应用通知管理 → 小伴',tips:['部分版本也可在 i管家 → 应用管理中查找自启动；最近任务中可按系统提示锁定小伴。']},
   samsung:{name:'三星',battery:'设置 → 应用程序 → 小伴 → 电池 → 不受限制',autostart:'设置 → 电池 → 后台使用限制 → 从休眠 / 深度休眠应用中移除小伴；按需加入从不休眠应用',notifications:'设置 → 通知 → 应用程序通知 → 小伴',tips:['部分 One UI 版本从“电池和设备维护”进入电池设置；三星通常没有单独的自启动开关。']},
@@ -16,8 +16,20 @@ const aliases=new Map([
   ['samsung','samsung'],['meizu','meizu'],['asus','asus'],['google','generic'],['android','generic'],
 ]);
 const normalize=value=>typeof value==='string'?value.trim().toLowerCase():'';
+const deviceText=(value,limit=64)=>typeof value==='string'?value.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g,' ').replace(/\s+/g,' ').trim().slice(0,limit):'';
 export const BACKGROUND_SETTINGS_KINDS=Object.freeze(['battery','autostart','notifications','app']);
 export function isBackgroundSettingsKind(value){return BACKGROUND_SETTINGS_KINDS.includes(value);}
+// Public Build metadata only. A model code remains a code; do not invent a
+// retail device name or infer a MagicOS version from HONOR identity/API level.
+export function phoneDeviceLabel(device){
+  const brand=deviceText(device?.brand)||deviceText(device?.manufacturer),model=deviceText(device?.model);
+  if(model&&brand&&(normalize(model)===normalize(brand)||normalize(model).startsWith(`${normalize(brand)} `)))return model;
+  return [brand,model].filter(Boolean).join(' ')||'Android 设备';
+}
+export function phoneSystemLabel(device){
+  const release=deviceText(device?.androidRelease,32),api=device?.apiLevel;
+  return [`Android${release?` ${release}`:''}`,Number.isSafeInteger(api)&&api>0?`API ${api}`:''].filter(Boolean).join(' · ');
+}
 export function phoneSettingsGuide(device){
   const vendor=Object.hasOwn(guides,device?.vendor)?device.vendor:aliases.get(normalize(device?.brand))||aliases.get(normalize(device?.manufacturer))||'generic';
   const guide={vendor,...guides[vendor],tips:[...guides[vendor].tips]};

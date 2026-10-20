@@ -82,6 +82,15 @@ public final class BackgroundSettingsPolicy {
                     routes.add(oem("huawei-autostart", "com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"));
                     routes.add(oem("huawei-autostart", "com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity"));
                     break;
+                case "honor":
+                    // Modern MagicOS has its own system manager. These fixed
+                    // candidates are corroborated by OmniBot AssistsUtil.kt
+                    // at 8203f5a428e15e3ae8ac47b3d9a0be4c7bcd4612.
+                    // They are not a public API or a claim of device support:
+                    // BackgroundSettings.resolve still checks every handler.
+                    routes.add(oem("honor-autostart", "com.hihonor.systemmanager", "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity"));
+                    routes.add(oem("honor-autostart", "com.hihonor.systemmanager", "com.hihonor.systemmanager.startupmgr.ui.StartupAppListActivity"));
+                    break;
                 case "oppo":
                     routes.add(oem("oppo-autostart", "com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"));
                     routes.add(oem("oppo-autostart", "com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity"));
@@ -98,7 +107,7 @@ public final class BackgroundSettingsPolicy {
                 case "asus":
                     routes.add(oem("asus-autostart", "com.asus.mobilemanager", "com.asus.mobilemanager.autostart.AutoStartActivity"));
                     break;
-                // Modern Honor and Samsung have no verified direct autostart component here.
+                // Samsung has no verified direct autostart component here.
                 default: break;
             }
         } else if ("notifications".equals(target) && apiLevel >= 26) {

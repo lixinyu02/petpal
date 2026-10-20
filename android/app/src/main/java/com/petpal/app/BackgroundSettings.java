@@ -38,6 +38,7 @@ final class BackgroundSettings {
             } catch (RuntimeException ignored) { }
         }
         return new JSObject().put("manufacturer", Build.MANUFACTURER).put("brand", Build.BRAND).put("vendor", vendor)
+            .put("model", Build.MODEL).put("androidRelease", Build.VERSION.RELEASE)
             .put("apiLevel", Build.VERSION.SDK_INT).put("batteryExempt", batteryExempt).put("routes", routes);
     }
 
