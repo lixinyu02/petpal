@@ -50,6 +50,7 @@ function fixture({native=true,enabled=true,href='https://app.example/?chat=1&set
     'react/jsx-runtime':{jsx:(type,{children,...props})=>react.createElement(type,props,...(Array.isArray(children)?children:children===undefined?[]:[children])),jsxs:(type,{children,...props})=>react.createElement(type,props,...(Array.isArray(children)?children:children===undefined?[]:[children]))},
     '@capacitor/core':{Capacitor:{isNativePlatform:()=>native,getPlatform:()=>native?'android':'web'},registerPlugin:()=>({})},
     './platform/useViewport':{useViewport:()=>{}},'./api':api,'./avatar/preference':preference,
+    './platform/useAndroidScreen':{useAndroidScreen:()=>{}},
     './platform/theme.ts':{mountThemeLifecycle:()=>()=>{}},
     './platform/android-official-account':{mountAndroidOfficialSession:()=>()=>{}},
     './platform/android-app-proxy':{mountAndroidAppProxyLifecycle:()=>()=>{}},

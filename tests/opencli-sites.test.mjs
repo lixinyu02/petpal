@@ -74,5 +74,5 @@ test('worker excludes CLI entry and user discovery and validates fixed module me
   assert.match(source, /hosts\.has\(url\.hostname\)/);
   assert.match(source, /authorization.*cookie.*proxy-authorization/);
   assert.doesNotMatch(source, /process\.exit\(/);
-  assert.match(source, /finally \{ clearTimeout\(deadline\); \}/);
+  assert.match(source, /finally\s*\{\s*clearTimeout\(deadline\);\s*await appProxy\?\.close\(\);\s*\}/);
 });

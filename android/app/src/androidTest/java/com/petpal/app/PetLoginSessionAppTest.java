@@ -100,6 +100,29 @@ public class PetLoginSessionAppTest {
         assertFalse("Session credential removed from the page", sessionSnapshot().getBoolean("hasToken"));
         assertFalse("Previous account is no longer rendered", bool("document.querySelector('.account-identity')"));
     }
+    private void assertTheme(String expected) throws Exception {
+        until("real document and native appearance agree", () -> bool("document.documentElement.dataset.theme===" + JSONObject.quote(expected))
+            && expected.equals(context.getSharedPreferences(ScreenInsetsController.APPEARANCE_PREFS, Context.MODE_PRIVATE).getString(ScreenInsetsController.PREFERENCE, null)), 15000);
+        String cssColor = "night".equals(expected) ? "rgb(24, 29, 27)" : "rgb(250, 251, 248)";
+        until("real computed document background follows the preference", () -> bool("getComputedStyle(document.documentElement).backgroundColor===" + JSONObject.quote(cssColor)), 5000);
+        android.app.UiModeManager manager = context.getSystemService(android.app.UiModeManager.class);
+        int expectedMode = "night".equals(expected) ? android.content.res.Configuration.UI_MODE_NIGHT_YES : android.content.res.Configuration.UI_MODE_NIGHT_NO;
+        assertEquals("Actual Activity configuration follows its own theme", expectedMode, activity.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK);
+        assertTrue("Theme changes preserve the authenticated session", sessionSnapshot().getBoolean("hasToken"));
+        assertEncryptedFile();
+    }
+    private void chooseTheme(String selected) throws Exception {
+        accountPage();
+        android.app.UiModeManager manager = context.getSystemService(android.app.UiModeManager.class);
+        int systemMode = manager.getNightMode();
+        MainActivity original = activity;
+        assertTrue("Actual device tab clicked", bool("(()=>{const tab=Array.from(document.querySelectorAll('[role=tab]')).find(node=>node.textContent.trim()==='设备连接');if(!tab||tab.disabled)return false;tab.click();return true;})()"));
+        until("actual appearance radio is available", () -> bool("document.querySelector('.theme-settings input[value=" + selected + "]')&&!document.querySelector('.theme-settings fieldset').disabled"), 30000);
+        assertTrue("Actual theme radio clicked", bool("(()=>{const input=document.querySelector('.theme-settings input[value=" + selected + "]');if(!input||input.disabled)return false;input.click();return true;})()"));
+        assertTheme(selected);
+        assertFalse("Appearance does not finish the authenticated Activity", original.isFinishing() || original.isDestroyed());
+        assertEquals("External system night mode is unchanged", systemMode, manager.getNightMode());
+    }
     private void cleared() throws Exception {
         loginForm(); assertFalse("Cold start does not resurrect the vault", vault().exists());
         assertFalse("Cold start does not resurrect a session", sessionSnapshot().getBoolean("hasToken"));
@@ -160,6 +183,12 @@ public class PetLoginSessionAppTest {
         until("autostart preference accepted", () -> bool("document.querySelector('section.app-proxy-settings')?.getAttribute('aria-busy')==='false'&&document.querySelector('section.app-proxy-settings .app-proxy-startup input')?.checked===true"), 15000); assertProxyRestored();
     }
     private void evidence(String stage) throws Exception {
+        // The native bar transaction and WebView compositor are independent.
+        // Wait for actual page frames before capturing a just-changed theme.
+        js("window.__loginAcceptancePaint=false;requestAnimationFrame(()=>requestAnimationFrame(()=>window.__loginAcceptancePaint=true));true");
+        until("actual page compositor frames before screenshot", () -> bool("window.__loginAcceptancePaint"), 5000);
+        InstrumentationRegistry.getInstrumentation().getUiAutomation().waitForIdle(250, 5000);
+        Thread.sleep(250);
         JSONObject report = new JSONObject().put("passed", true).put("stage", stage).put("actualMainActivity", true).put("actualFormOrUi", true)
             .put("hasSession", sessionSnapshot().getBoolean("hasToken")).put("encryptedVaultExists", vault().isFile()).put("apiLevel", Build.VERSION.SDK_INT);
         if (stage.startsWith("proxy")) report.put("proxy", nativeProxySnapshot());
@@ -190,12 +219,12 @@ public class PetLoginSessionAppTest {
     @Test public void stagedActualApplicationLoginPersistence() throws Exception {
         String stage = InstrumentationRegistry.getArguments().getString("stage");
         org.junit.Assume.assumeTrue("Explicit staged emulator acceptance only", stage != null);
-        assertTrue("Known staged login operation", Arrays.asList("login", "restored", "offline", "logout", "cleared", "proxy", "proxyRestored").contains(stage));
+        assertTrue("Known staged login operation", Arrays.asList("login", "restored", "offline", "logout", "cleared", "proxy", "proxyRestored", "themeNight", "themeDay", "nightRestored").contains(stage));
         org.junit.Assume.assumeTrue("Only an isolated Android emulator may run this fixture", Build.HARDWARE.contains("ranchu") || Build.HARDWARE.contains("goldfish") || Build.MODEL.contains("sdk"));
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         try {
             startChat();
-            switch (stage) { case "login": submitLogin(); break; case "restored": accountPage(); break; case "offline": offline(); break; case "logout": logout(); break; case "cleared": cleared(); break; case "proxy": proxy(); break; case "proxyRestored": proxyPage(); assertProxyRestored(); break; default: throw new AssertionError(); }
+            switch (stage) { case "login": submitLogin(); break; case "restored": accountPage(); break; case "offline": offline(); break; case "logout": logout(); break; case "cleared": cleared(); break; case "proxy": proxy(); break; case "proxyRestored": proxyPage(); assertProxyRestored(); break; case "themeNight": chooseTheme("night"); break; case "themeDay": chooseTheme("day"); break; case "nightRestored": accountPage(); assertTheme("night"); break; default: throw new AssertionError(); }
             evidence(stage);
         } catch (Exception | AssertionError failure) { failureEvidence(stage); throw failure; }
     }

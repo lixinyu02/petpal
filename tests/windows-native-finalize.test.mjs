@@ -17,7 +17,7 @@ function visit(node) {
   if (ts.isVariableDeclaration(node) && node.name.getText(tree) === 'requiredExecutionSource') required = [...vm.runInNewContext(node.initializer.getText(tree))];
   ts.forEachChild(node, visit);
 }
-visit(tree); assert.ok(required); assert.ok(required.includes('server/user-roles.mjs'));
+visit(tree); assert.ok(required); assert.ok(required.includes('server/user-roles.mjs'));assert.ok(required.includes('desktop/appearance.cjs'));
 const present = async file => { try { await access(file); return true; } catch { return false; } };
 const fixtureRoots = [];
 test.after(async () => {
@@ -113,7 +113,7 @@ test('legacy finalization accepts the array freeze and keeps byte-identical gene
 });
 
 test('finalization refuses corrupted and missing lifecycle receipts before writing output', async () => {
-  for (const file of ['desktop/main.cjs', 'server/user-roles.mjs']) for (const group of ['freeze', 'packed', 'smoke']) for (const mode of ['missing', 'corrupt']) {
+  for (const file of ['desktop/main.cjs', 'desktop/appearance.cjs', 'server/user-roles.mjs']) for (const group of ['freeze', 'packed', 'smoke']) for (const mode of ['missing', 'corrupt']) {
     const f = await fixture();
     const change = rows => mode === 'missing' ? rows.filter(item => item.path !== file) : rows.map(item => item.path === file ? { ...item, sha256: '0'.repeat(64) } : item);
     if (group === 'freeze') await f.json(f.config.freezeReceipt, { version, files: change(f.freeze) });

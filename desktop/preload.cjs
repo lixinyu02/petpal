@@ -1,5 +1,15 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+function initialAppearance() {
+  const args = typeof process !== 'undefined' && Array.isArray(process.argv) ? process.argv : [];
+  const seeds = args.filter(value => typeof value === 'string' && value.startsWith('--petpal-appearance='));
+  const match = seeds.length === 1 && /^--petpal-appearance=(day|night|auto):(day|night):(0|1)$/.exec(seeds[0]);
+  const sessions = args.filter(value => typeof value === 'string' && value.startsWith('--petpal-appearance-session='));
+  const session = sessions.length === 1 && /^--petpal-appearance-session=([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/.exec(sessions[0]);
+  return Object.freeze(match && (match[1] === 'auto' || match[1] === match[2]) ? { preference: match[1], theme: match[2], saved: match[3] === '1', ...(session ? { sessionId: session[1] } : {}) }
+    : { preference: 'day', theme: 'day', saved: false });
+}
+
 const remoteRequests = new Map();
 let remoteListening = false;
 const receiveRemoteEvent = (_event, id, payload) => {
@@ -64,6 +74,13 @@ function memoryRuntimeCall(action, value) {
 
 contextBridge.exposeInMainWorld('petpal', Object.freeze({
   runtime: Object.freeze({ platform:typeof process !== 'undefined' && typeof process.platform === 'string' ? process.platform : '', arch:typeof process !== 'undefined' && typeof process.arch === 'string' ? process.arch : '' }),
+  appearance: Object.freeze({ initial: initialAppearance(),
+    status: () => ipcRenderer.invoke('petpal:appearance:status'),
+    setPreference: preference => {
+      if (!['day', 'night', 'auto'].includes(preference)) return Promise.reject(new TypeError('外观选项无效。'));
+      return ipcRenderer.invoke('petpal:appearance:set-preference', preference);
+    },
+  }),
   connection: () => ipcRenderer.invoke('petpal:connection'),
   showPet: () => ipcRenderer.invoke('petpal:show-pet'),
   showMain: () => ipcRenderer.invoke('petpal:show-main'),

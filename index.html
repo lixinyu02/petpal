@@ -8,10 +8,18 @@
       /* Keep this first-paint policy in sync with src/platform/theme.mjs. */
       (() => {
         let preference = 'day';
-        try { const saved = localStorage.getItem('petpal.theme'); if (saved === 'day' || saved === 'night' || saved === 'auto') preference = saved; } catch {}
+        const query = new URLSearchParams(location.search), transparent = query.has('pet') || query.has('overlay');
+        const valid = value => value === 'day' || value === 'night' || value === 'auto';
+        let saved = null, seed = null, sameSession = false;
+        try { saved = localStorage.getItem('petpal.theme'); if (valid(saved)) preference = saved; } catch {}
+        try { seed = !transparent && globalThis.window?.petpal?.appearance?.initial; if (!seed || !valid(seed.preference) || seed.saved !== true) seed = null; } catch {}
+        if (seed) {
+          try { sameSession = !!seed.sessionId && localStorage.getItem('petpal.theme.native-session') === seed.sessionId; } catch {}
+          if (!valid(saved) || seed.sessionId && !sameSession) preference = seed.preference;
+          try { localStorage.setItem('petpal.theme', preference); if (seed.sessionId) localStorage.setItem('petpal.theme.native-session', seed.sessionId); } catch {}
+        }
         const hour = new Date().getHours(), theme = preference === 'auto' ? (hour >= 7 && hour < 19 ? 'day' : 'night') : preference;
-        const root = document.documentElement, query = new URLSearchParams(location.search);
-        const transparent = query.has('pet') || query.has('overlay');
+        const root = document.documentElement;
         root.dataset.theme = theme; root.dataset.themePreference = preference;
         if (transparent) root.dataset.petpalSurface = 'transparent';
         root.style.colorScheme = theme === 'night' ? 'dark' : 'light';

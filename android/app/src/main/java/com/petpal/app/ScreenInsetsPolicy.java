@@ -21,4 +21,9 @@ public final class ScreenInsetsPolicy {
 
     public static boolean nativeInsets(int sdk) { return sdk >= 30; }
     public static boolean validTheme(String value) { return "day".equals(value) || "night".equals(value); }
+    public static boolean validPreference(String value) { return validTheme(value) || "auto".equals(value); }
+    public static String effectiveTheme(String preference, int hour) {
+        if ("auto".equals(preference)) return hour >= 7 && hour < 19 ? "day" : "night";
+        return "night".equals(preference) ? "night" : "day";
+    }
 }

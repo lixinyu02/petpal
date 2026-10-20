@@ -9,6 +9,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 
 const { createStartupDiagnostics, startupFailureMessage } = createRequire(import.meta.url)('../desktop/startup-diagnostics.cjs');
+const { createAppearance, createAppearanceHandlers, appearanceArguments, COLORS: APPEARANCE_COLORS } = createRequire(import.meta.url)('../desktop/appearance.cjs');
 const source = await readFile(new URL('../desktop/main.cjs', import.meta.url), 'utf8');
 const parsed = ts.createSourceFile('main.cjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
 async function fixture(t) {
@@ -103,15 +104,16 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false, pre
   class Window extends EventEmitter {
     constructor() { super(); this.webContents = new EventEmitter(); this.index = windows.length; windows.push(this); }
     show() { this.showCount = (this.showCount || 0) + 1; } focus() {} showInactive() {} setAlwaysOnTop() {} setVisibleOnAllWorkspaces() {} isDestroyed() { return false; }
+    setBackgroundColor(value) { this.backgroundColor = value; }
     loadURL() {
       if (loadError && this.index === 0) return Promise.reject(loadError);
       return deferredLoads ? loads[this.index].promise : Promise.resolve();
     }
   }
   const desktopTools = { music: { platform: 'win32', players: [] }, opencli: { available: true, version: '1.8.8', runtime: 'bundled', daemon: { state: 'stopped' } } };
-  const backendStub = { token: 'private-pairing-token', server: {}, updates: {} };
+  const backendStub = { token: 'private-pairing-token', server: {}, updates: {}, memory: { runtime: {} } };
   const context = vm.createContext({ app, path, process: { argv: args, env: { PETPAL_SMOKE_DIR: path.join(f.root, 'smoke') }, platform: 'win32', arch: 'x64', execPath: process.execPath, versions: { electron: metadata.electronVersion } },
-    fs: { mkdir, writeFile }, crypto: { randomBytes: () => ({ toString: () => 'private-pairing-token' }) },
+    fs: { mkdir, writeFile }, crypto: { randomBytes: () => ({ toString: () => 'private-pairing-token' }), randomUUID: () => '12345678-1234-1234-1234-123456789abc' },
     console: { error: (...args) => logs.push(args), log: (...args) => logs.push(args) },
     dialog: { showErrorBox: (...args) => dialogs.push(args) },
     createStartupDiagnostics(options) {
@@ -126,6 +128,7 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false, pre
     readDesktopServiceSettings: async () => ({ codexHttpOrigins: '' }),
     createAppPreferences: () => ({ load: async () => {}, current: () => ({ startMinimized: false, showPetOnLaunch: true, closeToTray: true, petAlwaysOnTop: true, ...preferences }) }),
     createAppPreferencesHandlers: () => ({}), verifyPreferencesSessionConnection: async () => ({}),
+    createAppearance, createAppearanceHandlers, appearanceArguments, APPEARANCE_COLORS, nativeTheme: { themeSource: 'system' },
     mainWindowState: () => ({ fullscreen: false }), setMainFullscreen: async () => {}, toggleMainFullscreen() {}, applyMainStartupFullscreen() {},
     createCentralServer: () => ({ load: async () => {} }), createCentralServerHandlers: () => ({}),
     safeStorage: { isEncryptionAvailable: () => false }, createOfficialAccountHandlers: () => ({}),
@@ -133,6 +136,7 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false, pre
     officialAuthModuleStub: { OfficialAuth: class { constructor(options) { this.options = options; } async close() {} } },
     officialAccountsModuleStub: { OfficialAccounts: class { constructor(options) { this.auth = options.auth; } async init() {} async close() { await this.auth.close(); } } },
     serverModule: { createPetServer: async () => backendStub },
+    memoryRuntimeModuleStub: { MEMOBASE_RUNTIME_PUBLIC_MESSAGES: {} }, createMemoryRuntimeHandlers: () => ({}),
     executorModuleStub: { DesktopExecutor: class { async disconnect() {} }, createExecutorHandlers: () => ({}), createMusicMcpHandlers: () => ({}), createComputerUseMcpHandlers: () => ({}), createOpenCliHandlers: () => ({}) },
     updaterModuleStub: { DesktopUpdateManager: class {}, createDesktopUpdateHandlers: () => ({}) },
     createDesktopRemoteHttp: () => ({}), listenDesktopBackend: async () => 50000,
@@ -148,6 +152,7 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false, pre
   };
   const boot = declaration('boot')
     .replace("await import(pathToFileURL(path.join(root, 'server', 'app.mjs')).href)", 'serverModule')
+    .replace("await import(pathToFileURL(path.join(root, 'server/memobase-runtime.mjs')).href)", 'memoryRuntimeModuleStub')
     .replace("await import(pathToFileURL(path.join(__dirname, 'official-auth.mjs')).href)", 'officialAuthModuleStub')
     .replace("await import(pathToFileURL(path.join(__dirname, 'official-account.mjs')).href)", 'officialAccountsModuleStub')
     .replace("await import(pathToFileURL(path.join(__dirname, 'executor.mjs')).href)", 'executorModuleStub')
@@ -155,7 +160,7 @@ async function bootHarness(t, { args = [], loadError, deferredLoads = false, pre
   vm.runInContext(`let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quitting = false, exitCode = 0;
     let pendingMainReveal = false, mainWindowCreated = false;
     let mainStartupFullscreenPending = false, mainFullscreenChange = null;
-    let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor, appPreferences, centralServer, officialAccounts, appProxy;
+    let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor, appPreferences, appearance, appearanceSessionId, centralServer, officialAccounts, appProxy;
     let startupDiagnostics, startupPhase = 'electron-ready', startupFailed = false;
     const root = ${JSON.stringify(f.root)}, __dirname = ${JSON.stringify(f.root)}, iconPath = 'fixture-icon';
     ${['getStartupDiagnostics', 'startupMilestone', 'handleStartupFailure', 'rendererFailure', 'createMain', 'showPet', 'applyPetWindowPreferences'].map(declaration).join('\n')}

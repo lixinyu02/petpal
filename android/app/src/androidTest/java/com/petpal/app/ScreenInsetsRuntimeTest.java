@@ -224,7 +224,12 @@ public class ScreenInsetsRuntimeTest {
             assertEquals("CSS viewport matches the actual native WebView", geometry().height, css.getDouble("height") * css.getDouble("ratio"), 4);
         }
         void appearance(String theme) throws Exception {
-            js("window.__screenTheme=null;window.Capacitor.Plugins.PetScreen.setAppearance({theme:" + JSONObject.quote(theme) + "}).then(v=>window.__screenTheme={ok:true,nativeInsets:v.nativeInsets}).catch(()=>window.__screenTheme={ok:false});true");
+            appearance(theme, null);
+        }
+        void appearance(String theme, String preference) throws Exception {
+            JSONObject request = new JSONObject().put("theme", theme);
+            if (preference != null) request.put("preference", preference);
+            js("window.__screenTheme=null;window.Capacitor.Plugins.PetScreen.setAppearance(" + request + ").then(v=>window.__screenTheme={ok:true,nativeInsets:v.nativeInsets}).catch(()=>window.__screenTheme={ok:false});true");
             until("actual native appearance bridge", () -> "true".equals(js("Boolean(window.__screenTheme?.ok&&window.__screenTheme.nativeInsets)")));
             main(() -> {
                 WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(activity.get().getWindow(), view()); boolean day = "day".equals(theme);
@@ -290,6 +295,44 @@ public class ScreenInsetsRuntimeTest {
             until("portrait safe rectangle restored", () -> { Geometry g = session.geometry(); return g.rootHeight > g.rootWidth && g.settled(); });
             session.geometry().assertSafeRectangle(); session.assertCssFitsNative(); session.appearance("night");
             Log.i(TAG, "rotation and real local-page theme bridge verified");
+        }
+    }
+
+    @Test public void nativeThemeAndPreferenceSurviveActivityRestartWithoutChangingSystemNightMode() throws Exception {
+        Assume.assumeTrue("Explicit screen acceptance only", "true".equals(InstrumentationRegistry.getArguments().getString("petpalScreenRuntime")));
+        Assume.assumeTrue("Only an owned emulator", Build.HARDWARE.contains("ranchu") || Build.HARDWARE.contains("goldfish"));
+        android.content.Context context = INSTRUMENTATION.getTargetContext();
+        android.content.SharedPreferences prefs = context.getSharedPreferences(ScreenInsetsController.APPEARANCE_PREFS, android.content.Context.MODE_PRIVATE);
+        String previous = prefs.getString(ScreenInsetsController.PREFERENCE, null);
+        android.app.UiModeManager manager = context.getSystemService(android.app.UiModeManager.class);
+        int globalMode = manager.getNightMode();
+        try {
+            try (Session first = new Session()) {
+                MainActivity original = first.activity.get();
+                first.appearance("night", "night");
+                assertSame("Theme switch retains the Activity and its account/IME state", original, first.activity.get());
+                assertEquals("night", prefs.getString(ScreenInsetsController.PREFERENCE, null));
+                first.appearance(ScreenInsetsController.currentTheme("auto"), "auto");
+                assertEquals("Auto preference persists even when its effective color did not change", "auto", prefs.getString(ScreenInsetsController.PREFERENCE, null));
+                first.appearance("night", "night");
+            }
+            try (Session restarted = new Session()) {
+                main(() -> {
+                    assertEquals("Stored night theme is restored before the real WebView fixture starts", Color.parseColor("#181d1b"), ((ColorDrawable) restarted.activity.get().getWindow().getDecorView().getBackground()).getColor());
+                    assertEquals(android.content.res.Configuration.UI_MODE_NIGHT_YES, restarted.activity.get().getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK);
+                    assertFalse(WindowCompat.getInsetsController(restarted.activity.get().getWindow(), restarted.view()).isAppearanceLightStatusBars());
+                    return null;
+                });
+                restarted.appearance("day", "day");
+                assertEquals("day", prefs.getString(ScreenInsetsController.PREFERENCE, null));
+                assertEquals("Application theme never changes global system/IME night mode", globalMode, manager.getNightMode());
+            }
+            Log.i(TAG, "app-local day/night/auto persistence and actual Activity restart verified; global system night mode unchanged");
+        } finally {
+            android.content.SharedPreferences.Editor edit = prefs.edit();
+            if (previous == null) edit.remove(ScreenInsetsController.PREFERENCE); else edit.putString(ScreenInsetsController.PREFERENCE, previous);
+            edit.commit();
+            if (Build.VERSION.SDK_INT >= 31) manager.setApplicationNightMode("night".equals(ScreenInsetsController.currentTheme(previous)) ? android.app.UiModeManager.MODE_NIGHT_YES : android.app.UiModeManager.MODE_NIGHT_NO);
         }
     }
 

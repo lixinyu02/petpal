@@ -1,4 +1,4 @@
-// Published installer caches belong to the web download service, not the client.
+// Published installers and server state belong to the host, never client payloads.
 import { cp, link, lstat, readFile, readdir, unlink } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -114,7 +114,7 @@ export async function auditMihomoClientPayload(directory, policy, { arch } = {})
 
 export function includeClientPayload(relative) {
   const normalized = relative.replaceAll('\\', '/');
-  return normalized !== 'dist/downloads' && !normalized.startsWith('dist/downloads/');
+  return !['dist/downloads', 'server/data'].some(root => normalized === root || normalized.startsWith(`${root}/`));
 }
 
 export async function copyClientPayload(sourceRoot, targetRoot) {

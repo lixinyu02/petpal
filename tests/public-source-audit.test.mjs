@@ -67,6 +67,9 @@ test('desktop proxy, official account and device role fixtures stay scoped to ex
   assert.ok(reasons(inspect('docs/config.txt',`Bearer ${bearer}`)).includes('literal bearer value'));
   const downloadFixture=['fixture','private','token'].join('-');
   assert.ok(reasons(inspect('docs/config.json',JSON.stringify({token:downloadFixture}))).includes('unreviewed literal credential'));
+  const callbackFixture=['http://127.0.0.1:1455/auth/callback?code=private-oauth-code','state=private-oauth-state'].join('&');
+  assert.deepEqual(inspect('tests/official-account-ui.test.mjs',JSON.stringify({secret:callbackFixture})),[]);
+  assert.ok(reasons(inspect('docs/config.json',JSON.stringify({secret:callbackFixture}))).includes('unreviewed literal credential'));
 });
 
 test('ASR and Agent fixture credentials use the shared exact-file policy without exempting other values',async()=>{
@@ -86,6 +89,112 @@ test('central server synthetic fixtures remain scoped to the reviewed test file 
   }
   const fixture=['secret','must','not','be','rendered'].join('-');
   for(const name of ['tests/other.test.mjs','docs/central-server.md',names[0]])assert.ok(reasons(inspect(name,JSON.stringify({token:fixture}))).includes('unreviewed literal credential'));
+});
+
+test('reviewed cloud, memory and lifecycle credentials require their exact file and literal',async()=>{
+  const reviewed=[
+  [
+    "tests/android-official-root-ready.test.mjs",
+    [
+      "synthetic-restored-session"
+    ]
+  ],
+  [
+    "tests/app-proxy-profiles-http.test.mjs",
+    [
+      "isolated-shared-password-123"
+    ]
+  ],
+  [
+    "tests/cloud-api.test.mjs",
+    [
+      "cloud-fixture-password"
+    ]
+  ],
+  [
+    "tests/cloud-docker-ui.test.mjs",
+    [
+      "never-include-permanent-token"
+    ]
+  ],
+  [
+    "tests/cloud-docker.test.mjs",
+    [
+      "upstream-private-fixture",
+      "private-loopback"
+    ]
+  ],
+  [
+    "tests/companion-routines-api.test.mjs",
+    [
+      "companion-api-owner-fixture",
+      "SyntheticDaily123a"
+    ]
+  ],
+  [
+    "tests/desktop-memory.test.mjs",
+    [
+      "private-login-token"
+    ]
+  ],
+  [
+    "tests/memobase-client.test.mjs",
+    [
+      "synthetic-only-memory-key"
+    ]
+  ],
+  [
+    "tests/memobase-runtime.test.mjs",
+    [
+      "private-model-key"
+    ]
+  ],
+  [
+    "tests/memory-api.test.mjs",
+    [
+      "synthetic-memory-model-key",
+      "synthetic-memory-password",
+      "synthetic-memobase-key",
+      "synthetic-remote-token"
+    ]
+  ],
+  [
+    "tests/memory-service.test.mjs",
+    [
+      "synthetic-private-token-123",
+      "synthetic-secret-key",
+      "synthetic-login-token",
+      "private-test-token",
+      "private-original",
+      "must-not-be-written",
+      "synthetic-private-provider-key",
+      "private-runtime-token",
+      "local-synthetic-only",
+      "synthetic-account-token"
+    ]
+  ],
+  [
+    "tests/task-notification-controller.test.mjs",
+    [
+      "new-session-token"
+    ]
+  ]
+];
+  for(const [name,values] of reviewed){
+    assert.deepEqual(inspect(name,await readFile(new URL(`../${name}`,import.meta.url))),[],name);
+    for(const value of values){
+      const text=JSON.stringify({token:value});
+      assert.deepEqual(inspect(name,text),[],name);
+      for(const other of ['tests/unreviewed-fixture.test.mjs',`docs/${name}`,`Tests/${name.slice(6)}`]){
+        assert.ok(reasons(inspect(other,text)).includes('unreviewed literal credential'),other);
+      }
+      assert.ok(reasons(inspect(name,JSON.stringify({token:value+'-changed'}))).includes('unreviewed literal credential'),name);
+    }
+    for(const key of ['apiKey','password','refreshToken'])assert.ok(reasons(inspect(name,JSON.stringify({[key]:credential()}))).includes('unreviewed literal credential'),name);
+    assert.ok(reasons(inspect(name,privateSample('RSA'))).includes('private key material'),name);
+    const provider=['sk','proj','z'.repeat(32)].join('-');
+    assert.ok(reasons(inspect(name,JSON.stringify({apiKey:provider}))).includes('provider key value'),name);
+  }
 });
 
 test('path restrictions apply case insensitively and source entry metadata remains bounded',()=>{

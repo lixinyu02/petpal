@@ -29,6 +29,8 @@ function fixture({ startFullscreen = false, tray = true, automatic = true } = {}
   }
   const preferences = { startFullscreen, closeToTray: true }, context = vm.createContext({
     BrowserWindow: Window, appPreferences: { current: () => ({ ...preferences }) }, app: { quit() {} },
+    appearance: { current: () => ({ preference: 'day', theme: 'day', saved: false }), refresh: () => ({ preference: 'day', theme: 'day', saved: false }) },
+    APPEARANCE_COLORS: { day: '#fafbf8', night: '#181d1b' }, appearanceArguments: () => ['--petpal-appearance=day:day:0'], crypto: { randomUUID: () => '12345678-1234-1234-1234-123456789abc' },
     screen: { getPrimaryDisplay: () => ({ workArea: {} }) }, mainWindowLayout: () => ({}),
     trackWindowDisplay() {}, fitWindowToDisplay() {}, secureWindow() {}, rendererFailure() {},
     path: { join: (...args) => args.join('/') }, __dirname: 'desktop', iconPath: 'icon.png',
@@ -36,7 +38,7 @@ function fixture({ startFullscreen = false, tray = true, automatic = true } = {}
     setTimeout(fn, ms) { assert.equal(ms, 3000); timers.set(++timerId, fn); return timerId; },
     clearTimeout(id) { timers.delete(id); },
   });
-  vm.runInContext(`let mainWindow,mainLoaded,quitting=false,mainFullscreenChange=null,mainStartupFullscreenPending=false;
+  vm.runInContext(`let mainWindow,mainLoaded,quitting=false,mainFullscreenChange=null,mainStartupFullscreenPending=false,appearanceSessionId;
     let mainWindowCreated=false,pendingMainReveal=false,origin='http://localhost',tray=${tray ? '{}' : 'null'};
     ${functions.join('\n')}`, context);
   const input = (key, extra = {}) => {

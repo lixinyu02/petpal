@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="petpal_window_background">#181d1b</color>
+    <bool name="petpal_light_system_bars">false</bool>
+</resources>

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, session, shell, dialog, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, nativeTheme, screen, session, shell, dialog, safeStorage } = require('electron');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const crypto = require('node:crypto');
@@ -11,6 +11,7 @@ const { mainWindowLayout, petWindowLayout } = require('./window-layout.cjs');
 const { createStartupDiagnostics, startupFailureMessage } = require('./startup-diagnostics.cjs');
 const { createAppPreferences } = require('./app-preferences.cjs');
 const { createAppPreferencesHandlers, verifyPreferencesSessionConnection } = require('./app-preferences-ipc.cjs');
+const { createAppearance, createAppearanceHandlers, appearanceArguments, COLORS: APPEARANCE_COLORS } = require('./appearance.cjs');
 const { createCentralServer } = require('./central-server.cjs');
 const { createCentralServerHandlers } = require('./central-server-ipc.cjs');
 const { createOfficialAccountHandlers } = require('./official-account-ipc.cjs');
@@ -22,7 +23,7 @@ let mainWindow, petWindow, mainLoaded, petLoaded, tray, backend, origin, quittin
 let pendingMainReveal = false, mainWindowCreated = false;
 let mainStartupFullscreenPending = false, mainFullscreenChange = null;
 let updates, pendingUpdate, verifyDownloadedUpdate, remoteHttp, executor;
-let appPreferences, centralServer, officialAccounts, appProxy, appProxyAuthentication;
+let appPreferences, appearance, appearanceSessionId, centralServer, officialAccounts, appProxy, appProxyAuthentication;
 let startupDiagnostics, startupPhase = 'electron-ready', startupFailed = false;
 const root = path.resolve(__dirname, '..');
 const iconPath = path.join(__dirname, 'assets', 'icon.png');
@@ -299,10 +300,12 @@ async function smokeWindowPresentation() {
 }
 
 function createMain(showOnReady = true) {
+  appearanceSessionId = crypto.randomUUID();
   mainWindow = new BrowserWindow({
     ...mainWindowLayout(screen.getPrimaryDisplay().workArea),
-    title: '小伴 PetPal', icon: iconPath, backgroundColor: '#f7f6f2', show: false,
-    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+    title: '小伴 PetPal', icon: iconPath, backgroundColor: APPEARANCE_COLORS[appearance.refresh().theme], show: false,
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true,
+      additionalArguments: appearanceArguments(appearance.current(), appearanceSessionId) },
   });
   mainWindowCreated = true;
   mainStartupFullscreenPending = appPreferences.current().startFullscreen === true;
@@ -1085,6 +1088,10 @@ async function boot() {
   const serviceSettings = await readDesktopServiceSettings(app.getPath('userData'));
   appPreferences = createAppPreferences({ app });
   await appPreferences.load();
+  appearance = createAppearance({ app, nativeTheme, onChanged: state => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setBackgroundColor(APPEARANCE_COLORS[state.theme]);
+  } });
+  await appearance.load();
   await startupMilestone('workspace');
   const workspaceRoot = process.env.PETPAL_WORKSPACE || path.join(app.getPath('userData'), 'workspace');
   await fs.mkdir(workspaceRoot, { recursive: true });
@@ -1121,6 +1128,10 @@ async function boot() {
   await startupMilestone('backend-listen');
   const port = await listenDesktopBackend(backend.server);
   origin = `http://127.0.0.1:${port}`;
+  for (const [channel, handler] of Object.entries(createAppearanceHandlers(appearance, {
+    isAllowed: event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting,
+    isForeground: () => !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused(),
+  }))) ipcMain.handle(channel, handler);
   const { MEMOBASE_RUNTIME_PUBLIC_MESSAGES } = await import(pathToFileURL(path.join(root, 'server/memobase-runtime.mjs')).href);
   for (const [channel, handler] of Object.entries(createMemoryRuntimeHandlers({ manager: backend.memory.runtime,
     isAllowed: event => isTrusted(event) && event.sender === mainWindow?.webContents && !quitting,
@@ -1416,7 +1427,7 @@ async function boot() {
       const bytes = await fs.readFile(absolute);
       return [{ path: relative.split(path.sep).join('/'), bytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') }];
     };
-    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/official-auth.mjs', 'desktop/official-account.mjs', 'desktop/official-account-ipc.cjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/memory-ipc.cjs', 'desktop/central-server-smoke.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
+    result.bundleFiles = (await Promise.all(['dist', 'server', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/window-layout.cjs', 'desktop/updates.mjs', 'desktop/media-permissions.cjs', 'desktop/service-settings.cjs', 'desktop/startup-diagnostics.cjs', 'desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs', 'desktop/appearance.cjs', 'desktop/official-auth.mjs', 'desktop/official-account.mjs', 'desktop/official-account-ipc.cjs', 'desktop/central-server.cjs', 'desktop/central-server-ipc.cjs', 'desktop/memory-ipc.cjs', 'desktop/central-server-smoke.cjs', 'desktop/remote-http.cjs', 'desktop/executor.mjs', 'package.json', 'node_modules/@jackwener/opencli/package.json', 'node_modules/@jackwener/opencli/dist/src/main.js', 'node_modules/@jackwener/opencli/dist/src/daemon.js', 'node_modules/@jackwener/opencli/LICENSE'].map(hashBundle))).flat();
     if (process.env.PETPAL_SMOKE_DIR) await fs.writeFile(path.join(process.env.PETPAL_SMOKE_DIR, 'result.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
     if (!health.ok || !bridge.hasToken || !codex.available || !desktopTools.opencli.available || desktopTools.opencli.version !== '1.8.8') throw new Error('Desktop smoke prerequisite failed');
@@ -1437,7 +1448,7 @@ else {
     tray?.destroy(); tray = null;
     (async () => {
       const centralOutcome = await Promise.allSettled([centralServer?.close()]);
-      const outcomes = await Promise.allSettled([appProxy?.close(), officialAccounts?.close(), appPreferences?.close(), executor?.close(), remoteHttp?.close(), updates?.close({ preserveHandoff: Boolean(pendingUpdate) }), backend?.close()]);
+      const outcomes = await Promise.allSettled([appProxy?.close(), officialAccounts?.close(), appPreferences?.close(), appearance?.close(), executor?.close(), remoteHttp?.close(), updates?.close({ preserveHandoff: Boolean(pendingUpdate) }), backend?.close()]);
       const failed = [...centralOutcome, ...outcomes].find(outcome => outcome.status === 'rejected');
       if (failed) throw failed.reason;
       if (pendingUpdate) await launchPreparedUpdate(pendingUpdate);

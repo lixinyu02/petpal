@@ -30,6 +30,8 @@ requiredApplicationSource.push('server/executors.mjs', 'server/remote-codex.mjs'
 requiredApplicationSource.push('server/user-input.mjs', 'server/agent-user-inputs.mjs');
 requiredApplicationSource.push('server/conversation-organization.mjs', 'server/chat-assistant.mjs', 'server/automation-schema.mjs', 'server/automation-tools.mjs', 'server/automations.mjs');
 requiredApplicationSource.push('desktop/app-preferences.cjs', 'desktop/app-preferences-ipc.cjs');
+requiredApplicationSource.push('desktop/appearance.cjs', 'server/companion-routines.mjs', 'server/companion-routine-schema.mjs',
+  'server/companion-personalization.mjs', 'server/companion-content.mjs', 'server/companion-weather.mjs');
 requiredApplicationSource.push('desktop/official-auth.mjs', 'desktop/official-account.mjs', 'desktop/official-account-ipc.cjs');
 requiredApplicationSource.push('server/official-providers.mjs');
 requiredApplicationSource.push('desktop/app-proxy.mjs', 'desktop/app-proxy-network.mjs', 'desktop/app-proxy-download.mjs', 'desktop/app-proxy-ipc.cjs', 'desktop/app-proxy-smoke.cjs',

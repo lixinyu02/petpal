@@ -185,7 +185,13 @@ test('Linux archive audit rejects every missing or modified music MCP vendor mem
     try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Published installer cache must not be distributed: ${file}`));}
     finally{await rm(path.join(app,file));await rmdir(path.join(app,'dist/downloads'));}
   });
-  for(const file of [...vendorFiles,...centralFiles,...ncmCliFiles,'server/native/computer-use/patches/linux-x11-window-geometry.patch','server/opencli-manager.mjs','server/opencli-sites.mjs','server/opencli-worker.mjs','server/opencli-routes.mjs']){
+  await t.test('server runtime data is rejected even if a different packager puts it in an archive',async()=>{
+    const file='server/data/store.json';await put(`resources/app/${file}`,'synthetic private host state');
+    try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Server runtime data must not be distributed: ${file}`));}
+    finally{await rm(path.join(app,file));await rmdir(path.join(app,'server/data'));}
+  });
+  for(const file of [...vendorFiles,...centralFiles,...ncmCliFiles,'server/native/computer-use/patches/linux-x11-window-geometry.patch','server/opencli-manager.mjs','server/opencli-sites.mjs','server/opencli-worker.mjs','server/opencli-routes.mjs',
+    'desktop/appearance.cjs','server/companion-routines.mjs','server/companion-routine-schema.mjs','server/companion-personalization.mjs','server/companion-content.mjs','server/companion-weather.mjs']){
     await t.test(`missing ${file}`,async()=>{
       await rm(path.join(app,file));
       try{const result=await verify();assert.equal(result.ok,false);assert.ok(result.failures.includes(`Required application source missing: ${file}`));}

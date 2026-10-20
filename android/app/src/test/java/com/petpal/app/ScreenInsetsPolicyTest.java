@@ -39,4 +39,14 @@ public class ScreenInsetsPolicyTest {
         assertTrue(ScreenInsetsPolicy.validTheme("day")); assertTrue(ScreenInsetsPolicy.validTheme("night"));
         for (String value : new String[] {null, "", "system", "DAY", "night ", "javascript:alert(1)"}) assertFalse(ScreenInsetsPolicy.validTheme(value));
     }
+    @Test public void persistedAutoUsesTheSameLocalBoundariesAsTheWebWithoutFollowingSystemTheme() {
+        for (int hour = 0; hour < 24; hour++) {
+            assertEquals("day", ScreenInsetsPolicy.effectiveTheme("day", hour));
+            assertEquals("night", ScreenInsetsPolicy.effectiveTheme("night", hour));
+            assertEquals(hour >= 7 && hour < 19 ? "day" : "night", ScreenInsetsPolicy.effectiveTheme("auto", hour));
+        }
+        assertTrue(ScreenInsetsPolicy.validPreference("auto"));
+        assertFalse(ScreenInsetsPolicy.validPreference("system"));
+        assertEquals("day", ScreenInsetsPolicy.effectiveTheme(null, 23));
+    }
 }

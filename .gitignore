@@ -39,3 +39,5 @@ outputs/animations/atlas-on-cream.png
 outputs/animations/render-receipt.json
 outputs/animations/*.gif
 outputs/animations/kitten-motions-preview.png
+.playwright-cli/
+output/playwright/

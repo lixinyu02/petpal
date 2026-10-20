@@ -24,6 +24,11 @@ const source=ts.transpileModule(await readFile(new URL('../src/App.tsx',import.m
 const motionSource=ts.transpileModule(await readFile(new URL('../src/platform/ui-motion.ts',import.meta.url),'utf8'),{
   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true},
 }).outputText;
+const dockerSource=ts.transpileModule(await readFile(new URL('../src/platform/cloud-docker.ts',import.meta.url),'utf8'),{
+  compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS},
+}).outputText;
+const dockerModule={exports:{}};
+vm.runInNewContext(dockerSource,{module:dockerModule,exports:dockerModule.exports});
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const nodes=tree=>Array.isArray(tree)?tree.flatMap(nodes):!tree||typeof tree!=='object'?[]:[tree,...nodes(tree.props?.children)];
 const text=tree=>Array.isArray(tree)?tree.map(text).join(''):tree==null||typeof tree==='boolean'?'':typeof tree!=='object'?String(tree):text(tree.props?.children);
@@ -90,9 +95,10 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
   const attachments={items:[...attachmentItems],uploading:attachmentUploading,error:'',clearCount:0,clear(){attachments.items=[];attachments.uploading=false;attachments.clearCount++;},inputRef:{current:null}};
   const speech={enabled:false,playing:false,active:false,pending:false,supported:false,stop(){},prepare(){},speak(){},speakIfEnabled(){}};
   const modules={
+    './platform/cloud-docker':dockerModule.exports,
     './platform/visible-poll.mjs':{createVisiblePoll:options=>createVisiblePoll({...options,setTimeoutFn:callback=>{const id=++timerId;timers.set(id,callback);return id;},clearTimeoutFn:id=>timers.delete(id)})},
     react,'react/jsx-runtime':{jsx:element,jsxs:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
-    '@capacitor/core':{Capacitor:{isNativePlatform:()=>native}},'./api':api,'./WorkspaceControls':controls,'./composer-keyboard.mjs':{composerKeyAction},
+    '@capacitor/core':{Capacitor:{isNativePlatform:()=>native,getPlatform:()=>native?'android':'web',isPluginAvailable:()=>false}},'./api':api,'./WorkspaceControls':controls,'./composer-keyboard.mjs':{composerKeyAction},
     './companion-mount.mjs':{watchCompanionBreakpoint},'./chat-display.mjs':{createChatDisplay},'./useChatScroll':{useChatScroll:()=>({contentRef:{current:null},onScroll(){},latest(){},showLatest:false})},
     './AgentPermissions':{...component('AgentPermissions'),defaultAgentPermissions:permissions},'./approval-review-ui.mjs':approvalReviewUi,
     './ProjectDirectory':{...component('ProjectDirectory'),useProjectDirectory:()=>({value:'',change(){}})},

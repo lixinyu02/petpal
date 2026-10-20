@@ -1,6 +1,27 @@
 /* Local day/night appearance. Character textures and canvases keep their original colors. */
-:root{--theme-surface:#fafbf8;--theme-raised:#fcfdf9;--theme-soft:#f1f4ec;--theme-ink:#30433b;--theme-muted:#778776;--theme-border:#dde5d7}
-html[data-theme="night"]{color-scheme:dark;--theme-surface:#181d1b;--theme-raised:#222a25;--theme-soft:#2b352e;--theme-ink:#e0e7e1;--theme-muted:#a9b8ae;--theme-border:#3b4940;--green:#a0ccb1;--muted:#a9b8ae;--line:#36433b;--soft:#28332c;--cream:#222a25;color:var(--theme-ink);background:var(--theme-surface)}
+:root{
+  --theme-surface:#fafbf8;--theme-raised:#fcfdf9;--theme-soft:#f1f4ec;
+  --theme-ink:#30433b;--theme-muted:#60715f;--theme-border:#dde5d7;
+  --theme-accent:#285e4b;--theme-accent-soft:#e6eee3;--theme-focus:#547b61;
+  --theme-input:#ffffff;--theme-control-border:#81907c;
+  --theme-danger:#9c433c;--theme-danger-soft:#fff1ec;
+  --theme-warning:#795327;--theme-warning-soft:#fff5e5;
+  --theme-success:#2e6545;--theme-success-soft:#edf4e8;
+  --theme-overlay:#10201870;--theme-shadow:0 12px 36px #18332120;
+  --muted:var(--theme-muted);
+}
+html[data-theme="night"]{
+  color-scheme:dark;--theme-surface:#181d1b;--theme-raised:#222a25;--theme-soft:#2b352e;
+  --theme-ink:#e0e7e1;--theme-muted:#a9b8ae;--theme-border:#3b4940;
+  --theme-accent:#a0ccb1;--theme-accent-soft:#344a3c;--theme-focus:#9bc9ad;
+  --theme-input:#202923;--theme-control-border:#7a8e80;
+  --theme-danger:#f2b2a7;--theme-danger-soft:#3a2927;
+  --theme-warning:#e7c491;--theme-warning-soft:#3b3224;
+  --theme-success:#a4d4b3;--theme-success-soft:#253d2c;
+  --theme-overlay:#060b08a8;--theme-shadow:0 12px 36px #0005;
+  --green:var(--theme-accent);--muted:var(--theme-muted);--line:#36433b;--soft:#28332c;--cream:#222a25;
+  color:var(--theme-ink);background:var(--theme-surface)
+}
 html[data-theme="day"]{color-scheme:light}
 .theme-settings{margin-top:28px;min-width:0}
 .theme-settings .section-title{margin-bottom:16px}
@@ -10,8 +31,8 @@ html[data-theme="day"]{color-scheme:light}
 .theme-choice{position:relative;display:block;min-width:0;cursor:pointer}
 .theme-choice input{position:absolute;inset:0;width:100%;height:100%;padding:0;margin:0;opacity:0;z-index:1;cursor:pointer}
 .theme-choice>span{display:flex;align-items:center;justify-content:center;gap:8px;min-height:46px;padding:9px 10px;border:1px solid var(--theme-border);border-radius:9px;background:var(--theme-raised);color:var(--theme-muted);font-size:12px;transition:background .15s,border-color .15s,color .15s}
-.theme-choice input:checked+span{background:var(--theme-soft);border-color:#779675;color:var(--green);font-weight:600}
-.theme-choice input:focus-visible+span{outline:2px solid #7ea38a;outline-offset:3px}
+.theme-choice input:checked+span{background:var(--theme-soft);border-color:var(--theme-accent);color:var(--green);font-weight:600}
+.theme-choice input:focus-visible+span{outline:2px solid var(--theme-focus);outline-offset:3px}
 .theme-choice input:disabled,.theme-choices:disabled .theme-choice{cursor:default}
 .theme-choices:disabled .theme-choice>span{opacity:.55}
 .theme-help,.theme-current{color:var(--theme-muted);font-size:11px;line-height:1.9;margin:12px 0 0;overflow-wrap:anywhere}
@@ -42,7 +63,7 @@ html[data-theme="night"] :is(.primary-button,.send-button,.companion-chat,.voice
 html[data-theme="night"] :is(.danger-button,.composer .stop-button){background:#794e3d!important;color:#ffebdf!important}
 html[data-theme="night"] :is(.pet-speech,.companion-reply,.suggestions>button){background:transparent!important}
 html[data-theme="night"] :is(.suggestions>button,.suggestions>button>svg,.suggestion-arrow){color:#b1c6b6!important;border-color:var(--theme-border)!important}
-html[data-theme="night"] :is(.settings-page,.modal,.login-page,.downloads-view,.chat-assistant-dialog,.workspace-disclosure-content,.workspace-model-popup,.composer,.agent-queue,.companion-voice-panel) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),textarea,select){color:var(--theme-ink)!important;background:#202923!important;border-color:#48574d!important}
+html[data-theme="night"] :is(.settings-page,.modal,.login-page,.downloads-view,.chat-assistant-dialog,.workspace-disclosure-content,.workspace-model-popup,.composer,.agent-queue,.companion-voice-panel) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),textarea,select){color:var(--theme-ink)!important;background:var(--theme-input)!important;border-color:var(--theme-control-border)!important}
 html[data-theme="night"] :is(.workspace-model-search,.workspace-host-search) input{background:transparent!important}
 html[data-theme="night"] :is(input,textarea)::placeholder{color:#a1afa5!important;opacity:1}
 html[data-theme="night"] :is(input[type="checkbox"],input[type="radio"],meter,progress){accent-color:#88b69c}
@@ -54,8 +75,10 @@ html[data-theme="night"] .message-markdown pre code{background:transparent!impor
 html[data-theme="night"] .message-markdown :is(td,th,hr,blockquote){border-color:#506253!important}
 html[data-theme="night"] .message-markdown blockquote{color:var(--theme-muted)!important}
 html[data-theme="night"] :is(.message-markdown a,.assistant-links a,.music-mcp-origin,.music-mcp-tools code,.music-mcp-login code,.opencli-browser-steps a,.account-entry,.assistant-task-actions,.speech-controls button,.single-companion-return:hover,.inline-connect,.settings-tabs>button.active){color:#a9d6b9!important}
-html[data-theme="night"] :is(.form-error,.error-banner,.login-retry,.agent-execution-unknown){background:#352a23!important;border-color:#755747!important;color:#eac3a8!important}
-html[data-theme="night"] :is(.form-error,.error-banner,.login-retry,.agent-execution-unknown) :is(p,span,strong,small){color:#eac3a8!important}
+html[data-theme="night"] :is(.form-error,.error-banner){background:var(--theme-danger-soft)!important;border-color:var(--theme-danger)!important;color:var(--theme-danger)!important}
+html[data-theme="night"] :is(.form-error,.error-banner) :is(p,span,strong,small){color:var(--theme-danger)!important}
+html[data-theme="night"] :is(.login-retry,.agent-execution-unknown){background:var(--theme-warning-soft)!important;border-color:var(--theme-warning)!important;color:var(--theme-warning)!important}
+html[data-theme="night"] :is(.login-retry,.agent-execution-unknown) :is(p,span,strong,small){color:var(--theme-warning)!important}
 html[data-theme="night"] :is(.message-error,.agent-queue-error,.agent-permission-notice,.workspace-target-error,.workspace-host-lock,.chat-assistant-note.is-error,.assistant-task-state.is-error,.assistant-task-state.is-unknown,.assistant-task-approval,.assistant-task-approval-jump,.voice-conversation-error,.execution-reconnect){color:#e4b79a!important}
 html[data-theme="night"] :is(.assistant-task-state,.music-mcp-state.is-connected,.opencli-capability.is-callable,.voice-saved,.assistant-message,.chat-assistant-trigger.is-enabled .chat-assistant-trigger-state){color:#a4d4b3!important}
 html[data-theme="night"] .client-behavior-switch{background:#506051}

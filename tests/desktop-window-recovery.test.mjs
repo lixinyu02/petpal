@@ -58,6 +58,8 @@ function harness({ origin = 'http://127.0.0.1:4318', tray = true, deferredPetLoa
   const context = vm.createContext({
     app, BrowserWindow: Window, backend,
     appPreferences: { current: () => ({ closeToTray: true, petAlwaysOnTop: true }) },
+    appearance: { current: () => ({ preference: 'day', theme: 'day', saved: false }), refresh: () => ({ preference: 'day', theme: 'day', saved: false }) },
+    APPEARANCE_COLORS: { day: '#fafbf8', night: '#181d1b' }, appearanceArguments: () => ['--petpal-appearance=day:day:0'], crypto: { randomUUID: () => '12345678-1234-1234-1234-123456789abc' },
     executor: { async disconnect() { calls.disconnects++; } },
     rendererFailure() { calls.fatalErrors++; }, remoteHttp: { cancelOwner() {} },
     screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }) },
@@ -66,7 +68,7 @@ function harness({ origin = 'http://127.0.0.1:4318', tray = true, deferredPetLoa
     process: { platform: 'win32' }, path: { join: (...parts) => parts.join('/') }, __dirname: 'desktop', iconPath: 'icon.png',
   });
   vm.runInContext(`let mainWindow, petWindow, mainLoaded, petLoaded, quitting = false;
-    let pendingMainReveal = false, mainWindowCreated = false, mainStartupFullscreenPending = false, mainFullscreenChange = null;
+    let pendingMainReveal = false, mainWindowCreated = false, mainStartupFullscreenPending = false, mainFullscreenChange = null, appearanceSessionId;
     let origin = ${JSON.stringify(origin)}, tray = ${tray ? '{}' : 'null'};
     ${['createMain', 'showMain', 'showPet', 'applyPetWindowPreferences'].map(declaration).join('\n')}
     ${registration('second-instance')}

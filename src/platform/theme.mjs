@@ -1,4 +1,5 @@
 export const THEME_STORAGE_KEY = 'petpal.theme';
+export const THEME_NATIVE_SESSION_KEY = 'petpal.theme.native-session';
 export const THEME_COLORS = Object.freeze({ day: '#fafbf8', night: '#181d1b' });
 export const THEME_CHROME_COLORS = Object.freeze({ day: '#f6f7f2', night: '#181d1b' });
 const preferences = new Set(['auto', 'day', 'night']);
@@ -26,15 +27,68 @@ export function createThemeController(options = {}) {
   const schedule = options.setTimeout ?? ((callback, delay) => win.setTimeout(callback, delay));
   const cancel = options.clearTimeout ?? (id => win.clearTimeout(id));
   const storage = () => Object.hasOwn(options, 'storage') ? options.storage : win?.localStorage;
+  const appearance = Object.hasOwn(options, 'appearance') ? options.appearance : win?.petpal?.appearance;
+  const native = appearance && typeof appearance.setPreference === 'function' ? appearance : null;
+  const validSnapshot = value => !!value && preferences.has(value.preference) && typeof value.saved === 'boolean';
+  let seed = null;
+  try { if (validSnapshot(native?.initial)) seed = native.initial; } catch {}
   const listeners = new Set();
   let mounts = 0, timer = null, ephemeral = false;
+  let revision = 0, nativeRequest = 0, attempted = '', lifecycle = 0, hydrating = false;
+  let nativeReady = !native?.status, nativeSavedPreference = seed?.saved ? seed.preference : null;
   let transparent = doc?.documentElement?.dataset?.petpalSurface === 'transparent';
+  if (transparent) { seed = null; nativeSavedPreference = null; }
   const read = () => {
-    try { const source = storage(); return source ? { available: true, preference: normalizeThemePreference(source.getItem(THEME_STORAGE_KEY)) } : { available: false }; }
+    try { const source = storage(), raw = source?.getItem(THEME_STORAGE_KEY); return source ? { available: true, valid: preferences.has(raw), preference: normalizeThemePreference(raw) } : { available: false }; }
     catch { return { available: false }; }
   };
   const initial = read();
-  let state = Object.freeze({ preference: initial.preference ?? 'day', theme: effectiveTheme(initial.preference, now()), saved: initial.available });
+  let preference = initial.preference ?? 'day', sameNativeSession = false;
+  if (seed?.sessionId) try { sameNativeSession = storage()?.getItem(THEME_NATIVE_SESSION_KEY) === seed.sessionId; } catch {}
+  if (seed?.saved && (!initial.valid || seed.sessionId && !sameNativeSession)) preference = seed.preference;
+  if (native && seed?.sessionId) {
+    try { const source = storage(); source?.setItem(THEME_STORAGE_KEY, preference); source?.setItem(THEME_NATIVE_SESSION_KEY, seed.sessionId); ephemeral = source?.getItem(THEME_STORAGE_KEY) !== preference; } catch { ephemeral = true; }
+  }
+  let state = Object.freeze({ preference, theme: effectiveTheme(preference, now()), saved: native ? nativeSavedPreference === preference : initial.available });
+
+  const savedFor = (selected, localSaved) => native ? nativeSavedPreference === selected : localSaved;
+  function syncNative() {
+    if (!native || !nativeReady || !mounts || transparent || doc?.visibilityState === 'hidden') return;
+    const selected = state.preference, key = `${selected}/${state.theme}`;
+    if (attempted === key) return;
+    attempted = key;
+    const request = ++nativeRequest, generation = lifecycle;
+    Promise.resolve().then(() => native.setPreference(selected)).then(result => {
+      if (!mounts || generation !== lifecycle || request !== nativeRequest || selected !== state.preference) return;
+      nativeSavedPreference = validSnapshot(result) && result.saved && result.preference === selected ? selected : null;
+      publish(selected, savedFor(selected, false));
+    }).catch(() => {
+      if (!mounts || generation !== lifecycle || request !== nativeRequest || selected !== state.preference) return;
+      publish(selected, false);
+    });
+  }
+  function hydrateNative() {
+    if (!native || nativeReady || hydrating || !mounts || transparent) return;
+    hydrating = true;
+    const atRevision = revision, generation = lifecycle;
+    Promise.resolve().then(() => native.status()).then(result => {
+      if (!mounts || generation !== lifecycle) return;
+      hydrating = false; nativeReady = true;
+      if (validSnapshot(result) && result.saved) {
+        nativeSavedPreference = result.preference;
+        if (revision === atRevision) {
+          let localSaved = false;
+          try { const source = storage(); source?.setItem(THEME_STORAGE_KEY, result.preference); localSaved = source?.getItem(THEME_STORAGE_KEY) === result.preference; } catch {}
+          ephemeral = !localSaved;
+          publish(result.preference, true);
+        }
+      }
+      syncNative();
+    }).catch(() => {
+      if (!mounts || generation !== lifecycle) return;
+      hydrating = false; nativeReady = true; syncNative();
+    });
+  }
 
   function apply() {
     const root = doc?.documentElement;
@@ -52,6 +106,7 @@ export function createThemeController(options = {}) {
     if (changed) state = Object.freeze({ preference, theme, saved });
     apply();
     if (changed) for (const listener of listeners) listener();
+    syncNative();
   }
 
   function reschedule() {
@@ -65,13 +120,13 @@ export function createThemeController(options = {}) {
   function refresh({ fromStorage = false } = {}) {
     if (fromStorage || !ephemeral) {
       const next = read();
-      if (next.available) { ephemeral = false; publish(next.preference, true); }
-      else publish(state.preference, false);
+      if (next.available) { ephemeral = false; publish(next.preference, savedFor(next.preference, true)); }
+      else publish(state.preference, savedFor(state.preference, false));
     } else publish();
     reschedule();
   }
   const visible = () => { if (doc?.visibilityState !== 'hidden') refresh(); else reschedule(); };
-  const focus = () => refresh();
+  const focus = () => { attempted = ''; refresh(); };
   const changed = event => {
     if (event.key !== null && event.key !== THEME_STORAGE_KEY) return;
     try { if (event.storageArea && event.storageArea !== storage()) return; } catch { return; }
@@ -84,22 +139,26 @@ export function createThemeController(options = {}) {
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     setPreference(preference) {
       if (!preferences.has(preference)) throw new TypeError('Unknown theme preference');
+      ++revision; ++nativeRequest; attempted = '';
       let saved = false;
       try { const source = storage(); if (source) { source.setItem(THEME_STORAGE_KEY, preference); saved = source.getItem(THEME_STORAGE_KEY) === preference; } } catch {}
-      ephemeral = !saved; publish(preference, saved); reschedule();
+      ephemeral = !saved; publish(preference, savedFor(preference, saved)); reschedule();
     },
     refresh,
     mount(surface = {}) {
       if (typeof surface.transparent === 'boolean') transparent = surface.transparent;
       if (++mounts === 1) {
+        ++lifecycle; hydrating = false;
         win?.addEventListener('storage', changed); win?.addEventListener('focus', focus);
         doc?.addEventListener('visibilitychange', visible);
       }
       refresh();
+      hydrateNative();
       let active = true;
       return () => {
         if (!active) return; active = false;
         if (--mounts) return;
+        ++lifecycle; hydrating = false;
         if (timer !== null) { cancel(timer); timer = null; }
         win?.removeEventListener('storage', changed); win?.removeEventListener('focus', focus);
         doc?.removeEventListener('visibilitychange', visible);

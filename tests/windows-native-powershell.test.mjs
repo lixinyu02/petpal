@@ -96,7 +96,7 @@ $sha=[System.Security.Cryptography.SHA256]::Create(); try {$hash=[BitConverter]:
 }
 
 test('real PowerShell smoke rejects missing assistant members and altered module byte receipts', { skip: process.platform !== 'win32' }, async () => {
-  const expected = ['server/conversation-organization.mjs', 'server/chat-assistant.mjs',
+  const expected = ['desktop/appearance.cjs', 'server/conversation-organization.mjs', 'server/chat-assistant.mjs',
     'server/automation-schema.mjs', 'server/automation-tools.mjs', 'server/automations.mjs',
     'server/codex-config.mjs', 'server/approval-review.mjs', 'server/system-controls.mjs', 'server/native/system-windows.ps1',
     'server/native/codex-review/models-0.143.0.json', 'server/native/codex-review/LICENSE', 'server/native/codex-review/PROVENANCE.json', 'server/native/codex-review/SHA256SUMS'];

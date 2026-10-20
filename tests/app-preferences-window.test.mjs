@@ -18,8 +18,10 @@ function harness({ tray = true } = {}) {
     setVisibleOnAllWorkspaces() {} loadURL() { return Promise.resolve(); }
   }
   const context = vm.createContext({
-    BrowserWindow: Window, app: { quit() { calls.quits++; } }, officialAccounts: undefined,
+    BrowserWindow: Window, app: { quit() { calls.quits++; } }, officialAccounts: undefined, appProxy: undefined,
     appPreferences: { current: () => ({ ...preferences }) },
+    appearance: { current: () => ({ preference: 'day', theme: 'day', saved: false }), refresh: () => ({ preference: 'day', theme: 'day', saved: false }), close: async () => {} },
+    APPEARANCE_COLORS: { day: '#fafbf8', night: '#181d1b' }, appearanceArguments: () => ['--petpal-appearance=day:day:0'], crypto: { randomUUID: () => '12345678-1234-1234-1234-123456789abc' },
     mainWindowLayout: () => ({}), petWindowLayout: () => ({}),
     screen: { getPrimaryDisplay: () => ({ workArea: {} }) },
     trackWindowDisplay() {}, fitWindowToDisplay() {}, secureWindow() {}, rendererFailure() {}, applyMainStartupFullscreen() {},
@@ -31,7 +33,7 @@ function harness({ tray = true } = {}) {
     const declaration = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
     assert.ok(declaration, name); return declaration.getText(parsed);
   });
-  vm.runInContext(`let mainWindow,petWindow,mainLoaded,petLoaded,quitting=false;let pendingMainReveal=false,mainWindowCreated=false,mainStartupFullscreenPending=false,mainFullscreenChange=null;let tray=${tray ? '{}' : 'null'};let origin='http://localhost';${functions.join('\n')}`, context);
+  vm.runInContext(`let mainWindow,petWindow,mainLoaded,petLoaded,quitting=false;let pendingMainReveal=false,mainWindowCreated=false,mainStartupFullscreenPending=false,mainFullscreenChange=null,appearanceSessionId;let tray=${tray ? '{}' : 'null'};let origin='http://localhost';${functions.join('\n')}`, context);
   return { preferences, windows, calls, context };
 }
 function close(win) { let prevented = false; win.emit('close', { preventDefault() { prevented = true; } }); return prevented; }
@@ -46,6 +48,17 @@ test('a hidden startup stays in tray until explicitly opened without hiding a se
 test('visible startup and absence of a usable tray cannot strand a hidden main window', () => {
   const normal = harness(); normal.context.createMain(); normal.windows[0].emit('ready-to-show'); assert.equal(normal.windows[0].shows, 1);
   const noTray = harness({ tray: false }); noTray.context.createMain(false); noTray.windows[0].emit('ready-to-show'); assert.equal(noTray.windows[0].shows, 1);
+});
+test('main windows start with the effective appearance while pet windows retain transparent native surfaces and no saving seed', () => {
+  for (const theme of ['day', 'night']) {
+    const f = harness();
+    f.context.appearance.current = f.context.appearance.refresh = () => ({ preference: theme, theme, saved: true });
+    f.context.createMain(); f.context.showPet();
+    assert.equal(f.windows[0].options.backgroundColor, theme === 'night' ? '#181d1b' : '#fafbf8');
+    assert.equal(f.windows[0].options.frame, undefined, 'Keep the existing native title bar');
+    assert.equal(f.windows[1].options.transparent, true); assert.equal(f.windows[1].options.frame, false);
+    assert.equal(f.windows[1].options.backgroundColor, undefined); assert.equal(f.windows[1].options.webPreferences.additionalArguments, undefined);
+  }
 });
 
 test('an OS autostart duplicate preserves the tray while manual relaunch opens the main window', () => {
@@ -82,14 +95,16 @@ test('pet topmost preference applies on creation and immediately after a saved c
   f.context.showPet(); assert.equal(f.windows.length, 1); assert.equal(pet.shows, 1);
 });
 
-test('application quit waits for pending preference rollback before exiting the process', async () => {
-  const f = harness(); let received, finish, finishCentral;
+test('application quit waits for pending preference rollback and appearance persistence before exiting the process', async () => {
+  const f = harness(); let received, finish, finishCentral, finishAppearance;
   const pending = new Promise(resolve => { finish = resolve; });
   const centralPending = new Promise(resolve => { finishCentral = resolve; });
+  const appearancePending = new Promise(resolve => { finishAppearance = resolve; });
   const exits = [], closures = [], centralClosures = [];
   f.context.app.on = (event, callback) => { assert.equal(event, 'before-quit'); received = callback; };
   f.context.app.exit = code => exits.push(code);
   f.context.appPreferences.close = () => { closures.push('preferences'); return pending; };
+  f.context.appearance.close = () => { closures.push('appearance'); return appearancePending; };
   f.context.executor.close = async () => { closures.push('executor'); };
   f.context.remoteHttp.close = async () => { closures.push('requests'); };
   f.context.centralServer = { close: async () => { centralClosures.push('start'); await centralPending; centralClosures.push('closed'); } };
@@ -106,9 +121,11 @@ test('application quit waits for pending preference rollback before exiting the 
   finishCentral();
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(centralClosures, ['start', 'closed']);
-  assert.equal(prevented, true); assert.deepEqual(closures.sort(), ['executor','preferences','requests']);
+  assert.equal(prevented, true); assert.deepEqual(closures.sort(), ['appearance','executor','preferences','requests']);
   assert.equal(exits.length, 0, 'OS rollback must finish before process exit');
   finish(); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(exits, [], 'Native appearance persistence must finish before process exit');
+  finishAppearance(); await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(exits, [0]);
   received({ preventDefault() { assert.fail('Reentrant quit'); } });
   assert.deepEqual(exits, [0]);

@@ -20,6 +20,7 @@ files:
   - desktop/startup-diagnostics.cjs
   - desktop/app-preferences.cjs
   - desktop/app-preferences-ipc.cjs
+  - desktop/appearance.cjs
   - desktop/app-proxy*.mjs
   - desktop/app-proxy*.cjs
   - desktop/native/mihomo/**

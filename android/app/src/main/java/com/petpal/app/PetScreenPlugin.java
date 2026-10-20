@@ -21,12 +21,16 @@ public final class PetScreenPlugin extends Plugin {
 
     @PluginMethod public void setAppearance(PluginCall call) {
         String theme = call.getString("theme");
-        if (call.getData().length() != 1 || !ScreenInsetsPolicy.validTheme(theme)) {
+        String preference = call.getString("preference");
+        boolean legacy = !call.getData().has("preference");
+        if (!ScreenInsetsPolicy.validTheme(theme) || (legacy ? call.getData().length() != 1
+            : call.getData().length() != 2 || !ScreenInsetsPolicy.validPreference(preference) || !"auto".equals(preference) && !theme.equals(preference))) {
             call.reject("界面主题必须为 day 或 night。"); return;
         }
         getActivity().runOnUiThread(() -> {
             if (!trusted()) { call.reject("系统栏外观仅限安全的小伴主页面设置。"); return; }
-            ((MainActivity) getActivity()).setScreenAppearance(theme);
+            if (legacy) ((MainActivity) getActivity()).setScreenAppearance(theme);
+            else ((MainActivity) getActivity()).setScreenAppearance(theme, preference);
             JSObject result = new JSObject();
             result.put("nativeInsets", ScreenInsetsPolicy.nativeInsets(Build.VERSION.SDK_INT));
             call.resolve(result);

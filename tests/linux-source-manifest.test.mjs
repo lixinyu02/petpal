@@ -17,8 +17,25 @@ test('every required Linux source member participates in payload hashing and man
     .map(statement => { assert.ok(statement); return statement.getText(parsed); }).join('\n');
   const policy = vm.runInNewContext(`${code}\n({ requiredApplicationSource, isApplicationSource });`);
   assert.ok(policy.requiredApplicationSource.includes('desktop/window-layout.cjs'));
+  for (const file of ['desktop/appearance.cjs', 'desktop/memory-ipc.cjs', 'server/companion-routines.mjs',
+    'server/companion-routine-schema.mjs', 'server/companion-personalization.mjs', 'server/companion-content.mjs', 'server/companion-weather.mjs']) {
+    assert.ok(policy.requiredApplicationSource.includes(file), `Required current feature can no longer disappear silently: ${file}`);
+  }
   for (const file of policy.requiredApplicationSource) assert.ok(policy.isApplicationSource(file), `Unhashed required source: ${file}`);
   for (const file of ['desktop/assets/icon.png', 'desktop/private.cjs', 'server/data/auth.json', 'node_modules/pkg/index.js']) {
     assert.equal(policy.isApplicationSource(file), false, `Unexpected application source: ${file}`);
+  }
+});
+
+test('Linux builder requires the actual appearance and daily companion backend modules before publication', async () => {
+  const source = await readFile(new URL('../scripts/linux-package.mjs', import.meta.url), 'utf8');
+  const parsed = ts.createSourceFile('linux-package.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const statements = parsed.statements.filter(statement =>
+    (ts.isVariableStatement(statement) && statement.declarationList.declarations.some(item => item.name.getText(parsed) === 'requiredApplicationSource'))
+    || (ts.isExpressionStatement(statement) && ts.isCallExpression(statement.expression) && statement.expression.expression.getText(parsed) === 'requiredApplicationSource.push'));
+  const required = vm.runInNewContext(statements.map(statement => statement.getText(parsed)).join('\n') + '\nrequiredApplicationSource');
+  for (const file of ['desktop/appearance.cjs', 'server/companion-routines.mjs', 'server/companion-routine-schema.mjs',
+    'server/companion-personalization.mjs', 'server/companion-content.mjs', 'server/companion-weather.mjs']) {
+    assert.ok(required.includes(file), `Builder must fail if this application module is missing: ${file}`);
   }
 });

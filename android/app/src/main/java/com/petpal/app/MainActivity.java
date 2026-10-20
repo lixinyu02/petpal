@@ -33,6 +33,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         sanitizeOfficialIntent(getIntent());
+        ScreenInsetsController.prepareAppearance(this);
         registerPlugin(PetOverlayPlugin.class);
         registerPlugin(PetUpdaterPlugin.class);
         registerPlugin(PetTaskNotificationsPlugin.class);
@@ -152,6 +153,10 @@ public class MainActivity extends BridgeActivity {
 
     public void setScreenAppearance(String theme) {
         if (screenInsets != null) screenInsets.setAppearance(theme);
+    }
+
+    public void setScreenAppearance(String theme, String preference) {
+        if (screenInsets != null) screenInsets.setAppearance(theme, preference);
     }
 
     private void defaultBack() {
