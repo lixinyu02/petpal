@@ -8,3 +8,12 @@
 @media(prefers-reduced-motion:reduce){.cloud-instance,.cloud-create,.remote-desktop-panel{animation:none}}
 
 .cloud-runtime-prepare{display:flex;gap:16px;flex-wrap:wrap;align-items:center;justify-content:space-between;padding:14px 0 22px;border-bottom:1px solid var(--theme-border,#e7ebe3);margin-bottom:12px}.cloud-runtime-prepare p{font-size:12px;color:var(--theme-muted,#859087)}.cloud-runtime-prepare button{display:inline-flex;align-items:center;gap:7px;min-height:40px;font-size:12px}
+/* A remote desktop is a visual-viewport drawer on phones and small tablets. */
+@media(max-width:1100px){
+ .remote-desktop-panel,.remote-desktop-panel.is-expanded{inset:auto;top:calc(var(--app-viewport-top,0px) + var(--app-safe-top,0px) + 8px);left:calc(var(--app-viewport-left,0px) + var(--app-safe-left,0px) + 8px);width:calc(var(--app-viewport-width,100vw) - var(--app-safe-left,0px) - var(--app-safe-right,0px) - 16px);height:calc(var(--app-viewport-height,100dvh) - var(--app-safe-top,0px) - var(--app-safe-bottom,0px) - 16px);overflow:auto;overscroll-behavior:contain}
+ .remote-desktop-panel.is-expanded{border-radius:8px}
+ .remote-desktop-panel>header,.remote-desktop-toolbar,.remote-desktop-panel>footer{flex-shrink:0}
+ .remote-desktop-canvas{min-height:64px;flex:1 0 64px}
+ .remote-desktop-toolbar{flex-wrap:wrap}
+ .remote-desktop-panel>footer{padding-bottom:10px}
+}

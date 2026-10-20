@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as executionHosts from '../src/execution-host-picker.mjs';
+import * as safeViewport from '../src/platform/safe-viewport.mjs';
 
 const source = ts.transpileModule(await readFile(new URL('../src/WorkspaceControls.tsx', import.meta.url), 'utf8'), {
   fileName: 'WorkspaceControls.tsx', compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
@@ -15,7 +16,7 @@ const providers = [
 ];
 
 /** Exercise the real component, layout effects and input handlers with isolated browser focus. */
-function pickerFixture({ width = 412, disabled = false, available = providers } = {}) {
+function pickerFixture({ width = 412, height = 960, left = 0, top = 0, scale = 1, insets = {}, native = false, disabled = false, available = providers } = {}) {
   const hooks = [], effects = [], focusCalls = [], changes = [], frames = new Map();
   const document = new EventTarget(), window = new EventTarget();
   let index = 0, tree, frameId = 0;
@@ -38,13 +39,15 @@ function pickerFixture({ width = 412, disabled = false, available = providers } 
   const trigger = fakeElement('trigger'), popup = fakeElement('popup'), search = fakeElement('search');
   document.activeElement = trigger;
   document.body = fakeElement('body');
+  document.documentElement = {dataset:{nativeInsets:String(native)},style:{getPropertyValue:()=>''}};
   document.getElementById = () => ({ scrollIntoView() {} });
-  Object.assign(window, { innerWidth: width, innerHeight: 960, visualViewport: Object.assign(new EventTarget(), { width, height: 960, offsetLeft: 0, offsetTop: 0 }) });
+  Object.assign(window, { innerWidth: width, innerHeight: height, visualViewport: Object.assign(new EventTarget(), { width, height, offsetLeft: left, offsetTop: top, scale }), getComputedStyle:()=>({getPropertyValue:property=>`${insets[property.split('-').at(-1)]||0}px`}) });
   const modules = {
     react, 'react/jsx-runtime': { jsx: element, jsxs: element },
     'react-dom': { createPortal: children => element('portal', { children }) },
     'lucide-react': new Proxy({}, { get: (_target, key) => Symbol.for(String(key)) }),
     './execution-host-picker.mjs': executionHosts,
+    './platform/safe-viewport.mjs': safeViewport,
     './WorkspaceDisclosure': { __esModule: true, default: Symbol('WorkspaceDisclosure') },
     './AgentOnboarding': { AgentOnboarding: Symbol('AgentOnboarding') },
   };
@@ -70,7 +73,7 @@ function pickerFixture({ width = 412, disabled = false, available = providers } 
   const key = (node, key, target = trigger) => { node.props.onKeyDown({ key, target, preventDefault() {}, stopPropagation() {} }); render(); };
   render();
   return {
-    find, focusCalls, changes, document, search,
+    find, focusCalls, changes, document, window, search, render,
     pointer(pointerType) { triggerNode().props.onPointerDown?.({ pointerType }); },
     cancelPointer() { triggerNode().props.onPointerCancel?.(); },
     click(detail = 1) { triggerNode().props.onClick({ detail, nativeEvent: { detail } }); render(); },
@@ -166,5 +169,18 @@ test('disabled and empty pickers do not open or change focus', t => {
     assert.equal(f.find('div', props => props.role === 'listbox'), undefined);
     assert.deepEqual(f.focusCalls, []);
     assert.deepEqual(f.changes, []);
+  }
+});
+
+test('the actual model popup respects landscape cutouts and a manually zoomed short keyboard viewport', t => {
+  for(const options of [{width:960,height:412,left:0,top:0,insets:{left:42,right:18,top:24,bottom:16}},
+    {width:225,height:180,left:70,top:100,scale:2,insets:{top:10,bottom:12}},
+    {width:432,height:240,left:0,top:60,native:true,insets:{top:40,bottom:30}}]){
+    const f=pickerFixture(options);t.after(()=>f.close());f.pointer('touch');f.click();f.render();
+    const style=f.find('div',props=>props.className==='workspace-model-popup').props.style;
+    const safe=safeViewport.readSafeViewport(f.window,f.document,12);
+    assert.ok(style.left>=safe.left);assert.ok(style.left+style.width<=safe.right);
+    assert.ok(style.top>=safe.top);assert.ok(style.top+style.maxHeight<=safe.bottom);
+    assert.equal(f.focusCalls.some(call=>call.name==='search'),false);
   }
 });

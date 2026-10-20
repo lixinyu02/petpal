@@ -15,6 +15,7 @@ public class MainActivity extends BridgeActivity {
     private boolean officialSettingsRequested;
     private final BackNavigationPolicy backNavigation = new BackNavigationPolicy();
     private OnBackPressedCallback nativeBack;
+    private ScreenInsetsController screenInsets;
     private final WebViewListener backPageListener = new WebViewListener() {
         @Override public void onPageStarted(WebView view) { backNavigation.cancel(); }
         @Override public void onPageLoaded(WebView view) { openOfficialSettings(); }
@@ -25,6 +26,7 @@ public class MainActivity extends BridgeActivity {
     @Override public void onPause() { updaterForeground = false; backNavigation.cancel(); super.onPause(); }
     @Override public void onDestroy() {
         backNavigation.cancel();
+        if (screenInsets != null) screenInsets.close();
         if (getBridge() != null) getBridge().removeWebViewListener(backPageListener);
         super.onDestroy();
     }
@@ -37,10 +39,12 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(PetAppProxyPlugin.class);
         registerPlugin(PetOfficialAccountPlugin.class);
         registerPlugin(PetLoginSessionPlugin.class);
+        registerPlugin(PetScreenPlugin.class);
         super.onCreate(savedInstanceState);
         // Capacitor already presents its no-WebView fallback if bridge creation could not run.
         // Preserve that page instead of crashing while installing local-only features.
         if (getBridge() == null || getBridge().getWebView() == null) return;
+        screenInsets = new ScreenInsetsController(this, getBridge().getWebView());
         // Capacitor normally uses an origin-scoped, main-frame WebMessageListener.
         // Remove its possible legacy JS-interface fallback, which has no frame origin.
         // Existing modern media/overlay bridges keep using the safe listener.
@@ -106,6 +110,9 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void requestPageBack() {
+        // Some OEM back dispatchers reach the Activity before the IME handles back.
+        // Dismissing the keyboard must not also close a menu or leave the workspace.
+        if (screenInsets != null && screenInsets.hideImeIfVisible()) return;
         if (backNavigation.isPending()) return;
         WebView view = getBridge() == null ? null : getBridge().getWebView();
         if (view == null || !activeLocalPage(view)) { defaultBack(); return; }
@@ -119,6 +126,10 @@ public class MainActivity extends BridgeActivity {
                 if (result == BackNavigationPolicy.Result.FALLBACK) defaultBack();
             });
         } catch (RuntimeException ignored) { backNavigation.cancel(); }
+    }
+
+    public void setScreenAppearance(String theme) {
+        if (screenInsets != null) screenInsets.setAppearance(theme);
     }
 
     private void defaultBack() {

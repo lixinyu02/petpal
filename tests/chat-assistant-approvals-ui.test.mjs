@@ -8,6 +8,7 @@ import * as preferences from '../src/chat-assistant-preferences.mjs';
 import * as directories from '../src/project-directory-preferences.mjs';
 import * as reviewUi from '../src/approval-review-ui.mjs';
 import * as messageReuse from '../src/conversation-message-reuse.mjs';
+import * as safeViewport from '../src/platform/safe-viewport.mjs';
 
 const source=ts.transpileModule(await readFile(new URL('../src/ChatAssistant.tsx',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
 const nodes=tree=>Array.isArray(tree)?tree.flatMap(nodes):!tree||typeof tree!=='object'?[]:[tree,...nodes(tree.props?.children)];
@@ -46,7 +47,7 @@ function fixture({hasApproval=true,review,failInitialRead=false,messages=[],user
     if(delayed>=0){const entry=delays.splice(delayed,1)[0];entry.started.resolve(value);await entry.release.promise;return entry.value===undefined?value:clone(entry.value);}
     return value;
   }};
-  const modules={'./platform/visible-poll.mjs':{createVisiblePoll},react,'react/jsx-runtime':{jsx:element,jsxs:element},'react-dom':{createPortal:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
+  const modules={'./platform/safe-viewport.mjs':safeViewport,'./platform/visible-poll.mjs':{createVisiblePoll},react,'react/jsx-runtime':{jsx:element,jsxs:element},'react-dom':{createPortal:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     './api':api,'./AgentPermissions':{__esModule:true,default:Symbol('AgentPermissions'),defaultAgentPermissions:{access:'read-only',approval:'ask'}},'./AgentUserInput':{__esModule:true,default:Symbol('AgentUserInput')},
     './WorkspaceControls':{ExecutionHostPicker:Symbol('ExecutionHostPicker'),ModelPicker:Symbol('ModelPicker')},'./ProjectDirectory':{__esModule:true,default:Symbol('ProjectDirectory')},
     './chat-assistant-preferences.mjs':preferences,'./project-directory-preferences.mjs':directories,'./approval-review-ui.mjs':reviewUi,'./conversation-message-reuse.mjs':messageReuse,'./platform/ui-motion.ts':{useUiEntrance:()=>({current:null})}};

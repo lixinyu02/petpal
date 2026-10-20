@@ -1,4 +1,5 @@
 /* One reading column connects the controls, conversation and input. */
+.app-shell { padding-left:var(--app-safe-left,0px);padding-right:var(--app-safe-right,0px); }
 .app-shell .workspace-controls,
 .app-shell .chat-reading-area,
 .app-shell .composer-area {
@@ -73,7 +74,7 @@
   html .app-shell .workspace-controls .agent-project-directory>summary { align-items:center;padding-block:3px; }
   html .app-shell .workspace-controls .agent-project-summary>strong { white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
   html .app-shell .composer-area { padding-top:4px;padding-bottom:calc(4px + env(safe-area-inset-bottom,0px)); }
-  html .app-shell .composer textarea { height:44px;min-height:44px;max-height:116px;padding-block:9px 5px;line-height:1.5;overflow-y:auto; }
+  html .app-shell .composer textarea { height:44px;min-height:max(44px,calc(1lh + 20px));max-height:max(116px,calc(1lh + 20px));padding-block:9px 5px;line-height:1.5;overflow-y:auto; }
   html .app-shell .composer-bottom { padding-bottom:4px; }
   html .app-shell .composer-footer { margin-top:0; }
   html .app-shell .composer-runtime .agent-permissions { margin-bottom:0; }
@@ -98,7 +99,7 @@
   html .app-shell .composer .attach-image span { display:none; }
   html[data-short-viewport=true] .app-shell .workspace-mode-row .mode-switch,
   html[data-short-viewport=true] .app-shell .workspace-mode-row .mode-switch>button { min-height:44px; }
-  html[data-short-viewport=true] .app-shell .composer textarea { height:44px;min-height:44px;max-height:92px; }
+  html[data-short-viewport=true] .app-shell .composer textarea { height:44px;min-height:max(44px,calc(1lh + 20px));max-height:max(92px,calc(1lh + 20px)); }
 }
 @supports(field-sizing:content) {
   @media(max-width:650px) {

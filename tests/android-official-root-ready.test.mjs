@@ -25,7 +25,7 @@ function fixture(){
   const modules={react,'react/jsx-runtime':{jsx,jsxs:jsx},'react-dom/client':{createRoot:()=>({render:tree=>{captured=tree;}})},
     '@capacitor/core':{Capacitor:{isNativePlatform:()=>true,getPlatform:()=>'android'},registerPlugin:()=>({})},
     './api':{getIdentity:()=>null,getSessionEpoch:()=>1,subscribeSession:()=>()=>{},initConnection:()=>restoration.promise},
-    './platform/useViewport':{useViewport(){}},'./platform/ui-motion.ts':{mountUiMotionLifecycle:()=>()=>{}},
+    './platform/useViewport':{useViewport(){}},'./platform/useAndroidScreen':{useAndroidScreen(){}},'./platform/ui-motion.ts':{mountUiMotionLifecycle:()=>()=>{}},
     './platform/interaction-layers.mjs':{mountInteractionLayers:()=>()=>{}},'./platform/theme.ts':{mountThemeLifecycle:()=>()=>{}},
     './platform/overlay':{PetOverlay:{stop:async()=>{},status:async()=>({running:false})},showPet:async()=>{}},
     './auth/LoginGate':{default:Symbol('LoginGate'),__esModule:true},'./auth/overlay-entry.mjs':{isPassiveNativeOverlay:()=>false},

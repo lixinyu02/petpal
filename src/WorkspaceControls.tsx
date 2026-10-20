@@ -5,6 +5,7 @@ import type { AgentHost, Provider } from './api';
 import { canSelectExecutionHost, executionHostChoices, groupExecutionHosts, type ExecutionHostChoice } from './execution-host-picker.mjs';
 import './workspace-controls.css';
 import WorkspaceDisclosure from './WorkspaceDisclosure';
+import { readSafeViewport } from './platform/safe-viewport.mjs';
 
 export { AgentOnboarding } from './AgentOnboarding';
 
@@ -60,14 +61,13 @@ export function ModelPicker({ providers, value, onChange, disabled = false, labe
     let frame = 0;
     const place = () => {
       const anchor = trigger.current?.getBoundingClientRect(); if (!anchor) return;
-      const viewport = window.visualViewport, width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
-      const offsetTop = viewport?.offsetTop || 0, offsetLeft = viewport?.offsetLeft || 0;
-      const gutter = 12, gap = 8, menuWidth = Math.min(360, Math.max(1, width - gutter * 2));
-      const below = height + offsetTop - anchor.bottom - gutter - gap, above = anchor.top - offsetTop - gutter - gap;
+      const bounds = readSafeViewport(window, document, 12);
+      const gap = 8, menuWidth = Math.min(360, bounds.width);
+      const below = bounds.bottom - anchor.bottom - gap, above = anchor.top - bounds.top - gap;
       const opensAbove = below < 220 && above > below, available = opensAbove ? above : below;
-      const maxHeight = Math.max(1, Math.min(430, height - gutter * 2, available < 100 ? height - gutter * 2 : available));
-      const top = Math.max(offsetTop + gutter, Math.min(opensAbove ? anchor.top - maxHeight - gap : anchor.bottom + gap, offsetTop + height - gutter - maxHeight));
-      setPlacement({ left: Math.max(offsetLeft + gutter, Math.min(anchor.left, width + offsetLeft - menuWidth - gutter)), top, width: menuWidth, maxHeight });
+      const maxHeight = Math.max(1, Math.min(430, bounds.height, available < 100 ? bounds.height : available));
+      const top = Math.max(bounds.top, Math.min(opensAbove ? anchor.top - maxHeight - gap : anchor.bottom + gap, bounds.bottom - maxHeight));
+      setPlacement({ left: Math.max(bounds.left, Math.min(anchor.left, bounds.right - menuWidth)), top, width: menuWidth, maxHeight });
     };
     const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(place); };
     place(); if (focusSearchOnOpen.current) search.current?.focus({ preventScroll: true });

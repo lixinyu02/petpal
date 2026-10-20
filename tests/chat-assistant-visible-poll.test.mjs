@@ -8,6 +8,7 @@ import * as preferences from '../src/chat-assistant-preferences.mjs';
 import * as directories from '../src/project-directory-preferences.mjs';
 import * as reviewUi from '../src/approval-review-ui.mjs';
 import * as messageReuse from '../src/conversation-message-reuse.mjs';
+import * as safeViewport from '../src/platform/safe-viewport.mjs';
 
 const source = ts.transpileModule(await readFile(new URL('../src/ChatAssistant.tsx', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
@@ -34,6 +35,7 @@ function fixture(context, initial = {}) {
   const schedule = (callback, delay) => { const id = ++timerId; timers.set(id, { callback, due: clock + delay }); return id; }, unschedule = id => timers.delete(id);
   const local = { getItem: () => null, setItem() {} };
   const modules = {
+    './platform/safe-viewport.mjs':safeViewport,
     react, 'react/jsx-runtime': {}, 'react-dom': {}, 'lucide-react': {},
     './api': { getSessionEpoch: () => epoch, isSessionChanged: error => error?.name === 'SessionChangedError', api(path, options = {}) { assert.equal(path, '/agent/hosts'); assert.equal(options.method, undefined, 'host polling cannot mutate or launch an Agent task'); const pending = deferred(); requests.push({ path, options, epoch, ...pending }); return pending.promise; } },
     './platform/visible-poll.mjs': { createVisiblePoll: options => createVisiblePoll({ ...options, setTimeoutFn: schedule, clearTimeoutFn: unschedule }) },

@@ -10,6 +10,7 @@ import { mountUiMotionLifecycle } from './platform/ui-motion.ts';
 import { mountInteractionLayers } from './platform/interaction-layers.mjs';
 import {mountThemeLifecycle} from './platform/theme.ts';
 import { useViewport } from './platform/useViewport';
+import { useAndroidScreen } from './platform/useAndroidScreen';
 import { getIdentity, getSessionEpoch, initConnection, subscribeSession, type LoginSessionBridge } from './api';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { PetOverlay as NativeOverlay, showPet } from './platform/overlay';
@@ -26,6 +27,7 @@ if(!overlay&&Capacitor.isNativePlatform()&&Capacitor.getPlatform()==='android'){
 }
 function SessionRoot(){
   useViewport();
+  useAndroidScreen(overlay);
   const[ready,setReady]=useState(overlay);
   useLayoutEffect(() => mountUiMotionLifecycle({ disabled: overlay }), []);
   useEffect(() => overlay ? undefined : mountInteractionLayers(), []);

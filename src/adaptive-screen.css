@@ -4,7 +4,13 @@
   --app-viewport-height: 100vh;
   --app-viewport-top: 0px;
   --app-viewport-left: 0px;
+  --app-safe-top: env(safe-area-inset-top,0px);
+  --app-safe-right: env(safe-area-inset-right,0px);
+  --app-safe-bottom: env(safe-area-inset-bottom,0px);
+  --app-safe-left: env(safe-area-inset-left,0px);
 }
+/* Android's native WebView rectangle has already excluded these pixels. */
+html[data-native-insets=true] { --app-safe-top:0px;--app-safe-right:0px;--app-safe-bottom:0px;--app-safe-left:0px; }
 @supports(height:100dvh) { :root { --app-viewport-height:100dvh; } }
 
 .companion-world.companion-world {
@@ -12,7 +18,7 @@
   min-height:0;
   overflow-y:auto;
   overflow-x:hidden;
-  padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);
+  padding:var(--app-safe-top) var(--app-safe-right) var(--app-safe-bottom) var(--app-safe-left);
   scrollbar-gutter:stable;
 }
 .companion-world .companion-header {
@@ -79,7 +85,7 @@
 }
 /* Landscape / keyboard: shorten chrome before shrinking the interactive model. */
 html[data-short-viewport=true] .companion-world .companion-header { padding-top:6px;padding-bottom:6px; }
-html[data-short-viewport=true] .companion-world .companion-space { min-height:300px;flex-basis:300px;row-gap:2px;padding-top:2px; }
+:where(html[data-short-viewport=true]) .companion-world .companion-space { min-height:300px;flex-basis:300px;row-gap:2px;padding-top:2px; }
 html[data-short-viewport=true] .companion-world .companion-intro h1 { font-size:22px;margin:2px 0; }
 html[data-short-viewport=true] .companion-world .companion-presence { display:none; }
 html[data-short-viewport=true] .companion-world .companion-footer { min-height:44px;padding-top:2px;padding-bottom:2px; }

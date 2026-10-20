@@ -12,6 +12,7 @@ import AgentUserInput from './AgentUserInput';
 import {projectDirectoryIssue} from './project-directory-preferences.mjs';
 import {useUiEntrance} from './platform/ui-motion.ts';
 import {createVisiblePoll} from './platform/visible-poll.mjs';
+import {readSafeViewport} from './platform/safe-viewport.mjs';
 import './chat-assistant.css';
 
 const taskLabels={deciding:'正在安排',queued:'已排队',running:'执行中',completed:'已完成',error:'未完成',cancelled:'已取消',unknown:'状态待确认'};
@@ -102,15 +103,16 @@ export function ChatAssistantControls({assistant,allowed,user,providers,reviewPr
     let frame=0;
     const place=()=>{
       const anchor=trigger.current?.getBoundingClientRect();if(!anchor||!panel.current)return;
-      const viewport=window.visualViewport,left=viewport?.offsetLeft||0,top=viewport?.offsetTop||0,width=viewport?.width||window.innerWidth,height=viewport?.height||window.innerHeight;
-      const sheet=width<=650,gutter=sheet?0:12,panelWidth=sheet?width:Math.min(380,width-gutter*2),fullHeight=Math.max(1,height-(sheet?10:24));
+      const safe=readSafeViewport(window,document),{viewport}=safe;
+      const sheet=viewport.width<=650,bounds=sheet?safe:readSafeViewport(window,document,12);
+      const panelWidth=sheet?bounds.width:Math.min(380,bounds.width),fullHeight=Math.max(1,bounds.height-(sheet?10:0));
       const naturalHeight=(heading.current?.offsetHeight||72)+(body.current?.scrollHeight||330)+2;
-      const below=top+height-anchor.bottom-19,above=anchor.top-top-19;
+      const below=bounds.bottom-anchor.bottom-7,above=anchor.top-bounds.top-7;
       const aboveAnchor=below<Math.min(naturalHeight,330)&&above>below;
       const available=aboveAnchor?above:below;
       const maxHeight=sheet?fullHeight:Math.min(fullHeight,available>180?available:fullHeight),renderedHeight=Math.min(naturalHeight,maxHeight);
-      const panelTop=sheet?top+height-renderedHeight:Math.max(top+12,Math.min(aboveAnchor?anchor.top-renderedHeight-7:anchor.bottom+7,top+height-12-renderedHeight));
-      const next={sheet,layer:{left,top,width,height} as CSSProperties,panel:{left:sheet?left:Math.max(left+gutter,Math.min(anchor.right-panelWidth,left+width-gutter-panelWidth)),top:panelTop,width:panelWidth,maxHeight,height:renderedHeight} as CSSProperties};
+      const panelTop=sheet?bounds.bottom-renderedHeight:Math.max(bounds.top,Math.min(aboveAnchor?anchor.top-renderedHeight-7:anchor.bottom+7,bounds.bottom-renderedHeight));
+      const next={sheet,layer:{left:viewport.left,top:viewport.top,width:viewport.width,height:viewport.height} as CSSProperties,panel:{left:sheet?bounds.left:Math.max(bounds.left,Math.min(anchor.right-panelWidth,bounds.right-panelWidth)),top:panelTop,width:panelWidth,maxHeight,height:renderedHeight} as CSSProperties};
       setPlacement(previous=>JSON.stringify(previous)===JSON.stringify(next)?previous:next);
     };
     const schedule=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(place);};

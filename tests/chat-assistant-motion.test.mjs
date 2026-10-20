@@ -9,6 +9,7 @@ import * as assistantPreferences from '../src/chat-assistant-preferences.mjs';
 import * as projectPreferences from '../src/project-directory-preferences.mjs';
 import * as approvalReviewUi from '../src/approval-review-ui.mjs';
 import * as messageReuse from '../src/conversation-message-reuse.mjs';
+import * as safeViewport from '../src/platform/safe-viewport.mjs';
 
 const compile=async file=>ts.transpileModule(await readFile(new URL(file,import.meta.url),'utf8'),{
   compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true},
@@ -34,13 +35,15 @@ class Surface{
 }
 
 /** Execute the actual dialog and hook bridge; browser geometry and service calls are isolated. */
-function fixture({reduced=false,hidden=false}={}){
+function fixture({reduced=false,hidden=false,width=412,height=960,left=0,top=0,scale=1,insets={},native=false}={}){
   const hooks=[],effects=[],frames=new Map(),layers=[],observers=new Set(),changes=[],apiCalls=[];
   const document=new Surface(),window=new Surface(),media=new Surface();
   let index=0,tree,dirty=false,frameId=0,disposed=false;
   document.documentElement=new Surface();document.body=new Surface();document.body.style.overflow='initial';document.visibilityState=hidden?'hidden':'visible';document.getElementById=()=>null;
+  document.documentElement.dataset={nativeInsets:String(native)};
+  window.getComputedStyle=()=>({getPropertyValue:property=>`${insets[property.split('-').at(-1)]||0}px`});
   media.matches=reduced;window.document=document;window.matchMedia=()=>media;
-  Object.assign(window,{innerWidth:412,innerHeight:960,visualViewport:Object.assign(new Surface(),{width:412,height:960,offsetLeft:0,offsetTop:0})});
+  Object.assign(window,{innerWidth:width,innerHeight:height,visualViewport:Object.assign(new Surface(),{width,height,offsetLeft:left,offsetTop:top,scale})});
   const same=(left,right)=>left&&right&&left.length===right.length&&left.every((value,at)=>Object.is(value,right[at]));
   const react={
     useState(initial){const at=index++;hooks[at]||={state:typeof initial==='function'?initial():initial};return[hooks[at].state,next=>{const value=typeof next==='function'?next(hooks[at].state):next;if(!Object.is(value,hooks[at].state)){hooks[at].state=value;dirty=true;}}];},
@@ -56,6 +59,7 @@ function fixture({reduced=false,hidden=false}={}){
   const props={assistant,allowed:true,user:{id:'owner',isOwner:true,canUseCodex:true},providers:[{id:'provider-one',name:'Fixture model',model:'fixture',protocol:'responses'}]};
   const modules={
     './platform/visible-poll.mjs':{createVisiblePoll},
+    './platform/safe-viewport.mjs':safeViewport,
     react,'react/jsx-runtime':{jsx:element,jsxs:element},'react-dom':{createPortal:children=>element('portal',{children})},
     'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     './api':{getSessionEpoch:()=>1,isSessionChanged:()=>false,api:async path=>{apiCalls.push(path);throw Error('Unexpected API call');}},
@@ -169,4 +173,18 @@ test('actual Chat + Agent controls pass the independent review catalog separatel
   const permission=f.find(f.permissions);assert.deepEqual(permission.props.reviewProviders,[reviewer]);assert.equal(permission.props.value.reviewProviderId,reviewer.id);assert.equal(permission.props.disabled,true);assert.equal(permission.props.reviewCapability,capability);
   assert.deepEqual(f.props.providers.map(provider=>provider.id),['provider-one'],'a reviewer on another connection does not become an Agent model');
   assert.deepEqual(f.changes,[]);
+});
+
+test('the actual Chat + Agent sheet and desktop popup reserve cutouts without shrinking the portal scrim or moving focus',t=>{
+  for(const options of [{width:432,height:280,left:0,top:70,insets:{top:28,bottom:22,left:8,right:8}},
+    {width:960,height:412,left:0,top:0,insets:{top:20,bottom:16,left:44,right:20}},
+    {width:225,height:200,left:70,top:90,scale:2,native:true,insets:{top:40,bottom:30}}]){
+    const f=fixture(options);t.after(()=>f.dispose());f.open();
+    const panel=f.find('section',p=>p.role==='dialog').props.style,layer=f.find('div',p=>p.className==='chat-assistant-layer').props.style;
+    const safe=safeViewport.readSafeViewport(f.window,f.document,options.width<=650?0:12);
+    assert.ok(panel.left>=safe.left);assert.ok(panel.left+panel.width<=safe.right);
+    assert.ok(panel.top>=safe.top);assert.ok(panel.top+panel.height<=safe.bottom);
+    assert.equal(layer.left,options.left);assert.equal(layer.top,options.top);assert.equal(layer.width,options.width);assert.equal(layer.height,options.height);
+    assert.equal(f.document.body.style.overflow,'hidden');assert.deepEqual(f.changes,[]);assert.deepEqual(f.apiCalls,[]);
+  }
 });

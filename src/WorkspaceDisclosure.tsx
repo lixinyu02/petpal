@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
+import { readSafeViewport } from './platform/safe-viewport.mjs';
 import './workspace-disclosure.css';
 
 /** Small settings stay beside their summary without moving the conversation. */
@@ -22,22 +23,20 @@ export default function WorkspaceDisclosure({ label, summary, children, classNam
     const place = () => {
       const anchor = ref.current?.querySelector('summary')?.getBoundingClientRect(), content = contentRef.current;
       if (!anchor || !content) return;
-      const viewport = window.visualViewport;
-      const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0;
-      const width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
-      const gutter = 12, gap = 7;
+      const bounds = readSafeViewport(window, document, 12);
+      const gap = 7;
       const preferredWidth = className.includes('agent-permissions') ? 350 : className.includes('speech-options') ? 310 : 320;
-      const menuWidth = Math.min(preferredWidth, Math.max(1, width - gutter * 2));
-      const below = top + height - anchor.bottom - gutter - gap, above = anchor.top - top - gutter - gap;
+      const menuWidth = Math.min(preferredWidth, bounds.width);
+      const below = bounds.bottom - anchor.bottom - gap, above = anchor.top - bounds.top - gap;
       const naturalHeight = Math.min(420, content.scrollHeight + 2);
       const prefersAbove = className.includes('agent-permissions') || className.includes('speech-options');
       const opensAbove = prefersAbove ? above >= naturalHeight || above > below : below < naturalHeight && above > below;
       const available = opensAbove ? above : below;
       // A very short keyboard viewport still gets a scrollable, reachable panel.
-      const maxHeight = Math.max(1, Math.min(420, height - gutter * 2, available < 100 ? height - gutter * 2 : available));
+      const maxHeight = Math.max(1, Math.min(420, bounds.height, available < 100 ? bounds.height : available));
       const renderedHeight = Math.min(naturalHeight, maxHeight);
-      const menuTop = Math.max(top + gutter, Math.min(opensAbove ? anchor.top - renderedHeight - gap : anchor.bottom + gap, top + height - gutter - renderedHeight));
-      const next: CSSProperties = { position: 'fixed', left: Math.max(left + gutter, Math.min(anchor.left, left + width - gutter - menuWidth)), top: menuTop, right: 'auto', bottom: 'auto', width: menuWidth, maxWidth: menuWidth, maxHeight };
+      const menuTop = Math.max(bounds.top, Math.min(opensAbove ? anchor.top - renderedHeight - gap : anchor.bottom + gap, bounds.bottom - renderedHeight));
+      const next: CSSProperties = { position: 'fixed', left: Math.max(bounds.left, Math.min(anchor.left, bounds.right - menuWidth)), top: menuTop, right: 'auto', bottom: 'auto', width: menuWidth, maxWidth: menuWidth, maxHeight };
       setPlacement(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
     };
     const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(place); };
