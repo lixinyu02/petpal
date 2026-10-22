@@ -23,9 +23,17 @@ test('the pale default and neutral night surface do not alter theme preference s
  assert.equal(day['--theme-surface'],'#fafbf8');assert.equal(night['--theme-surface'],'#282828');assert.ok(!Object.hasOwn(day,'--theme-preference'));assert.ok(!Object.hasOwn(night,'--theme-preference'));
 });
 
-test('night action labels and selected text remain readable in every interactive state',()=>{
- for(const fill of ['button','button-hover'])assert.ok(contrast(night['--theme-button-ink'],night[`--theme-${fill}`])>=4.5,`night label on ${fill}`);
- assert.ok(contrast(night['--theme-accent'],night['--theme-accent-soft'])>=4.5,'selected option and active read-aloud labels');
- assert.ok(contrast(night['--theme-selected-ink'],night['--theme-selected'])>=4.5,'neutral selected option');
- for(const text of ['ink','muted','accent'])for(const surface of ['navigation','panel','popover'])assert.ok(contrast(night[`--theme-${text}`],night[`--theme-${surface}`])>=4.5,`night ${text} on ${surface}`);
+for(const theme of ['day','night'])test(`${theme} action labels, selected text and navigation remain readable`,()=>{
+ const colors=palette(theme);
+ for(const fill of ['button','button-hover'])assert.ok(contrast(colors['--theme-button-ink'],colors[`--theme-${fill}`])>=4.5,`${theme} label on ${fill}`);
+ assert.ok(contrast(colors['--theme-accent'],colors['--theme-accent-soft'])>=4.5,'selected option and active read-aloud labels');
+ assert.ok(contrast(colors['--theme-selected-ink'],colors['--theme-selected'])>=4.5,'neutral selected option');
+ assert.ok(contrast(colors['--theme-ink'],colors['--theme-user'])>=4.5,'user message text');
+ for(const text of ['ink','muted','accent'])for(const surface of ['navigation','panel','popover'])assert.ok(contrast(colors[`--theme-${text}`],colors[`--theme-${surface}`])>=4.5,`${theme} ${text} on ${surface}`);
+});
+
+test('legacy color aliases follow the shared light palette instead of an independent green palette',()=>{
+ const root={};sheet.walkRules(rule=>{if(rule.selector===':root')for(const d of rule.nodes||[])if(d.type==='decl')root[d.prop]=d.value;});
+ for(const [alias,role] of [['green','accent'],['muted','muted'],['line','border'],['soft','soft'],['cream','panel']])assert.equal(root[`--${alias}`],`var(--theme-${role})`);
+ assert.equal(root.color,'var(--theme-ink)');assert.equal(root.background,'var(--theme-surface)');
 });

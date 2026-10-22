@@ -1,22 +1,23 @@
 /* Local day/night appearance. Character textures and canvases keep their original colors. */
 :root{
-  --theme-surface:#fafbf8;--theme-raised:#fdfdfb;--theme-soft:#f0f0ec;
-  --theme-ink:#302d29;--theme-muted:#69665f;--theme-border:#deddd8;
-  --theme-accent:#8f4c32;--theme-accent-soft:#f4e7df;--theme-focus:#9b593f;
-  --theme-input:#ffffff;--theme-control-border:#918b80;
+  --theme-surface:#fafbf8;--theme-raised:#ffffff;--theme-soft:#efeeeb;
+  --theme-ink:#302e2b;--theme-muted:#6b6965;--theme-border:#dfddd8;
+  --theme-accent:#55534f;--theme-accent-soft:#e8e6e2;--theme-focus:#77716a;
+  --theme-input:#ffffff;--theme-control-border:#918b85;
   --theme-danger:#9c433c;--theme-danger-soft:#fff1ec;
   --theme-warning:#795327;--theme-warning-soft:#fff5e5;
   --theme-success:#2e6545;--theme-success-soft:#edf4e8;
-  --theme-overlay:#10201870;--theme-shadow:0 12px 36px #18332120;
+  --theme-overlay:#26252270;--theme-shadow:0 12px 36px #201f1c20;
   /* Open Claude UI role/geometry reference; adapted colors retain PetPal's
      pale default and existing semantic contrast (provenance in NOTICE). */
-  --theme-panel:#f7f7f3;--theme-navigation:#f4f4ef;--theme-popover:#ffffff;
-  --theme-selected:#ecebe5;--theme-selected-ink:#302d29;
-  --theme-button:#d97757;--theme-button-hover:#de876b;--theme-button-ink:#281b16;
-  --theme-segmented-track:#eeeee9;--theme-segmented-thumb:#ffffff;
+  --theme-panel:#f5f4f1;--theme-navigation:#f2f1ee;--theme-popover:#ffffff;
+  --theme-selected:#e8e6e2;--theme-selected-ink:#302e2b;
+  --theme-button:#343330;--theme-button-hover:#232321;--theme-button-ink:#ffffff;
+  --theme-user:#efeeeb;--theme-danger-ink:#ffffff;
+  --theme-segmented-track:#eeede9;--theme-segmented-thumb:#ffffff;
   --theme-hairline:#302d291c;--theme-hairline-strong:#302d2940;
-  --theme-popover-shadow:inset 0 0 0 var(--ui-hairline-width) var(--theme-hairline-strong),0 8px 28px #22332512,0 2px 8px #2233250a;
-  --theme-composer-shadow:inset 0 0 0 var(--ui-hairline-width) var(--theme-hairline-strong),0 4px 20px #22332508;
+  --theme-popover-shadow:inset 0 0 0 var(--ui-hairline-width) var(--theme-hairline-strong),0 8px 28px #201f1c12,0 2px 8px #201f1c0a;
+  --theme-composer-shadow:inset 0 0 0 var(--ui-hairline-width) var(--theme-hairline-strong),0 4px 20px #201f1c08;
   --theme-surface-0:var(--theme-surface);--theme-surface-1:var(--theme-panel);
   --theme-surface-2:var(--theme-raised);--theme-surface-3:var(--theme-input);
   --ui-radius-composer:20px;--ui-radius-message:18px;--ui-radius-panel:10px;
@@ -25,29 +26,33 @@
   --ui-hairline-width:1px;--ui-focus-width:2px;
   --ui-duration-touch:60ms;--ui-duration-snap:120ms;--ui-duration-base:200ms;--ui-duration-sheet:300ms;
   --ui-ease-swift:cubic-bezier(.16,1,.3,1);--ui-ease-snap:cubic-bezier(.32,.72,0,1);--ui-ease-enter:cubic-bezier(.22,1,.36,1);
-  --ui-weight-label:550;--ui-weight-heading:600;--ui-clay:#d97757;
-  --muted:var(--theme-muted);
+  --ui-weight-label:550;--ui-weight-heading:600;--ui-clay:var(--theme-accent);
+  /* Legacy component names share both theme palettes, including light mode. */
+  --green:var(--theme-accent);--muted:var(--theme-muted);--line:var(--theme-border);--soft:var(--theme-soft);--cream:var(--theme-panel);
+  --theme-canvas:var(--theme-surface);--theme-error:var(--theme-danger);
+  color:var(--theme-ink);background:var(--theme-surface);
 }
 html[data-theme="night"]{
   /* Surface roles adapted from Open Claude UI c1f923ae (MIT; see NOTICE).
-     Neutral graphite surfaces with ivory text and small clay accents. */
-  color-scheme:dark;--theme-surface:#282828;--theme-panel:#2b2b2b;--theme-raised:#323232;--theme-soft:#393939;
-  --theme-ink:#e5e3dd;--theme-muted:#b8b6b0;--theme-border:#4b4b49;
-  --theme-accent:#e3b9a8;--theme-accent-soft:#4c3e36;--theme-focus:#e3b9a8;
-  --theme-input:#323232;--theme-control-border:#93958f;
+     Neutral graphite surfaces with ivory text and quiet monochrome controls. */
+  color-scheme:dark;--theme-surface:#282828;--theme-panel:#2b2a28;--theme-raised:#32312f;--theme-soft:#393835;
+  --theme-ink:#e9e6e0;--theme-muted:#b8b6b0;--theme-border:#4b4945;
+  --theme-accent:#d7d1c8;--theme-accent-soft:#42403c;--theme-focus:#cec2b3;
+  --theme-input:#32312f;--theme-control-border:#93918c;
   --theme-danger:#e6b5ad;--theme-danger-soft:#483936;
   --theme-warning:#d5c39d;--theme-warning-soft:#433e32;
   --theme-success:#b3cab4;--theme-success-soft:#34463a;
-  --theme-navigation:#232323;--theme-popover:#353535;--theme-selected:#454545;--theme-selected-ink:#e5e3dd;
-  --theme-button:#d97757;--theme-button-hover:#e38a6c;--theme-button-ink:#211b18;
-  --theme-segmented-track:#2b2b2b;--theme-segmented-thumb:#454545;
+  --theme-navigation:#242423;--theme-popover:#353431;--theme-selected:#45433f;--theme-selected-ink:#e9e6e0;
+  --theme-button:#e4dfd6;--theme-button-hover:#f0ede7;--theme-button-ink:#2b2926;
+  --theme-user:#3c3a37;--theme-danger-ink:#342422;
+  --theme-segmented-track:#2b2a28;--theme-segmented-thumb:#45433f;
   --theme-hairline:#deded817;--theme-hairline-strong:#deded830;
   --theme-popover-shadow:inset 0 0 0 var(--ui-hairline-width) #deded824,0 8px 28px #17171740,0 2px 8px #17171730;
   --theme-composer-shadow:inset 0 0 0 var(--ui-hairline-width) #deded824,0 4px 20px #17171726;
   --ui-weight-label:500;--ui-weight-heading:550;
   --theme-overlay:#17171799;--theme-shadow:0 12px 36px #17171740;
   --theme-canvas:var(--theme-surface);--theme-error:var(--theme-danger);
-  --green:var(--theme-accent);--muted:var(--theme-muted);--line:var(--theme-border);--soft:var(--theme-soft);--cream:var(--theme-raised);
+  --green:var(--theme-accent);--muted:var(--theme-muted);--line:var(--theme-border);--soft:var(--theme-soft);--cream:var(--theme-panel);
   color:var(--theme-ink);background:var(--theme-surface)
 }
 html[data-theme="day"]{color-scheme:light}
