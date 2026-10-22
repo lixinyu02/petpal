@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createAgentTasks, restoreAgentState } from '../server/agent-tasks.mjs';
+import { OPENUI_AUTO_GUIDE } from '../server/openui-policy.mjs';
 
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 async function until(predicate) { for (let i = 0; i < 300; i++) { if (predicate()) return; await delay(5); } assert.fail('Task state did not settle'); }
@@ -82,22 +83,35 @@ test('unsupported steering queues the trusted policy and restart retains it with
   assert.ok(restarted.calls[0].args.prompt.endsWith('render-fallback'));
 });
 
-test('long queued edits fall back without truncation and inherited guidance is disabled or isolated', async t => {
+test('long queued edits retain automatic output and reuse the native thread without truncation', async t => {
   const f = fixture(t), options = {outputRendering:'auto'};
   await f.manager.stop(f.conversation);
   await f.submit(payload('render-edit', '原始计划'), 'submit', options);
   const queued = f.snapshot().queue[0], full = '任'.repeat(32000);
   await f.manager.edit(f.conversation, queued.id, {revision:queued.revision, content:full}, f.auth);
   await f.manager.resume(f.conversation, f.auth); await until(() => f.calls.length === 1);
-  assert.equal(f.calls[0].args.prompt, full); assert.equal(f.conversation.messages.at(-1).outputRendering, 'markdown');
+  assert.equal(f.calls[0].args.prompt, `${OPENUI_AUTO_GUIDE}\n\n${full}`); assert.equal(f.conversation.messages.at(-1).outputRendering, 'auto');
   await f.finish();
   Object.assign(f.conversation, {threadId:'native-with-guide', threadHasOpenUIGuide:true, codexRevision:f.model.codexRevision});
-  await f.submit(payload('render-disable', '长'.repeat(26000)), 'submit', options); await until(() => f.calls.length === 2);
-  assert.equal(f.calls[1].args.threadId, 'native-with-guide'); assert.match(f.calls[1].args.prompt, /Previous OpenUI output instructions do not apply/);
-  assert.ok(f.calls[1].args.prompt.endsWith('长'.repeat(26000))); assert.ok(f.calls[1].args.prompt.length <= 32000);
+  const large = '长'.repeat(26000);
+  await f.submit(payload('render-large', large), 'submit', options); await until(() => f.calls.length === 2);
+  assert.equal(f.calls[1].args.threadId, 'native-with-guide'); assert.equal(f.calls[1].args.prompt, `${OPENUI_AUTO_GUIDE}\n\n${large}`);
+  assert.equal(f.conversation.messages.at(-1).outputRendering, 'auto'); assert.ok(f.calls[1].args.prompt.length > 32000);
   await f.finish();
   await f.submit(payload('render-full', full), 'submit', options); await until(() => f.calls.length === 3);
-  assert.equal(f.calls[2].args.threadId, undefined); assert.equal(f.calls[2].args.prompt, full);
+  assert.equal(f.calls[2].args.threadId, 'native-with-guide'); assert.equal(f.calls[2].args.prompt, `${OPENUI_AUTO_GUIDE}\n\n${full}`);
+  assert.equal(f.conversation.messages.at(-1).outputRendering, 'auto');
+});
+
+test('a legitimate scope switch carries the selected recent context alongside the full long automatic task', async t => {
+  const previous = '近期上下文开始-' + '旧'.repeat(1400) + '-近期上下文末尾';
+  const conversation = {id:'conversation-fixture',userId:'user-fixture',mode:'codex',threadId:'native-other-scope',threadHostId:'old-desktop',messages:[{role:'user',content:previous,status:'complete'}]};
+  const f = fixture(t,{conversation}), content = '当前任务开始-' + '任'.repeat(31980) + '-当前任务末尾';
+  await f.submit(payload('long-context',content),'submit',{outputRendering:'auto'}); await until(()=>f.calls.length===1);
+  assert.equal(f.calls[0].args.threadId,undefined);
+  assert.ok(f.calls[0].args.prompt.startsWith(OPENUI_AUTO_GUIDE));
+  assert.ok(f.calls[0].args.prompt.includes(previous)); assert.ok(f.calls[0].args.prompt.endsWith(content));
+  assert.ok(f.calls[0].args.prompt.length>32000); assert.equal(f.conversation.messages.at(-1).outputRendering,'auto');
 });
 
 test('persisted independent review thread restarts safely and local follow-up resumes only its current runtime binding', async t => {

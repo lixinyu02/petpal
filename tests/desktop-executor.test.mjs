@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import vm from 'node:vm';
 import { createHash } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
 import { DesktopExecutor, createExecutorHandlers, createMusicMcpHandlers, loadExecutorDeviceId, validateExecutorConnection } from '../desktop/executor.mjs';
+import { CodexBridge } from '../server/codex.mjs';
 
 const input = extra => ({ url: 'https://central.example', token: 'central-session-secret', instanceId: 'instance-one', userId: 'user-one', ...extra });
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { resolve, promise }; };
@@ -196,6 +197,41 @@ test('a durable run receipt precedes execution; exact replay never starts a seco
   assert.doesNotMatch(await readFile(path.join(ctx.directory, 'receipts', receipts[0]), 'utf8'), /central-session-secret|run-only-secret|Look around/);
   assert.ok(f.requests.filter(item => item.url.endsWith('/events')).every(item => item.init.headers.Authorization === 'Bearer central-session-secret'));
   await assert.rejects(f.manager._command(ctx, { ...command, prompt: 'changed replay' })); assert.equal(runs, 1);
+});
+
+test('a long central prompt passes desktop validation and the real native bridge without truncation', { timeout: 10_000 }, async t => {
+  const dir = await directory(t), cli = path.join(dir, 'long-prompt-cli.mjs'), log = path.join(dir, 'rpc.jsonl');
+  await writeFile(cli, `
+import { createInterface } from 'node:readline';
+import { appendFileSync } from 'node:fs';
+const send = message => process.stdout.write(JSON.stringify(message) + '\\n');
+createInterface({input: process.stdin}).on('line', line => {
+  const message = JSON.parse(line);
+  appendFileSync(process.argv[2], line + '\\n');
+  if (message.method === 'initialized') return;
+  if (message.method === 'thread/start') { send({id: message.id, result: {thread: {id: 'thread-one'}}}); return; }
+  if (message.method === 'turn/start') {
+    send({id: message.id, result: {turn: {id: 'turn-one'}}});
+    send({method: 'item/completed', params: {threadId: 'thread-one', turnId: 'turn-one', item: {type: 'agentMessage', id: 'answer-one', text: 'long prompt accepted'}}});
+    send({method: 'turn/completed', params: {threadId: 'thread-one', turn: {id: 'turn-one', status: 'completed'}}});
+    return;
+  }
+  if (message.id !== undefined) send({id: message.id, result: {}});
+});
+`);
+  const f = await protocolFixture(t, { bridgeFactory: options => new CodexBridge({ ...options, command: [process.execPath, cli, log] }) });
+  const prompt = `${'组件说明'.repeat(12000)}\n\n当前任务：验证完整转发`;
+  assert.ok(prompt.length > 32000);
+  const ctx = f.manager.current;
+  await assert.rejects(f.manager._command(ctx, runCommand({prompt: {text: prompt}})));
+  await f.manager._command(ctx, runCommand({prompt}));
+  await ctx.run.done;
+  assert.equal(f.events.at(-1).event, 'complete');
+  const messages = (await readFile(log, 'utf8')).trim().split('\n').map(JSON.parse);
+  const turns = messages.filter(message => message.method === 'turn/start');
+  assert.equal(turns.length, 1);
+  assert.deepEqual(turns[0].params.input, [{ type: 'text', text: prompt }]);
+  assert.equal(f.events.find(event => event.event === 'delta').data.text, 'long prompt accepted');
 });
 
 test('desktop negotiates review, automation and project-directory support only at the pre-connection 400 boundary', async t => {

@@ -33,7 +33,7 @@ import { MODEL_REQUEST_BYTES } from './model-request-limits.mjs';
 import { createNotificationService } from './notifications.mjs';
 import { createCompanionRoutineService } from './companion-routines.mjs';
 import { createCompanionPersonalizer } from './companion-personalization.mjs';
-import { OUTPUT_PROMPT_LIMIT, prepareOutputRendering, outputGuideLength, withOutputGuide } from './openui-policy.mjs';
+import { prepareOutputRendering, withOutputGuide } from './openui-policy.mjs';
 import { closeCompanionWeatherQueries } from './companion-weather.mjs';
 import { createAutomationService } from './automations.mjs';
 import { executeAutomationTool, withAutomationTools } from './automation-tools.mjs';
@@ -1424,10 +1424,8 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       const messages = conversation.mode === 'chat' ? await imageAttachments.messages(req.user.id, [...history, user]) : undefined;
       const recalled = await memoryContext(req.user.id, content, controller.signal);
       requireCurrentAuth(req); controller.signal.throwIfAborted();
-      const memoryRoom = Math.max(0, OUTPUT_PROMPT_LIMIT - basePersona.length - content.length - outputGuideLength(outputPolicy) - 2);
-      const boundedRecall = recalled && memoryRoom > 64 ? recalled.slice(0, memoryRoom) : '';
-      const agentPrompt = withOutputGuide(boundedRecall ? `${boundedRecall}\n\n${content}` : content, outputPolicy);
-      const persona = withOutputGuide(basePersona + boundedRecall, outputPolicy);
+      const agentPrompt = withOutputGuide(recalled ? `${recalled}\n\n${content}` : content, outputPolicy);
+      const persona = withOutputGuide(basePersona + recalled, outputPolicy);
       const result = conversation.mode === 'codex'
         ? await bridge.run({ conversationId: conversation.id, permissions: requirePermissions(req.user), prompt: agentPrompt, images, threadId: !outputPolicy.resetThread && (!conversation.threadHostId || conversation.threadHostId === 'central') ? conversation.threadId : undefined, signal: controller.signal, onEvent })
         : await streamProvider({ provider, messages, persona, signal: controller.signal, onEvent,

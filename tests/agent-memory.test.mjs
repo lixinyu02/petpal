@@ -61,10 +61,11 @@ test('slow or unavailable memory does not block Agent dispatch and journal error
   await f.finish(); assert.equal(f.manager.snapshot(f.conversation).run.status, 'completed');
 });
 
-test('automatic jobs use the same account memory and a maximal prompt never loses the user task', async t => {
+test('automatic jobs keep account memory and the maximal user task beyond the old combined prompt budget', async t => {
   const f = fixture(t, { conversation: { automationId: 'memory-automation-fixture' } });
   const content = '任'.repeat(32000); await f.submit({ content });
-  assert.equal(f.calls[0].args.prompt, content); assert.equal(f.calls[0].args.prompt.length, 32000);
+  assert.match(f.calls[0].args.prompt, /长期记忆/); assert.match(f.calls[0].args.prompt, /喜欢轻音乐/);
+  assert.ok(f.calls[0].args.prompt.endsWith(content)); assert.ok(f.calls[0].args.prompt.length > 32000);
   await f.finish(); assert.equal(f.remembered[0].source, 'automation');
 });
 

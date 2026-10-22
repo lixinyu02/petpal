@@ -9,6 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createPetServer } from '../server/app.mjs';
 import { JsonStore } from '../server/store.mjs';
 import { defaultCodexConfig } from '../server/codex-config.mjs';
+import { OPENUI_AUTO_GUIDE } from '../server/openui-policy.mjs';
 import { listenFixture } from './helpers/loopback.mjs';
 
 const answer = '请补充目标。\n\n```openui\nroot = Panel("计划", [Field("goal", "目标"), Button("加入输入框", @UseInPrompt("继续"))])\n```';
@@ -18,7 +19,7 @@ const events = source => source.split(/\r?\n\r?\n/).flatMap(block => {
 });
 async function until(callback) { for (let index = 0; index < 250; index++) { const value = await callback(); if (value) return value; await delay(5); } assert.fail('OpenUI fixture did not settle'); }
 
-async function fixture(t) {
+async function fixture(t, options = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-openui-api-')), token = randomUUID(), upstreamRequests = [], calls = [];
   const upstream = http.createServer(async (req, res) => {
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
@@ -38,7 +39,8 @@ async function fixture(t) {
     async close() {},
   };
   let app;
-  const start = async () => { app = await createPetServer({dataDir:directory, token, codex}); await listenFixture(app.server); };
+  const memoryOptions = options.memoryContext === undefined ? {} : {service:{async getContext() {return options.memoryContext;}, async remember() {}, async close() {}}};
+  const start = async () => { app = await createPetServer({dataDir:directory, token, codex, memoryOptions}); await listenFixture(app.server); };
   await start();
   const request = (route, {method='GET', body, authorization=token}={}) => fetch(`http://127.0.0.1:${app.server.address().port}/api${route}`, {method, headers:{'Content-Type':'application/json', ...(authorization ? {Authorization:`Bearer ${authorization}`} : {})}, ...(body === undefined ? {} : {body:JSON.stringify(body)})});
   const json = async (route, options) => { const response = await request(route, options); return {status:response.status, data:await response.json()}; };
@@ -88,14 +90,46 @@ test('direct Agent submit and legacy Codex SSE persist automatic output without 
   assert.equal(f.calls.length,2); assert.equal(f.upstreamRequests.length,0);
 });
 
-test('legacy inherited native guide is disabled on long input and full-length input starts fresh without cutting the task', async t => {
-  const f = await fixture(t), conversation = await f.create('codex');
+test('both Chat protocols retain their complete guide, memory and user text beyond the old prompt budget', async t => {
+  const memory = '记忆开始-' + '忆'.repeat(5000) + '-记忆末尾';
+  const f = await fixture(t, {memoryContext:memory});
+  for (const provider of f.providers) {
+    const conversation = await f.create('chat',provider.id), content = '任'.repeat(31990) + '用户任务末尾';
+    const sent = await f.send(conversation,content);
+    assert.equal(sent.status,200); assert.equal(sent.events.find(event=>event.type==='meta').data.outputRendering,'auto');
+    const upstream = f.upstreamRequests.at(-1), guide = upstream.instructions ?? upstream.messages.find(message=>message.role==='system').content;
+    assert.ok(guide.includes(OPENUI_AUTO_GUIDE)); assert.ok(guide.includes(memory));
+    assert.ok(JSON.stringify(upstream.input ?? upstream.messages).includes(content));
+    assert.ok(guide.length + content.length > 32000);
+    assert.equal(sent.events.find(event=>event.type==='done').data.conversation.messages.at(-1).outputRendering,'auto');
+  }
+  assert.equal(f.upstreamRequests.length,2); assert.equal(f.calls.length,0);
+});
+
+test('direct Agent retains complete account memory and its automatic guide with a maximum-length task', async t => {
+  const memory = '执行记忆开始-' + '忆'.repeat(5000) + '-执行记忆末尾';
+  const f = await fixture(t,{memoryContext:memory}), conversation = await f.create('codex');
+  const content = '任'.repeat(32000), body = {submissionId:randomUUID(),content,permissions:{access:'read-only',approval:'ask'}};
+  const result = await f.json(`/conversations/${conversation.id}/agent/submit`,{method:'POST',body});
+  assert.equal(result.status,200);
+  const completed = await until(async()=>{const current=(await f.json(`/conversations/${conversation.id}`)).data;return current.agent.run?.status==='completed'&&current;});
+  assert.equal(f.calls.length,1); assert.equal(f.upstreamRequests.length,0);
+  assert.ok(f.calls[0].prompt.startsWith(OPENUI_AUTO_GUIDE)); assert.ok(f.calls[0].prompt.includes(memory)); assert.ok(f.calls[0].prompt.endsWith(content));
+  assert.ok(f.calls[0].prompt.length>32000); assert.equal(f.calls[0].permissions.access,'read-only');
+  assert.equal(completed.agent.run.outputRendering,'auto'); assert.equal(completed.messages.at(-1).outputRendering,'auto');
+});
+
+test('legacy long input retains automatic guidance, memory and its native thread without cutting the task', async t => {
+  const memory = '记忆开始-' + '忆'.repeat(5000) + '-记忆末尾';
+  const f = await fixture(t, {memoryContext:memory}), conversation = await f.create('codex');
   await f.send(conversation,'先构建表单');
-  const large = '长'.repeat(26000), fallback = await f.send(conversation,large);
-  assert.equal(fallback.events.find(event=>event.type==='meta').data.outputRendering,'markdown');
-  assert.match(f.calls[1].prompt,/Previous OpenUI output instructions do not apply/); assert.ok(f.calls[1].prompt.endsWith(large));
-  assert.equal(f.calls[1].threadId,'ui-native-1'); assert.ok(f.calls[1].prompt.length<=32000);
+  const large = '长'.repeat(26000), continued = await f.send(conversation,large);
+  assert.equal(continued.events.find(event=>event.type==='meta').data.outputRendering,'auto');
+  assert.ok(f.calls[1].prompt.startsWith(OPENUI_AUTO_GUIDE)); assert.ok(f.calls[1].prompt.includes(memory)); assert.ok(f.calls[1].prompt.endsWith(large));
+  assert.equal(f.calls[1].threadId,'ui-native-1'); assert.ok(f.calls[1].prompt.length>32000);
   const full = '全'.repeat(32000), last = await f.send(conversation,full);
-  assert.equal(last.events.find(event=>event.type==='meta').data.outputRendering,'markdown');
-  assert.equal(f.calls[2].prompt,full); assert.equal(f.calls[2].threadId,undefined);
+  assert.equal(last.events.find(event=>event.type==='meta').data.outputRendering,'auto');
+  assert.ok(f.calls[2].prompt.startsWith(OPENUI_AUTO_GUIDE)); assert.ok(f.calls[2].prompt.includes(memory)); assert.ok(f.calls[2].prompt.endsWith(full));
+  assert.equal(f.calls[2].threadId,'ui-native-1'); assert.ok(f.calls[2].prompt.length>32000);
+  assert.equal(last.events.find(event=>event.type==='done').data.conversation.messages.at(-1).outputRendering,'auto');
 });

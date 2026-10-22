@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OPENUI_AUTO_GUIDE, MARKDOWN_TURN_GUIDE, OUTPUT_PROMPT_LIMIT, prepareOutputRendering, withOutputGuide } from '../server/openui-policy.mjs';
+import { OPENUI_AUTO_GUIDE, MARKDOWN_TURN_GUIDE, prepareOutputRendering, withOutputGuide } from '../server/openui-policy.mjs';
 
 test('automatic presentation is optional in the original response and describes draft-only actions', () => {
   const policy = prepareOutputRendering('帮我整理可填写的计划', { outputRendering: 'auto' });
@@ -14,17 +14,18 @@ test('automatic presentation is optional in the original response and describes 
   assert.deepEqual(prepareOutputRendering('内部结构化任务'), {outputRendering:undefined, guide:'', resetThread:false});
 });
 
-test('the full user task has priority over the guide at both budget boundaries', () => {
-  const task = '原'.repeat(OUTPUT_PROMPT_LIMIT - OPENUI_AUTO_GUIDE.length - 2);
-  const fits = prepareOutputRendering(task, {outputRendering:'auto'});
-  assert.equal(fits.outputRendering, 'auto'); assert.equal(withOutputGuide(task, fits).length, OUTPUT_PROMPT_LIMIT);
-  const over = task + '完';
-  const fallback = prepareOutputRendering(over, {outputRendering:'auto'});
-  assert.equal(fallback.outputRendering, 'markdown');
-  assert.ok(withOutputGuide(over, fallback).endsWith(over));
-  assert.ok(withOutputGuide(over, fallback).length <= OUTPUT_PROMPT_LIMIT);
-  const maximum = '用'.repeat(OUTPUT_PROMPT_LIMIT);
-  assert.equal(withOutputGuide(maximum, prepareOutputRendering(maximum, {outputRendering:'auto'})), maximum);
+test('long tasks and component guides stay complete and automatic without a presentation budget', () => {
+  const task = '原'.repeat(50000) + '任务末尾';
+  const guide = OPENUI_AUTO_GUIDE + '\n' + '组件参考'.repeat(10000) + '说明末尾';
+  assert.ok(task.length > 32000); assert.ok(guide.length > 32000);
+  for (const previousHasGuide of [false, true]) {
+    const policy = prepareOutputRendering(task, {outputRendering:'auto', previousHasGuide, guide});
+    assert.equal(policy.outputRendering, 'auto'); assert.equal(policy.resetThread, false);
+    assert.equal(policy.guide, guide); assert.equal(withOutputGuide(task, policy), `${guide}\n\n${task}`);
+  }
+  const full = '用'.repeat(32000), policy = prepareOutputRendering(full, {outputRendering:'auto'});
+  assert.equal(policy.outputRendering, 'auto');
+  assert.equal(withOutputGuide(full, policy), `${OPENUI_AUTO_GUIDE}\n\n${full}`);
 });
 
 test('missing optional guide falls back and inherited native guidance is explicitly disabled', () => {
@@ -32,7 +33,11 @@ test('missing optional guide falls back and inherited native guidance is explici
   assert.equal(fallback.outputRendering, 'markdown'); assert.equal(fallback.guide, MARKDOWN_TURN_GUIDE); assert.equal(fallback.resetThread, false);
   const internal = prepareOutputRendering('只返回JSON', {previousHasGuide:true});
   assert.equal(internal.guide, MARKDOWN_TURN_GUIDE);
-  const full = '整'.repeat(OUTPUT_PROMPT_LIMIT);
-  const fresh = prepareOutputRendering(full, {outputRendering:'auto', previousHasGuide:true});
-  assert.equal(fresh.resetThread, true); assert.equal(withOutputGuide(full, fresh), full);
+  const full = '整'.repeat(50000);
+  const unavailable = prepareOutputRendering(full, {outputRendering:'auto', guide:null, previousHasGuide:true});
+  assert.equal(unavailable.outputRendering, 'markdown'); assert.equal(unavailable.resetThread, false);
+  assert.equal(withOutputGuide(full, unavailable), `${MARKDOWN_TURN_GUIDE}\n\n${full}`);
+  const explicit = prepareOutputRendering(full, {outputRendering:'markdown', previousHasGuide:true});
+  assert.equal(explicit.outputRendering, 'markdown'); assert.equal(explicit.resetThread, false);
+  assert.equal(withOutputGuide(full, explicit), `${MARKDOWN_TURN_GUIDE}\n\n${full}`);
 });

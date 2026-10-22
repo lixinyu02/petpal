@@ -440,7 +440,9 @@ export class DesktopExecutor {
     }[command.type];
     if (!allowed || Object.keys(command).some(key => !allowed.includes(key))) throw invalid();
     if (command.type === 'run') {
-      if (!identifier(command.conversationId) || typeof command.prompt !== 'string' || command.prompt.length > 32000 ||
+      // The central service has already assembled presentation and context with
+      // the task. Do not apply the raw user-message character limit to it.
+      if (!identifier(command.conversationId) || typeof command.prompt !== 'string' ||
           command.threadId !== undefined && !identifier(command.threadId) || !uuid(command.codexRevision) ||
           typeof command.model !== 'string' || !command.model.trim() || command.model.length > 160 || /[\x00-\x1f\x7f]/.test(command.model) ||
           typeof command.relayToken !== 'string' || !command.relayToken || command.relayToken.length > 4096 || /[\x00-\x20\x7f]/.test(command.relayToken)) throw invalid();

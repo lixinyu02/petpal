@@ -43,7 +43,9 @@ const nativeDecisions = params => {
 // Paths are resolved from authorized uploads by the service, never from raw HTTP
 // input. This final protocol boundary still rejects remote URLs and malformed paths.
 function userInput(content, images = []) {
-  if (typeof content !== 'string' || content.length > 32000 || !Array.isArray(images) || images.length > 4) throw new Error('Agent 消息或图片格式无效。');
+  // A run receives the server-composed prompt (task, presentation and context),
+  // whose size is independent of the HTTP entry's user-message validation.
+  if (typeof content !== 'string' || !Array.isArray(images) || images.length > 4) throw new Error('Agent 消息或图片格式无效。');
   const input = content.trim() ? [{ type: 'text', text: content }] : [];
   for (const image of images) {
     if (!image || typeof image !== 'object' || Array.isArray(image) || Object.keys(image).some(key => key !== 'path') ||

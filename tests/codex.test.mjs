@@ -194,6 +194,22 @@ test('streams one response, resumes same thread, overrides unsafe inherited sett
   }
 });
 
+test('server-composed prompts over 32000 characters reach native turn/start intact and resume the same thread', { timeout: 10_000 }, async t => {
+  const { bridge, messages } = await setup(t);
+  const guide = '组件说明'.repeat(12000), task = '请保留末尾任务';
+  const prompt = `${guide}\n\n${task}`;
+  assert.ok(prompt.length > 32000);
+  const first = await bridge.run({ conversationId: 'long-composed-prompt', prompt });
+  const secondPrompt = `${prompt}\n第二次任务`;
+  const second = await bridge.run({ conversationId: 'long-composed-prompt', threadId: first.threadId, prompt: secondPrompt });
+  assert.equal(second.threadId, first.threadId);
+  const rpc = await messages(), turns = rpc.filter(message => message.method === 'turn/start');
+  assert.equal(turns.length, 2);
+  assert.deepEqual(turns.map(message => message.params.input), [[{ type: 'text', text: prompt }], [{ type: 'text', text: secondPrompt }]]);
+  assert.equal(rpc.filter(message => message.method === 'thread/start').length, 1);
+  assert.equal(rpc.filter(message => message.method === 'thread/resume').length, 1);
+});
+
 test('final-only messages are surfaced without requiring a delta notification', { timeout: 10_000 }, async (t) => {
   const { bridge } = await setup(t);
   assert.equal((await bridge.run({ prompt: 'final-only' })).text, '完整回复');
@@ -371,12 +387,12 @@ test('successful steer acknowledgement remains confirmed if the turn finishes be
   await task;
 });
 
-test('image-only input is supported but remote URLs, relative paths and oversized inputs never start CLI', { timeout: 10_000 }, async t => {
+test('image-only input is supported but remote URLs, relative paths, oversized image sets and non-text prompts never start CLI', { timeout: 10_000 }, async t => {
   const { bridge, messages } = await setup(t);
   for (const images of [[{ path: '../secret.png' }], [{ path: 'https://example.com/private.png' }], [{ path: path.resolve('x.png'), url: 'other' }], Array.from({ length: 5 }, () => ({ path: path.resolve('x.png') }))]) {
     await assert.rejects(bridge.run({ images })); assert.equal(bridge.child, null);
   }
-  await assert.rejects(bridge.run({ prompt: 'x'.repeat(32001) }));
+  await assert.rejects(bridge.run({ prompt: { text: 'not a text prompt' } })); assert.equal(bridge.child, null);
   const image = { path: path.resolve('accepted.png') };
   await bridge.run({ images: [image] });
   assert.deepEqual((await messages()).find(message => message.method === 'turn/start').params.input, [{ type: 'localImage', path: image.path }]);
