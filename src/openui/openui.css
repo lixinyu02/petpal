@@ -2,7 +2,7 @@
 .assistant-output{min-width:0;max-width:100%;display:flex;flex-direction:column;gap:14px}
 .openui-renderer{display:block;margin:0;padding:0;border:0;min-inline-size:0;min-width:0;max-width:100%;color:var(--theme-ink);font:inherit;overflow-wrap:anywhere}
 .openui-renderer *,.openui-renderer *::before,.openui-renderer *::after{box-sizing:border-box}
-.openui-panel{display:flex;flex-direction:column;gap:16px;min-width:0;padding:18px;border:1px solid var(--theme-border);border-radius:14px;background:var(--theme-raised)}
+.openui-panel{display:flex;flex-direction:column;gap:16px;min-width:0;padding:18px;border:var(--ui-hairline-width,1px) solid var(--theme-border);border-radius:var(--ui-radius-panel,10px);background:var(--theme-raised)}
 .openui-panel .openui-panel{padding:12px;background:var(--theme-surface)}
 .openui-panel-title,.openui-heading{margin:0;color:var(--theme-ink);line-height:1.5;font-weight:600;font-size:1em}
 .openui-panel-title{font-size:1.06em}

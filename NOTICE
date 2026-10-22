@@ -24,8 +24,9 @@ Copyright (c) 2026 Caho1. License: MIT.
 
 PetPal adapts the surface-role palette, composer/popover edge treatment, and
 geometric segmented-control idea from code-examples/cds-theme.css,
-ChatComposer.tsx and SegmentedControl.tsx. The local CSS is scoped to PetPal's
-night preference, keeps accessible text/field colors and touch sizes, and uses
+ChatComposer.tsx and SegmentedControl.tsx. The local CSS adapts shared geometry,
+hairline, typography and motion tokens to PetPal's day and night preferences,
+keeps accessible text/field colors and touch sizes, and uses
 PetPal's existing motion lifecycle and business components. The upstream
 JavaScript, demo model/attachment data, fonts and branding are not bundled.
 This is a community reference and does not imply affiliation with Anthropic.

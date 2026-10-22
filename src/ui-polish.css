@@ -1,12 +1,5 @@
 /* Warm, readable interface chrome. Keep the portrait grid and native overlays unchanged. */
 :root{
-  --ui-polish-muted:#65766a;
-  --ui-polish-soft:#f0f3eb;
-  --ui-polish-edge:#dde5d8;
-  --ui-polish-control:#fcfdf9;
-  --ui-polish-accent:#315e49;
-}
-html[data-theme="night"]{
   --ui-polish-muted:var(--theme-muted);
   --ui-polish-soft:var(--theme-soft);
   --ui-polish-edge:var(--theme-border);
@@ -184,59 +177,62 @@ html[data-theme="night"] .app-shell .companion-panel-toggle:hover,
 html[data-theme="night"] .app-shell .companion-panel-toggle[aria-expanded="true"]{background:var(--ui-polish-control)!important}
 html[data-theme="night"] .login-page .login-form .auth-modes>button.active{border:0!important;border-radius:10px}
 
-/* Open Claude UI reference: surface roles, neutral selection and a single
-   composer outline. Local implementation; provenance and MIT text are in NOTICE. */
-html[data-theme="night"] :is(.workspace-model-popup,.workspace-disclosure-content,.chat-assistant-dialog){
+/* Shared day/night geometry. Keep this one contract authoritative over lazy
+   feature sheets; no transformed ancestor is introduced for fixed menus. */
+html :is(.workspace-model-popup,.workspace-disclosure-content,.chat-assistant-dialog){
   background:var(--theme-popover)!important;border-color:transparent!important;
-  border-radius:12px;box-shadow:var(--theme-popover-shadow)!important;
+  border-radius:var(--ui-radius-panel);box-shadow:var(--theme-popover-shadow)!important;
 }
-html[data-theme="night"] .modal{
+html .modal{
   background:var(--theme-raised)!important;border-color:transparent!important;
-  border-radius:16px;box-shadow:var(--theme-popover-shadow)!important;
+  border-radius:var(--ui-radius-dialog);box-shadow:var(--theme-popover-shadow)!important;
 }
-html[data-theme="night"] .workspace-model-option{border-radius:8px}
-html[data-theme="night"] :is(.workspace-model-option.is-selected,.workspace-model-option.is-focused){
+html .workspace-model-option{border-radius:var(--ui-radius-button)}
+html :is(.workspace-model-option.is-selected,.workspace-model-option.is-focused){
   background:var(--theme-selected)!important;color:var(--theme-selected-ink)!important;
 }
-html[data-theme="night"] .workspace-model-option.is-selected .workspace-model-selected{color:var(--theme-accent)}
-html[data-theme="night"] .app-shell .composer{
+html .workspace-model-option.is-selected .workspace-model-selected{color:var(--theme-accent)}
+html .app-shell .composer{
   background:var(--theme-raised)!important;border-color:transparent!important;
-  border-radius:20px;box-shadow:var(--theme-composer-shadow)!important;
+  border-radius:var(--ui-radius-composer);box-shadow:var(--theme-composer-shadow)!important;
 }
-html[data-theme="night"] .app-shell .composer:focus-within{
+html .app-shell .composer:focus-within{
   border-color:transparent!important;
-  box-shadow:inset 0 0 0 1px var(--theme-hairline-strong),0 0 0 1px var(--theme-focus),0 4px 20px #17171726!important;
+  box-shadow:0 0 0 var(--ui-focus-width) var(--theme-focus),var(--theme-composer-shadow)!important;
 }
 /* The existing pseudo-ring would otherwise draw a second focus outline. */
-html[data-theme="night"] .app-shell .composer::after{border-color:transparent;opacity:0!important}
-html[data-theme="night"] .app-shell .composer .send-button{border-radius:10px}
-html[data-theme="night"] .app-shell :is(.primary-button,.secondary-button,.danger-button,.new-chat){border-radius:8px}
-html[data-theme="night"] .app-shell .message-user .message-text{border-radius:18px;max-width:100%}
-html[data-theme="night"] .message-markdown pre{border-radius:12px}
-html[data-theme="night"] .workspace-model-search:focus-within{box-shadow:inset 0 -1px var(--theme-focus)}
-html[data-theme="night"] :is(.workspace-model-search,.workspace-model-footer){border-color:var(--theme-hairline)!important}
+html .app-shell .composer::after{border-color:transparent;opacity:0!important}
+html .app-shell .composer .send-button{border-radius:var(--ui-radius-control)}
+html .app-shell :is(.primary-button,.secondary-button,.danger-button,.new-chat){border-radius:var(--ui-radius-button)}
+html .app-shell .message-user .message-text{border-radius:var(--ui-radius-message);max-width:100%}
+html .message-markdown pre{border-radius:var(--ui-radius-code)}
+html .workspace-model-search:focus-within{box-shadow:inset 0 -1px var(--theme-focus)}
+html :is(.workspace-model-search,.workspace-model-footer){border-color:var(--theme-hairline)!important}
+html .app-shell :is(.message-author,.workspace-model-current strong,.mode-switch>button){font-weight:var(--ui-weight-label)}
+html .app-shell :is(.settings-heading h1,.welcome h1){font-weight:var(--ui-weight-heading)}
+.message-markdown :is(p,li)>svg{vertical-align:-.125em}
 
 /* Equal tracks keep the decorative thumb aligned without measuring or re-rendering.
    This parent never transforms, preserving fixed model/host menu coordinates. */
-html[data-theme="night"] .app-shell .workspace-mode-row .mode-switch{
+html .app-shell .workspace-mode-row .mode-switch{
   position:relative;isolation:isolate;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
-  padding:2px;gap:0;border:0;border-radius:12px;background:var(--theme-segmented-track)!important;
+  padding:2px;gap:0;border:0;border-radius:var(--ui-radius-pill);background:var(--theme-segmented-track)!important;
 }
-html[data-theme="night"] .app-shell .workspace-mode-row .mode-switch>button{
-  position:relative;z-index:1;min-width:0;border:0;border-radius:10px;
+html .app-shell .workspace-mode-row .mode-switch>button{
+  position:relative;z-index:1;min-width:0;border:0;border-radius:var(--ui-radius-pill);
   justify-content:center;color:var(--theme-muted)!important;background:transparent!important;box-shadow:none;
 }
-html[data-theme="night"] .app-shell .workspace-mode-row .mode-switch>button[aria-pressed="true"]{
+html .app-shell .workspace-mode-row .mode-switch>button[aria-pressed="true"]{
   color:var(--theme-selected-ink)!important;background:var(--theme-segmented-thumb)!important;
 }
 @supports selector(:has(*)){
-  html[data-theme="night"] .app-shell .workspace-mode-row .mode-switch::before{
+  html .app-shell .workspace-mode-row .mode-switch::before{
     content:'';position:absolute;inset:2px auto 2px 2px;width:calc((100% - 4px)/2);
-    border-radius:10px;pointer-events:none;z-index:0;transform:translateX(0);
-    background:var(--theme-segmented-thumb);box-shadow:inset 0 0 0 1px var(--theme-hairline),0 1px 3px #0003;transition:none!important;
+    border-radius:var(--ui-radius-pill);pointer-events:none;z-index:0;transform:translateX(0);
+    background:var(--theme-segmented-thumb);box-shadow:inset 0 0 0 var(--ui-hairline-width) var(--theme-hairline),0 1px 3px #0001;transition:none!important;
   }
-  html[data-theme="night"] .app-shell .workspace-mode-row .mode-switch:has(>button:nth-child(2)[aria-pressed="true"])::before{transform:translateX(100%)}
-  html[data-theme="night"] .app-shell .workspace-mode-row .mode-switch>button[aria-pressed="true"]{background:transparent!important}
+  html .app-shell .workspace-mode-row .mode-switch:has(>button:nth-child(2)[aria-pressed="true"])::before{transform:translateX(100%)}
+  html .app-shell .workspace-mode-row .mode-switch>button[aria-pressed="true"]{background:transparent!important}
 }
 /* Hover affordances remain fully exposed on touch, narrow screens and keyboards. */
 @supports selector(:has(*)){

@@ -52,8 +52,8 @@ html :is(.welcome,.message,.message-avatar,.modal,.toast,.ui-toast,.chat-assista
 @media(prefers-reduced-motion:no-preference){
   /* Decorative only: no layout measurements, no transformed popup ancestor.
      Hidden/reduced pages lose data-ui-motion=full, so the thumb settles instantly. */
-  html[data-ui-motion="full"][data-theme="night"] .app-shell .workspace-mode-row .mode-switch::before{
-    transition:transform 120ms cubic-bezier(.32,.72,0,1)!important;
+  html[data-ui-motion="full"] .app-shell .workspace-mode-row .mode-switch::before{
+    transition:transform var(--ui-duration-snap) var(--ui-ease-snap)!important;
   }
   /* Fade only: transformed ancestors would change fixed menu coordinates. */
   html[data-ui-motion="full"] .app-shell :is(.workspace-controls,.chat-scroll-content)[data-ui-enter="true"]{
@@ -118,13 +118,13 @@ html :is(.welcome,.message,.message-avatar,.modal,.toast,.ui-toast,.chat-assista
 
   /* Pointer feedback is limited to interface controls, not pet touch targets. */
   html[data-ui-motion="full"] :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button){
-    transition:transform 150ms cubic-bezier(.2,.75,.25,1),opacity 150ms ease!important;
+    transition:transform var(--ui-duration-snap) var(--ui-ease-swift),opacity var(--ui-duration-snap) ease!important;
   }
   html[data-ui-motion="full"] :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button)>svg:not(.spin){
-    transition:transform 150ms cubic-bezier(.2,.75,.25,1),opacity 150ms ease!important;
+    transition:transform var(--ui-duration-snap) var(--ui-ease-swift),opacity var(--ui-duration-snap) ease!important;
   }
   html[data-ui-motion="full"] :is(.primary-button,.secondary-button,.danger-button,.new-chat,.icon-button,.send-button,.message-read,.copy-message,.attach-image,.companion-chat,.companion-settings,.companion-codex,.companion-voice-entry,.voice-conversation-actions>button,.voice-conversation-heading>button,.mode-switch>button,.workspace-target-segments>button,.settings-tabs>button,.auth-modes>button):not(:disabled):not([aria-disabled="true"]):active{
-    transform:translateY(1px) scale(.975);
+    transform:scale(.98);transition-duration:var(--ui-duration-touch)!important;
   }
   html[data-ui-motion="full"] .settings-tabs>button::after{
     transition:opacity 160ms ease,transform 180ms cubic-bezier(.2,.75,.25,1)!important;
