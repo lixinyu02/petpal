@@ -7,7 +7,7 @@ html .settings-tabs>button::after,
 html .composer::after{
   transition:none!important;
 }
-html :is(.welcome,.message,.message-avatar,.modal,.toast,.ui-toast,.chat-assistant-layer,.chat-assistant-dialog,.chat-latest-button,.typing-dots>i,.spin,.ui-message-enter,.ui-view-enter,.ui-voice-bars>i){
+html :is(.welcome,.message,.message-avatar,.modal,.toast,.ui-toast,.chat-assistant-layer,.chat-assistant-dialog,.chat-latest-button,.chat-scroll-dock,.typing-dots>i,.spin,.ui-message-enter,.ui-view-enter,.ui-voice-bars>i){
   animation:none!important;
 }
 
@@ -40,7 +40,34 @@ html :is(.welcome,.message,.message-avatar,.modal,.toast,.ui-toast,.chat-assista
 }
 .settings-tabs>button.active::after{opacity:1;transform:scaleX(1)}
 
+/* A small selected-state marker avoids moving navigation text or its hit area. */
+.app-shell :is(.main-nav>button,.history-row){position:relative}
+.app-shell :is(.main-nav>button,.history-row)::before{
+  content:'';position:absolute;left:2px;top:calc(50% - 7px);width:3px;height:14px;
+  border-radius:2px;background:currentColor;opacity:0;transform:scaleY(.35);pointer-events:none;
+}
+.app-shell .main-nav>button.active::before,
+.app-shell .history-row.selected::before{opacity:.65;transform:scaleY(1)}
+
 @media(prefers-reduced-motion:no-preference){
+  /* Fade only: transformed ancestors would change fixed menu coordinates. */
+  html[data-ui-motion="full"] .app-shell :is(.workspace-controls,.chat-scroll-content)[data-ui-enter="true"]{
+    animation:ui-workspace-in 180ms ease-out both!important;
+  }
+  html[data-ui-motion="full"] .app-shell :is(.main-nav>button,.history-row)::before{
+    transition:opacity 160ms ease,transform 180ms cubic-bezier(.2,.75,.25,1)!important;
+  }
+  html[data-ui-motion="full"] .chat-scroll-dock{
+    animation:ui-dock-in 180ms ease-out both!important;
+  }
+  html[data-ui-motion="full"] .chat-scroll-dock-action{
+    transform:translateX(0) scale(1);transform-origin:right center;
+    transition:opacity 160ms ease,transform 180ms cubic-bezier(.2,.75,.25,1),visibility 0s linear 180ms!important;
+  }
+  html[data-ui-motion="full"] .chat-scroll-dock[data-expanded="false"] .chat-scroll-dock-action{
+    transform:translateX(10px) scale(.94);
+  }
+  html[data-ui-motion="full"] .chat-scroll-dock[data-expanded="true"] .chat-scroll-dock-action{transition-delay:0s!important}
   /* Entry opacity is attached only to fresh views. Settings may contain a portrait,
      so only its heading and tabs move; the view itself fades in place. */
   html[data-ui-motion="full"] :is(.settings-page,.login-page,.downloads-view,.welcome)[data-ui-enter="true"]{
@@ -147,6 +174,8 @@ html:not([data-ui-motion="full"]) :is(.workspace-model-popup,.workspace-disclosu
 }
 
 @keyframes ui-surface-in{from{opacity:0}to{opacity:1}}
+@keyframes ui-workspace-in{from{opacity:.35}to{opacity:1}}
+@keyframes ui-dock-in{from{opacity:0;transform:translateX(6px)}to{opacity:1;transform:translateX(0)}}
 @keyframes ui-rise-in{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
 @keyframes ui-message-enter{from{opacity:0}to{opacity:1}}
 @keyframes ui-message-avatar-in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
