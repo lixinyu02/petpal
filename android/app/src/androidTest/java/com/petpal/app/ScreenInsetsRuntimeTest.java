@@ -235,7 +235,7 @@ public class ScreenInsetsRuntimeTest {
                 WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(activity.get().getWindow(), view()); boolean day = "day".equals(theme);
                 assertEquals("Status icons follow application theme", day, bars.isAppearanceLightStatusBars());
                 assertEquals("Navigation icons follow application theme", day, bars.isAppearanceLightNavigationBars());
-                assertEquals("Native safe-area background follows application theme", Color.parseColor(day ? "#fafbf8" : "#181d1b"), ((ColorDrawable) activity.get().getWindow().getDecorView().getBackground()).getColor()); return null;
+                assertEquals("Native safe-area background follows application theme", Color.parseColor(day ? "#fafbf8" : "#1f1e1b"), ((ColorDrawable) activity.get().getWindow().getDecorView().getBackground()).getColor()); return null;
             });
         }
         @Override public void close() throws Exception {
@@ -318,7 +318,7 @@ public class ScreenInsetsRuntimeTest {
             }
             try (Session restarted = new Session()) {
                 main(() -> {
-                    assertEquals("Stored night theme is restored before the real WebView fixture starts", Color.parseColor("#181d1b"), ((ColorDrawable) restarted.activity.get().getWindow().getDecorView().getBackground()).getColor());
+                    assertEquals("Stored night theme is restored before the real WebView fixture starts", Color.parseColor("#1f1e1b"), ((ColorDrawable) restarted.activity.get().getWindow().getDecorView().getBackground()).getColor());
                     assertEquals(android.content.res.Configuration.UI_MODE_NIGHT_YES, restarted.activity.get().getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK);
                     assertFalse(WindowCompat.getInsetsController(restarted.activity.get().getWindow(), restarted.view()).isAppearanceLightStatusBars());
                     return null;

@@ -116,7 +116,7 @@ public final class ScreenInsetsController {
         if (persist && !preference.equals(savedPreference(activity))) activity.getSharedPreferences(APPEARANCE_PREFS, Context.MODE_PRIVATE).edit().putString(PREFERENCE, preference).apply();
         appNightMode(activity, theme);
         boolean night = "night".equals(theme);
-        int background = Color.parseColor(night ? "#181d1b" : "#fafbf8");
+        int background = Color.parseColor(night ? "#1f1e1b" : "#fafbf8");
         activity.getWindow().setBackgroundDrawable(new ColorDrawable(background));
         webView.setBackgroundColor(background);
         if (Build.VERSION.SDK_INT >= 30) {

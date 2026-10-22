@@ -143,10 +143,9 @@ test('first-paint inline policy matches the module for every boundary, preferenc
 
 test('night palette keeps readable text and button contrast without recoloring character pixels', async () => {
   const css = await readFile(new URL('../src/theme.css', import.meta.url), 'utf8');
-  const luminance = hex => { const channels = hex.replace('#', '').match(/../g).map(value => parseInt(value, 16) / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4); return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722; };
-  const contrast = (left, right) => { const a = luminance(left), b = luminance(right); return (Math.max(a, b) + .05) / (Math.min(a, b) + .05); };
-  for (const surface of ['#181d1b', '#222a25', '#2b352e']) { assert.ok(contrast('#e0e7e1', surface) >= 7); assert.ok(contrast('#a9b8ae', surface) >= 4.5); }
-  assert.ok(contrast('#f4f8f3', '#3c7158') >= 4.5);
+  // Numeric contrast gates read the actual palette in theme-colors.test.mjs.
+  // Here guard the lazy-sheet action binding and preservation of character pixels.
+  assert.match(css, /:is\(\.primary-button,\.send-button,\.companion-chat,\.voice-conversation-actions \.voice-primary\)\{background:var\(--theme-button\)!important;color:var\(--theme-button-ink\)!important/);
   assert.doesNotMatch(css, /(?:filter|backdrop-filter)\s*:\s*(?:invert|brightness|contrast)/i);
   assert.match(css, /data-petpal-surface="transparent"/); assert.match(css, /prefers-reduced-motion:reduce/);
 });

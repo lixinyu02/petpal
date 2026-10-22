@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {createRequire} from 'node:module';
 import vm from 'node:vm';
-import {createThemeController, effectiveTheme, THEME_NATIVE_SESSION_KEY, THEME_STORAGE_KEY} from '../src/platform/theme.mjs';
+import {createThemeController, effectiveTheme, THEME_CHROME_COLORS, THEME_COLORS, THEME_NATIVE_SESSION_KEY, THEME_STORAGE_KEY} from '../src/platform/theme.mjs';
 
 const date=new Date(2026,9,21,12), tick=()=>new Promise(resolve=>setImmediate(resolve));
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
@@ -91,4 +92,18 @@ test('first-paint seed agrees with native preference across a new origin and pre
     vm.runInNewContext(script,{Date:ClockDate,window:{petpal:{appearance:{initial:{...snapshot('night'),sessionId:'launch'}}}},localStorage:{getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value)},document,location:{search:overlay?'?pet=1':''},URLSearchParams});
     assert.equal(document.documentElement.dataset.theme,expected);if(overlay)assert.equal(values.get(THEME_NATIVE_SESSION_KEY),'old');
   }
+});
+
+test('web canvas, desktop window and Android system surfaces share the warm night color',async()=>{
+  const {COLORS}=createRequire(import.meta.url)('../desktop/appearance.cjs');
+  const [nativeSource,nightResource]=await Promise.all([
+    readFile(new URL('../android/app/src/main/java/com/petpal/app/ScreenInsetsController.java',import.meta.url),'utf8'),
+    readFile(new URL('../android/app/src/main/res/values-night/colors.xml',import.meta.url),'utf8'),
+  ]);
+  const nativeColors=nativeSource.match(/Color\.parseColor\(night\s*\?\s*"(#[\da-f]+)"\s*:\s*"(#[\da-f]+)"\)/i);
+  const splash=nightResource.match(/<color\s+name="petpal_window_background">(#[\da-f]+)<\/color>/i);
+  assert.ok(nativeColors,'Android runtime must select an explicit surface');assert.ok(splash,'Android splash has a night resource');
+  assert.equal(THEME_COLORS.night,'#1f1e1b');assert.equal(THEME_CHROME_COLORS.night,THEME_COLORS.night);
+  assert.equal(COLORS.night,THEME_COLORS.night);assert.equal(nativeColors[1],THEME_COLORS.night);assert.equal(splash[1],THEME_COLORS.night);
+  assert.equal(THEME_COLORS.day,'#fafbf8');assert.equal(COLORS.day,THEME_COLORS.day);assert.equal(nativeColors[2],THEME_COLORS.day);assert.equal(THEME_CHROME_COLORS.day,'#f6f7f2');
 });
