@@ -1,0 +1,41 @@
+{
+  "format": 1,
+  "capturedAt": "2026-10-22T15:22:18.516359+00:00",
+  "referenceProject": "Codex Remote",
+  "referenceHead": "bfff604179588ccc3744179d0061605b6e1a6e1f",
+  "referenceWorktreeHasUnrelatedChanges": true,
+  "files": [
+    {
+      "source": "web/openui/library.mjs",
+      "sha256": "7fb9ded5343e0f0f7f342d217b2d09a095429b5627b6e48573558034abc22825",
+      "destination": "src/openui/library.mjs",
+      "matchesReferenceHeadAfterLfNormalization": true
+    },
+    {
+      "source": "web/openui/validate.mjs",
+      "sha256": "34d3ad6e64494646e3e9b8e941c67f99a8305a0129c8fda8bad44ff240417c29",
+      "destination": "src/openui/validate.mjs",
+      "matchesReferenceHeadAfterLfNormalization": true
+    }
+  ],
+  "adaptation": "Reuse the source-controlled component definitions and official-SDK validation; rename the conversation preamble to PetPal. No prebundled React runtime is copied.",
+  "dependencies": {
+    "@openuidev/lang-core": {
+      "version": "1.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/thesysdev/openui/tree/main/packages/lang-core"
+    },
+    "@openuidev/react-lang": {
+      "version": "1.0.1",
+      "license": "MIT",
+      "repository": "https://github.com/thesysdev/openui/tree/main/packages/react-lang"
+    },
+    "zod": {
+      "version": "4.6.7",
+      "license": "MIT",
+      "repository": "https://github.com/colinhacks/zod"
+    }
+  },
+  "licenseNote": "Third-party SDK and dependency code is MIT. The copied host component definitions and validation originated in the user-owned Codex Remote source; no repository-wide license was inferred for that custom host code. Third-party notices must be retained with the application.",
+  "hashSource": "SHA256 values describe the reference working-tree bytes; HEAD comparison normalizes CRLF to LF only."
+}

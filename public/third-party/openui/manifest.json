@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "@openuidev/lang-core": "1.0.1",
+    "@openuidev/react-lang": "1.0.1",
+    "@openuidev/observability": "0.0.4",
+    "zod": "4.6.7",
+    "ci-info": "4.4.0"
+  },
+  "promptSha256": "fb476376594d9421c19b1a7bdff5563a8a9d421cd34a2a59b1eb72a72aab4418",
+  "runtime": "lazy Vite chunk using the application React instance"
+}

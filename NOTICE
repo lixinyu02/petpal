@@ -4,6 +4,18 @@ Third-party attribution
 This notice describes bundled dependencies and adapted references. It does not assign a license
 or copyright ownership to PetPal itself.
 
+OpenUI
+------
+Packages: @openuidev/react-lang and @openuidev/lang-core 1.0.1 (MIT).
+Official project: https://github.com/thesysdev/openui
+Dependency license texts and locked versions are retained under
+public/third-party/openui/. Runtime telemetry is disabled. The renderer loads
+on demand and shares PetPal's React instance.
+
+The restricted component library and validator are adapted from the user's
+Codex Remote source, with provenance recorded in docs/openui-reference.json.
+That source is not assigned an MIT license by this dependency notice.
+
 Open Claude UI design reference
 ------------------------------
 Project: https://github.com/Caho1/open-claude-ui

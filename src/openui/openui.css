@@ -1,0 +1,31 @@
+/* One responsive rendering surface, sharing the application's day/night tokens. */
+.assistant-output{min-width:0;max-width:100%;display:flex;flex-direction:column;gap:14px}
+.openui-renderer{display:block;margin:0;padding:0;border:0;min-inline-size:0;min-width:0;max-width:100%;color:var(--theme-ink);font:inherit;overflow-wrap:anywhere}
+.openui-renderer *,.openui-renderer *::before,.openui-renderer *::after{box-sizing:border-box}
+.openui-panel{display:flex;flex-direction:column;gap:16px;min-width:0;padding:18px;border:1px solid var(--theme-border);border-radius:14px;background:var(--theme-raised)}
+.openui-panel .openui-panel{padding:12px;background:var(--theme-surface)}
+.openui-panel-title,.openui-heading{margin:0;color:var(--theme-ink);line-height:1.5;font-weight:600;font-size:1em}
+.openui-panel-title{font-size:1.06em}
+.openui-text{margin:0;white-space:pre-wrap;line-height:1.75}
+.openui-stack{display:flex;flex-direction:column;gap:12px;min-width:0}
+.openui-stack-horizontal{flex-direction:row;flex-wrap:wrap;align-items:flex-start}
+.openui-field{display:flex;flex-direction:column;gap:7px;min-width:0}
+.openui-stack-horizontal>.openui-field{flex:1 1 180px}
+.openui-field>label{font-size:.9em;font-weight:550;color:var(--theme-muted)}
+.openui-renderer .openui-field :is(input,textarea,select){width:100%;min-width:0;min-height:44px;border:1px solid var(--theme-control-border);border-radius:8px;padding:9px 11px;background:var(--theme-input);color:var(--theme-ink);font:inherit;line-height:1.5}
+.openui-field textarea{resize:vertical;max-height:360px}
+.openui-checkbox{display:inline-flex;align-items:center;gap:10px;min-height:44px;cursor:pointer;line-height:1.6}
+.openui-renderer .openui-checkbox input{width:18px;height:18px;flex:0 0 auto;margin:0;accent-color:var(--theme-button,var(--theme-accent))}
+.openui-renderer .openui-button{border:1px solid transparent;border-radius:9px;padding:9px 14px;min-height:44px;max-width:100%;align-self:flex-start;white-space:normal;overflow-wrap:anywhere;color:var(--theme-button-ink,#fff);background:var(--theme-button,var(--theme-accent));cursor:pointer;font:inherit;font-size:.93em;line-height:1.5}
+.openui-renderer .openui-button:hover:not(:disabled){filter:brightness(1.05)}
+.openui-renderer .openui-button:disabled{cursor:default;opacity:.55}
+.openui-renderer :is(input,textarea,select,button,[tabindex]):focus-visible{outline:2px solid var(--theme-focus);outline-offset:3px}
+.openui-table-scroll{min-width:0;max-width:100%;overflow:auto;border:1px solid var(--theme-border);border-radius:8px}
+.openui-table{border-collapse:collapse;width:100%;font-size:.92em;text-align:left}
+.openui-table th,.openui-table td{padding:10px 12px;border-bottom:1px solid var(--theme-border);vertical-align:top;white-space:pre-wrap;min-width:90px}
+.openui-table th{font-weight:600;background:var(--theme-soft)}
+.openui-table tbody tr:last-child td{border-bottom:0}
+.openui-loading,.openui-notice{margin:8px 0;color:var(--theme-muted);font-size:12px;line-height:1.7}
+.openui-loading{padding:12px;border-left:2px solid var(--theme-border)}
+.openui-original{min-width:0;max-width:100%}
+@media(max-width:520px){.openui-panel{padding:12px;gap:12px}.openui-stack-horizontal>.openui-field{flex-basis:100%}.openui-renderer .openui-field :is(input,textarea,select){font-size:16px}}

@@ -6,7 +6,7 @@ const version = process.env.PETPAL_ANDROID_VERSION || packageVersion;
 if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version)) throw new Error('Invalid client version');
 const versionJson = JSON.stringify({version});
 export default defineConfig({
-  define: { __PETPAL_VERSION__: JSON.stringify(version) },
+  define: { __PETPAL_VERSION__: JSON.stringify(version), 'process.env.OPENUI_RUNTIME_TELEMETRY_ENABLED': '"0"' },
   plugins: [react(), {
     name:'petpal-client-version',
     generateBundle(){this.emitFile({type:'asset',fileName:'version.json',source:versionJson});},
