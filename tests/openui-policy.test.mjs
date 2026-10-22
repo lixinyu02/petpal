@@ -28,6 +28,17 @@ test('long tasks and component guides stay complete and automatic without a pres
   assert.equal(withOutputGuide(full, policy), `${OPENUI_AUTO_GUIDE}\n\n${full}`);
 });
 
+test('automatic presentation honors read-only card requests without replacing them with a form', () => {
+  const policy = prepareOutputRendering('请用卡片展示上海和杭州的出行安排，不需要输入表单', {outputRendering:'auto'});
+  assert.equal(policy.outputRendering, 'auto');
+  assert.match(policy.guide, /Honor an explicit request to display or render visual cards/);
+  assert.match(policy.guide, /read-only cards with no controls/);
+  assert.match(policy.guide, /A card is a Panel component; there is no Card component/);
+  assert.match(policy.guide, /rather than substituting an empty data-entry form/);
+  assert.match(policy.guide, /requests to explain or show interface source code remain code/);
+  assert.doesNotMatch(policy.guide, /Choose OpenUI only when interactive controls/);
+});
+
 test('missing optional guide falls back and inherited native guidance is explicitly disabled', () => {
   const fallback = prepareOutputRendering('原始任务', {outputRendering:'auto', guide:null, previousHasGuide:true});
   assert.equal(fallback.outputRendering, 'markdown'); assert.equal(fallback.guide, MARKDOWN_TURN_GUIDE); assert.equal(fallback.resetThread, false);

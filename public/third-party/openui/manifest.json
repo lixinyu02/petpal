@@ -6,6 +6,6 @@
     "zod": "4.6.7",
     "ci-info": "4.4.0"
   },
-  "promptSha256": "fb476376594d9421c19b1a7bdff5563a8a9d421cd34a2a59b1eb72a72aab4418",
+  "promptSha256": "a41038a8eb815acbe05f49fa52c47ad1ae4ad973be86b94dad5ef5b9ff1dca16",
   "runtime": "lazy Vite chunk using the application React instance"
 }

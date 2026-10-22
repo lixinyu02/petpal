@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { OPENUI_LIMITS, openUIExample, openUIPrompt } from '../src/openui/library.mjs';
+import { OPENUI_LIMITS, openUIExample, openUICardExample, openUIPrompt } from '../src/openui/library.mjs';
 import { copyBoundedData, validateOpenUI } from '../src/openui/validate.mjs';
 
 // Actual official parser and PetPal's controlled library; no parser or model doubles.
@@ -19,6 +19,8 @@ test('the generated model guide describes the same restricted PetPal library', (
 
 test("official SDK validates the published library example and all component types", () => {
   assert.deepEqual(validateOpenUI(openUIExample), { valid: true, errors: [] });
+  assert.deepEqual(validateOpenUI(openUICardExample), { valid: true, errors: [] });
+  assert.ok(openUIPrompt.includes(openUICardExample));
   const source = '$choice = "A"\nroot = Panel("检查", [Heading("结果", 2), Stack([Text("证据"), Field("note", "备注", "", true), Select("choice", "方案", ["A", "B"], $choice), Checkbox("ok", "确认", false)]), Table(["项目", "结果"], [["引脚", true], ["数值", 12], ["空值", null]]), Button("重置", @Reset($choice))])';
   assert.deepEqual(validateOpenUI(source), { valid: true, errors: [] });
 });
