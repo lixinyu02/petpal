@@ -50,6 +50,11 @@ html :is(.welcome,.message,.message-avatar,.modal,.toast,.ui-toast,.chat-assista
 .app-shell .history-row.selected::before{opacity:.65;transform:scaleY(1)}
 
 @media(prefers-reduced-motion:no-preference){
+  /* Decorative only: no layout measurements, no transformed popup ancestor.
+     Hidden/reduced pages lose data-ui-motion=full, so the thumb settles instantly. */
+  html[data-ui-motion="full"][data-theme="night"] .app-shell .workspace-mode-row .mode-switch::before{
+    transition:transform 120ms cubic-bezier(.32,.72,0,1)!important;
+  }
   /* Fade only: transformed ancestors would change fixed menu coordinates. */
   html[data-ui-motion="full"] .app-shell :is(.workspace-controls,.chat-scroll-content)[data-ui-enter="true"]{
     animation:ui-workspace-in 180ms ease-out both!important;

@@ -19,12 +19,13 @@ for(const theme of ['day','night'])test(`${theme} field boundaries and focus ind
  const colors=palette(theme);for(const surface of ['surface','raised','input']){assert.ok(contrast(colors['--theme-control-border'],colors[`--theme-${surface}`])>=3,`${theme} field boundary on ${surface}`);assert.ok(contrast(colors['--theme-focus'],colors[`--theme-${surface}`])>=3,`${theme} focus on ${surface}`);}
 });
 
-test('the pale default and warm night surface do not alter theme preference state',()=>{
- assert.equal(day['--theme-surface'],'#fafbf8');assert.equal(night['--theme-surface'],'#1f1e1b');assert.ok(!Object.hasOwn(day,'--theme-preference'));assert.ok(!Object.hasOwn(night,'--theme-preference'));
+test('the pale default and neutral night surface do not alter theme preference state',()=>{
+ assert.equal(day['--theme-surface'],'#fafbf8');assert.equal(night['--theme-surface'],'#151515');assert.ok(!Object.hasOwn(day,'--theme-preference'));assert.ok(!Object.hasOwn(night,'--theme-preference'));
 });
 
 test('night action labels and selected text remain readable in every interactive state',()=>{
  for(const fill of ['button','button-hover'])assert.ok(contrast(night['--theme-button-ink'],night[`--theme-${fill}`])>=4.5,`night label on ${fill}`);
  assert.ok(contrast(night['--theme-accent'],night['--theme-accent-soft'])>=4.5,'selected option and active read-aloud labels');
- for(const text of ['ink','muted'])assert.ok(contrast(night[`--theme-${text}`],night['--theme-navigation'])>=4.5,`night ${text} navigation`);
+ assert.ok(contrast(night['--theme-selected-ink'],night['--theme-selected'])>=4.5,'neutral selected option');
+ for(const text of ['ink','muted','accent'])for(const surface of ['navigation','panel','popover'])assert.ok(contrast(night[`--theme-${text}`],night[`--theme-${surface}`])>=4.5,`night ${text} on ${surface}`);
 });

@@ -59,7 +59,7 @@ function harness({ origin = 'http://127.0.0.1:4318', tray = true, deferredPetLoa
     app, BrowserWindow: Window, backend,
     appPreferences: { current: () => ({ closeToTray: true, petAlwaysOnTop: true }) },
     appearance: { current: () => ({ preference: 'day', theme: 'day', saved: false }), refresh: () => ({ preference: 'day', theme: 'day', saved: false }) },
-    APPEARANCE_COLORS: { day: '#fafbf8', night: '#1f1e1b' }, appearanceArguments: () => ['--petpal-appearance=day:day:0'], crypto: { randomUUID: () => '12345678-1234-1234-1234-123456789abc' },
+    APPEARANCE_COLORS: { day: '#fafbf8', night: '#151515' }, appearanceArguments: () => ['--petpal-appearance=day:day:0'], crypto: { randomUUID: () => '12345678-1234-1234-1234-123456789abc' },
     executor: { async disconnect() { calls.disconnects++; } },
     rendererFailure() { calls.fatalErrors++; }, remoteHttp: { cancelOwner() {} },
     screen: { getPrimaryDisplay: () => ({ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }) },

@@ -186,6 +186,69 @@ html[data-theme="night"] .app-shell .companion-panel-toggle:hover,
 html[data-theme="night"] .app-shell .companion-panel-toggle[aria-expanded="true"]{background:var(--ui-polish-control)!important}
 html[data-theme="night"] .login-page .login-form .auth-modes>button.active{border:0!important;border-radius:10px}
 
+/* Open Claude UI reference: surface roles, neutral selection and a single
+   composer outline. Local implementation; provenance and MIT text are in NOTICE. */
+html[data-theme="night"] :is(.workspace-model-popup,.workspace-disclosure-content,.chat-assistant-dialog){
+  background:var(--theme-popover)!important;border-color:transparent!important;
+  border-radius:12px;box-shadow:var(--theme-popover-shadow)!important;
+}
+html[data-theme="night"] .modal{
+  background:var(--theme-raised)!important;border-color:transparent!important;
+  border-radius:16px;box-shadow:var(--theme-popover-shadow)!important;
+}
+html[data-theme="night"] .workspace-model-option{border-radius:8px}
+html[data-theme="night"] :is(.workspace-model-option.is-selected,.workspace-model-option.is-focused){
+  background:var(--theme-selected)!important;color:var(--theme-selected-ink)!important;
+}
+html[data-theme="night"] .workspace-model-option.is-selected .workspace-model-selected{color:var(--theme-accent)}
+html[data-theme="night"] .app-shell .composer{
+  background:var(--theme-raised)!important;border-color:transparent!important;
+  border-radius:20px;box-shadow:var(--theme-composer-shadow)!important;
+}
+html[data-theme="night"] .app-shell .composer:focus-within{
+  border-color:transparent!important;
+  box-shadow:inset 0 0 0 1px var(--theme-hairline-strong),0 0 0 1px var(--theme-focus),0 4px 20px #0003!important;
+}
+/* The existing pseudo-ring would otherwise draw a second orange outline. */
+html[data-theme="night"] .app-shell .composer::after{border-color:transparent;opacity:0!important}
+html[data-theme="night"] .app-shell .composer .send-button{border-radius:10px}
+html[data-theme="night"] .app-shell :is(.primary-button,.secondary-button,.danger-button,.new-chat){border-radius:8px}
+html[data-theme="night"] .app-shell .message-user .message-text{border-radius:18px;max-width:100%}
+html[data-theme="night"] .message-markdown pre{border-radius:12px}
+html[data-theme="night"] .workspace-model-search:focus-within{box-shadow:inset 0 -1px var(--theme-focus)}
+html[data-theme="night"] :is(.workspace-model-search,.workspace-model-footer){border-color:var(--theme-hairline)!important}
+
+/* Equal tracks keep the decorative thumb aligned without measuring or re-rendering.
+   This parent never transforms, preserving fixed model/host menu coordinates. */
+html[data-theme="night"] .app-shell .workspace-mode-row .mode-switch{
+  position:relative;isolation:isolate;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  padding:2px;gap:0;border:0;border-radius:12px;background:var(--theme-segmented-track)!important;
+}
+html[data-theme="night"] .app-shell .workspace-mode-row .mode-switch>button{
+  position:relative;z-index:1;min-width:0;border:0;border-radius:10px;
+  justify-content:center;color:var(--theme-muted)!important;background:transparent!important;box-shadow:none;
+}
+html[data-theme="night"] .app-shell .workspace-mode-row .mode-switch>button[aria-pressed="true"]{
+  color:var(--theme-selected-ink)!important;background:var(--theme-segmented-thumb)!important;
+}
+@supports selector(:has(*)){
+  html[data-theme="night"] .app-shell .workspace-mode-row .mode-switch::before{
+    content:'';position:absolute;inset:2px auto 2px 2px;width:calc((100% - 4px)/2);
+    border-radius:10px;pointer-events:none;z-index:0;transform:translateX(0);
+    background:var(--theme-segmented-thumb);box-shadow:inset 0 0 0 1px var(--theme-hairline),0 1px 3px #0003;transition:none!important;
+  }
+  html[data-theme="night"] .app-shell .workspace-mode-row .mode-switch:has(>button:nth-child(2)[aria-pressed="true"])::before{transform:translateX(100%)}
+  html[data-theme="night"] .app-shell .workspace-mode-row .mode-switch>button[aria-pressed="true"]{background:transparent!important}
+}
+/* Hover affordances remain fully exposed on touch, narrow screens and keyboards. */
+@supports selector(:has(*)){
+  @media(hover:hover) and (pointer:fine) and (min-width:961px){
+    html[data-theme="night"] .app-shell .message-actions{opacity:0}
+    html[data-theme="night"] .app-shell :is(.message:hover,.message:focus-within) .message-actions{opacity:1}
+    html[data-theme="night"] .app-shell .message-actions:has(.message-read-active){opacity:1}
+  }
+}
+
 /* Fresh markers run once and end on the marked node. No persistent idle animation. */
 html .companion-world :is(.companion-intro,.companion-reply,.companion-voice-panel,.companion-aura){
   animation:none!important;transition:none!important;
@@ -251,3 +314,7 @@ html[data-short-viewport="true"] .app-shell .workspace-mode-row .mode-switch>but
 html[data-short-viewport="true"] .app-shell .workspace-controls:is(.is-chat,.is-agent) .workspace-model-trigger,
 html[data-short-viewport="true"] .app-shell .workspace-controls.is-agent .workspace-context-row :is(.workspace-model-trigger,.workspace-host-control),
 html[data-short-viewport="true"] .app-shell :is(.workspace-host-control,.workspace-host-picker>summary){min-height:46px}
+@media(max-width:650px),(any-pointer:coarse){
+  html[data-theme="night"] .app-shell .workspace-mode-row .mode-switch>button{min-height:44px}
+  html[data-theme="night"] .app-shell .message-actions{opacity:1}
+}

@@ -11,16 +11,22 @@
   --muted:var(--theme-muted);
 }
 html[data-theme="night"]{
-  /* Warm charcoal surfaces, quiet cream text and a restrained clay accent. */
-  color-scheme:dark;--theme-surface:#1f1e1b;--theme-raised:#2a2825;--theme-soft:#33312c;
-  --theme-ink:#efede7;--theme-muted:#b9b5aa;--theme-border:#46433c;
-  --theme-accent:#e5a184;--theme-accent-soft:#49372f;--theme-focus:#d8a18a;
-  --theme-input:#24231f;--theme-control-border:#827e72;
+  /* Surface roles adapted from Open Claude UI c1f923ae (MIT; see NOTICE).
+     Text/focus tokens keep PetPal's contrast requirements. Day stays independent. */
+  color-scheme:dark;--theme-surface:#151515;--theme-panel:#1a1a19;--theme-raised:#20201f;--theme-soft:#2c2c2a;
+  --theme-ink:#ebebe6;--theme-muted:#b4b4ae;--theme-border:#343432;
+  --theme-accent:#e4a085;--theme-accent-soft:#392b25;--theme-focus:#d97757;
+  --theme-input:#20201f;--theme-control-border:#7b7b75;
   --theme-danger:#f1ada0;--theme-danger-soft:#432d29;
   --theme-warning:#e3c38c;--theme-warning-soft:#403526;
   --theme-success:#a9c9a5;--theme-success-soft:#2d3b2d;
-  --theme-navigation:#191815;--theme-button:#d99072;--theme-button-hover:#e6a085;--theme-button-ink:#1f1e1b;
-  --theme-overlay:#100e0bc2;--theme-shadow:0 12px 36px #0005;
+  --theme-navigation:#0b0b0b;--theme-popover:#2c2c2a;--theme-selected:#343432;--theme-selected-ink:#ebebe6;
+  --theme-button:#d97757;--theme-button-hover:#e08264;--theme-button-ink:#151515;
+  --theme-segmented-track:#1a1a19;--theme-segmented-thumb:#343432;
+  --theme-hairline:#ffffff17;--theme-hairline-strong:#ffffff2e;
+  --theme-popover-shadow:inset 0 0 0 1px #ffffff1a,0 8px 28px #0006,0 2px 8px #0004;
+  --theme-composer-shadow:inset 0 0 0 1px #ffffff17,0 4px 20px #0003;
+  --theme-overlay:#000000a8;--theme-shadow:0 12px 36px #0005;
   --theme-canvas:var(--theme-surface);--theme-error:var(--theme-danger);
   --green:var(--theme-accent);--muted:var(--theme-muted);--line:var(--theme-border);--soft:var(--theme-soft);--cream:var(--theme-raised);
   color:var(--theme-ink);background:var(--theme-surface)
@@ -45,7 +51,9 @@ html[data-theme="day"]{color-scheme:light}
 /* Legacy feature sheets still use fixed daylight colors; these scoped color overrides
    also cover sheets loaded after the entry point, without changing their layout. */
 html[data-theme="night"] :is(.app-shell,.main-area,.chat-area,.settings-page,.login-page,.downloads-view,.companion-world){background:var(--theme-surface)!important;color:var(--theme-ink)!important}
-html[data-theme="night"] :is(.sidebar,.topbar,.pet-panel){background:var(--theme-navigation)!important;border-color:var(--line)!important}
+html[data-theme="night"] .sidebar{background:var(--theme-navigation)!important;border-color:var(--theme-hairline)!important}
+html[data-theme="night"] .topbar{background:var(--theme-surface)!important;border-color:var(--theme-hairline)!important}
+html[data-theme="night"] .pet-panel{background:var(--theme-panel)!important;border-color:var(--theme-hairline)!important}
 html[data-theme="night"] :is(.composer,.modal,.workspace-model-popup,.workspace-disclosure-content,.chat-assistant-dialog,.task-notification-settings,.computer-use-settings,.music-mcp-source,.opencli-site-list,.pet-render-error){background:var(--theme-raised)!important;border-color:var(--theme-border)!important;color:var(--theme-ink)!important;box-shadow:0 10px 32px #0003}
 html[data-theme="night"] :is(.settings-page,.modal,.login-page,.downloads-view,.chat-assistant-dialog,.workspace-model-popup,.workspace-disclosure-content) :is(h1,h2,h3,h4,strong,legend,label),
 html[data-theme="night"] :is(.app-shell,.companion-world) :is(h1,h2,h3,h4){color:var(--theme-ink)!important}
@@ -56,11 +64,11 @@ html[data-theme="night"] :is(.workspace-model-current small,.workspace-model-id,
 html[data-theme="night"] :is(.new-chat,.secondary-button,.desktop-pet-button,.companion-controls,.companion-response-row button,.companion-voice-entry,.workspace-model-trigger,.workspace-host-control,.workspace-host-picker>summary,.workspace-host-search,.workspace-target-segments,.agent-onboarding-configure,.workspace-host-guide>button,.assistant-task-approval button,.chat-assistant-default>button,.agent-execution-unknown button){background:var(--theme-raised)!important;border-color:var(--theme-border)!important;color:var(--theme-ink)!important;box-shadow:none}
 html[data-theme="night"] :is(.new-chat,.secondary-button,.desktop-pet-button,.workspace-model-trigger,.workspace-host-picker>summary,.agent-onboarding-configure,.workspace-host-guide>button):hover:not(:disabled),
 html[data-theme="night"] :is(.main-nav button,.settings-link,.history-row,.icon-button,.workspace-disclosure>summary,.workspace-host-option,.workspace-host-refresh,.workspace-model-close,.chat-assistant-trigger,.chat-assistant-dialog-heading>button,.agent-queue-actions button,.companion-controls button):hover{background:var(--theme-soft)!important;color:var(--theme-ink)!important}
-html[data-theme="night"] :is(.main-nav button.active,.settings-link.active,.history-row.selected,.workspace-model-option.is-selected,.workspace-model-option.is-focused,.workspace-host-option.is-selected,.workspace-target-segments>button[aria-pressed="true"],.companion-switch button[aria-pressed="true"]){background:var(--theme-accent-soft)!important;color:var(--theme-accent)!important}
+html[data-theme="night"] :is(.main-nav button.active,.settings-link.active,.history-row.selected,.workspace-model-option.is-selected,.workspace-model-option.is-focused,.workspace-host-option.is-selected,.workspace-target-segments>button[aria-pressed="true"],.companion-switch button[aria-pressed="true"]){background:var(--theme-selected)!important;color:var(--theme-selected-ink)!important}
 html[data-theme="night"] :is(.main-nav>button,.settings-link,.history-item,.settings-tabs>button,.workspace-disclosure,.workspace-disclosure>summary,.chat-assistant-trigger,.chat-assistant-task-latest>button,.companion-footer>a,.companion-footer>button,.companion-settings,.companion-codex,.single-companion-return,.copy-message,.message-read,.attach-image,.attachment-remove,.speech-controls button,.speech-toggle,.motion-preview-link,.task-notification-settings summary,.music-mcp-source>summary,.music-mcp-runtime>summary,.music-mcp-tools>summary,.opencli-catalog>summary,.opencli-browser>summary,.opencli-notebook>summary,.opencli-site>summary){color:var(--theme-muted)!important}
 html[data-theme="night"] :is(.mode-switch,.companion-switch,.message-user .message-text,.message-avatar,.avatar,.dialog-icon,.empty-models,.pet-settings-preview,.device-badge,.nav-tag,.setup-notice,.assistant-runtime,.voice-runtime-note,.voice-preparing,.task-settings-notice,.workspace-host-server-note,.opencli-state,.opencli-command-names code,.protocol-labels code){background:var(--theme-soft)!important;border-color:var(--theme-border)!important;color:var(--theme-ink)!important}
 html[data-theme="night"] :is(.mode-switch button,.companion-switch button){color:var(--theme-muted)!important}
-html[data-theme="night"] :is(.mode-switch button[aria-pressed="true"],.auth-modes button.active){background:var(--theme-accent-soft)!important;color:var(--theme-accent)!important;border-color:var(--theme-accent)!important;box-shadow:none}
+html[data-theme="night"] :is(.mode-switch button[aria-pressed="true"],.auth-modes button.active){background:var(--theme-selected)!important;color:var(--theme-selected-ink)!important;border-color:var(--theme-border)!important;box-shadow:none}
 html[data-theme="night"] :is(.primary-button,.send-button,.companion-chat,.voice-conversation-actions .voice-primary){background:var(--theme-button)!important;color:var(--theme-button-ink)!important;border-color:var(--theme-button)!important}
 html[data-theme="night"] :is(.primary-button,.send-button,.companion-chat,.voice-conversation-actions .voice-primary):hover:not(:disabled){background:var(--theme-button-hover)!important;color:var(--theme-button-ink)!important}
 html[data-theme="night"] :is(.danger-button,.composer .stop-button){background:var(--theme-danger-soft)!important;color:var(--theme-danger)!important}
@@ -94,7 +102,7 @@ html[data-theme="night"] .companion-floor{background:radial-gradient(ellipse,#c8
 html[data-theme="night"] :is(.scene-circle,.scene-floor){background:var(--theme-soft)}
 html[data-theme="night"] :is(.modal-backdrop,.nav-scrim,.chat-assistant-layer){background:var(--theme-overlay)!important}
 html[data-theme="night"] .toast{background:var(--theme-raised);color:var(--theme-ink)}
-html[data-theme="night"] :is(.single-pet-tools button,.floating-hide,.floating-bubble){background:#2a2825f0!important;color:var(--theme-ink)!important;border-color:var(--theme-control-border)!important}
+html[data-theme="night"] :is(.single-pet-tools button,.floating-hide,.floating-bubble){background:#20201ff0!important;color:var(--theme-ink)!important;border-color:var(--theme-control-border)!important}
 html[data-theme="night"] :is(.single-pet-drag,.pet-drag-handle){color:var(--theme-muted)!important}
 html[data-theme="night"] ::selection{background:var(--theme-accent-soft);color:var(--theme-ink)}
 html[data-theme="night"] ::-webkit-scrollbar-thumb{background:#646056}
@@ -112,7 +120,7 @@ html[data-theme="night"] .workspace-model-search{color:var(--theme-muted)!import
 html[data-theme="night"] .workspace-model-search:focus-within{box-shadow:inset 0 -2px var(--theme-focus)}
 html[data-theme="night"] .workspace-host-control:focus-within{outline-color:var(--theme-focus)}
 html[data-theme="night"] :is(.composer,.workspace-model-search,.workspace-host-search) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),textarea){background:transparent!important}
-html[data-theme="night"] .history-row.selected .history-item{color:var(--theme-accent)!important}
+html[data-theme="night"] .history-row.selected .history-item{color:var(--theme-selected-ink)!important}
 html[data-theme="night"] .history-dialog .history-action-danger{color:var(--theme-danger)!important}
 html[data-theme="night"] :is(.agent-onboarding-copy>p,.agent-project-summary>span){color:var(--theme-muted)!important}
 html[data-theme="night"] .agent-project-summary>strong{color:var(--theme-ink)!important}

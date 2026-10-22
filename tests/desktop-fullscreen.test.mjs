@@ -30,7 +30,7 @@ function fixture({ startFullscreen = false, tray = true, automatic = true } = {}
   const preferences = { startFullscreen, closeToTray: true }, context = vm.createContext({
     BrowserWindow: Window, appPreferences: { current: () => ({ ...preferences }) }, app: { quit() {} },
     appearance: { current: () => ({ preference: 'day', theme: 'day', saved: false }), refresh: () => ({ preference: 'day', theme: 'day', saved: false }) },
-    APPEARANCE_COLORS: { day: '#fafbf8', night: '#1f1e1b' }, appearanceArguments: () => ['--petpal-appearance=day:day:0'], crypto: { randomUUID: () => '12345678-1234-1234-1234-123456789abc' },
+    APPEARANCE_COLORS: { day: '#fafbf8', night: '#151515' }, appearanceArguments: () => ['--petpal-appearance=day:day:0'], crypto: { randomUUID: () => '12345678-1234-1234-1234-123456789abc' },
     screen: { getPrimaryDisplay: () => ({ workArea: {} }) }, mainWindowLayout: () => ({}),
     trackWindowDisplay() {}, fitWindowToDisplay() {}, secureWindow() {}, rendererFailure() {},
     path: { join: (...args) => args.join('/') }, __dirname: 'desktop', iconPath: 'icon.png',

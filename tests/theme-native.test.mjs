@@ -94,7 +94,7 @@ test('first-paint seed agrees with native preference across a new origin and pre
   }
 });
 
-test('web canvas, desktop window and Android system surfaces share the warm night color',async()=>{
+test('web canvas, desktop window and Android system surfaces share the CDS night color',async()=>{
   const {COLORS}=createRequire(import.meta.url)('../desktop/appearance.cjs');
   const [nativeSource,nightResource]=await Promise.all([
     readFile(new URL('../android/app/src/main/java/com/petpal/app/ScreenInsetsController.java',import.meta.url),'utf8'),
@@ -103,7 +103,7 @@ test('web canvas, desktop window and Android system surfaces share the warm nigh
   const nativeColors=nativeSource.match(/Color\.parseColor\(night\s*\?\s*"(#[\da-f]+)"\s*:\s*"(#[\da-f]+)"\)/i);
   const splash=nightResource.match(/<color\s+name="petpal_window_background">(#[\da-f]+)<\/color>/i);
   assert.ok(nativeColors,'Android runtime must select an explicit surface');assert.ok(splash,'Android splash has a night resource');
-  assert.equal(THEME_COLORS.night,'#1f1e1b');assert.equal(THEME_CHROME_COLORS.night,THEME_COLORS.night);
+  assert.equal(THEME_COLORS.night,'#151515');assert.equal(THEME_CHROME_COLORS.night,THEME_COLORS.night);
   assert.equal(COLORS.night,THEME_COLORS.night);assert.equal(nativeColors[1],THEME_COLORS.night);assert.equal(splash[1],THEME_COLORS.night);
   assert.equal(THEME_COLORS.day,'#fafbf8');assert.equal(COLORS.day,THEME_COLORS.day);assert.equal(nativeColors[2],THEME_COLORS.day);assert.equal(THEME_CHROME_COLORS.day,'#f6f7f2');
 });

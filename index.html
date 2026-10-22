@@ -23,8 +23,8 @@
         root.dataset.theme = theme; root.dataset.themePreference = preference;
         if (transparent) root.dataset.petpalSurface = 'transparent';
         root.style.colorScheme = theme === 'night' ? 'dark' : 'light';
-        root.style.backgroundColor = transparent ? 'transparent' : theme === 'night' ? '#1f1e1b' : '#fafbf8';
-        document.querySelector('meta[name="theme-color"]').setAttribute('content', theme === 'night' ? '#1f1e1b' : '#f6f7f2');
+        root.style.backgroundColor = transparent ? 'transparent' : theme === 'night' ? '#151515' : '#fafbf8';
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', theme === 'night' ? '#151515' : '#f6f7f2');
       })();
     </script>
     <meta name="description" content="小伴 PetPal，你的二次元伙伴与个人 AI 助手。" />

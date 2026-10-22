@@ -1,8 +1,24 @@
 Third-party attribution
 =======================
 
-This notice describes bundled dependencies only. It does not assign a license
+This notice describes bundled dependencies and adapted references. It does not assign a license
 or copyright ownership to PetPal itself.
+
+Open Claude UI design reference
+------------------------------
+Project: https://github.com/Caho1/open-claude-ui
+Reference commit: c1f923ae0051a871941b98a0e2e3183a545e6a85
+Copyright (c) 2026 Caho1. License: MIT.
+
+PetPal adapts the surface-role palette, composer/popover edge treatment, and
+geometric segmented-control idea from code-examples/cds-theme.css,
+ChatComposer.tsx and SegmentedControl.tsx. The local CSS is scoped to PetPal's
+night preference, keeps accessible text/field colors and touch sizes, and uses
+PetPal's existing motion lifecycle and business components. The upstream
+JavaScript, demo model/attachment data, fonts and branding are not bundled.
+This is a community reference and does not imply affiliation with Anthropic.
+The original MIT notice is retained at:
+public/third-party/open-claude-ui/LICENSE.txt
 
 OpenCLI
 -------
