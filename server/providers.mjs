@@ -36,6 +36,36 @@ function safeMessage(value, provider) {
   return message.slice(0, 500);
 }
 
+const CONNECTION_ERRORS = Object.freeze({
+  CERT_HAS_EXPIRED: '模型服务的 HTTPS 证书已过期，请联系服务管理员续期。',
+  CERT_NOT_YET_VALID: '模型服务的 HTTPS 证书尚未生效，请检查设备时间或联系服务管理员。',
+  ERR_TLS_CERT_ALTNAME_INVALID: '模型服务的 HTTPS 证书与域名不匹配，请使用证书对应的服务地址。',
+  DEPTH_ZERO_SELF_SIGNED_CERT: '模型服务的 HTTPS 证书不受信任或证书链不完整，请联系服务管理员修复。',
+  SELF_SIGNED_CERT_IN_CHAIN: '模型服务的 HTTPS 证书不受信任或证书链不完整，请联系服务管理员修复。',
+  UNABLE_TO_VERIFY_LEAF_SIGNATURE: '模型服务的 HTTPS 证书不受信任或证书链不完整，请联系服务管理员修复。',
+  UNABLE_TO_GET_ISSUER_CERT_LOCALLY: '模型服务的 HTTPS 证书不受信任或证书链不完整，请联系服务管理员修复。',
+  ENOTFOUND: '无法解析模型服务域名，请检查服务地址和 DNS。',
+  EAI_AGAIN: '模型服务域名解析暂时失败，请稍后重试或检查 DNS。',
+  ECONNREFUSED: '模型服务拒绝连接，请检查接口服务是否启动以及端口是否正确。',
+  ETIMEDOUT: '连接模型服务超时，请检查网络、代理和服务状态。',
+  UND_ERR_CONNECT_TIMEOUT: '连接模型服务超时，请检查网络、代理和服务状态。',
+});
+
+function connectionMessage(error) {
+  // Node fetch wraps TLS/socket errors in cause, sometimes in AggregateError.
+  // Inspect bounded error codes only; upstream messages can contain credentials.
+  const queue = [error], seen = new WeakSet();
+  for (let index = 0; index < queue.length && index < 24; index++) {
+    const item = queue[index];
+    if (!item || typeof item !== 'object' || seen.has(item)) continue;
+    seen.add(item);
+    if (Object.hasOwn(CONNECTION_ERRORS, item.code)) return CONNECTION_ERRORS[item.code];
+    if (item.cause) queue.push(item.cause);
+    if (Array.isArray(item.errors)) queue.push(...item.errors.slice(0, 12));
+  }
+  return '';
+}
+
 function responseText(data) {
   if (typeof data.output_text === 'string') return data.output_text;
   return (data.output ?? []).filter(item => item.type === 'message').flatMap(item => item.content ?? [])
@@ -141,7 +171,7 @@ async function providerRequest({ provider, body, combined, onEvent }) {
   try { response = await fetch(endpointFor(provider), { method: 'POST', headers, body: JSON.stringify(body), signal: combined, redirect: 'error' }); }
   catch (error) {
     if (combined.aborted) throw combined.reason;
-    throw new Error(`无法连接模型服务：${safeMessage(error.message, provider)}。请检查 URL、网络和 TLS 证书。`);
+    throw new Error(connectionMessage(error) || `无法连接模型服务：${safeMessage(error?.message, provider)}。请检查 URL、网络和 TLS 证书。`);
   }
   if (!response.ok) {
     let detail = '';

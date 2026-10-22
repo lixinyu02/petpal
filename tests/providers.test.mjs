@@ -146,6 +146,64 @@ test('redirects are rejected without forwarding API key', async t => {
   assert.equal(destinationHits, 0);
 });
 
+for (const [code, expected] of [
+  ['CERT_HAS_EXPIRED', /HTTPS 证书已过期/],
+  ['CERT_NOT_YET_VALID', /证书尚未生效/],
+  ['ERR_TLS_CERT_ALTNAME_INVALID', /证书与域名不匹配/],
+  ['DEPTH_ZERO_SELF_SIGNED_CERT', /证书不受信任或证书链不完整/],
+  ['SELF_SIGNED_CERT_IN_CHAIN', /证书不受信任或证书链不完整/],
+  ['UNABLE_TO_VERIFY_LEAF_SIGNATURE', /证书不受信任或证书链不完整/],
+  ['UNABLE_TO_GET_ISSUER_CERT_LOCALLY', /证书不受信任或证书链不完整/],
+  ['ENOTFOUND', /无法解析模型服务域名/],
+  ['EAI_AGAIN', /域名解析暂时失败/],
+  ['ECONNREFUSED', /模型服务拒绝连接/],
+  ['ETIMEDOUT', /连接模型服务超时/],
+  ['UND_ERR_CONNECT_TIMEOUT', /连接模型服务超时/],
+]) test(`provider reports actionable ${code} without exposing upstream diagnostics`, async t => {
+  const cause = Object.assign(new Error('sensitive upstream private-test-key'), { code });
+  t.mock.method(globalThis, 'fetch', async () => { throw new TypeError('fetch failed', { cause }); });
+  await assert.rejects(streamProvider({ ...input, provider: model('https://example.com/v1') }), error => {
+    assert.match(error.message, expected);
+    assert.doesNotMatch(error.message, /sensitive|private-test-key|fetch failed/);
+    return true;
+  });
+});
+
+test('provider recognizes nested aggregate causes without looping on cyclic errors', async t => {
+  const cycle = new Error('private-test-key'); cycle.cause = cycle;
+  const expired = Object.assign(new Error('sensitive certificate details'), { code: 'CERT_HAS_EXPIRED' });
+  const cause = new AggregateError([cycle, new Error('wrapper', { cause: expired })]);
+  t.mock.method(globalThis, 'fetch', async () => { throw new TypeError('fetch failed', { cause }); });
+  await assert.rejects(streamProvider({ ...input, provider: model('https://example.com/v1') }), /HTTPS 证书已过期/);
+});
+
+test('provider keeps cancellation reason instead of replacing it with a connection diagnosis', async t => {
+  const controller = new AbortController(), reason = new Error('user cancelled');
+  t.mock.method(globalThis, 'fetch', async () => {
+    controller.abort(reason);
+    throw new TypeError('fetch failed', { cause: { code: 'CERT_HAS_EXPIRED' } });
+  });
+  await assert.rejects(streamProvider({ ...input, provider: model('https://example.com/v1'), signal: controller.signal }), error => error === reason);
+});
+
+test('provider keeps its overall timeout instead of a late connection diagnosis', async t => {
+  t.mock.method(globalThis, 'fetch', async () => {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    throw new TypeError('fetch failed', { cause: { code: 'CERT_HAS_EXPIRED' } });
+  });
+  await assert.rejects(streamProvider({ ...input, provider: model('https://example.com/v1'), timeoutMs: 1 }), { name: 'TimeoutError' });
+});
+
+test('unknown connection causes stay bounded and redact the configured key', async t => {
+  const cause = new Error('sensitive unknown cause'); cause.cause = cause;
+  t.mock.method(globalThis, 'fetch', async () => { throw new TypeError('failed private-test-key', { cause }); });
+  await assert.rejects(streamProvider({ ...input, provider: model('https://example.com/v1') }), error => {
+    assert.match(error.message, /无法连接模型服务：failed \[redacted\]/);
+    assert.doesNotMatch(error.message, /private-test-key|sensitive unknown cause/);
+    return true;
+  });
+});
+
 test('cancellation interrupts an active provider stream', async t => {
   const controller = new AbortController();
   const baseUrl = await fixture(t, (req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.write('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'); });
