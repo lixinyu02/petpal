@@ -4,6 +4,7 @@ import { normalizeAttachmentIds } from './attachments.mjs';
 import { normalizeProjectDirectory, validateProjectDirectoryText, validateStoredProjectDirectory } from './project-directory.mjs';
 import { validApprovalReview } from './approval-review.mjs';
 import { approvalMetadata } from './agent-user-inputs.mjs';
+import { createReplyMemoryJobs, replyMemoryPrivacyGuard } from './reply-memory-jobs.mjs';
 
 const failure = (status, message, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 const now = () => new Date().toISOString();
@@ -151,8 +152,12 @@ export function createAgentRecoveryPersistence(store) {
 }
 
 /** Persistent receipts and short per-conversation locks own task lifetime, not HTTP. */
-export function createAgentTasks({ store, active, approvals, userInputs, getBridge, authorize, authorizeRemoval = authorize, authorizeContextRepair = authorizeRemoval, getConfigRevision = () => store.state.codexConfig?.revision, resolveModel, resolveReview = () => ({}), getReviewConfig = () => undefined, resolveHost = (_userId, hostId) => ({ hostId, hostName: '中央服务器' }), resolveProject = (_userId, _hostId, value) => value ? { projectDirectory: normalizeProjectDirectory(value), projectAccess: 'workspace' } : {}, resolveImages = async () => [], redact = value => value, memory }) {
+export function createAgentTasks({ store, active, approvals, userInputs, getBridge, authorize, authorizeRemoval = authorize, authorizeContextRepair = authorizeRemoval, getConfigRevision = () => store.state.codexConfig?.revision, resolveModel, resolveReview = () => ({}), getReviewConfig = () => undefined, resolveHost = (_userId, hostId) => ({ hostId, hostName: '中央服务器' }), resolveProject = (_userId, _hostId, value) => value ? { projectDirectory: normalizeProjectDirectory(value), projectAccess: 'workspace' } : {}, resolveImages = async () => [], redact = value => value, memory, replyMemoryJobs }) {
   const locks = new Map(), generations = new Map(), removed = new Set(), knownReviewThreads = new Map();
+  const memoryJobs = replyMemoryJobs ?? createReplyMemoryJobs({ memory, authorize: (userId, input) => {
+    const conversation = store.state.conversations.find(item => item.id === input.conversationId && item.userId === userId);
+    return Boolean(conversation && !removed.has(conversation.id) && conversation.messages.some(message => message.id === input.id && message.role === 'assistant' && message.status === 'complete'));
+  } });
   let closed = false;
   const memoryContext = async (userId, query, signal) => {
     if (!memory?.getContext || signal.aborted) return '';
@@ -307,9 +312,10 @@ export function createAgentTasks({ store, active, approvals, userInputs, getBrid
         // must not make the next independent task see this computer as busy.
         if (active.get(conversation.id) === task) active.delete(conversation.id);
         if (!error && assistant.status === 'complete' && !task.sensitiveInput && !task.privateInputProtected && memory?.remember) {
-          // The journal is quick and durable; extraction/sync runs elsewhere.
-          // Its failure must not turn a completed desktop action into a retry.
-          try { await memory.remember(entry.auth.userId, { id: assistant.id, conversationId: conversation.id, userText: userMessage.content, assistantText: assistant.content, source: conversation.automationId ? 'automation' : 'agent', sensitive: false }); } catch {}
+          // The application owns this bounded auxiliary job; no journal await
+          // may retain the execution lock or turn a completed action into retry.
+          const privacy = task.replyMemoryPrivacy ??= { sensitiveInput: false, privateInputProtected: false };
+          memoryJobs.enqueue(entry.auth.userId, { id: assistant.id, conversationId: conversation.id, userText: userMessage.content, assistantText: assistant.content, source: conversation.automationId ? 'automation' : 'agent', sensitive: false }, { authorize: replyMemoryPrivacyGuard(privacy) });
         }
       } finally { if (active.get(conversation.id) === task) active.delete(conversation.id); }
     }).catch(() => { agent.paused = true; }).finally(() => task.finish());
@@ -327,7 +333,7 @@ export function createAgentTasks({ store, active, approvals, userInputs, getBrid
       if (conversation.messages.length > 498) { agent.paused = true; await save(conversation); return; }
       const controller = new AbortController(); let finish;
       const done = new Promise(resolve => { finish = resolve; });
-      const task = { controller, done, finish, mode: 'codex', userId: entry.auth.userId, sessionHash: entry.auth.sessionHash, providerId: entry.providerId, ...(entry.permissions.approval === 'review' && entry.permissions.reviewProviderId ? { reviewProviderId: entry.permissions.reviewProviderId } : {}), approvalIds: new Set(), agentEntry: entry };
+      const task = { controller, done, finish, mode: 'codex', userId: entry.auth.userId, sessionHash: entry.auth.sessionHash, providerId: entry.providerId, ...(entry.permissions.approval === 'review' && entry.permissions.reviewProviderId ? { reviewProviderId: entry.permissions.reviewProviderId } : {}), approvalIds: new Set(), replyMemoryPrivacy: { sensitiveInput: false, privateInputProtected: false }, agentEntry: entry };
       active.set(conversation.id, task); agent.queue.shift(); bumpQueue(conversation); record.status = 'running';
       agent.run = { id: entry.id, submissionId: entry.submissionId, status: 'running', turnId: null, permissions: { ...entry.permissions }, providerId: entry.providerId, model: entry.model, ...(entry.reviewModel ? { reviewModel: entry.reviewModel } : {}), effort: entry.effort, hostId: entry.hostId ?? 'central', hostName: entry.hostName ?? '中央服务器', ...(entry.projectDirectory ? { projectDirectory: entry.projectDirectory } : {}), startedAt: now() };
       const userMessage = { id: randomUUID(), role: 'user', content: entry.content, ...(entry.attachmentIds.length ? { attachmentIds: [...entry.attachmentIds] } : {}), status: 'complete', createdAt: now(), agentSubmissionId: entry.submissionId };
@@ -481,10 +487,11 @@ export function createAgentTasks({ store, active, approvals, userInputs, getBrid
       };
       if (task.privateInputProtected) { if (active.get(conversation.id) !== task || task.controller.signal.aborted) throw failure(409, '原任务已结束。'); return; }
       validate(); task.sensitiveInput = true;
+      const privacy = task.replyMemoryPrivacy ??= { sensitiveInput: false, privateInputProtected: false }; privacy.sensitiveInput = true;
       try {
         await store.save({ agentRecovery: { kind: 'private-context', conversationId: conversation.id, userId: conversation.userId, revision: data(conversation).revision, generation, validate } });
       } catch { throw failure(500, '无法保存私密上下文保护，本次回答未发送；请停止任务后重试。'); }
-      knownReviewThreads.delete(conversation.id); task.privateInputProtected = true;
+      knownReviewThreads.delete(conversation.id); task.privateInputProtected = true; privacy.privateInputProtected = true;
     });
   }
   async function stop(conversation, { clear = false } = {}) {
@@ -516,7 +523,7 @@ export function createAgentTasks({ store, active, approvals, userInputs, getBrid
   async function close() {
     closed = true;
     for (const conversation of store.state.conversations) if (conversation.agent && !conversation.agent.paused && (conversation.agent.queue.length || ['running', 'stopping'].includes(conversation.agent.run?.status))) { conversation.agent.paused = true; bump(conversation); }
-    await Promise.allSettled([...locks.values()]); await store.save();
+    await Promise.allSettled([...locks.values()]); if (!replyMemoryJobs) await memoryJobs.close(); await store.save();
   }
   return { snapshot: projection, submit, edit, reorder, resume, recover, resetContext, protectPrivateInput, stop, revoke, kick, close, hasPending: () => store.state.conversations.some(conversation => conversation.agent?.queue.length) };
 }

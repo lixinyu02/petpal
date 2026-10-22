@@ -51,6 +51,36 @@ async function fixture(t, options = {}) {
   return { directory, get service() { return service; }, async reopen() { await service.close(); service = await createMemoryService({ dataDir: directory, instanceId: 'central-one', autoPoll: false, ...options }); return service; } };
 }
 
+test('reply authorization and cancellation are rechecked before the atomic journal replacement', async t => {
+  for (const mode of ['deleted', 'disabled', 'aborted']) {
+    let accountActive = true, present = true;
+    const f = await fixture(t, { scopeForUser: userId => { if (!accountActive) throw Object.assign(new Error('account disabled'), { status: 401 }); return { instanceId: 'central-one', userId }; } });
+    const reached = deferred(), release = deferred(), controller = new AbortController();
+    const authorize = async () => {
+      if ((await readdir(path.join(f.directory, 'memory'))).some(name => name.endsWith('.tmp'))) { reached.resolve(); await release.promise; }
+      return present;
+    };
+    const writing = f.service.remember('one', event(`late-${mode}`), { signal: controller.signal, authorize });
+    // Attach the rejection owner before releasing the commit boundary.
+    const rejected = assert.rejects(writing, mode === 'aborted' ? { name: 'AbortError' } : { code: 'MEMORY_REVOKED' });
+    await reached.promise;
+    if (mode === 'deleted') present = false;
+    if (mode === 'disabled') accountActive = false;
+    if (mode === 'aborted') controller.abort(new DOMException('cancelled fixture', 'AbortError'));
+    release.resolve(); await rejected; accountActive = true;
+    assert.equal((await f.service.status('one')).events, 0);
+    assert.equal((await readdir(path.join(f.directory, 'memory'))).some(name => name.endsWith('.tmp')), false);
+  }
+});
+
+test('a reply waiting before mutation cannot repopulate the newly cleared memory epoch', async t => {
+  const f = await fixture(t), entered = deferred(), release = deferred(); let first = true;
+  const writing = f.service.remember('one', event('before-clear'), { authorize: async () => { if (first) { first = false; entered.resolve(); await release.promise; } return true; } });
+  const rejected = assert.rejects(writing, { code: 'MEMORY_EPOCH_CONFLICT' });
+  await entered.promise; const cleared = await f.service.clear('one'); assert.equal(cleared.epoch, 2);
+  release.resolve(); await rejected; const status = await f.service.status('one'); assert.equal(status.epoch, 2); assert.equal(status.events, 0);
+});
+
 test('memory UUIDv5 is stable, with separate central instances and accounts', () => {
   const a = memobaseUserId('central-a', 'user-one'); assert.equal(a, memobaseUserId('central-a', 'user-one'));
   assert.match(a, /^[a-f0-9-]{14}5[a-f0-9-]+$/); assert.notEqual(a, memobaseUserId('central-b', 'user-one')); assert.notEqual(a, memobaseUserId('central-a', 'user-two'));
@@ -236,6 +266,24 @@ function remoteEndpoint() {
   const bind = (service,userId = 'alpha') => service.bindRemote({ url: 'http://central.test',token: `${userId}-private-token`,instanceId: 'remote-central',userId,localUserId: 'owner' });
   return { calls,gate,fetch,bind };
 }
+
+test('cancelling one reply does not abort the shared saved-account verification of another reply', async t => {
+  const remote = remoteEndpoint(); let verificationSignal;
+  const f = await fixture(t, { instanceId: 'local-pc', fetchImpl: (url, options) => { if (new URL(url).pathname === '/api/auth/me') verificationSignal = options.signal; return remote.fetch(url, options); } });
+  await remote.bind(f.service); await f.reopen();
+  const gate = { started: deferred(), done: deferred() }; remote.gate.oldAuth = gate;
+  const controller = new AbortController();
+  const aborted = f.service.remember('owner', event('cancel-shared-reply'), { signal: controller.signal });
+  const rejected = assert.rejects(aborted, { name: 'AbortError' });
+  const kept = f.service.remember('owner', event('keep-shared-reply'));
+  try {
+    await gate.started.promise; controller.abort(new DOMException('cancelled one reply', 'AbortError'));
+    assert.equal(verificationSignal.aborted, false);
+  } finally { gate.done.resolve(); }
+  await rejected; assert.equal((await kept).queued, true);
+  assert.equal((await f.service.status('owner')).events, 1);
+  assert.equal(remote.calls.filter(call => call.path === '/api/auth/me').length, 2);
+});
 
 test('saved remote tokens are reverified after restart; revocation removes credentials and blocks old cached facts', async t => {
   const remote = remoteEndpoint(), f = await fixture(t, { instanceId: 'local-pc',fetchImpl: remote.fetch });

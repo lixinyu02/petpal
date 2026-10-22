@@ -330,7 +330,13 @@ export async function streamMessage(id:string,content:string,signal:AbortSignal,
     if(!response.body)throw new Error('当前环境不支持流式回复。');
     reader=response.body.getReader();const decoder=new TextDecoder();let buffer='',terminal=false;
     const dispatch=(block:string)=>{request.assertCurrent();let type='message';const payload:string[]=[];for(const line of block.split('\n')){if(line.startsWith('event:'))type=line.slice(6).trim();else if(line.startsWith('data:'))payload.push(line.slice(5).trimStart());}if(!payload.length)return;const data=JSON.parse(payload.join('\n'));if(type==='done'||type==='error')terminal=true;onEvent({type,data});};
-    while(true){const{value,done}=await reader.read();request.assertCurrent();if(done)break;buffer+=decoder.decode(value,{stream:true});buffer=buffer.replace(/\r\n/g,'\n');let boundary;while((boundary=buffer.indexOf('\n\n'))>=0){dispatch(buffer.slice(0,boundary));buffer=buffer.slice(boundary+2);}}
-    buffer+=decoder.decode();if(buffer.trim())dispatch(buffer);if(!terminal)throw new Error('连接提前断开，回复可能不完整。请重试。');
-  }finally{await reader?.cancel().catch(()=>{});reader?.releaseLock();request.close();}
+    while(!terminal){const{value,done}=await reader.read();request.assertCurrent();if(done)break;buffer+=decoder.decode(value,{stream:true});buffer=buffer.replace(/\r\n/g,'\n');let boundary;while(!terminal&&(boundary=buffer.indexOf('\n\n'))>=0){dispatch(buffer.slice(0,boundary));buffer=buffer.slice(boundary+2);}}
+    if(!terminal){buffer+=decoder.decode();if(buffer.trim())dispatch(buffer);if(!terminal)throw new Error('连接提前断开，回复可能不完整。请重试。');}
+  }finally{
+    // The protocol terminal owns completion. Native/proxy cancellation may take
+    // arbitrarily long; consume its rejection without holding the composer open.
+    try{void reader?.cancel().catch(()=>{});}catch{}
+    try{reader?.releaseLock();}catch{}
+    request.close();
+  }
 }

@@ -12,7 +12,7 @@ import { listenFixture } from './helpers/loopback.mjs';
 const bootstrap = 'synthetic-memory-owner-credential';
 async function fixture(t, options = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'petpal-memory-api-'));
-  const store = await new JsonStore(directory).init(), requests = [], writes = [], memoryCalls = [], runtimeCalls = [];
+  const store = await new JsonStore(directory).init(), requests = [], writes = [], committed = [], memoryCalls = [], runtimeCalls = [];
   const upstream = http.createServer(async (req, res) => {
     const bytes = []; for await (const chunk of req) bytes.push(chunk);
     const body = JSON.parse(Buffer.concat(bytes).toString()); requests.push(body);
@@ -33,7 +33,7 @@ async function fixture(t, options = {}) {
   const memory = {
     async status(userId, value) { memoryCalls.push({ name: 'status', userId, value }); return { enabled: true, scope: { instanceId: store.state.instanceId, userId }, ...(value?.admin ? { runtime: await runtime.status() } : {}) }; },
     async getContext(userId, value) { memoryCalls.push({ name: 'context', userId, value }); if (options.slowMemory) return new Promise(() => {}); return `账号${userId}喜欢轻音乐`; },
-    async remember(userId, value) { writes.push({ userId, ...value }); if (options.journalError) throw new Error('Synthetic journal failure'); },
+    async remember(userId, value, control) { writes.push({ userId, ...value, control }); if (options.journalGate) await options.journalGate.promise; await control?.authorize?.(); if (options.journalError) throw new Error('Synthetic journal failure'); committed.push({ userId, id: value.id }); return { queued: true }; },
     async exportSync(userId, value) { memoryCalls.push({ name: 'export', userId, value }); return { scope: { instanceId: store.state.instanceId, userId, memobaseUserId: `memory-${userId}` }, epoch: 1, cursor: value.cursor ?? 0, nextCursor: 0, events: [], context: '', hasMore: false }; },
     async importSync(userId, value) { memoryCalls.push({ name: 'import', userId, value }); return { accepted: value.events.length }; },
     ...Object.fromEntries(['clear', 'setEnabled', 'configure', 'sync', 'bindRemote', 'unbindRemote', 'close'].map(name => [name, async (...args) => { memoryCalls.push({ name, args }); }])),
@@ -43,7 +43,7 @@ async function fixture(t, options = {}) {
     async run(args) { codexCalls.push(args); return { text: '任务完成', threadId: 'synthetic-memory-thread' }; },
     async close() {},
   };
-  const app = await createPetServer({ dataDir: directory, token: bootstrap, codex, memoryOptions: options.realMemory ? { autoStart: false, autoPoll: false } : { service: memory }, memoryRuntimeOptions: { runtime } });
+  const app = await createPetServer({ dataDir: directory, token: bootstrap, codex, memoryOptions: options.realMemory ? { autoStart: false, autoPoll: false } : { service: memory, replyJobs: options.replyJobs }, memoryRuntimeOptions: { runtime } });
   await listenFixture(app.server);
   const request = (route, { token = bootstrap, method = 'GET', body } = {}) => fetch(`http://127.0.0.1:${app.server.address().port}/api${route}`, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const json = async (route, value) => { const response = await request(route, value); return { status: response.status, data: await response.json() }; };
@@ -54,8 +54,81 @@ async function fixture(t, options = {}) {
     assert.equal(login.status, 200); return { id: created.data.user.id, token: login.data.token };
   };
   t.after(async () => { await app.close(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve)); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-memory-api-'))); await rm(directory, { recursive: true, force: true }); });
-  return { app, ownerId: store.state.ownerId, instanceId: store.state.instanceId, providers, requests, writes, memoryCalls, runtimeCalls, codexCalls, request, json, member };
+  return { app, ownerId: store.state.ownerId, instanceId: store.state.instanceId, providers, requests, writes, committed, memoryCalls, runtimeCalls, codexCalls, request, json, member };
 }
+
+test('a durably completed Chat sends done and accepts the next message without waiting for memory', async t => {
+  let release;
+  const journalGate = { promise: new Promise(resolve => { release = resolve; }) };
+  const f = await fixture(t, { journalGate });
+  const created = await f.json('/conversations', { method: 'POST', body: { mode: 'chat', providerId: f.providers[0].id } });
+  assert.equal(created.status, 201);
+  const route = `/conversations/${created.data.id}/messages`;
+  let first;
+  try {
+    first = f.request(route, { method: 'POST', body: { content: '首次受控回复' } }).then(async response => ({ status: response.status, text: await response.text() }));
+    for (let i = 0; i < 300 && !f.writes.length; i++) await new Promise(resolve => setTimeout(resolve, 3));
+    assert.equal(f.writes.length, 1);
+    const result = await Promise.race([first, new Promise(resolve => setTimeout(() => resolve(null), 100))]);
+    assert.ok(result, 'A completed Chat must publish done before its auxiliary memory journal settles');
+    assert.equal(result.status, 200); assert.match(result.text, /event: done/);
+    const second = await f.request(route, { method: 'POST', body: { content: '继续下一轮' } });
+    assert.equal(second.status, 200); assert.match(await second.text(), /event: done/);
+  } finally { release(); await first; }
+});
+
+test('clearing memory cancels active and queued reply jobs for that account only', async t => {
+  let release;
+  const journalGate = { promise: new Promise(resolve => { release = resolve; }) };
+  const f = await fixture(t, { journalGate, replyJobs: { concurrency: 1 } });
+  const other = await f.member('memory-jobs-other');
+  const create = async token => (await f.json('/conversations', { token, method: 'POST', body: { mode: 'chat', providerId: f.providers[0].id } })).data;
+  const own = await create(bootstrap), foreign = await create(other.token);
+  const send = async (conversation, token) => { const response = await f.request(`/conversations/${conversation.id}/messages`, { token, method: 'POST', body: { content: '受控记忆内容' } }); assert.equal(response.status, 200); assert.match(await response.text(), /event: done/); };
+  try {
+    await send(own, bootstrap); await send(own, bootstrap); await send(foreign, other.token);
+    assert.equal(f.writes.length, 1);
+    assert.equal((await f.json('/memory', { method: 'DELETE', body: {} })).status, 200);
+    assert.equal(f.app.memory.replyJobs().cancelled, 2);
+    release();
+    for (let i = 0; i < 300 && f.app.memory.replyJobs().pending; i++) await new Promise(resolve => setTimeout(resolve, 3));
+    assert.equal(f.app.memory.replyJobs().pending, 0);
+    assert.equal(f.committed.length, 1); assert.equal(f.committed[0].userId, other.id);
+    const ownStatus = await f.json('/memory/status'); assert.equal(ownStatus.data.memory.replyJobs.completed, 1);
+    const foreignStatus = await f.json('/memory/status', { token: other.token }); assert.equal(foreignStatus.data.memory.replyJobs, undefined);
+  } finally { release(); }
+});
+
+test('deleting a conversation or disabling its account prevents a pending reply journal from committing', async t => {
+  for (const mode of ['conversation', 'account']) {
+    let release; const journalGate = { promise: new Promise(resolve => { release = resolve; }) };
+    const f = await fixture(t, { journalGate }), member = await f.member(`memory-job-${mode}`);
+    const created = await f.json('/conversations', { token: member.token, method: 'POST', body: { mode: 'chat', providerId: f.providers[0].id } });
+    try {
+      const response = await f.request(`/conversations/${created.data.id}/messages`, { token: member.token, method: 'POST', body: { content: '稍后写入的记忆' } });
+      assert.match(await response.text(), /event: done/);
+      assert.equal(f.writes.length, 1);
+      const removed = mode === 'conversation'
+        ? await f.json(`/conversations/${created.data.id}`, { token: member.token, method: 'DELETE', body: {} })
+        : await f.json(`/admin/users/${member.id}`, { method: 'PATCH', body: { disabled: true } });
+      assert.equal(removed.status, 200); assert.equal(f.writes[0].control.signal.aborted, true);
+      release(); for (let i = 0; i < 300 && f.app.memory.replyJobs().pending; i++) await new Promise(resolve => setTimeout(resolve, 3));
+      assert.equal(f.committed.length, 0); assert.equal(f.app.memory.replyJobs().pending, 0);
+    } finally { release(); }
+  }
+});
+
+test('server shutdown owns and bounds a reply journal that ignores cancellation', async t => {
+  let release; const journalGate = { promise: new Promise(resolve => { release = resolve; }) };
+  const f = await fixture(t, { journalGate, replyJobs: { closeGraceMs: 30 } });
+  const chat = await f.json('/conversations', { method: 'POST', body: { mode: 'chat', providerId: f.providers[0].id } });
+  const response = await f.request(`/conversations/${chat.data.id}/messages`, { method: 'POST', body: { content: '关闭前的已完成回复' } });
+  assert.match(await response.text(), /event: done/); assert.equal(f.writes.length, 1);
+  try {
+    const closed = await Promise.race([f.app.close().then(() => true), new Promise(resolve => setTimeout(() => resolve(false), 2000))]);
+    assert.equal(closed, true); assert.equal(f.writes[0].control.signal.aborted, true); assert.equal(f.app.memory.replyJobs().closed, true);
+  } finally { release(); }
+});
 
 test('memory APIs require login and bind every read, synchronization and deletion to the current user', async t => {
   const f = await fixture(t), a = await f.member('memory-a'), b = await f.member('memory-b');

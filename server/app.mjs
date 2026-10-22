@@ -42,6 +42,7 @@ import { MobileOfficialAccounts, combineOfficialAccounts } from './mobile-offici
 import { AppProxyProfiles } from './app-proxy-profiles.mjs';
 import { mountAppProxyProfileRoutes } from './app-proxy-profile-routes.mjs';
 import { createMemoryService } from './memory-service.mjs';
+import { createReplyMemoryJobs, replyMemoryPrivacyGuard } from './reply-memory-jobs.mjs';
 import { createMemobaseRuntime } from './memobase-runtime.mjs';
 import {createServiceLinks} from './service-links.mjs';
 import {createServiceModels} from './service-models.mjs';
@@ -86,6 +87,11 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const serviceModels=createServiceModels({store,links:serviceLinks});await serviceModels.synchronize();
   const memoryRuntime = memoryRuntimeOptions.runtime ?? await createMemobaseRuntime({ ...memoryRuntimeOptions, directory: path.join(path.resolve(dataDir), 'memobase-runtime') });
   const memory = memoryOptions.service ?? await createMemoryService({ ...memoryOptions, dataDir: path.resolve(dataDir), instanceId: state.instanceId, runtime: memoryRuntime, scopeForUser: userId => { const user = state.users.find(item => item.id === userId && !item.disabled); if (!user) throw failure(401, '记忆账号已停用或不存在。'); return { instanceId: state.instanceId, userId }; } });
+  const replyMemoryJobs = createReplyMemoryJobs({ ...memoryOptions.replyJobs, memory, authorize: (userId, input) => {
+    const user = state.users.find(item => item.id === userId && !item.disabled);
+    const conversation = state.conversations.find(item => item.id === input.conversationId && item.userId === userId);
+    return Boolean(user && conversation && !deletingConversations.has(conversation.id) && conversation.messages.some(message => message.id === input.id && message.role === 'assistant' && message.status === 'complete'));
+  } });
   const memoryContext = async (userId, query, signal) => {
     if (signal?.aborted) return '';
     const controller = new AbortController(), abort = () => controller.abort(signal?.reason);
@@ -98,9 +104,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     } catch { return ''; }
     finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
   };
-  const rememberReply = async (conversation, userMessage, assistant, task) => {
+  const rememberReply = (conversation, userMessage, assistant, task) => {
     if (assistant.status !== 'complete' || task.sensitiveInput || task.privateInputProtected) return;
-    try { await memory.remember(conversation.userId, { id: assistant.id, conversationId: conversation.id, userText: userMessage.content, assistantText: assistant.content, source: conversation.mode === 'chat' ? 'chat' : 'agent', sensitive: false }); } catch {}
+    const privacy = task.replyMemoryPrivacy ??= { sensitiveInput: false, privateInputProtected: false };
+    return replyMemoryJobs.enqueue(conversation.userId, { id: assistant.id, conversationId: conversation.id, userText: userMessage.content, assistantText: assistant.content, source: conversation.mode === 'chat' ? 'chat' : 'agent', sensitive: false }, { authorize: replyMemoryPrivacyGuard(privacy) });
   };
   const appProxyProfiles = await new AppProxyProfiles({ ...appProxyProfilesOptions, dataDir:path.resolve(dataDir), users:()=>state.users }).init();
   let officialChange = async () => {};
@@ -489,7 +496,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (task.agentEntry) authorizeAgentEntry(task.agentEntry);
     else { const identity = authorizeAgentIdentity({ userId: task.userId, sessionHash: task.sessionHash, bootstrap: task.bootstrap }); requireCodex(identity.user); }
   } });
-  const agentTasks = createAgentTasks({ store, active, approvals, userInputs: agentUserInputs, memory, getBridge: entry => cloudDocker.has(entry?.hostId)?cloudDocker.bind(entry):entry?.hostId && entry.hostId !== 'central' ? new RemoteCodexBridge(executors, entry) : getAgentBridge(entry), redact: redactCodex, resolveModel: resolveAgentModel, resolveReview: resolveAgentReview, getReviewConfig: getAgentReviewConfig, resolveImages: imageAttachments.images, resolveHost: targets.target,
+  const agentTasks = createAgentTasks({ store, active, approvals, userInputs: agentUserInputs, memory, replyMemoryJobs, getBridge: entry => cloudDocker.has(entry?.hostId)?cloudDocker.bind(entry):entry?.hostId && entry.hostId !== 'central' ? new RemoteCodexBridge(executors, entry) : getAgentBridge(entry), redact: redactCodex, resolveModel: resolveAgentModel, resolveReview: resolveAgentReview, getReviewConfig: getAgentReviewConfig, resolveImages: imageAttachments.images, resolveHost: targets.target,
     resolveProject: (userId, hostId, value) => {
       const host = targets.hostFor(userId, hostId), projectDirectory = normalizeProjectDirectory(value, host.platform);
       if (!projectDirectory) return {};
@@ -671,13 +678,14 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     requireCurrentAuth(req);
     if (Object.keys(req.body).some(key => !bodyKeys.includes(key)) || Object.keys(req.query).some(key => !queryKeys.includes(key))) throw failure(400, '记忆请求包含不支持的字段。');
   };
-  const memoryStatus = req => memory.status(req.user.id, { admin: isAdministrator(req.user) });
+  const memoryStatus = async req => ({ ...await memory.status(req.user.id, { admin: isAdministrator(req.user) }), ...(isAdministrator(req.user) ? { replyJobs: replyMemoryJobs.status() } : {}) });
   app.get('/api/memory/status', async (req, res) => {
     memoryRequest(req); const value = await memoryStatus(req); requireCurrentAuth(req); res.json({ memory: value });
   });
   app.patch('/api/memory/preferences', async (req, res) => {
     memoryRequest(req, ['enabled']);
     if (typeof req.body.enabled !== 'boolean') throw failure(400, '记忆开关必须为 boolean。');
+    if (!req.body.enabled) replyMemoryJobs.cancelUser(req.user.id);
     await memory.setEnabled(req.user.id, req.body.enabled); requireCurrentAuth(req); res.json({ memory: await memoryStatus(req) });
   });
   app.get('/api/memory/context', async (req, res) => {
@@ -700,7 +708,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const value = await memory.importSync(req.user.id, req.body); requireCurrentAuth(req); res.json(value ?? { ok: true });
   });
   app.delete('/api/memory', async (req, res) => {
-    memoryRequest(req); await memory.clear(req.user.id); requireCurrentAuth(req); res.json({ memory: await memoryStatus(req) });
+    memoryRequest(req); replyMemoryJobs.cancelUser(req.user.id); await memory.clear(req.user.id); requireCurrentAuth(req); res.json({ memory: await memoryStatus(req) });
   });
   app.post('/api/memory/flush', async (req, res) => {
     memoryRequest(req); await memory.sync(req.user.id); requireCurrentAuth(req); res.json({ memory: await memoryStatus(req) });
@@ -879,7 +887,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const settings = settingsFor(user);
     if (settings.defaultProviderId && !canUseProvider(user, settings.defaultProviderId)) settings.defaultProviderId = null;
     if (revoked) state.sessions = state.sessions.filter(session => session.userId !== user.id);
-    if (revoked) await stopTasks(task => task.userId === user.id);
+    if (revoked) { replyMemoryJobs.cancelUser(user.id); await stopTasks(task => task.userId === user.id); }
     const clearHost = settings.chatAssistantHostId !== null && !targets.canAccess(user.id, settings.chatAssistantHostId);
     await store.save(clearHost ? { chatAssistantDefaultHost: { userId: user.id, hostId: null } } : undefined); res.json({ user: managedUser(user) });
   });
@@ -1190,7 +1198,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (Object.keys(req.body).length) throw failure(400, '删除对话不接受附加字段。');
     assertDeletable(conversation);
     const ids = [conversation.id, ...state.conversations.filter(item => item.backgroundParentId === conversation.id && item.userId === req.user.id).map(item => item.id)];
-    for (const id of ids) deletingConversations.add(id);
+    for (const id of ids) { deletingConversations.add(id); replyMemoryJobs.cancelConversation(id); }
     try {
       await store.save({ organization: { kind: 'conversation-delete', id: conversation.id, userId: req.user.id, authorize: () => requireCurrentAuth(req), validateLive: () => assertDeletable(conversation) } });
       requireCurrentAuth(req); res.json({ ok: true });
@@ -1354,7 +1362,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const controller = new AbortController();
     let finish;
     const done = new Promise(resolve => { finish = resolve; });
-    const task = { controller, done, mode: conversation.mode, userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap, providerId: provider?.id ?? null, approvalIds: new Set(), ...(conversation.mode === 'codex' ? { bridge } : {}),
+    const task = { controller, done, mode: conversation.mode, userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap, providerId: provider?.id ?? null, approvalIds: new Set(), replyMemoryPrivacy: { sensitiveInput: false, privateInputProtected: false }, ...(conversation.mode === 'codex' ? { bridge } : {}),
       ...(collaborationOptions ? { assistantProviderId: collaborationOptions.providerId,
         ...(collaborationOptions.permissions.approval === 'review' ? { assistantReviewProviderId: collaborationOptions.permissions.reviewProviderId } : {}) } : {}) };
     active.set(conversation.id, task);
@@ -1434,7 +1442,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       if (result.threadId && !task.sensitiveInput) { conversation.threadId = result.threadId; conversation.threadCodexRevision = state.codexConfig.revision; conversation.threadHostId = 'central'; conversation.agentHostId = 'central'; }
       if (!assistant.content && result.text) { assistant.content = result.text; send('delta', { text: result.text }); }
       assistant.status = 'complete'; conversation.updatedAt = now();
-      await store.save(); await rememberReply(conversation, user, assistant, task); send('done', { conversation: visibleConversation(conversation), assistantMessageId: assistant.id });
+      await store.save(); rememberReply(conversation, user, assistant, task); send('done', { conversation: visibleConversation(conversation), assistantMessageId: assistant.id });
     } catch (error) {
       if (collaboration && !collaboration.duplicate) await chatAssistant.finishDecision(collaboration.record, { cancelled: controller.signal.aborted, error: String(error?.message ?? '聊天决策失败。').slice(0, 500) }).catch(() => {});
       assistant.status = controller.signal.aborted && controller.signal.reason?.name === 'AbortError' ? 'cancelled' : 'error';
@@ -1548,6 +1556,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   let closing;
   const close = () => closing ??= (async () => {
     shuttingDown = true;
+    replyMemoryJobs.stopAccepting();
     clearInterval(serviceLinkTimer);await cloudDesktop.close();
     await automations.close();
     await companionRoutines.close();await closeCompanionWeatherQueries();
@@ -1561,7 +1570,9 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     for (const task of active.values()) task.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     if (configSwap) await configSwap.catch(() => {});
     const results = await Promise.allSettled([appProxyProfiles.close(), mobileOfficial.close(), notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), ...[...officialBridges.values()].map(item => item.bridge.close()), codexStatusProbe?.promise.catch(() => {}), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
-    // Completed turns finish their durable journal writes before memory closes.
+    // Reply journals have their own bounded lifetime; they never retain a
+    // foreground response or execution lock, and cancellation guards late writes.
+    await replyMemoryJobs.close();
     for (const service of [cloudDocker,serviceModels,serviceLinks,memory, memoryRuntime]) results.push(...await Promise.allSettled([service.close()]));
     let saveError;
     try { await store.queue; } catch (error) { saveError = error; }
@@ -1590,6 +1601,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     bindRemote: connection => memory.bindRemote({ ...connection, localUserId: state.ownerId }),
     unbindRemote: () => memory.unbindRemote(),
     runtime: memoryRuntime,
+    replyJobs: replyMemoryJobs.status,
   };
   return { server, token: accessToken, close, updates, hosting, automations, companionRoutines, officialAccountChanged, memory: nativeMemory, cloudDocker,serviceLinks };
 }

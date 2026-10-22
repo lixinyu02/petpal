@@ -8,6 +8,7 @@ import {creationProjectId,conversationHistoryScope,mergeConversationOrganization
 import {reuseConversationMessages} from './conversation-message-reuse.mjs';
 import {watchCompanionBreakpoint} from './companion-mount.mjs';
 import {createChatDisplay,type ChatDisplay} from './chat-display.mjs';
+import {createChatCompletion,mergeChatCompletionSnapshot,readChatTerminalSnapshot,startChatRecovery,type ChatRecovery} from './chat-completion.mjs';
 import {useChatScroll} from './useChatScroll';
 import {useUiEntrance} from './platform/ui-motion.ts';
 import {createVisiblePoll} from './platform/visible-poll.mjs';
@@ -20,7 +21,7 @@ import AgentUserInput from './AgentUserInput';
 import ProjectDirectory, {useProjectDirectory} from './ProjectDirectory';
 import {executionProjectDirectory,projectDirectoryIssue} from './project-directory-preferences.mjs';
 import {ChatAssistantControls,ChatAssistantTasks,useChatAssistant} from './ChatAssistant';
-import {mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMessage} from './chat-assistant-preferences.mjs';
+import {mergeAssistantTask,mergeChatAssistantConversation} from './chat-assistant-preferences.mjs';
 import { executionHostLock, readExecutionHost, resolveExecutionHostId, saveExecutionHost } from './execution-hosts.mjs';
 import { useAttachments, AttachmentInput, AttachmentDrafts, MessageImages } from './Attachments';
 import './workspace.css';
@@ -175,6 +176,7 @@ export default function App() {
   awakeRef.current = mood !== 'sleep';
   const abortRef = useRef<AbortController | null>(null);
   const displayRef=useRef<ChatDisplay|null>(null);
+  const chatRecoveryRef=useRef<ChatRecovery|null>(null);
   const busyRef = useRef(false);
   const switchingModelRef = useRef(false);
   const activeRef = useRef<string | null>(null);
@@ -393,7 +395,7 @@ export default function App() {
   useEffect(() => {
     const hidden = () => { if (document.hidden) { if (responseTimer.current) clearTimeout(responseTimer.current); setResponsePerformance(previous => ({ ...previous, phase: 'idle' })); } };
     document.addEventListener('visibilitychange', hidden);
-    return () => { requestSequence.current++; displayRef.current?.close(); abortRef.current?.abort(); if (responseTimer.current) clearTimeout(responseTimer.current); document.removeEventListener('visibilitychange', hidden); };
+    return () => { requestSequence.current++; chatRecoveryRef.current?.cancel(); displayRef.current?.close(); abortRef.current?.abort(); if (responseTimer.current) clearTimeout(responseTimer.current); document.removeEventListener('visibilitychange', hidden); };
   }, []);
   useEffect(() => { if (view !== 'chat' || companionKind !== 'anime' || connectionOpen) { if (responseTimer.current) clearTimeout(responseTimer.current); setResponsePerformance({ utteranceId: '', text: '', phase: 'idle' }); } }, [view, companionKind, connectionOpen]);
 
@@ -460,6 +462,7 @@ export default function App() {
   }
   function newChat(nextMode = mode) {requestNavigation({kind:'new',mode:nextMode});}
   function startNewChat(nextMode:'chat'|'codex') {
+    chatRecoveryRef.current?.cancel();chatRecoveryRef.current=null;
     stopPresentation();
     cacheAutomationConversation(null);
     attachments.clear();setPermissions({...defaultAgentPermissions});setAgentProviderId(state.providers.some(provider=>provider.id===state.settings.defaultProviderId&&provider.source==='official-account')&&state.codex.eligibleProviderIds?.includes(state.settings.defaultProviderId||'')?state.settings.defaultProviderId!:(state.user?.isAdmin||state.user?.isOwner)?'':state.codex.eligibleProviderIds?.[0]||'');agentSubmissionRef.current=null;
@@ -479,6 +482,7 @@ export default function App() {
     if(!next.automationId)setState(previous=>({...previous,conversations:[mergeConversationOrganization(previous.conversations.find(item=>item.id===next.id),next,readRevision!==organizationRevision.current),...previous.conversations.filter(item=>item.id!==next.id)]}));selectChat(selectedNext);
   }
   function switchConversation(c:Conversation) {
+    chatRecoveryRef.current?.cancel();chatRecoveryRef.current=null;
     stopPresentation();
     cacheAutomationConversation(c.automationId?c:null);
     attachments.clear();setDraft('');agentSubmissionRef.current=null;setAgentProviderId(c.agent?.run?.providerId || ((state.user?.isAdmin||state.user?.isOwner)?'':state.codex.eligibleProviderIds?.[0]||''));setPermissions(c.agent?.run?.permissions||{...defaultAgentPermissions});
@@ -543,23 +547,30 @@ export default function App() {
     let assistantSnapshot;
     try{assistantSnapshot=chatAssistant.snapshot();}catch(cause){setError((cause as Error).message);return;}
     const assistantRequest=assistantSnapshot?{assistant:assistantSnapshot,submissionId:crypto.randomUUID()}:undefined;
+    chatRecoveryRef.current?.cancel();chatRecoveryRef.current=null;
     chatScroll.latest();
     stopPresentation();
     busyRef.current = true; setBusy(true); setError(''); setApprovals([]); setStatus('正在想怎么回答你…');
     speech.prepare();
     const controller = new AbortController(); abortRef.current = controller;
     const requestId = ++requestSequence.current;
+    const isCurrentRequest=()=>approvalAlive.current&&requestSequence.current===requestId&&getSessionEpoch()===accountEpoch;
+    const completion=createChatCompletion({isCurrent:isCurrentRequest,release:()=>{
+      setBusy(false);busyRef.current=false;activeRef.current=null;abortRef.current=null;setApprovals([]);setStatus('');
+    },speak:message=>speechRef.current.speakIfEnabled(message.content,`${message.id}-auto-${requestId}`)});
     const readRevision=organizationRevision.current;
     let target = conversation;
     let assistantId = `pending-${Date.now()}`;
     let accepted = false;
     let responseText = '', finalReply: Message | undefined;
     let serverAssistantId: string | undefined;
-    let failed = false, display:ChatDisplay|undefined;
+    let failed = false, authoritativeSnapshot=false, display:ChatDisplay|undefined;
     performancePhase('thinking', '', assistantId);
     try {
       if (!target) {
-        target = await api<Conversation>('/conversations', { method: 'POST', body: JSON.stringify({ mode: currentMode, projectId:creationProjectId(projectFilter,projects), ...(currentMode === 'chat' ? { providerId: provider!.id } : {}) }) });
+        target = await api<Conversation>('/conversations', { method: 'POST',signal:controller.signal, body: JSON.stringify({ mode: currentMode, projectId:creationProjectId(projectFilter,projects), ...(currentMode === 'chat' ? { providerId: provider!.id } : {}) }) });
+        if(!isCurrentRequest())return;
+        controller.signal.throwIfAborted();
         setSelected(target.id); setState(s => ({ ...s, conversations: [target!, ...s.conversations] }));
       }
       controller.signal.throwIfAborted();
@@ -588,42 +599,60 @@ export default function App() {
         if (event.type === 'task') { setState(s=>({...s,conversations:s.conversations.map(c=>c.id===target!.id?{...c,assistantTasks:mergeAssistantTask(c.assistantTasks||[],event.data.task)}:c)})); }
         if (event.type === 'approval') { performancePhase('thinking', responseText, assistantId); setApprovals(a => [...a.filter(item => item.id !== String(event.data.id)), { id: String(event.data.id), kind: event.data.kind || '操作请求', description: event.data.description || 'Codex 请求执行操作，请检查后决定。', ...(typeof event.data.requestedAt==='string'?{requestedAt:event.data.requestedAt}:{}), ...(typeof event.data.expiresAt==='string'?{expiresAt:event.data.expiresAt}:{}), ...(typeof event.data.canAccept==='boolean'?{canAccept:event.data.canAccept}:{}) }]); }
         if (event.type === 'approval-resolved') setApprovals(items=>items.filter(item=>item.id!==String(event.data.id)));
-        if (event.type === 'error') { failed = true; performancePhase('error', responseText, assistantId); if (foregroundAssistantMessage(event.data.conversation,event.data.assistantMessageId||serverAssistantId)?.status !== 'cancelled') setError(event.data.message || '回复失败，请检查连接后重试。'); if (event.data.conversation) setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? mergeConversationOrganization(c,event.data.conversation,readRevision!==organizationRevision.current) : c) })); }
+        if (event.type === 'error') {
+          failed=true;performancePhase('error',responseText,assistantId);
+          const terminal=readChatTerminalSnapshot(event.data.conversation,target!.id,event.data.assistantMessageId||serverAssistantId);
+          if(terminal?.reply.status!=='cancelled')setError(event.data.message||'回复失败，请检查连接后重试。');
+          if(terminal){authoritativeSnapshot=true;setState(previous=>mergeChatCompletionSnapshot(previous,terminal.conversation,{conversationId:target!.id,isCurrent:isCurrentRequest,preserveOrganization:readRevision!==organizationRevision.current,deletedIds:deletedConversationIds.current}));}
+        }
         if (event.type === 'done') {
-          if (event.data.conversation) {
-            finalReply = foregroundAssistantMessage(event.data.conversation,event.data.assistantMessageId||serverAssistantId);
-            setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? mergeConversationOrganization(c,event.data.conversation,readRevision!==organizationRevision.current) : c) }));
+          const terminal=readChatTerminalSnapshot(event.data.conversation,target!.id,event.data.assistantMessageId||serverAssistantId);
+          if (terminal) {
+            authoritativeSnapshot=true;finalReply=terminal.reply;
+            setState(previous=>mergeChatCompletionSnapshot(previous,terminal.conversation,{conversationId:target!.id,isCurrent:isCurrentRequest,preserveOrganization:readRevision!==organizationRevision.current,deletedIds:deletedConversationIds.current}));
           }
           if (!failed) finishResponse(responseText || finalReply?.content || '', assistantId, requestId);
         }
       },images.map(item=>item.id),assistantRequest);
     } catch (e) {
-      if (getSessionEpoch() !== accountEpoch || isSessionChanged(e)) return;
+      if (!isCurrentRequest() || isSessionChanged(e)) return;
       display?.flush();
       failed = true;
       performancePhase((e as Error).name === 'AbortError' ? 'idle' : 'error', responseText, assistantId);
       if ((e as Error).name !== 'AbortError') { setError((e as Error).message); if (!accepted) setDraft(content); }
     } finally {
       display?.close();if(displayRef.current===display)displayRef.current=null;
-      if (requestSequence.current === requestId && getSessionEpoch() === accountEpoch) {
+      if (isCurrentRequest()) {
         if (failed || controller.signal.aborted) performancePhase(controller.signal.aborted ? 'idle' : 'error', responseText, assistantId);
-        try { await refresh(); } catch { setError(previous => previous || '暂时无法刷新会话，请检查服务连接。'); }
-        if (requestSequence.current === requestId && getSessionEpoch() === accountEpoch) {
-          setBusy(false); busyRef.current = false; activeRef.current = null; abortRef.current = null; setApprovals([]); setStatus('');
-          if (!failed && !controller.signal.aborted && finalReply?.role === 'assistant' && finalReply.status === 'complete') speech.speakIfEnabled(finalReply.content, `${finalReply.id}-auto-${requestId}`);
+        completion.finish(finalReply,!failed&&!controller.signal.aborted);
+        if(!authoritativeSnapshot&&target&&!deletedConversationIds.current.has(target.id)){
+          const conversationId=target.id;
+          const recovery=startChatRecovery({
+            isCurrent:()=>isCurrentRequest()&&!deletedConversationIds.current.has(conversationId),
+            read:signal=>api<Conversation>(`/conversations/${encodeURIComponent(conversationId)}`,{signal}),
+            onConversation:(updated,current)=>{
+              if(updated.id!==conversationId||updated.mode!=='chat')throw new Error('对话状态与当前请求不一致。');
+              setState(previous=>mergeChatCompletionSnapshot(previous,updated,{conversationId,isCurrent:current,preserveOrganization:readRevision!==organizationRevision.current,deletedIds:deletedConversationIds.current}));
+            },
+            onError:(_cause,current)=>setError(previous=>current()?previous||'暂时无法同步这段对话，请稍后重新打开。':previous),
+          });
+          chatRecoveryRef.current=recovery;
+          const finished=()=>{if(chatRecoveryRef.current===recovery)chatRecoveryRef.current=null;};
+          void recovery.finished.then(finished,finished);
         }
       }
     }
   }
   async function stop() {
     stopPresentation();
+    const stoppedRequest=requestSequence.current;
     const active = currentMode==='codex'?conversation?.id:activeRef.current;
     displayRef.current?.close();
     abortRef.current?.abort();
     if (!active) return;
     setStatus('正在停止…');
     try { await api(`/conversations/${encodeURIComponent(active)}/stop`, { method: 'POST' }); if(currentMode==='codex')await refreshConversation(active); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { if(approvalAlive.current&&requestSequence.current===stoppedRequest&&getSessionEpoch()===accountEpoch&&!isSessionChanged(e))setError((e as Error).message); }
   }
   function recordApprovalDecision(key:string,value?:ApprovalDecision){
     const next={...approvalDecisionsRef.current};if(value)next[key]=value;else delete next[key];
@@ -777,6 +806,7 @@ export default function App() {
     if(!state.providers.some(p => p.id === nextId))return;
     if (!conversation) { setProviderId(nextId); return; }
     if (conversation.mode !== 'chat' || conversation.providerId === nextId) return;
+    chatRecoveryRef.current?.cancel();chatRecoveryRef.current=null;
     switchingModelRef.current = true; setSwitchingModel(true); setError('');
     const readRevision=organizationRevision.current;
     try {

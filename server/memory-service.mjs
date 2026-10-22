@@ -392,15 +392,31 @@ export async function createMemoryService({ dataDir, instanceId, runtime, fetchI
         return contextResult(state.value);
       } catch { return ''; }
     },
-    async remember(userId, input) {
-      const revision = bindingRevision, state = await getState(userId);
+    async remember(userId, input, { signal, authorize } = {}) {
+      signal?.throwIfAborted();
+      if (authorize !== undefined && typeof authorize !== 'function') throw fail(400, 'MEMORY_INVALID_AUTHORIZATION');
+      const revision = bindingRevision, state = await getState(userId), epoch = state.value.epoch;
+      const guard = async () => {
+        signal?.throwIfAborted();
+        if (revision !== bindingRevision) throw fail(409, 'MEMORY_SYNC_BINDING_CHANGED');
+        if (state.value.epoch !== epoch) throw fail(409, 'MEMORY_EPOCH_CONFLICT');
+        if (await authorize?.() === false) throw fail(403, 'MEMORY_REVOKED');
+        await requireLive(userId, state)();
+        signal?.throwIfAborted();
+        if (revision !== bindingRevision) throw fail(409, 'MEMORY_SYNC_BINDING_CHANGED');
+        if (state.value.epoch !== epoch) throw fail(409, 'MEMORY_EPOCH_CONFLICT');
+      };
       if (config.blockedUserId === userId || bindingPending) return { queued: false, reason: 'authentication-required' };
       if (!await liveAccount(userId,state)) return { queued: false, reason: 'disabled' };
+      await guard();
+      // Remote verification can be shared. One reply's abort must not cancel
+      // another account/job's verification; its own guard runs again after it.
       const remote = remoteFor(userId); if (remote) { try { await verifyRemote(remote); } catch (error) { if (!offlineBindings.has(remote) || !activeBinding(remote)) throw error; } if (!activeBinding(remote)) throw fail(409,'MEMORY_SYNC_BINDING_CHANGED'); }
+      await guard();
       if (input?.sensitive === true) return { queued: false, reason: 'sensitive' };
-      const event = normalizeEvent(input, state.value.epoch);
+      const event = normalizeEvent(input, epoch);
       let added;
-      try { added = await mutate(state, value => { if (revision !== bindingRevision) throw fail(409,'MEMORY_SYNC_BINDING_CHANGED'); if (event.epoch !== value.epoch) throw fail(409, 'MEMORY_EPOCH_CONFLICT'); return append(value, event); },requireLive(userId,state)); }
+      try { added = await mutate(state, value => { if (revision !== bindingRevision) throw fail(409,'MEMORY_SYNC_BINDING_CHANGED'); if (event.epoch !== value.epoch) throw fail(409, 'MEMORY_EPOCH_CONFLICT'); return append(value, event); }, guard); }
       catch (error) { if (error.code === 'MEMORY_CAPACITY') await noteError(state, error); throw error; }
       kick(userId); return { queued: true, duplicate: !added, id: event.id, epoch: event.epoch };
     },

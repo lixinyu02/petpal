@@ -77,3 +77,29 @@ test('a completed computer is released while its durable memory journal finishes
   await delay(20); assert.equal(settled, false);
   gate.resolve(); await closing; await task.done; assert.equal(settled, true);
 });
+
+test('a completed Agent starts the next queued task while its memory journal is still pending', async t => {
+  const gate = deferred(); const f = fixture(t, { journal: () => gate.promise });
+  try {
+    await f.submit();
+    await f.manager.submit(f.conversation, { submissionId: 'memory-queued-follow-up', content: '继续下一条任务' }, f.auth);
+    f.calls[0].work.resolve({ text: '首条任务已经完成' });
+    await until(() => f.remembered.length === 1);
+    await delay(80);
+    assert.equal(f.calls.length, 2, 'The durable memory journal must not retain the conversation execution lock');
+    assert.equal(f.manager.snapshot(f.conversation).run.status, 'running');
+  } finally {
+    gate.resolve();
+    for (const call of f.calls) call.work.resolve({ text: 'fixture cleanup' });
+  }
+});
+
+test('private-input protection updates the small live memory fence before any reply is journaled', async t => {
+  const f = fixture(t); await f.submit();
+  const task = f.active.get(f.conversation.id), privacy = task.replyMemoryPrivacy;
+  assert.deepEqual(privacy, { sensitiveInput: false, privateInputProtected: false });
+  await f.manager.protectPrivateInput(f.conversation, task);
+  assert.equal(task.replyMemoryPrivacy, privacy);
+  assert.deepEqual(privacy, { sensitiveInput: true, privateInputProtected: true });
+  await f.finish(); assert.equal(f.remembered.length, 0);
+});

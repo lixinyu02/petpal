@@ -143,6 +143,46 @@ test('real API wrapper account-switch and native restore behavior',async t=>{
       writer.enqueue(new TextEncoder().encode('event: delta\ndata: {"text":"old private reply"}\n\n'));
       await assert.rejects(pending,api.SessionChangedError);assert.deepEqual(events,[]);
     });
+    for(const terminal of ['done','error'])await t.test(`${terminal} releases a completed SSE response without EOF or an unbounded cancel`,async()=>{
+      delete window.petpal;
+      const api=await freshApi();api.setConnection({url:'',token:'active'});
+      const cleanup=deferred();let writer,cancelled=false;
+      install('fetch',async()=>new Response(new ReadableStream({
+        start(controller){writer=controller;controller.enqueue(new TextEncoder().encode(`event: delta\ndata: {"text":"accepted partial"}\n\nevent: ${terminal}\ndata: {}\n\n`));},
+        cancel(){cancelled=true;return cleanup.promise;},
+      })));
+      const events=[],pending=api.streamMessage('conversation','hello',new AbortController().signal,event=>events.push(event));
+      try{
+        const settled=await Promise.race([pending.then(()=>true),new Promise(resolve=>setTimeout(()=>resolve(false),60))]);
+        assert.equal(settled,true,'an authoritative terminal event must not await transport EOF/cancel');
+        assert.equal(cancelled,true,'the unused response transport is still cancelled');
+        assert.deepEqual(events.map(event=>event.type),['delta',terminal]);
+      }finally{cleanup.resolve();try{writer.close();}catch{}await pending.catch(()=>{});}
+    });
+    await t.test('frames following an authoritative terminal event are never delivered',async()=>{
+      delete window.petpal;
+      const api=await freshApi();api.setConnection({url:'',token:'active'});
+      install('fetch',async()=>new Response('event: delta\ndata: {"text":"accepted partial"}\n\nevent: done\ndata: {}\n\nevent: delta\ndata: {"text":"late content"}\n\nevent: error\ndata: {"message":"late error"}\n\n'));
+      const events=[];await api.streamMessage('conversation','hello',new AbortController().signal,event=>events.push(event));
+      assert.deepEqual(events.map(event=>event.type),['delta','done']);
+      assert.equal(events[0].data.text,'accepted partial');
+    });
+    await t.test('EOF without a terminal event still rejects while preserving delivered partial text and approvals',async()=>{
+      delete window.petpal;
+      const api=await freshApi();api.setConnection({url:'',token:'active'});
+      install('fetch',async()=>new Response('event: delta\ndata: {"text":"accepted partial"}\n\nevent: approval\ndata: {"id":"approval-one"}\n\n'));
+      const events=[];await assert.rejects(api.streamMessage('conversation','hello',new AbortController().signal,event=>events.push(event)),/连接提前断开/);
+      assert.deepEqual(events.map(event=>event.type),['delta','approval']);assert.equal(events[0].data.text,'accepted partial');
+    });
+    await t.test('terminal events split across CRLF chunks and a final frame without a separator remain supported',async()=>{
+      delete window.petpal;
+      for(const chunks of [['event: delta\r\ndata: {"text":"accepted"}\r\n\r','\nevent: do','ne\r\ndata: {}\r\n\r\n'],['event: done\ndata: {}']]){
+        const api=await freshApi();api.setConnection({url:'',token:'active'});
+        install('fetch',async()=>new Response(new ReadableStream({start(controller){for(const chunk of chunks)controller.enqueue(new TextEncoder().encode(chunk));controller.close();}})));
+        const events=[];await api.streamMessage('conversation','hello',new AbortController().signal,event=>events.push(event));
+        assert.equal(events.at(-1).type,'done');
+      }
+    });
     await t.test('invalid credentials or malformed identity never replace the active account',async()=>{
       const api=await freshApi();api.setConnection({url:'',token:'active'});
       install('fetch',async()=>json({error:'bad credentials'},401));
