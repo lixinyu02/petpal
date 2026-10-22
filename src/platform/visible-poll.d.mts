@@ -1,7 +1,7 @@
 export type VisiblePollOptions<Timer = ReturnType<typeof globalThis.setTimeout>> = {
   document: Pick<Document, 'hidden' | 'addEventListener' | 'removeEventListener'>;
   window: Pick<Window, 'addEventListener' | 'removeEventListener'> & { navigator?: Pick<Navigator, 'onLine'> };
-  intervalMs: number;
+  intervalMs: number | (() => number);
   run(signal: AbortSignal): Promise<void>;
   isCurrent?(): boolean;
   setTimeoutFn?(callback: () => void, delayMs: number): Timer;

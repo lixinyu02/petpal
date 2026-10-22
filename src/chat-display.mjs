@@ -17,7 +17,7 @@ export function createChatDisplay({ onText, isCurrent = () => true, delayMs,
       if (first) { first = false; flush(); }
       // Long Markdown reparses the accumulated document. Lower its update
       // frequency without delaying the first text or authoritative flushes.
-      else if (timer === null) timer = schedule(flush, delayMs ?? (length >= 8000 ? 120 : length >= 4000 ? 100 : 50));
+      else if (timer === null) timer = schedule(flush, delayMs ?? (length >= 64000 ? 400 : length >= 32000 ? 250 : length >= 16000 ? 180 : length >= 8000 ? 120 : length >= 4000 ? 100 : 50));
     },
     flush,
     close() { closed = true; clear(); pending = ''; },

@@ -180,3 +180,38 @@ test('invalid intervals fail before listeners are installed', () => {
     assert.equal(document.listenerCount(), 0); assert.equal(window.listenerCount(), 0);
   }
 });
+
+test('dynamic intervals retain running and idle cadence after the exact owned request settles', async () => {
+  const document=surface({hidden:false}),window=surface({navigator:{onLine:true}}),timers=clock(),calls=[];
+  let running=false;
+  const cleanup=createVisiblePoll({document,window,intervalMs:()=>running?800:2500,...timers,run:signal=>{
+    const pending=deferred();calls.push({signal,...pending});return pending.promise;
+  }});
+  try{
+    running=true;calls[0].resolve();await flush();timers.advance(799);assert.equal(calls.length,1);
+    timers.advance(1);assert.equal(calls.length,2);
+    running=false;calls[1].resolve();await flush();timers.advance(2499);assert.equal(calls.length,2);
+    timers.advance(1);assert.equal(calls.length,3);
+    cleanup();calls[2].resolve();await flush();assert.equal(timers.size(),0);
+  }finally{cleanup();for(const call of calls)call.resolve();await flush();}
+});
+
+test('pausing or starting a newer read invalidates a settled owner whose UI update may still be queued',async()=>{
+  for(const cause of ['hidden','offline','new-read']){
+    const h=harness();await h.finish(0);assert.equal(h.calls[0].signal.aborted,false);
+    if(cause==='hidden')h.hidden(true);else if(cause==='offline')h.online(false);else h.timers.advance(100);
+    assert.equal(h.calls[0].signal.aborted,true);
+    h.cleanup();if(cause==='new-read')await h.finish(1);
+  }
+});
+
+test('invalid dynamic intervals fail before installing listeners and cannot create a busy retry loop',async()=>{
+  for(const intervalMs of [()=>0,()=>NaN,()=>{throw new Error('invalid interval');}]){
+    const document=surface({hidden:false}),window=surface({navigator:{onLine:true}});
+    assert.throws(()=>createVisiblePoll({document,window,intervalMs,run:async()=>{}}),/interval/);
+    assert.equal(document.listenerCount()+window.listenerCount(),0);
+  }
+  const document=surface({hidden:false}),window=surface({navigator:{onLine:true}}),timers=clock();let interval=100,calls=0;
+  const cleanup=createVisiblePoll({document,window,intervalMs:()=>interval,...timers,run:async()=>{calls++;interval=0;}});
+  await flush();assert.equal(calls,1);assert.equal(timers.size(),0);timers.advance(100000);assert.equal(calls,1);cleanup();
+});

@@ -9,11 +9,17 @@ export function createVisiblePoll({
   setTimeoutFn = (callback, delay) => globalThis.setTimeout(callback, delay),
   clearTimeoutFn = timer => globalThis.clearTimeout(timer),
 }) {
-  if (!Number.isFinite(intervalMs) || intervalMs <= 0) throw new TypeError('Polling interval must be positive.');
+  const interval = () => {
+    let value;
+    try { value = typeof intervalMs === 'function' ? intervalMs() : intervalMs; } catch { throw new TypeError('Polling interval must be positive.'); }
+    if (!Number.isFinite(value) || value <= 0) throw new TypeError('Polling interval must be positive.');
+    return value;
+  };
+  interval();
   if (typeof run !== 'function' || typeof isCurrent !== 'function' || typeof setTimeoutFn !== 'function' || typeof clearTimeoutFn !== 'function') throw new TypeError('Polling callbacks must be functions.');
   if (!document?.addEventListener || !document?.removeEventListener || !window?.addEventListener || !window?.removeEventListener) throw new TypeError('Polling requires document and window event targets.');
 
-  let disposed = false, timer = null, active = null, ready = false, refreshRequested = false;
+  let disposed = false, timer = null, active = null, latestController = null, ready = false, refreshRequested = false;
   let online = window.navigator?.onLine !== false;
   const current = () => {
     try { return !disposed && isCurrent(); } catch { return false; }
@@ -24,21 +30,27 @@ export function createVisiblePoll({
   };
   const pause = () => {
     ready = false; refreshRequested = false; clearTimer();
-    active?.controller.abort();
+    // A completed transport can still have a queued React update. Invalidate
+    // that presentation owner as well as any request currently awaiting IO.
+    latestController?.abort();
   };
   const schedule = () => {
     if (!eligible()) { pause(); return; }
     clearTimer();
+    let delay;
+    try { delay = interval(); } catch { pause(); return; }
     timer = setTimeoutFn(() => {
       timer = null;
       if (!eligible()) { pause(); return; }
       start();
-    }, intervalMs);
+    }, delay);
   };
   const start = () => {
     if (active || !eligible()) return;
     clearTimer(); refreshRequested = false;
+    latestController?.abort();
     const owner = { controller: new AbortController() };
+    latestController = owner.controller;
     active = owner;
     const settled = () => {
       if (active !== owner) return;

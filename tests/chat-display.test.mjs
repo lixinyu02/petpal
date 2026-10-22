@@ -56,3 +56,17 @@ test('an existing deadline is not extended when new deltas cross the long-reply 
   assert.deepEqual(delays,[50]);timers[0]();assert.equal(events.length,2);
   display.push('之后');assert.deepEqual(delays,[50,100]);display.flush();display.close();
 });
+
+test('very long documents bound reparsing frequency without delaying first text or terminal flush',()=>{
+  for(const [length,budget] of [[20000,180],[40000,250],[80000,400]]){
+    const events=[],delays=[],timers=new Map();let sequence=0;
+    const display=createChatDisplay({onText:text=>events.push(text),schedule:(callback,delay)=>{const id=++sequence;delays.push(delay);timers.set(id,callback);return id;},cancel:id=>timers.delete(id)});
+    display.push('首段');assert.deepEqual(events,['首段']);
+    display.push('a'.repeat(length));display.push('有序的尾段');
+    assert.deepEqual(delays,[budget]);assert.equal(timers.size,1);
+    // A protocol terminal must present every accepted character now, even when
+    // the long-document budget has not expired.
+    display.flush();display.close();assert.equal(timers.size,0);
+    assert.equal(events.join(''),'首段'+'a'.repeat(length)+'有序的尾段');
+  }
+});

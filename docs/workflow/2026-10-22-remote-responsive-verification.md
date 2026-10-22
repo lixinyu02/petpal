@@ -3,7 +3,7 @@
 - Date: 2026-10-22
 - Source baseline: `bac9f47e698c11034aca3de50013026b8cd8123e`
 - Reference: [检查并优化 Codex Remote 客户端](codex://threads/01a119c9-3aa2-7bf3-8659-eb58dcaa3782)，只读参考其分离终态/后处理及保持DOM身份的方法，未修改参考项目，未使用其性能数字作为小伴结果。
-- Status: issue-1 已通过；issue-2 待完成。
+- Status: issue-1、issue-2 源码与隔离验收完成；未替换正式客户端或生产服务。
 
 ## issue-1
 
@@ -28,6 +28,27 @@ Chrome插件在独立loopback夹具运行真实App。假LLM输出25字固定回�
 ## issue-2 基线
 
 Chrome对真实MessageMarkdown组件操作，点击QA按钮真实聚焦/设置横向滚动后追加内容。旧Renderer每次重建表格节点：tableSameNode=false，scrollLeft从300回到0；表格和链接焦点均从DIV/A丢到BODY。原始Renderer SHA256 `f4c89100ff7c748cc7c4398eedca7ee31226b1231d74f21f504c5f490d6fadad`，基线DOM指标和截图保留于 `.tools/remote-iteration-20261022/browser/baseline/`。
+
+## issue-2 结果
+
+Markdown组件类型和remarkPlugins改为模块级稳定引用。Chrome追加后tableSameNode=true，表格scrollLeft保持300，DIV/A焦点均保留；412×960时结果相同且页面scrollWidth=412。安全URL、禁HTML、GFM任务列表与图片占位语义保持。16k/32k/64k长文中途批显预算调整为180/250/400ms，第一段和显式终态仍立即flush；这只减少完整Markdown重解析频次，没有新增增量AST解析。
+
+Agent被动读取复用可见/在线单飞调度，仍按运行800ms、空闲2500ms刷新；隐藏、离线、卸载及下一次读取都会废弃旧展示owner。普通和自动化快照在React updater内再次复验账号epoch、删除和展示归属，忽略取消的迟到传输也不能覆盖界面。初次已有完成回复不朗读，恢复后新完成回复去重朗读。轮询只GET，不调用任务stop，不修改原生通知。
+
+| 验证矩阵 | 结果 | 证据（相对仓库根） |
+| --- | --- | --- |
+| Markdown/长文批显/消息 | 30/30 | `.tools/remote-iteration-20261022/issue2-markdown-regression.log` |
+| Agent实际App effect、可见轮询及关联回归 | 146/146；基线22项中7项失败 | `.tools/remote-iteration-20261022/frontend-audit/agent-visible-summary.json` |
+| Chrome桌面DOM身份、焦点、滚动 | 通过 | `browser/candidate-dom-metrics.json`（以下browser均位于同一.tools目录） |
+| Chrome 412×960 DOM与布局 | 通过 | `browser/candidate-mobile-night-verified.json`；真实App日间截图`browser/candidate-chat-mobile-table.png` |
+| Chrome页面隐藏 | 实际hidden事件后约24秒，GET计数39→39；恢复调试焦点后重新GET | `browser/visibility-summary.json`与对应原始timeline/DOM记录 |
+| TypeScript与隔离Vite构建 | exit 0；2132模块、构建4.79秒 | `.tools/remote-iteration-20261022/issue2-build.log`；输出为同目录`dist/` |
+| 独立只读自审 | 未发现阻塞项 | 检查Markdown语义、批显顺序与旧展示owner失效路径 |
+| 暂存源码公开审计 | 1691文件通过，无问题；测试数据和证据未入Git | `.tools/remote-iteration-20261022/issue2-public-source-audit-staged.log` |
+
+各测试矩阵存在重叠，不累计。候选手机DOM文件名含night，但QA夹具的自定义夜间body样式不代表产品夜间视觉验收；产品截图仅使用真实App日间视图。截图改用CDP原始PNG保存，早期扩展截图格式/模拟点击偏移的尝试保留，不作为最终通过证据。
+
+Chrome原先调试焦点模拟使多标签均报告visible；关闭该模拟后观察到真实hidden事件和请求暂停，未使用冻结生命周期冒充隐藏。插件的Page.bringToFront未让该环境实际切回前台；恢复验证通过还原调试焦点模拟触发visible后观察GET，不能称物理标签切换完整验收。隐藏/离线/恢复单飞、朗读去重和迟到UI保护由146项回归覆盖；Android真机、Windows/Ubuntu原生后台与生产模型性能未重新验收。
 
 ## 适用范围与保留边界
 

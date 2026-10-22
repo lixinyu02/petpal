@@ -710,19 +710,25 @@ export default function App() {
     finally{deleteLock.current=false;if(getSessionEpoch()===accountEpoch)setDeleteBusy(false);}
   }
   function chooseSuggestion(text: string) { setDraft(text); inputRef.current?.focus(); }
-  async function refreshConversation(id:string,signal?:AbortSignal) {
+  async function refreshConversation(id:string,signal?:AbortSignal,stillCurrent:()=>boolean=()=>true) {
+    const current=()=>approvalAlive.current&&!signal?.aborted&&getSessionEpoch()===accountEpoch&&!deletedConversationIds.current.has(id)&&stillCurrent();
+    if(!current())throw new DOMException('页面或状态读取已关闭。','AbortError');
     const readRevision=organizationRevision.current;
     const updated=await api<Conversation>(`/conversations/${encodeURIComponent(id)}`,{signal});
-    if(!approvalAlive.current||signal?.aborted)throw new DOMException('页面或状态读取已关闭。','AbortError');
     if(getSessionEpoch()!==accountEpoch)throw new SessionChangedError();
+    if(!current())throw new DOMException('页面或状态读取已关闭。','AbortError');
     if(updated.id!==id)throw new Error('对话状态与当前请求不一致，请刷新后再操作。');
     if(deletedConversationIds.current.has(id))throw new DOMException('这段对话已删除。','AbortError');
     if(loadedAutomationConversationRef.current?.id===id){
-      const before=loadedAutomationConversationRef.current;
-      if(!before.agent||!updated.agent||before.agent.revision<=updated.agent.revision){if(JSON.stringify(before)!==JSON.stringify(updated))cacheAutomationConversation(updated);}
+      setLoadedAutomationConversation(before=>{
+        if(!current()||before?.id!==id||before.agent&&updated.agent&&before.agent.revision>updated.agent.revision)return before;
+        if(JSON.stringify(before)===JSON.stringify(updated))return before;
+        return mergeConversationOrganization(before,updated,readRevision!==organizationRevision.current);
+      });
       return updated;
     }
     setState(previous=>{
+      if(!current())return previous;
       const before=previous.conversations.find(item=>item.id===id);
       if(before?.agent&&updated.agent&&before.agent.revision>updated.agent.revision)return previous;
       if(before&&JSON.stringify(before)===JSON.stringify(updated))return previous;
@@ -733,13 +739,15 @@ export default function App() {
   }
   useEffect(()=>{
     if(!selected||currentMode!=='codex')return;
-    const controller=new AbortController();let timer:ReturnType<typeof setTimeout>|undefined,initialized=false,lastText='';
+    let alive=true,running=false,initialized=false,lastText='';
     const complete=new Set<string>();
-    const poll=async()=>{
-      let running=false;
+    const isCurrent=()=>alive&&approvalAlive.current&&getSessionEpoch()===accountEpoch&&!deletedConversationIds.current.has(selected);
+    const cleanup=createVisiblePoll({document,window,intervalMs:()=>running?800:2500,isCurrent,run:async signal=>{
+      const current=()=>isCurrent()&&!signal.aborted&&!document.hidden&&window.navigator?.onLine!==false;
+      running=false;
       try {
-        const next=await refreshConversation(selected,controller.signal);
-        if(controller.signal.aborted)return;
+        const next=await refreshConversation(selected,signal,current);
+        if(!current())return;
         const receipt=next.agent?.submissions?.find(item=>item.submissionId===agentSubmissionRef.current?.id);
         if(receipt&&['queued','running','completed','cancelled','error','steered','uncertain'].includes(receipt.status))resolveSubmission(receipt);
         running=next.agent?.run?.status==='running'||next.agent?.run?.status==='stopping';
@@ -750,10 +758,9 @@ export default function App() {
         }
         if(last&&(last.content!==lastText||!running)){lastText=last.content;performancePhase(running?(last.content?'speaking':'thinking'):'idle',last.content,last.id);}
         initialized=true;
-      }catch(error){if(!controller.signal.aborted&&!isSessionChanged(error)&&(error as Error).name!=='AbortError')setError((error as Error).message);}
-      if(!controller.signal.aborted)timer=setTimeout(()=>void poll(),running?800:2500);
-    };
-    void poll();return()=>{controller.abort();if(timer)clearTimeout(timer);};
+      }catch(error){if(current()&&!isSessionChanged(error)&&(error as Error).name!=='AbortError')setError(previous=>current()?(error as Error).message:previous);}
+    }});
+    return()=>{alive=false;cleanup();};
   },[selected,currentMode]);
   function resolveSubmission(submission:AgentSubmission) {
     const pending=agentSubmissionRef.current;if(!pending||pending.id!==submission.submissionId)return;
