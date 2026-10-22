@@ -12,21 +12,21 @@
 }
 html[data-theme="night"]{
   /* Surface roles adapted from Open Claude UI c1f923ae (MIT; see NOTICE).
-     Text/focus tokens keep PetPal's contrast requirements. Day stays independent. */
-  color-scheme:dark;--theme-surface:#151515;--theme-panel:#1a1a19;--theme-raised:#20201f;--theme-soft:#2c2c2a;
-  --theme-ink:#ebebe6;--theme-muted:#b4b4ae;--theme-border:#343432;
-  --theme-accent:#e4a085;--theme-accent-soft:#392b25;--theme-focus:#d97757;
-  --theme-input:#20201f;--theme-control-border:#7b7b75;
-  --theme-danger:#f1ada0;--theme-danger-soft:#432d29;
-  --theme-warning:#e3c38c;--theme-warning-soft:#403526;
-  --theme-success:#a9c9a5;--theme-success-soft:#2d3b2d;
-  --theme-navigation:#0b0b0b;--theme-popover:#2c2c2a;--theme-selected:#343432;--theme-selected-ink:#ebebe6;
-  --theme-button:#d97757;--theme-button-hover:#e08264;--theme-button-ink:#151515;
-  --theme-segmented-track:#1a1a19;--theme-segmented-thumb:#343432;
-  --theme-hairline:#ffffff17;--theme-hairline-strong:#ffffff2e;
-  --theme-popover-shadow:inset 0 0 0 1px #ffffff1a,0 8px 28px #0006,0 2px 8px #0004;
-  --theme-composer-shadow:inset 0 0 0 1px #ffffff17,0 4px 20px #0003;
-  --theme-overlay:#000000a8;--theme-shadow:0 12px 36px #0005;
+     Neutral graphite surfaces with ivory text; sage is reserved for actions. */
+  color-scheme:dark;--theme-surface:#282828;--theme-panel:#2b2b2b;--theme-raised:#323232;--theme-soft:#393939;
+  --theme-ink:#e5e3dd;--theme-muted:#b8b6b0;--theme-border:#4b4b49;
+  --theme-accent:#bbd0c2;--theme-accent-soft:#3d4942;--theme-focus:#b3c8bb;
+  --theme-input:#323232;--theme-control-border:#93958f;
+  --theme-danger:#e6b5ad;--theme-danger-soft:#483936;
+  --theme-warning:#d5c39d;--theme-warning-soft:#433e32;
+  --theme-success:#b3cab4;--theme-success-soft:#34463a;
+  --theme-navigation:#232323;--theme-popover:#353535;--theme-selected:#454545;--theme-selected-ink:#e5e3dd;
+  --theme-button:#b7c8bd;--theme-button-hover:#c6d4cb;--theme-button-ink:#28342c;
+  --theme-segmented-track:#2b2b2b;--theme-segmented-thumb:#454545;
+  --theme-hairline:#deded817;--theme-hairline-strong:#deded830;
+  --theme-popover-shadow:inset 0 0 0 1px #deded824,0 8px 28px #17171740,0 2px 8px #17171730;
+  --theme-composer-shadow:inset 0 0 0 1px #deded824,0 4px 20px #17171726;
+  --theme-overlay:#17171799;--theme-shadow:0 12px 36px #17171740;
   --theme-canvas:var(--theme-surface);--theme-error:var(--theme-danger);
   --green:var(--theme-accent);--muted:var(--theme-muted);--line:var(--theme-border);--soft:var(--theme-soft);--cream:var(--theme-raised);
   color:var(--theme-ink);background:var(--theme-surface)
@@ -97,15 +97,15 @@ html[data-theme="night"] :is(.assistant-task-state.is-error,.message-error,.agen
 html[data-theme="night"] .client-behavior-switch{background:var(--theme-control-border)}
 html[data-theme="night"] .client-behavior-control input:checked+.client-behavior-switch{background:var(--theme-button)}
 html[data-theme="night"] .client-behavior-control input:disabled+.client-behavior-switch{opacity:.65}
-html[data-theme="night"] .companion-aura{background:radial-gradient(ellipse,#d9907226 0%,#80614b1a 44%,transparent 72%)}
-html[data-theme="night"] .companion-floor{background:radial-gradient(ellipse,#c8b29b24,transparent 70%)}
+html[data-theme="night"] .companion-aura{background:radial-gradient(ellipse,#d7d9d31a 0%,#b7bcb412 44%,transparent 72%)}
+html[data-theme="night"] .companion-floor{background:radial-gradient(ellipse,#d7d9d314,transparent 70%)}
 html[data-theme="night"] :is(.scene-circle,.scene-floor){background:var(--theme-soft)}
 html[data-theme="night"] :is(.modal-backdrop,.nav-scrim,.chat-assistant-layer){background:var(--theme-overlay)!important}
 html[data-theme="night"] .toast{background:var(--theme-raised);color:var(--theme-ink)}
-html[data-theme="night"] :is(.single-pet-tools button,.floating-hide,.floating-bubble){background:#20201ff0!important;color:var(--theme-ink)!important;border-color:var(--theme-control-border)!important}
+html[data-theme="night"] :is(.single-pet-tools button,.floating-hide,.floating-bubble){background:#323232f0!important;color:var(--theme-ink)!important;border-color:var(--theme-control-border)!important}
 html[data-theme="night"] :is(.single-pet-drag,.pet-drag-handle){color:var(--theme-muted)!important}
 html[data-theme="night"] ::selection{background:var(--theme-accent-soft);color:var(--theme-ink)}
-html[data-theme="night"] ::-webkit-scrollbar-thumb{background:#646056}
+html[data-theme="night"] ::-webkit-scrollbar-thumb{background:#72736f}
 
 /* Stateful controls must stay legible when lazy feature sheets arrive. */
 html[data-theme="night"] :is(.approval,.agent-input-card){background:var(--theme-raised)!important;border-color:var(--theme-border)!important;color:var(--theme-ink)!important}

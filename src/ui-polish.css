@@ -177,8 +177,6 @@ html[data-theme="night"] .companion-world .companion-footer>.companion-voice-ent
 html[data-theme="night"] .app-shell :is(.workspace-model-trigger,.workspace-host-control,.workspace-host-picker>summary){
   background:var(--ui-polish-control)!important;border-color:transparent!important;
 }
-html[data-theme="night"] .app-shell .composer{box-shadow:0 5px 20px #0002!important}
-html[data-theme="night"] .app-shell .composer:focus-within{border-color:var(--theme-focus)!important;box-shadow:0 0 0 3px #d8a18a1a!important}
 html[data-theme="night"] .app-shell .companion-panel-toggle{
   background:var(--ui-polish-soft)!important;color:var(--ui-polish-accent)!important;
 }
@@ -207,9 +205,9 @@ html[data-theme="night"] .app-shell .composer{
 }
 html[data-theme="night"] .app-shell .composer:focus-within{
   border-color:transparent!important;
-  box-shadow:inset 0 0 0 1px var(--theme-hairline-strong),0 0 0 1px var(--theme-focus),0 4px 20px #0003!important;
+  box-shadow:inset 0 0 0 1px var(--theme-hairline-strong),0 0 0 1px var(--theme-focus),0 4px 20px #17171726!important;
 }
-/* The existing pseudo-ring would otherwise draw a second orange outline. */
+/* The existing pseudo-ring would otherwise draw a second focus outline. */
 html[data-theme="night"] .app-shell .composer::after{border-color:transparent;opacity:0!important}
 html[data-theme="night"] .app-shell .composer .send-button{border-radius:10px}
 html[data-theme="night"] .app-shell :is(.primary-button,.secondary-button,.danger-button,.new-chat){border-radius:8px}

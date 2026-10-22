@@ -5,7 +5,7 @@ const nativeFs = require('node:fs/promises');
 const { randomUUID } = require('node:crypto');
 
 const PREFERENCES = new Set(['day', 'night', 'auto']);
-const COLORS = Object.freeze({ day: '#fafbf8', night: '#151515' });
+const COLORS = Object.freeze({ day: '#fafbf8', night: '#282828' });
 const MAX_BYTES = 1024;
 const missing = error => error?.code === 'ENOENT';
 const failure = kind => Object.assign(new Error({

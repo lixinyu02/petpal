@@ -1,7 +1,7 @@
 export const THEME_STORAGE_KEY = 'petpal.theme';
 export const THEME_NATIVE_SESSION_KEY = 'petpal.theme.native-session';
-export const THEME_COLORS = Object.freeze({ day: '#fafbf8', night: '#151515' });
-export const THEME_CHROME_COLORS = Object.freeze({ day: '#f6f7f2', night: '#151515' });
+export const THEME_COLORS = Object.freeze({ day: '#fafbf8', night: '#282828' });
+export const THEME_CHROME_COLORS = Object.freeze({ day: '#f6f7f2', night: '#282828' });
 const preferences = new Set(['auto', 'day', 'night']);
 export const normalizeThemePreference = value => preferences.has(value) ? value : 'day';
 

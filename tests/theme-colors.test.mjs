@@ -20,7 +20,7 @@ for(const theme of ['day','night'])test(`${theme} field boundaries and focus ind
 });
 
 test('the pale default and neutral night surface do not alter theme preference state',()=>{
- assert.equal(day['--theme-surface'],'#fafbf8');assert.equal(night['--theme-surface'],'#151515');assert.ok(!Object.hasOwn(day,'--theme-preference'));assert.ok(!Object.hasOwn(night,'--theme-preference'));
+ assert.equal(day['--theme-surface'],'#fafbf8');assert.equal(night['--theme-surface'],'#282828');assert.ok(!Object.hasOwn(day,'--theme-preference'));assert.ok(!Object.hasOwn(night,'--theme-preference'));
 });
 
 test('night action labels and selected text remain readable in every interactive state',()=>{

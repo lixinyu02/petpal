@@ -21,7 +21,7 @@ function harness({ tray = true } = {}) {
     BrowserWindow: Window, app: { quit() { calls.quits++; } }, officialAccounts: undefined, appProxy: undefined,
     appPreferences: { current: () => ({ ...preferences }) },
     appearance: { current: () => ({ preference: 'day', theme: 'day', saved: false }), refresh: () => ({ preference: 'day', theme: 'day', saved: false }), close: async () => {} },
-    APPEARANCE_COLORS: { day: '#fafbf8', night: '#151515' }, appearanceArguments: () => ['--petpal-appearance=day:day:0'], crypto: { randomUUID: () => '12345678-1234-1234-1234-123456789abc' },
+    APPEARANCE_COLORS: { day: '#fafbf8', night: '#282828' }, appearanceArguments: () => ['--petpal-appearance=day:day:0'], crypto: { randomUUID: () => '12345678-1234-1234-1234-123456789abc' },
     mainWindowLayout: () => ({}), petWindowLayout: () => ({}),
     screen: { getPrimaryDisplay: () => ({ workArea: {} }) },
     trackWindowDisplay() {}, fitWindowToDisplay() {}, secureWindow() {}, rendererFailure() {}, applyMainStartupFullscreen() {},
@@ -54,7 +54,7 @@ test('main windows start with the effective appearance while pet windows retain 
     const f = harness();
     f.context.appearance.current = f.context.appearance.refresh = () => ({ preference: theme, theme, saved: true });
     f.context.createMain(); f.context.showPet();
-    assert.equal(f.windows[0].options.backgroundColor, theme === 'night' ? '#151515' : '#fafbf8');
+    assert.equal(f.windows[0].options.backgroundColor, theme === 'night' ? '#282828' : '#fafbf8');
     assert.equal(f.windows[0].options.frame, undefined, 'Keep the existing native title bar');
     assert.equal(f.windows[1].options.transparent, true); assert.equal(f.windows[1].options.frame, false);
     assert.equal(f.windows[1].options.backgroundColor, undefined); assert.equal(f.windows[1].options.webPreferences.additionalArguments, undefined);
