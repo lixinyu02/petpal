@@ -141,6 +141,13 @@ html :is(.welcome,.message,.message-avatar,.modal,.toast,.ui-toast,.chat-assista
   html[data-ui-motion="full"] :is(.app-shell,.login-page,.modal-backdrop,.downloads-view,.companion-world) .spin{
     animation:ui-busy-turn 1s linear infinite!important;
   }
+  /* Only mounted while an assistant is waiting for its first content. */
+  html[data-ui-motion="full"] .app-shell .typing-dots>i{
+    color:var(--ui-clay);background:currentColor;
+    animation:ui-thinking-wave 1.2s var(--ui-ease-swift) infinite!important;
+  }
+  html[data-ui-motion="full"] .app-shell .typing-dots>i:nth-child(2){animation-delay:140ms!important}
+  html[data-ui-motion="full"] .app-shell .typing-dots>i:nth-child(3){animation-delay:280ms!important}
   /* Decorative bars follow the current ASR/TTS phase. The real input meter remains authoritative. */
   html[data-ui-motion="full"] .companion-world[data-voice-phase="listening"] .ui-voice-bars>i{
     animation:ui-voice-listening 920ms ease-in-out infinite!important;
@@ -185,5 +192,6 @@ html:not([data-ui-motion="full"]) :is(.workspace-model-popup,.workspace-disclosu
 @keyframes ui-message-enter{from{opacity:0}to{opacity:1}}
 @keyframes ui-message-avatar-in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
 @keyframes ui-busy-turn{to{transform:rotate(360deg)}}
+@keyframes ui-thinking-wave{0%,60%,100%{transform:translateY(0);opacity:.45}30%{transform:translateY(-3px);opacity:1}}
 @keyframes ui-voice-listening{0%,100%{transform:scaleY(.25);opacity:.65}48%{transform:scaleY(.72);opacity:1}}
 @keyframes ui-voice-speaking{0%,100%{transform:scaleY(.36);opacity:.72}36%{transform:scaleY(1);opacity:1}70%{transform:scaleY(.5);opacity:.88}}

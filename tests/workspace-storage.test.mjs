@@ -16,7 +16,9 @@ import {reuseConversationMessages} from '../src/conversation-message-reuse.mjs';
 import {createBrowserSetupDraft} from '../src/browser-setup-draft.mjs';
 import {reasoningEfforts} from '../src/desktop-settings.mjs';
 import * as uiMotion from '../src/platform/ui-motion.mjs';
-import {composerKeyAction} from '../src/composer-keyboard.mjs';
+import {composerKeyAction,createCompositionGuard} from '../src/composer-keyboard.mjs';
+import * as composerLayout from '../src/composer-layout.mjs';
+const inputHookSource=ts.transpileModule(await readFile(new URL('../src/useComposerInput.ts',import.meta.url),'utf8'),{fileName:'useComposerInput.ts',compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 import {createVisiblePoll} from '../src/platform/visible-poll.mjs';
 
 const source=ts.transpileModule(await readFile(new URL('../src/App.tsx',import.meta.url),'utf8'),{
@@ -99,7 +101,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     './platform/cloud-docker':dockerModule.exports,
     './platform/visible-poll.mjs':{createVisiblePoll:options=>createVisiblePoll({...options,setTimeoutFn:callback=>{const id=++timerId;timers.set(id,callback);return id;},clearTimeoutFn:id=>timers.delete(id)})},
     react,'react/jsx-runtime':{jsx:element,jsxs:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
-    '@capacitor/core':{Capacitor:{isNativePlatform:()=>native,getPlatform:()=>native?'android':'web',isPluginAvailable:()=>false}},'./api':api,'./WorkspaceControls':controls,'./composer-keyboard.mjs':{composerKeyAction},
+    '@capacitor/core':{Capacitor:{isNativePlatform:()=>native,getPlatform:()=>native?'android':'web',isPluginAvailable:()=>false}},'./api':api,'./WorkspaceControls':controls,'./composer-keyboard.mjs':{composerKeyAction,createCompositionGuard},'./composer-layout.mjs':composerLayout,'./useWorkspaceDensity':{useWorkspaceDensity(){}},
     './companion-mount.mjs':{watchCompanionBreakpoint},'./chat-display.mjs':{createChatDisplay},'./chat-completion.mjs':chatCompletion,'./useChatScroll':{useChatScroll:()=>({contentRef:{current:null},onScroll(){},latest(){},showLatest:false})},
     './AgentPermissions':{...component('AgentPermissions'),defaultAgentPermissions:permissions},'./approval-review-ui.mjs':approvalReviewUi,
     './ProjectDirectory':{...component('ProjectDirectory'),useProjectDirectory:()=>({value:'',change(){}})},
@@ -122,6 +124,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
   const motionModule={exports:{}};
   vm.runInNewContext(motionSource,{module:motionModule,exports:motionModule.exports,require:context.require,window,document});
   modules['./platform/ui-motion.ts']=motionModule.exports;
+  const inputHookModule={exports:{}};vm.runInNewContext(inputHookSource,{...context,module:inputHookModule,exports:inputHookModule.exports,requestAnimationFrame:callback=>{const id=++timerId;timers.set(id,callback);return id;},cancelAnimationFrame:id=>timers.delete(id)});modules['./useComposerInput']=inputHookModule.exports;
   vm.runInNewContext(source,context);const Component=module.exports.default;
   const render=()=>{index=0;effects.length=0;tree=Component();for(const effect of effects)effect();return tree;};
   const find=(type,predicate=()=>true)=>nodes(tree).find(node=>node.type===type&&predicate(node.props));
@@ -241,6 +244,23 @@ for(const scenario of[
     assert.ok(f.requests.every(item=>item.method==='GET'),'composition and newline must never reach a mutating API');
   });
 }
+
+test('App retains the real composition lock across draft updates and ignores a committing Enter before accepting the next key sequence',async t=>{
+  const f=workspaceFixture();t.after(()=>f.close());await f.ready();
+  f.find('textarea').props.onCompositionStart();f.typeDraft('输入法刚刚确认');
+  assert.equal(f.keyDown({ctrlKey:true}),false);await f.ready();assert.equal(f.streams.length,0);
+  f.find('textarea').props.onCompositionEnd();
+  assert.equal(f.keyDown({ctrlKey:true}),false);assert.equal(f.streams.length,0);
+  f.find('textarea').props.onKeyUp({nativeEvent:{key:'Enter'}});
+  assert.equal(f.keyDown({ctrlKey:true}),true);await f.ready();
+  assert.equal(f.streams.length,1);assert.equal(f.streams[0].content,'输入法刚刚确认');
+});
+
+test('App blur releases a composition transaction without blocking a later deliberate send',async t=>{
+  const f=workspaceFixture({native:true});t.after(()=>f.close());await f.ready();f.typeDraft('明确发送的文字');
+  f.find('textarea').props.onCompositionStart();f.find('textarea').props.onCompositionEnd();f.find('textarea').props.onBlur();
+  assert.equal(f.keyDown({ctrlKey:true}),true);await f.ready();assert.equal(f.streams.length,1);
+});
 
 for(const label of['连接与设置','下载客户端']){
   test(`App workspace back returns from ${label} to Chat with draft and attachments intact`,async t=>{

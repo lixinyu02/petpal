@@ -5,6 +5,12 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import * as executionHosts from '../src/execution-host-picker.mjs';
 import * as safeViewport from '../src/platform/safe-viewport.mjs';
+import * as composerKeyboard from '../src/composer-keyboard.mjs';
+import * as composerLayout from '../src/composer-layout.mjs';
+
+const inputSource=ts.transpileModule(await readFile(new URL('../src/useComposerInput.ts',import.meta.url),'utf8'),{
+  fileName:'useComposerInput.ts',compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS},
+}).outputText;
 
 const source = ts.transpileModule(await readFile(new URL('../src/WorkspaceControls.tsx', import.meta.url), 'utf8'), {
   fileName: 'WorkspaceControls.tsx', compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
@@ -48,16 +54,21 @@ function pickerFixture({ width = 412, height = 960, left = 0, top = 0, scale = 1
     'lucide-react': new Proxy({}, { get: (_target, key) => Symbol.for(String(key)) }),
     './execution-host-picker.mjs': executionHosts,
     './platform/safe-viewport.mjs': safeViewport,
+    './composer-keyboard.mjs': composerKeyboard,
+    './composer-layout.mjs': composerLayout,
     './WorkspaceDisclosure': { __esModule: true, default: Symbol('WorkspaceDisclosure') },
     './AgentOnboarding': { AgentOnboarding: Symbol('AgentOnboarding') },
   };
-  const module = { exports: {} };
-  vm.runInNewContext(source, {
+  const contextFor=module=>({
     module, exports: module.exports, window, document,
     require: name => { if (name.endsWith('.css')) return {}; assert.ok(Object.hasOwn(modules, name), `Unexpected dependency: ${name}`); return modules[name]; },
     requestAnimationFrame(callback) { const id = ++frameId; frames.set(id, callback); return id; },
     cancelAnimationFrame: id => frames.delete(id),
   });
+  const inputModule={exports:{}};
+  vm.runInNewContext(inputSource,contextFor(inputModule));modules['./useComposerInput']=inputModule.exports;
+  const module = { exports: {} };
+  vm.runInNewContext(source,contextFor(module));
   const Component = module.exports.ModelPicker;
   const find = (type, predicate = () => true) => nodes(tree).find(node => node.type === type && predicate(node.props));
   const render = () => {
@@ -70,7 +81,7 @@ function pickerFixture({ width = 412, height = 960, left = 0, top = 0, scale = 1
     return tree;
   };
   const triggerNode = () => find('button', props => props.className === 'workspace-model-trigger');
-  const key = (node, key, target = trigger) => { node.props.onKeyDown({ key, target, preventDefault() {}, stopPropagation() {} }); render(); };
+  const key = (node, key, target = trigger, extra = {}) => { node.props.onKeyDown({ key, target, nativeEvent:{key,...extra},preventDefault() {}, stopPropagation() {} }); render(); };
   render();
   return {
     find, focusCalls, changes, document, window, search, render,
@@ -78,7 +89,11 @@ function pickerFixture({ width = 412, height = 960, left = 0, top = 0, scale = 1
     cancelPointer() { triggerNode().props.onPointerCancel?.(); },
     click(detail = 1) { triggerNode().props.onClick({ detail, nativeEvent: { detail } }); render(); },
     triggerKey(keyValue) { key(triggerNode(), keyValue); },
-    searchKey(keyValue) { key(find('div', props => props.className === 'workspace-model-popup'), keyValue, search); },
+    searchKey(keyValue,extra) { key(find('div', props => props.className === 'workspace-model-popup'), keyValue, search,extra); },
+    compositionStart(){find('input').props.onCompositionStart();},
+    compositionEnd(){find('input').props.onCompositionEnd();},
+    searchKeyUp(key){find('input').props.onKeyUp({nativeEvent:{key}});},
+    flushFrames(){const jobs=[...frames.values()];frames.clear();jobs.forEach(job=>job());render();},
     choose(id) { find('div', props => props.role === 'option' && props.children[0].props.children[0].props.children === providers.find(provider => provider.id === id).name).props.onClick(); render(); },
     type(query) { find('input').props.onChange({ target: { value: query } }); render(); },
     close() { for (const hook of hooks) hook?.cleanup?.(); assert.equal(frames.size, 0, 'position listeners must release queued animation frames'); },
@@ -133,6 +148,31 @@ test('keyboard activation preserves focused search, arrow navigation and Enter s
   f.searchKey('ArrowDown'); f.searchKey('Enter');
   assert.deepEqual(f.changes, ['two']);
   assert.equal(f.document.activeElement.name, 'trigger');
+});
+
+test('real model search does not consume CJK candidate keys or WebKit committing Enter',t=>{
+  const f=pickerFixture();t.after(()=>f.close());f.click();
+  f.compositionStart();
+  f.searchKey('ArrowDown');f.searchKey('Enter');f.searchKey('Escape');
+  assert.ok(f.find('div',props=>props.role==='listbox'));assert.deepEqual(f.changes,[]);
+  f.compositionEnd();f.searchKey('Enter');assert.deepEqual(f.changes,[]);
+  f.searchKeyUp('Enter');f.searchKey('ArrowDown');f.searchKey('Enter');
+  assert.deepEqual(f.changes,['two'],'next real key sequence can select immediately');
+});
+
+test('model search respects native IME flags even without composition events and releases pointer commits after one frame',t=>{
+  const f=pickerFixture();t.after(()=>f.close());f.click();f.type('model-two');
+  f.searchKey('Enter',{isComposing:true});f.searchKey('Enter',{keyCode:229});
+  assert.deepEqual(f.changes,[]);assert.ok(f.find('div',props=>props.role==='listbox'));
+  f.compositionStart();f.compositionEnd();f.flushFrames();f.searchKey('Enter');
+  assert.deepEqual(f.changes,['two']);
+});
+
+test('closing a model search cancels a pending composition release and permits clean reopening',t=>{
+  const f=pickerFixture();t.after(()=>f.close());f.click();f.compositionStart();f.compositionEnd();
+  f.find('button',props=>props.className==='workspace-model-close').props.onClick();f.render();
+  f.click();f.searchKey('ArrowDown');f.searchKey('Enter');
+  assert.deepEqual(f.changes,['two']);
 });
 
 test('zero-detail keyboard or assistive activation overrides a prior touch pointer, including cancellation', t => {

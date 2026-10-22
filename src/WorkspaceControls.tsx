@@ -6,6 +6,7 @@ import { canSelectExecutionHost, executionHostChoices, groupExecutionHosts, type
 import './workspace-controls.css';
 import WorkspaceDisclosure from './WorkspaceDisclosure';
 import { readSafeViewport } from './platform/safe-viewport.mjs';
+import { useInputComposition } from './useComposerInput';
 
 export { AgentOnboarding } from './AgentOnboarding';
 
@@ -27,6 +28,7 @@ export function ModelPicker({ providers, value, onChange, disabled = false, labe
   const [placement, setPlacement] = useState({ left: 12, top: 60, width: 340, maxHeight: 400 });
   const trigger = useRef<HTMLButtonElement>(null), popup = useRef<HTMLDivElement>(null), search = useRef<HTMLInputElement>(null);
   const triggerPointer = useRef(''), focusSearchOnOpen = useRef(true);
+  const composition=useInputComposition(open);
   const id = useId(), listId = `${id}-models`, searchId = `${id}-search`;
   const choices = useMemo<ModelChoice[]>(() => [
     ...(fallbackOption ? [{ id: '', name: fallbackOption.label, description: fallbackOption.description || '使用执行主机上的 Codex 配置', search: `${fallbackOption.label} ${fallbackOption.description || ''}`.toLocaleLowerCase() }] : []),
@@ -45,6 +47,7 @@ export function ModelPicker({ providers, value, onChange, disabled = false, labe
   }
   function choose(choice: ModelChoice) { close(true); if (choice.id !== value) onChange(choice.id); }
   function keyDown(event: KeyboardEvent) {
+    if(composition.blocks(event.nativeEvent||event))return;
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true); }
     else if (event.key === 'Tab') close(true);
     else if (event.target !== search.current) return;
@@ -98,7 +101,7 @@ export function ModelPicker({ providers, value, onChange, disabled = false, labe
     </button>
     {open && createPortal(<div ref={popup} className="workspace-model-popup" style={placement} onKeyDown={keyDown}>
       <div className="workspace-model-search"><Search size={17} aria-hidden="true"/><input ref={search} id={searchId} role="combobox" aria-label="搜索模型" aria-autocomplete="list" aria-expanded="true" aria-controls={listId} aria-activedescendant={active ? `${id}-option-${activeIndex}` : undefined}
-        placeholder="搜索名称、模型或协议" value={query} onChange={event => { setQuery(event.target.value); setActiveIndex(0); }} autoComplete="off" autoCorrect="off" spellCheck={false}/>
+        placeholder="搜索名称、模型或协议" value={query} onCompositionStart={()=>composition.start()} onCompositionEnd={()=>composition.end()} onKeyUp={event=>composition.keyUp(event.nativeEvent)} onBlur={()=>composition.reset()} onChange={event => { setQuery(event.target.value); setActiveIndex(0); }} autoComplete="off" autoCorrect="off" spellCheck={false}/>
         <button type="button" className="workspace-model-close" aria-label="关闭模型选择" onClick={() => close(true)}><X size={16}/></button>
       </div>
       <div className="workspace-model-list" role="listbox" id={listId} aria-label={label}>

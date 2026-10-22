@@ -2,7 +2,7 @@
 
 - Date: 2026-10-23
 - Complexity: L1
-- Status: draft
+- Status: final
 
 ## Background
 
@@ -14,12 +14,12 @@
 
 ## Design
 
-- Visual thesis：淡白与柔和石墨灰的轻薄工作空间，以表面阶梯、排版和细边表达层次，小范围陶土色表达正在思考，不增加装饰性框层。
+- Visual thesis：淡白与柔和石墨灰的轻薄工作空间，以表面阶梯、排版和细边表达层次；正文采用中性暖灰，小范围陶土色标记主操作与正在思考，不增加装饰性框层。
 - Content plan：会话阅读占主位；模式、模型与目标电脑紧凑分组；输入与附件作为同一个 Composer；额外状态在需要时呈现。
 - Interaction thesis：共用 60/120/200/300ms 时序和缓动；分段滑块只改变装饰几何；思考波浪只在待回复时播放；输入高度按 RAF 合并，不在每次流式 token 上测量。
 - 统一 Composer 20px、用户气泡 18px、Panel 10px、Dialog 16px、按钮 6/8/10px、胶囊轨道与高分屏装饰发丝线。字段与键盘焦点继续保持可见边界和 2px 焦点，不以发丝替代。
 - 保留此前淡白默认和较柔和 night 底色，不把上游近黑调色板当必须逐字复制的品牌要求。补全 day 的 navigation/popover/selected/button 角色，几何与阴影两主题共享。
-- CSS 容器放在不会捕获 fixed 菜单坐标的阅读区域；Portal 沿用 viewport 定位。保留 44px 触控、安全区、短屏和减少动画策略。
+- 按实际聊天列宽 576/480/384/320 分档。源码核查发现主机菜单是 fixed 后代而非 Portal，使用 ResizeObserver 仅在跨档时写属性，避免 container-type/layout containment 改变菜单坐标。Portal 沿用 viewport 定位。保留 44px 触控、安全区、短屏和减少动画策略。
 - 复用小伴模态焦点陷阱与语音引擎；不引入 Tailwind、Framer Motion 或新运行依赖，不复制示例模型、额度、自动重试、脚本沙箱或 macOS 专属宿主行为。
 
 ## Risks
@@ -29,3 +29,7 @@
 ## Verification Plan
 
 issue-1 检查主题对比度/透明首帧/原生颜色合同、CSS 语法与类型，保存一次提交；issue-2 验证真实输入事件、模型选择、输入高度、窄列布局、减少动画和思考状态。Chrome 插件验收桌面、412×960、360×800、320px 及桌面窄聊天列的 day/night；生产构建使用隔离输出目录，无真实模型/CLI/语音调用、无线上部署或安装包制作。
+
+## Results
+
+两个 issue 完成。最终相关回归 196/196、TypeScript、生产构建、源码绑定与浏览器验收断言通过；详细范围、截图、夹具边界和收尾见 `2026-10-23-claude-ui-refinement-acceptance.md`。

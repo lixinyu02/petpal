@@ -1,20 +1,20 @@
 /* Local day/night appearance. Character textures and canvases keep their original colors. */
 :root{
-  --theme-surface:#fafbf8;--theme-raised:#fcfdf9;--theme-soft:#f1f4ec;
-  --theme-ink:#30433b;--theme-muted:#60715f;--theme-border:#dde5d7;
-  --theme-accent:#285e4b;--theme-accent-soft:#e6eee3;--theme-focus:#547b61;
-  --theme-input:#ffffff;--theme-control-border:#81907c;
+  --theme-surface:#fafbf8;--theme-raised:#fdfdfb;--theme-soft:#f0f0ec;
+  --theme-ink:#302d29;--theme-muted:#69665f;--theme-border:#deddd8;
+  --theme-accent:#8f4c32;--theme-accent-soft:#f4e7df;--theme-focus:#9b593f;
+  --theme-input:#ffffff;--theme-control-border:#918b80;
   --theme-danger:#9c433c;--theme-danger-soft:#fff1ec;
   --theme-warning:#795327;--theme-warning-soft:#fff5e5;
   --theme-success:#2e6545;--theme-success-soft:#edf4e8;
   --theme-overlay:#10201870;--theme-shadow:0 12px 36px #18332120;
   /* Open Claude UI role/geometry reference; adapted colors retain PetPal's
      pale default and existing semantic contrast (provenance in NOTICE). */
-  --theme-panel:#f6f7f3;--theme-navigation:#f4f5f1;--theme-popover:#ffffff;
-  --theme-selected:#e9ede6;--theme-selected-ink:#30433b;
-  --theme-button:#285e4b;--theme-button-hover:#204d3e;--theme-button-ink:#ffffff;
-  --theme-segmented-track:#edf0e9;--theme-segmented-thumb:#ffffff;
-  --theme-hairline:#263b2e1c;--theme-hairline-strong:#263b2e40;
+  --theme-panel:#f7f7f3;--theme-navigation:#f4f4ef;--theme-popover:#ffffff;
+  --theme-selected:#ecebe5;--theme-selected-ink:#302d29;
+  --theme-button:#d97757;--theme-button-hover:#de876b;--theme-button-ink:#281b16;
+  --theme-segmented-track:#eeeee9;--theme-segmented-thumb:#ffffff;
+  --theme-hairline:#302d291c;--theme-hairline-strong:#302d2940;
   --theme-popover-shadow:inset 0 0 0 var(--ui-hairline-width) var(--theme-hairline-strong),0 8px 28px #22332512,0 2px 8px #2233250a;
   --theme-composer-shadow:inset 0 0 0 var(--ui-hairline-width) var(--theme-hairline-strong),0 4px 20px #22332508;
   --theme-surface-0:var(--theme-surface);--theme-surface-1:var(--theme-panel);
@@ -30,16 +30,16 @@
 }
 html[data-theme="night"]{
   /* Surface roles adapted from Open Claude UI c1f923ae (MIT; see NOTICE).
-     Neutral graphite surfaces with ivory text; sage is reserved for actions. */
+     Neutral graphite surfaces with ivory text and small clay accents. */
   color-scheme:dark;--theme-surface:#282828;--theme-panel:#2b2b2b;--theme-raised:#323232;--theme-soft:#393939;
   --theme-ink:#e5e3dd;--theme-muted:#b8b6b0;--theme-border:#4b4b49;
-  --theme-accent:#bbd0c2;--theme-accent-soft:#3d4942;--theme-focus:#b3c8bb;
+  --theme-accent:#e3b9a8;--theme-accent-soft:#4c3e36;--theme-focus:#e3b9a8;
   --theme-input:#323232;--theme-control-border:#93958f;
   --theme-danger:#e6b5ad;--theme-danger-soft:#483936;
   --theme-warning:#d5c39d;--theme-warning-soft:#433e32;
   --theme-success:#b3cab4;--theme-success-soft:#34463a;
   --theme-navigation:#232323;--theme-popover:#353535;--theme-selected:#454545;--theme-selected-ink:#e5e3dd;
-  --theme-button:#b7c8bd;--theme-button-hover:#c6d4cb;--theme-button-ink:#28342c;
+  --theme-button:#d97757;--theme-button-hover:#e38a6c;--theme-button-ink:#211b18;
   --theme-segmented-track:#2b2b2b;--theme-segmented-thumb:#454545;
   --theme-hairline:#deded817;--theme-hairline-strong:#deded830;
   --theme-popover-shadow:inset 0 0 0 var(--ui-hairline-width) #deded824,0 8px 28px #17171740,0 2px 8px #17171730;
