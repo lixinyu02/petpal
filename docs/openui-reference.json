@@ -18,7 +18,7 @@
       "matchesReferenceHeadAfterLfNormalization": true
     }
   ],
-  "adaptation": "Reuse the source-controlled component definitions and official-SDK validation; rename the conversation preamble to PetPal. No prebundled React runtime is copied.",
+  "adaptation": "Reuse the source-controlled component definitions and official-SDK validation; rename the conversation preamble to PetPal and disable the pinned SDK development inspector before import. No prebundled React runtime is copied.",
   "dependencies": {
     "@openuidev/lang-core": {
       "version": "1.0.1",

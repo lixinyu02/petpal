@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { OPENUI_AUTO_GUIDE } from '../server/openui-policy.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -50,7 +51,7 @@ test('context reset adopts current global config, keeps history and only a later
   assert.deepEqual(after.messages, before.messages); assert.deepEqual(after.agent.submissions, before.agent.submissions); assert.equal(after.customTitle, before.customTitle); assert.equal(after.agentProjectDirectory, before.agentProjectDirectory); assert.equal(after.agentHostId, before.agentHostId);
   assert.equal(after.agent.run.errorCode, undefined); assert.equal(after.agent.run.error, undefined); assert.match(after.agent.contextNotice, /记忆已重置.*历史已保留.*主动发送.*补充/); assert.equal(f.calls.length, 0);
   const posted = await f.request(`/conversations/${id}/agent/submit`, { method: 'POST', body: { submissionId: randomUUID(), content: 'Only this new explicit task' } }); assert.equal(posted.status, 200);
-  await until(() => f.calls.length === 1); assert.equal(f.calls[0].threadId, undefined); assert.equal(f.calls[0].prompt, 'Only this new explicit task');
+  await until(() => f.calls.length === 1); assert.equal(f.calls[0].threadId, undefined); assert.equal(f.calls[0].prompt, OPENUI_AUTO_GUIDE + '\n\nOnly this new explicit task');
   await until(async () => (await f.request(`/conversations/${id}`)).data.agent.run.status === 'completed');
 });
 

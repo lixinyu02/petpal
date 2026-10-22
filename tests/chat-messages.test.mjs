@@ -41,3 +41,13 @@ test('incomplete, cancelled and steered messages retain their state and cannot b
   const html=await render([message('one',{status:'error'}),message('two',{status:'cancelled'}),message('three',{status:'streaming',content:'',steered:true})],{mode:'codex',working:true});
   assert.ok(html.includes('回复未完成'));assert.ok(html.includes('已停止'));assert.ok(html.includes('已追加到当前任务'));assert.ok(html.includes('typing-dots'));assert.equal(html.includes('aria-label="朗读这条回复"'),false);assert.ok(html.includes('Codex'));
 });
+
+test('OpenUI belongs only to marked assistant replies, never user messages or old history',async()=>{
+  const content='```openui\nroot = Panel("交互", [Field("city", "地点", "北蔡镇"), Button("填入草稿", @UseInPrompt("继续"))])\n```';
+  for(const mode of ['chat','codex']) {
+    const html=await render([message('old',{content}),message('user',{role:'user',content,outputRendering:'auto'}),message('new',{content,outputRendering:'auto'})],{mode});
+    assert.equal((html.match(/class="openui-panel"/g)||[]).length,1);
+    assert.equal((html.match(/language-openui/g)||[]).length,1);
+    assert.ok(html.includes('地点'));assert.ok(html.includes('填入草稿'));
+  }
+});

@@ -9,6 +9,7 @@ import { createPetServer } from '../server/app.mjs';
 import { JsonStore } from '../server/store.mjs';
 import { defaultCodexConfig } from '../server/codex-config.mjs';
 import { listenFixture } from './helpers/loopback.mjs';
+import { OPENUI_AUTO_GUIDE } from '../server/openui-policy.mjs';
 
 async function until(callback) {
   for (let index = 0; index < 200; index++) { const result = await callback(); if (result) return result; await delay(5); }
@@ -49,7 +50,7 @@ test('authenticated queue reorder persists only pending order and survives ended
   const saved = JSON.parse(await readFile(path.join(f.directory, 'state.json'), 'utf8')).conversations.find(item => item.id === conversation.id);
   assert.deepEqual(saved.agent.queue.map(entry => entry.id), entryIds);
   f.calls[0].resolve({ text: 'current done' }); await until(() => f.calls.length === 2);
-  assert.equal(f.calls[1].args.prompt, 'second pending');
+  assert.equal(f.calls[1].args.prompt, OPENUI_AUTO_GUIDE + '\n\nsecond pending');
 });
 
 test('reorder API rejects unauthenticated callers, foreign conversations and malformed or stale permutations', async t => {

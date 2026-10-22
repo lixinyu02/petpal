@@ -10,7 +10,7 @@ const OpenUIBlock = lazy(() => import('./OpenUIBlock').catch(() => ({default: ({
 type Props = { content: string; mode?: OutputRendering; status?: string; onUseInPrompt?: (text: string) => void };
 export default memo(function AssistantOutput({content, mode = 'markdown', status, onUseInPrompt}: Props) {
   const streaming = status === 'streaming';
-  const parsed = useMemo(() => isOpenUIMode(mode) && /^ {0,3}(?:`{3,}|~{3,})openui\s*$/m.test(content)
+  const parsed = useMemo(() => isOpenUIMode(mode) && /^(?:`{3,}|~{3,})openui\s*$/m.test(content)
     ? splitOpenUI(content, { streaming }) : null, [content, mode, streaming]);
   if (!parsed || !parsed.parts.some(part => part.type === 'openui')) return <>
     {parsed?.error && <p className="openui-notice" role="status">{parsed.error}</p>}

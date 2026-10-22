@@ -109,6 +109,7 @@ test('Chat finishes while its Agent runs independently, allowing another Chat tu
   const first = await f.send(chat);
   assert.equal(first.status, 200); assert.ok(first.events.some(event => event.type === 'done')); assert.ok(!first.events.some(event => event.type === 'error'));
   const foregroundId=first.events.find(event=>event.type==='meta').data.assistantMessageId;
+  assert.equal(first.events.find(event=>event.type==='meta').data.outputRendering,'auto');
   assert.equal(first.events.find(event=>event.type==='done').data.assistantMessageId,foregroundId);
   assert.ok(first.events.find(event=>event.type==='done').data.conversation.messages.some(message=>message.id===foregroundId&&message.role==='assistant'&&!message.assistantTaskId));
   const background = first.events.find(event => event.type === 'task')?.data.task;
@@ -118,6 +119,10 @@ test('Chat finishes while its Agent runs independently, allowing another Chat tu
   assert.equal(f.calls[0].args.model, 'fixture-default-agent-model'); assert.deepEqual(f.calls[0].args.permissions, chosenPermissions);
   const running = (await f.json(`/conversations/${background.conversationId}`)).data;
   assert.equal(running.agent.run.status, 'running');
+  assert.equal(running.messages.find(message=>message.role==='assistant').outputRendering,undefined);
+  assert.match(f.upstreamRequests[0].instructions,/Output presentation for this turn: Automatic/);
+  const saved = JSON.parse(await readFile(path.join(f.directory,'state.json'),'utf8'));
+  assert.equal(saved.conversations.find(item=>item.id===chat.id).messages.find(message=>message.id===foregroundId).outputRendering,'auto');
   const second = await f.send(chat, f.submission('你好，继续聊聊今天的心情。'));
   assert.equal(second.status, 200); assert.ok(second.events.some(event => event.type === 'done')); assert.equal(f.calls.length, 1);
   assert.equal((await f.json(`/conversations/${background.conversationId}`)).data.agent.run.status, 'running');

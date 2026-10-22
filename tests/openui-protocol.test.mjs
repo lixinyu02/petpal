@@ -35,6 +35,21 @@ test('an indented example does not consume a subsequent explicit top-level UI', 
   assert.deepEqual(result.parts.map(part => part.type), ['markdown', 'openui']);
   assert.equal(result.parts[1].text, 'root = Panel("实际界面", [])');
 });
+
+test('HTML containers and comments cannot activate nested column-zero fences',()=>{
+  const block='```openui\nroot = Panel("隐藏示例", [])\n```';
+  const containers=[['<!-- 注释','-->'],['正文 <!-- 注释','-->'],['<pre>','</pre>'],['<script type="text/plain">','</script>'],['<style>','</style>'],['<textarea>','</textarea>'],['<details>','</details>'],['<![CDATA[',']]>'],['<?xml','?>'],['<!DOCTYPE html [',']>'],['<custom-element>','</custom-element>']];
+  for(const [open,close] of containers)for(const streaming of [false,true]) {
+    const source=`${open}\n${block}\n${close}`;
+    assert.deepEqual(splitOpenUI(source,{streaming}).parts,[{type:'markdown',text:source}],source);
+    assert.equal(splitOpenUI(`${open}\n${block}`,{streaming}).parts.some(part=>part.type==='openui'),false);
+  }
+  // HTML examples in ordinary code and escaped strings in real UI remain data.
+  const mixed='```html\n<script>example</script>\n```\n'+block;
+  assert.equal(splitOpenUI(mixed).parts.some(part=>part.type==='openui'),true);
+  const strings='```openui\nroot = Panel("示例", [Text("<script>文字</script>")])\n```';
+  assert.equal(splitOpenUI(strings).parts[0].type,'openui');
+});
 test('streamed UI waits for its source and terminal truncation falls back', () => {
   const source = '正文\n```openui\nroot = Panel("进行中", [';
   assert.equal(splitOpenUI(source, {streaming:true}).parts[1].closed, false);

@@ -15,6 +15,9 @@ export function markdownSpeechText(value) {
     // The parser already consumes actual Markdown delimiters. Text/code values
     // may legitimately contain operators, identifiers or escaped delimiters.
     if(node.type==='text')return node.value;
+    // OpenUI is a presentation program, not spoken prose (also on truncated
+    // replies or examples nested in lists/quotes). Other code keeps its meaning.
+    if(node.type==='code'&&node.lang?.toLowerCase()==='openui')return '';
     if(node.type==='code'||node.type==='inlineCode')return node.value;
     if(!node.children)return '';
     return node.children.map(plain).join(node.type==='tableRow'?'，':blocks.has(node.type)?'\n':'');
@@ -24,11 +27,34 @@ export function markdownSpeechText(value) {
 
 /** Do not split sentence punctuation or size bounds inside Markdown destinations/code. */
 export function markdownSafeCuts(text) {
-  const emphasis=new Map();
-  const remember=node=>{if(['emphasis','strong','delete'].includes(node.type))emphasis.set(node.position.start.offset,Math.max(node.position.end.offset,emphasis.get(node.position.start.offset)||0));for(const child of node.children||[])remember(child);};
+  const emphasis=new Map(),fences=new Map();
+  const remember=node=>{
+    const start=node.position?.start.offset,end=node.position?.end.offset;
+    if(['emphasis','strong','delete'].includes(node.type))emphasis.set(start,Math.max(end,emphasis.get(start)||0));
+    if(node.type==='code') {
+      const opening=/^(`{3,}|~{3,})[^\n]*(?:\n|$)/.exec(text.slice(start,end));
+      if(opening) {
+        // Use the parser's fenced span, not the first matching substring: DSL
+        // strings may contain ``` or ~~~ without ending their enclosing block.
+        const lineStart=text.lastIndexOf('\n',start-1)+1;
+        const prefix=text.slice(lineStart,start);
+        const quoteCount=(prefix.match(/>/g)||[]).length;
+        const lastLine=text.slice(text.lastIndexOf('\n',end-1)+1,end).replace(/\r$/,'');
+        const closing=new RegExp(`^[ \\t]*(?:>[ \\t]*){${quoteCount}}${opening[1][0]}{${opening[1].length},}[ \\t]*$`);
+        // Wait for a newline after the closing delimiter. At a chunk boundary,
+        // ``` may still become ```not-a-close as the next token arrives.
+        const endedLine=text[end]==='\n'||text[end]==='\r'&&text[end+1]==='\n';
+        // Keep container prefixes too; cutting off `> ` would turn a quoted
+        // closing fence into code content and swallow the following prose.
+        fences.set(lineStart,{end,closed:end>start+opening[0].length&&closing.test(lastLine)&&endedLine});
+      }
+    }
+    for(const child of node.children||[])remember(child);
+  };
   remember(parser.parse(text));
   const cuts=[];let i=0;
   while(i<text.length) {
+    if(fences.has(i)) {const fence=fences.get(i);if(!fence.closed)return cuts;i=fence.end;cuts.push(i);continue;}
     if(text[i]==='\\'&&i+1<text.length){i+=2;cuts.push(i);continue;}
     if(text[i]==='*'||text[i]==='_'||(text[i]==='~'&&text[i+1]==='~')) {
       const marker=text[i];let count=1;while(text[i+count]===marker)count++;

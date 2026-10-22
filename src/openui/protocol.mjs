@@ -4,7 +4,8 @@ const interactiveModes = new Set(['auto', 'openui']);
 export const isOpenUIMode = mode => interactiveModes.has(mode);
 
 /** Only explicit fences opening at column zero activate UI. Indented/list,
- * quoted and outer-fence examples stay Markdown without loading a parser. */
+ * quoted and outer-fence examples stay Markdown without loading a parser.
+ * Raw HTML containers outside code conservatively keep the whole reply Markdown. */
 export function splitOpenUI(value, { streaming = false } = {}) {
   const source = String(value ?? '');
   if (source.length > OPENUI_MESSAGE_LIMIT) return { parts: [], error: '交互内容过长，已显示原文。' };
@@ -18,6 +19,13 @@ export function splitOpenUI(value, { streaming = false } = {}) {
       continue;
     }
     if (ordinary) { prose.push(line); if (closing(line, ordinary)) ordinary = null; continue; }
+    // Markdown HTML blocks can contain column-zero fences that are only text
+    // (comments, pre/script/style, declarations and custom tags). Do not activate
+    // an apparent UI inside them. Conservatively decline this mixed reply rather
+    // than introducing a second Markdown parser into the initial app bundle.
+    if (line.includes('<!--') || /^ {0,3}<(?:\?|!\[CDATA\[|![A-Z]|\/?[A-Za-z][\w:-]*(?:[\t />]|$))/.test(line)) {
+      return { parts: [{ type: 'markdown', text: source }] };
+    }
     const match = /^(`{3,}|~{3,})openui\s*$/.exec(line);
     if (match) { flush(); fence = match[1]; code = []; continue; }
     const other = /^ {0,3}(`{3,}|~{3,})/.exec(line);

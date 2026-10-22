@@ -1,3 +1,4 @@
+import './runtime-policy.mjs';
 import { Component, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Renderer } from '@openuidev/react-lang';
 import { openUILibrary } from './library.mjs';

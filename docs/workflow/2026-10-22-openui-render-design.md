@@ -2,7 +2,8 @@
 
 - Date: 2026-10-22
 - Complexity: L1
-- Status: draft
+- Status: complete
+- Completed: 2026-10-23
 
 ## Background
 
@@ -31,3 +32,9 @@ Chat 与直接 Agent 消息自动选择普通 Markdown 或显式 OpenUI 交互�
 ## Verification Plan
 
 组件/协议安全与流式测试、真实小伴隔离HTTP任务测试、现有聊天/队列/朗读回归、TypeScript与独立Vite构建；Chrome桌面、412×960和360×800操作表单、回填草稿、流中状态/坏源码/主题/懒加载验收。真实模型和实体设备是否运行另行记录。
+
+## Completion
+
+两个 issue 已完成。当前模型自行选择 Markdown 或 OpenUI，无渲染选择器、无额外 UI 模型调用。251 项相关回归、TypeScript 和生产构建通过；Chrome 隔离服务已验证流式表单、草稿回填、错误回退及移动深浅主题。语音字幕也过滤 DSL 并提供返回对应对话的入口；开发检查器及其 CDN 自动加载关闭。
+
+详见 `2026-10-22-openui-render-acceptance.md`。本次未部署线上或重打客户端；上游模型和 Codex bridge 为隔离替身，不代替真实模型决策质量或实体终端验收。

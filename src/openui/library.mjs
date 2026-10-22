@@ -1,4 +1,5 @@
 // Adapted from the same-owner Codex Remote component library; see docs/openui-reference.json.
+import './runtime-policy.mjs';
 import React, { useId } from "react";
 import {
   action, createLibrary, defineAction, defineComponent, reactive,

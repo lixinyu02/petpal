@@ -1,5 +1,6 @@
 import { listenFixture } from './helpers/loopback.mjs';
 import test from 'node:test';
+import { OPENUI_AUTO_GUIDE } from '../server/openui-policy.mjs';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import path from 'node:path';
@@ -159,7 +160,7 @@ test('Qwen Agent image submission honors persisted true and false capability bef
   assert.equal(f.calls.length, 0); assert.equal((await f.json(`/conversations/${chat.id}`)).data.messages.length, 0);
   const accepted = await f.json(route, { method: 'POST', body: { submissionId: randomUUID(), providerId: provider.id, attachmentIds: [image.id] } });
   assert.equal(accepted.status, 200); await until(() => f.calls.length === 1);
-  assert.equal(f.calls[0].args.model, provider.model); assert.equal(f.calls[0].args.prompt, '');
+  assert.equal(f.calls[0].args.model, provider.model); assert.equal(f.calls[0].args.prompt, OPENUI_AUTO_GUIDE + '\n\n');
   assert.equal(f.calls[0].args.images.length, 1);
   assert.equal(path.dirname(f.calls[0].args.images[0].path), path.join(f.directory, 'attachments'));
   assert.deepEqual(await readFile(f.calls[0].args.images[0].path), picture);
@@ -173,12 +174,12 @@ test('Agent run, steer, queued edits and restart use owned paths and retain imag
   const f = await fixture(t), chat = await f.create(null, bootstrap, 'codex'), first = await f.upload(), second = await f.upload(bootstrap, webp, 'image/webp');
   const route = `/conversations/${chat.id}/agent`, submit = async body => f.json(`${route}/submit`, { method: 'POST', body: { submissionId: randomUUID(), ...body } });
   assert.equal((await submit({ attachmentIds: [first.id] })).status, 200); await until(() => f.calls.length === 1);
-  assert.equal(f.calls[0].args.prompt, ''); assert.equal(f.calls[0].args.images.length, 1); assert.equal(path.dirname(f.calls[0].args.images[0].path), path.join(f.directory, 'attachments')); assert.deepEqual(await readFile(f.calls[0].args.images[0].path), picture);
+  assert.equal(f.calls[0].args.prompt, OPENUI_AUTO_GUIDE + '\n\n'); assert.equal(f.calls[0].args.images.length, 1); assert.equal(path.dirname(f.calls[0].args.images[0].path), path.join(f.directory, 'attachments')); assert.deepEqual(await readFile(f.calls[0].args.images[0].path), picture);
   const steer = await f.json(`${route}/steer`, { method: 'POST', body: { submissionId: randomUUID(), expectedTurnId: 'image-turn-1', attachmentIds: [second.id] } }); assert.equal(steer.status, 200); assert.equal(steer.data.submission.status, 'steered'); assert.deepEqual(await readFile(f.steers[0].images[0].path), webp);
   const queued = await submit({ content: 'queued image', attachmentIds: [first.id] }); const entry = queued.data.conversation.agent.queue[0];
   const edited = await f.json(`${route}/queue/${entry.id}`, { method: 'PATCH', body: { revision: entry.revision, content: '', attachmentIds: [second.id] } }); assert.equal(edited.status, 200); assert.deepEqual(edited.data.conversation.agent.queue[0].attachmentIds, [second.id]);
   await f.restart(); const state = (await f.json(`/conversations/${chat.id}`)).data; assert.deepEqual(state.agent.queue[0].attachmentIds, [second.id]); assert.equal(state.agent.paused, true); assert.deepEqual(state.messages[0].attachments, [first]);
-  await f.json(`${route}/queue/resume`, { method: 'POST', body: {} }); await until(() => f.calls.length === 2); assert.equal(f.calls[1].args.prompt, ''); assert.deepEqual(await readFile(f.calls[1].args.images[0].path), webp);
+  await f.json(`${route}/queue/resume`, { method: 'POST', body: {} }); await until(() => f.calls.length === 2); assert.equal(f.calls[1].args.prompt, OPENUI_AUTO_GUIDE + '\n\n'); assert.deepEqual(await readFile(f.calls[1].args.images[0].path), webp);
 });
 
 test('a missing file produces a recoverable error while retaining owned message metadata', async t => {

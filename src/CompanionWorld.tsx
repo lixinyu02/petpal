@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, AudioLines, Check, Loader2, MessageCircle, Mic, Monitor, Settings2, Square, Terminal, X, Zap } from 'lucide-react';
 import BrandMark from './BrandMark';
 import CompanionScene from './avatar/CompanionScene';
-import MessageMarkdown from './MessageMarkdown';
+import VoiceReplyCaption from './voice/VoiceReplyCaption';
 import { useCompanion, hydrateCompanion } from './avatar/preference';
 import { getIdentity, getSessionEpoch, type CompanionKind, type NativeExecutorStatus, type State, type User } from './api';
 import type { PetAction } from './pet/behavior';
@@ -95,7 +95,7 @@ export default function CompanionWorld() {
         <p id="companion-voice-help" className="voice-conversation-help">{voice.awaitingWake?`麦克风已开启，说“${voice.wake.phrases[0]}”唤醒；也可接着说问题。`:voice.wake?.enabled?`直接说话即可连续对话，回应时开口可打断；安静 ${voice.wake.idleTimeoutSeconds} 秒后回待机。`:'直接说话，停顿后发送；回应时再开口即可打断。后台任务会在空闲时汇报。'}</p>
         <div ref={captions} className="voice-conversation-captions" aria-label="语音对话字幕" hidden={!hasCaptions}>
           {voice.transcript && <p className="voice-caption-user"><span>你</span>{voice.transcript}</p>}
-          {voice.reply && <div className="voice-caption-reply"><span className="voice-caption-author">{name}</span><MessageMarkdown content={voice.reply} compact/></div>}
+          {voice.reply && <div className="voice-caption-reply"><span className="voice-caption-author">{name}</span><VoiceReplyCaption content={voice.reply} conversationId={voice.conversationId}/></div>}
           {!voice.transcript && !voice.reply && voice.listening && <p className="voice-caption-empty">直接说话，停顿后发送。</p>}
           {voice.awaitingWake && <p className="voice-caption-empty voice-wake-prompt">{voice.hasUtterance?'正在听唤醒词…':'等待唤醒'}{voice.wake.phrases.length>1&&<span> · {voice.wake.phrases.join(' / ')}</span>}</p>}
         </div>

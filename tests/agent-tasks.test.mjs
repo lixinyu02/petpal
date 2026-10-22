@@ -30,7 +30,7 @@ function fixture(t, options = {}) {
   t.after(async () => { saving = undefined; for (const call of calls) call.work.resolve({ text: 'cleanup' }); await manager.stop(conversation); await manager.close(); });
   return { conversation, auth, calls, active, approvals, valid, model, store, manager, saved: () => saved,
     saveWith: callback => { saving = callback; }, steerWith: callback => { steer = callback; }, setOnline: value => { online = value; },
-    submit: (body, kind = 'submit') => manager.submit(conversation, body, auth, kind),
+    submit: (body, kind = 'submit', options) => manager.submit(conversation, body, auth, kind, options),
     snapshot: () => manager.snapshot(conversation),
     finish: async (index = calls.length - 1) => { calls[index].work.resolve({ text: 'done' }); await until(() => !active.has(conversation.id) || calls.length > index + 1); },
   };
@@ -45,6 +45,59 @@ test('concurrent duplicate submissions execute exactly once and receipts survive
   await assert.rejects(f.submit({ ...body, content: 'changed' }), { status: 409 });
   assert.equal(f.conversation.messages.filter(item => item.role === 'user').length, 1);
   assert.equal(f.saved().conversations[0].agent.submissions.length, 1);
+});
+
+test('trusted automatic output survives queue execution while steering keeps the active response policy', async t => {
+  const f = fixture(t), options = {outputRendering:'auto'}, first = payload('render-first', '收集计划');
+  await assert.rejects(f.submit({...first, outputRendering:'auto'}), {status:400});
+  const submitted = await f.submit(first, 'submit', options); await until(() => f.calls.length === 1);
+  assert.match(f.calls[0].args.prompt, /Output presentation for this turn: Automatic/);
+  assert.ok(f.calls[0].args.prompt.endsWith(first.content));
+  assert.equal(f.conversation.messages.at(-1).outputRendering, 'auto'); assert.equal(f.snapshot().run.outputRendering, 'auto');
+  assert.equal((await f.submit(first, 'submit', options)).entryId, submitted.entryId); assert.equal(f.calls.length, 1);
+  let steered;
+  f.steerWith(async args => { steered = args; });
+  await f.submit({...payload('render-steer', '补充要求'), expectedTurnId:'turn-1'}, 'steer', options);
+  assert.equal(steered.content, '补充要求'); assert.equal(f.conversation.messages.find(message => message.role === 'assistant').outputRendering, 'auto');
+  await f.submit(payload('render-next', '下一份计划'), 'submit', options);
+  assert.equal(f.snapshot().queue[0].outputRendering, 'auto');
+  assert.equal(f.saved().conversations[0].agent.queue[0].outputRendering, 'auto');
+  await f.finish(); await until(() => f.calls.length === 2);
+  assert.match(f.calls[1].args.prompt, /Output presentation for this turn: Automatic/);
+  assert.ok(f.calls[1].args.prompt.endsWith('下一份计划')); assert.equal(f.conversation.messages.at(-1).outputRendering, 'auto');
+});
+
+test('unsupported steering queues the trusted policy and restart retains it without automatic replay', async t => {
+  const f = fixture(t), options = {outputRendering:'auto'};
+  await f.submit(payload('render-running')); await until(() => f.calls.length === 1);
+  f.steerWith(async () => { throw Object.assign(new Error('Unsupported'), {code:'steer_unsupported'}); });
+  const fallback = await f.submit({...payload('render-fallback'), expectedTurnId:'turn-1'}, 'steer', options);
+  assert.equal(fallback.status, 'queued'); assert.equal(f.snapshot().queue[0].outputRendering, 'auto');
+  const restored = structuredClone(f.saved().conversations[0]);
+  restoreAgentState(restored); assert.equal(restored.agent.paused, true); assert.equal(restored.agent.queue[0].outputRendering, 'auto');
+  const restarted = fixture(t, {conversation:restored});
+  assert.equal(restarted.calls.length, 0);
+  await restarted.manager.resume(restored, restarted.auth); await until(() => restarted.calls.length === 1);
+  assert.match(restarted.calls[0].args.prompt, /Output presentation for this turn: Automatic/);
+  assert.ok(restarted.calls[0].args.prompt.endsWith('render-fallback'));
+});
+
+test('long queued edits fall back without truncation and inherited guidance is disabled or isolated', async t => {
+  const f = fixture(t), options = {outputRendering:'auto'};
+  await f.manager.stop(f.conversation);
+  await f.submit(payload('render-edit', '原始计划'), 'submit', options);
+  const queued = f.snapshot().queue[0], full = '任'.repeat(32000);
+  await f.manager.edit(f.conversation, queued.id, {revision:queued.revision, content:full}, f.auth);
+  await f.manager.resume(f.conversation, f.auth); await until(() => f.calls.length === 1);
+  assert.equal(f.calls[0].args.prompt, full); assert.equal(f.conversation.messages.at(-1).outputRendering, 'markdown');
+  await f.finish();
+  Object.assign(f.conversation, {threadId:'native-with-guide', threadHasOpenUIGuide:true, codexRevision:f.model.codexRevision});
+  await f.submit(payload('render-disable', '长'.repeat(26000)), 'submit', options); await until(() => f.calls.length === 2);
+  assert.equal(f.calls[1].args.threadId, 'native-with-guide'); assert.match(f.calls[1].args.prompt, /Previous OpenUI output instructions do not apply/);
+  assert.ok(f.calls[1].args.prompt.endsWith('长'.repeat(26000))); assert.ok(f.calls[1].args.prompt.length <= 32000);
+  await f.finish();
+  await f.submit(payload('render-full', full), 'submit', options); await until(() => f.calls.length === 3);
+  assert.equal(f.calls[2].args.threadId, undefined); assert.equal(f.calls[2].args.prompt, full);
 });
 
 test('persisted independent review thread restarts safely and local follow-up resumes only its current runtime binding', async t => {
