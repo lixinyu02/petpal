@@ -33,6 +33,7 @@ import { Capacitor } from '@capacitor/core';
 import { PetOverlay as Overlay, showPet } from './platform/overlay';
 import { useCompanion, hydrateCompanion, readCompanion } from './avatar/preference';
 import Cat from './CatV2';
+import SpeechCompanion from './SpeechCompanion';
 import type { PetBehaviorState, PetInteraction } from './pet/behavior';
 import './natural-companion.css';
 import './companion-mobile.css';
@@ -170,7 +171,7 @@ export default function App() {
   const [responsePerformance, setResponsePerformance] = useState<PerformanceInput>({ utteranceId: '', text: '', phase: 'idle' });
   const voiceIdentity=getIdentity();
   const voiceScope = state.instanceId && state.user ? `${state.instanceId}:${state.user.id}` : voiceIdentity ? `${voiceIdentity.instanceId}:${voiceIdentity.userId}` : `guest:${getConnection().url || location.origin}`;
-  const speech = useSpeech(view === 'chat' && !connectionOpen && mood !== 'sleep', voiceScope);
+  const speech = useSpeech(view === 'chat' && !connectionOpen && mood !== 'sleep', voiceScope, {separateProgress:true});
   const speechRef=useRef(speech);speechRef.current=speech;
   const awakeRef = useRef(mood !== 'sleep');
   awakeRef.current = mood !== 'sleep';
@@ -243,9 +244,9 @@ export default function App() {
   },[conversation?.messages]);
   const todayKey=new Date().toDateString();
   const todayLabel=useMemo(()=>dateFormatter.format(new Date()),[todayKey]);
-  const performanceInput: PerformanceInput = mood === 'sleep' ? { utteranceId: 'sleep', text: '', phase: 'idle' } : speech.playing
-    ? { utteranceId: speech.utteranceId, text: speech.text, phase: 'speaking', speech: { active: speech.active, charIndex: speech.charIndex, ended: speech.ended, audioLevel:speech.audioLevel, emotion:speech.emotion } }
-    : { ...responsePerformance, ...(speech.enabled ? { speech: { active: false, charIndex: 0, ended: true } } : {}) };
+  const performanceInput=useMemo<PerformanceInput>(()=>mood === 'sleep'
+    ? {utteranceId:'sleep',text:'',phase:'idle'}
+    : {...responsePerformance,...(speech.enabled?{speech:{active:false,charIndex:0,ended:true}}:{})},[mood==='sleep',responsePerformance,speech.enabled]);
 
   const updateChatTasks=useCallback((updated:Conversation)=>{
     setState(previous=>({...previous,conversations:previous.conversations.map(before=>{
@@ -410,15 +411,15 @@ export default function App() {
     return () => window.removeEventListener('petpal:workspace-back', back);
   }, [view, busy, agentRunning, agentSubmitting, unconfirmed, switchingModel, draft, attachments.items.length, attachments.uploading, stopPresentation,automationEditing]);
 
-  function companionState(next: PetBehaviorState) {
+  const companionState=useCallback((next: PetBehaviorState)=>{
     awakeRef.current = next.action !== 'sleep';
     setMood(next.action);
     const replies = { idle: '我在这里，听你说。', walk: '走两步，再回来陪你。', pet: companionKind === 'anime' ? '嗯，这样就很安心。' : '呼噜…喜欢这样。', eat: '谢谢你的点心。', jump: '嗨，我看到你啦。', sleep: '陪你安静一会儿。' };
     setPetSay(replies[next.action]);
-  }
-  function companionInteract(next: PetInteraction) {
+  },[companionKind]);
+  const companionInteract=useCallback((next: PetInteraction)=>{
     if (next === 'sleep') { awakeRef.current = false; stopPresentation(); }
-  }
+  },[stopPresentation]);
   function navigationBlocked(target:PendingNavigation) {
     if(automationEditingRef.current.busy){setNotice('正在保存或确认自动化结果，请完成后再离开。');return true;}
     if (switchingModelRef.current) { setNotice('正在切换模型，请稍候。'); return true; }
@@ -903,7 +904,7 @@ export default function App() {
 
         </section>
         {shownDesktopHost&&<Suspense fallback={<div className="loading-view" role="status">正在打开远程桌面…</div>}><RemoteDesktopPanel key={shownDesktopHost.id} host={shownDesktopHost} user={state.user} connected={connected} onClose={()=>setRemoteDesktopHost(null)}/></Suspense>}
-        <aside className="pet-panel" id="workspace-companion-panel"><div className="pet-panel-heading"><span>你的小伙伴</span><span className="live-tag"><span/>{mood === 'sleep' ? '打盹中' : speech.active ? '朗读中' : responsePerformance.phase === 'speaking' ? '回应中' : working ? '思考中' : '在你身边'}</span></div><div className="pet-scene"><div className="scene-circle"/><svg className="scene-leaf" viewBox="0 0 90 120" aria-hidden="true"><path d="M42 118V44m0 50C3 85 8 54 42 75m0-9c33-6 40-31 8-28m-8 4C17 32 24 5 42 15" fill="#b7c8a5" stroke="#9bad8a" strokeWidth="2"/><path d="M26 100h34l-5 20H31z" fill="#d9cbb5" stroke="none"/></svg><div className="pet-touch">{companionPanelMounted&&<Cat performanceInput={performanceInput} onState={companionState} onInteract={companionInteract}/>}</div><div className="scene-floor"/></div><div className="pet-name"><h2>{state.settings.petName}</h2><span>{companionKind === 'anime' ? '温柔的二次元伙伴' : '一只喜欢陪着你的小猫'}</span></div><div className="pet-speech">{mood !== 'sleep' && working ? '让我想一想，马上就好…' : petSay}</div><p className="pet-interaction-hint">轻触回应 · 长按休息</p><a className="motion-preview-link" href="/" onClick={homeClick}>回到伙伴身边 <ArrowUpRight size={16} aria-hidden="true"/></a><div className="pet-panel-bottom"><div className="quiet-note"><Sparkles size={16} aria-hidden="true"/><p>不用每一刻都很有生产力。<br/>有我陪着，发会儿呆也很好。</p></div>{window.petpal ? <button className="desktop-pet-button" onClick={() => window.petpal?.showPet()}><Monitor size={16} aria-hidden="true"/>放到桌面上<ArrowUpRight size={16} aria-hidden="true"/></button> : Capacitor.isNativePlatform() ? <button className="desktop-pet-button" onClick={() => setView('settings')}><Monitor size={16} aria-hidden="true"/>开启悬浮伙伴<ArrowUpRight size={16} aria-hidden="true"/></button> : <div className="platform-note"><Monitor size={14} aria-hidden="true"/><span>桌面版支持透明悬浮伙伴</span></div>}</div></aside>
+        <aside className="pet-panel" id="workspace-companion-panel"><div className="pet-panel-heading"><span>你的小伙伴</span><span className="live-tag"><span/>{mood === 'sleep' ? '打盹中' : speech.active ? '朗读中' : responsePerformance.phase === 'speaking' ? '回应中' : working ? '思考中' : '在你身边'}</span></div><div className="pet-scene"><div className="scene-circle"/><svg className="scene-leaf" viewBox="0 0 90 120" aria-hidden="true"><path d="M42 118V44m0 50C3 85 8 54 42 75m0-9c33-6 40-31 8-28m-8 4C17 32 24 5 42 15" fill="#b7c8a5" stroke="#9bad8a" strokeWidth="2"/><path d="M26 100h34l-5 20H31z" fill="#d9cbb5" stroke="none"/></svg><div className="pet-touch">{companionPanelMounted&&<SpeechCompanion progress={speech.progress} idleInput={performanceInput} sleeping={mood==='sleep'} onState={companionState} onInteract={companionInteract}/>}</div><div className="scene-floor"/></div><div className="pet-name"><h2>{state.settings.petName}</h2><span>{companionKind === 'anime' ? '温柔的二次元伙伴' : '一只喜欢陪着你的小猫'}</span></div><div className="pet-speech">{mood !== 'sleep' && working ? '让我想一想，马上就好…' : petSay}</div><p className="pet-interaction-hint">轻触回应 · 长按休息</p><a className="motion-preview-link" href="/" onClick={homeClick}>回到伙伴身边 <ArrowUpRight size={16} aria-hidden="true"/></a><div className="pet-panel-bottom"><div className="quiet-note"><Sparkles size={16} aria-hidden="true"/><p>不用每一刻都很有生产力。<br/>有我陪着，发会儿呆也很好。</p></div>{window.petpal ? <button className="desktop-pet-button" onClick={() => window.petpal?.showPet()}><Monitor size={16} aria-hidden="true"/>放到桌面上<ArrowUpRight size={16} aria-hidden="true"/></button> : Capacitor.isNativePlatform() ? <button className="desktop-pet-button" onClick={() => setView('settings')}><Monitor size={16} aria-hidden="true"/>开启悬浮伙伴<ArrowUpRight size={16} aria-hidden="true"/></button> : <div className="platform-note"><Monitor size={14} aria-hidden="true"/><span>桌面版支持透明悬浮伙伴</span></div>}</div></aside>
       </div>}
     </main>
     {notice && <div ref={toastEntrance} className="toast" role="status"><Check size={16} aria-hidden="true"/>{notice}</div>}

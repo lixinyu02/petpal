@@ -9,6 +9,7 @@ import * as executionHosts from '../src/execution-hosts.mjs';
 import * as projectPreferences from '../src/project-directory-preferences.mjs';
 import {watchCompanionBreakpoint} from '../src/companion-mount.mjs';
 import {createChatDisplay} from '../src/chat-display.mjs';
+import * as chatCompletion from '../src/chat-completion.mjs';
 import {mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMessage} from '../src/chat-assistant-preferences.mjs';
 import * as organizationSync from '../src/conversation-organization-sync.mjs';
 import {reuseConversationMessages} from '../src/conversation-message-reuse.mjs';
@@ -99,7 +100,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     './platform/visible-poll.mjs':{createVisiblePoll:options=>createVisiblePoll({...options,setTimeoutFn:callback=>{const id=++timerId;timers.set(id,callback);return id;},clearTimeoutFn:id=>timers.delete(id)})},
     react,'react/jsx-runtime':{jsx:element,jsxs:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     '@capacitor/core':{Capacitor:{isNativePlatform:()=>native,getPlatform:()=>native?'android':'web',isPluginAvailable:()=>false}},'./api':api,'./WorkspaceControls':controls,'./composer-keyboard.mjs':{composerKeyAction},
-    './companion-mount.mjs':{watchCompanionBreakpoint},'./chat-display.mjs':{createChatDisplay},'./useChatScroll':{useChatScroll:()=>({contentRef:{current:null},onScroll(){},latest(){},showLatest:false})},
+    './companion-mount.mjs':{watchCompanionBreakpoint},'./chat-display.mjs':{createChatDisplay},'./chat-completion.mjs':chatCompletion,'./useChatScroll':{useChatScroll:()=>({contentRef:{current:null},onScroll(){},latest(){},showLatest:false})},
     './AgentPermissions':{...component('AgentPermissions'),defaultAgentPermissions:permissions},'./approval-review-ui.mjs':approvalReviewUi,
     './ProjectDirectory':{...component('ProjectDirectory'),useProjectDirectory:()=>({value:'',change(){}})},
     './project-directory-preferences.mjs':projectPreferences,'./execution-hosts.mjs':executionHosts,'./conversation-organization-sync.mjs':organizationSync,'./conversation-message-reuse.mjs':{reuseConversationMessages},
@@ -112,7 +113,7 @@ function workspaceFixture({canUseCodex=false,storage,deniedGetter=false,touch=fa
     './platform/task-notification-session':{taskNotificationSession:{subscribe(){},snapshot:()=>notificationSnapshot,takeNavigation(){notificationTakes++;const previous=notificationSnapshot.navigation;notificationSnapshot={navigation:null};return previous;}}},'./desktop-settings.mjs':{reasoningEfforts},
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
   };
-  for(const name of ['DownloadsView','BrandMark','CompanionOptions','ChatMessages','ChatScrollDock','ConversationHistory','AgentQueue','AgentUserInput','UpdatesSettings','CatV2','WorkspaceDisclosure','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','OfficialAccountSettings','ClientBehaviorSettings'])modules[`./${name}`]=component(name);
+  for(const name of ['DownloadsView','BrandMark','CompanionOptions','ChatMessages','ChatScrollDock','ConversationHistory','AgentQueue','AgentUserInput','UpdatesSettings','CatV2','SpeechCompanion','WorkspaceDisclosure','AccountsSettings','VoiceSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','OfficialAccountSettings','ClientBehaviorSettings'])modules[`./${name}`]=component(name);
   const module={exports:{}},context={module,exports:module.exports,require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),`Unexpected dependency: ${name}`);return modules[name];},
     window,document,location:{search,origin:'https://fixture.invalid',assign:path=>navigations.push(path)},URL,URLSearchParams,AbortController,DOMException,crypto:{randomUUID:()=>`fixture-submission-${requests.length}`},
     setTimeout(callback){const id=++timerId;timers.set(id,callback);return id;},clearTimeout:id=>timers.delete(id)};

@@ -4,6 +4,7 @@ import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 const syntheticSecrets = new Map([
+  ['tests/speech-progress-hook.test.mjs', new Set(['isolated-fixture'])],
   ['android/app/src/androidTest/java/com/petpal/app/PetAppProxyServerTest.java', new Set(['fixture-app-proxy-session-'])],
   ['android/app/src/androidTest/java/com/petpal/app/PetLoginSessionAppTest.java', new Set(['SyntheticSync123a'])],
   ['tests/android-login-session.test.mjs', new Set(['synthetic-saved-token','synthetic-new-login','synthetic-pairing-token','synthetic-other-token','synthetic-current-token','synthetic-pending-login','synthetic-new-after-logout','synthetic-replacement','synthetic-web-token'])],

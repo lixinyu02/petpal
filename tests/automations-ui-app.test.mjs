@@ -8,6 +8,7 @@ import * as executionHosts from '../src/execution-hosts.mjs';
 import * as projectPreferences from '../src/project-directory-preferences.mjs';
 import {watchCompanionBreakpoint} from '../src/companion-mount.mjs';
 import {createChatDisplay} from '../src/chat-display.mjs';
+import * as chatCompletion from '../src/chat-completion.mjs';
 import {mergeAssistantTask,mergeChatAssistantConversation,foregroundAssistantMessage} from '../src/chat-assistant-preferences.mjs';
 import {createBrowserSetupDraft} from '../src/browser-setup-draft.mjs';
 import {reasoningEfforts} from '../src/desktop-settings.mjs';
@@ -155,7 +156,7 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
     react,'react/jsx-runtime':{jsx:element,jsxs:element},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     '@capacitor/core':{Capacitor:{isNativePlatform:()=>native,getPlatform:()=>native?'android':'web',isPluginAvailable:()=>false}},'./api':api,'./WorkspaceControls':controls,'./composer-keyboard.mjs':{composerKeyAction},
     './platform/cloud-docker':cloudModule.exports,
-    './companion-mount.mjs':{watchCompanionBreakpoint},'./chat-display.mjs':{createChatDisplay},'./useChatScroll':{useChatScroll:()=>({contentRef:{current:null},onScroll(){},latest(){},showLatest:false})},
+    './companion-mount.mjs':{watchCompanionBreakpoint},'./chat-display.mjs':{createChatDisplay},'./chat-completion.mjs':chatCompletion,'./useChatScroll':{useChatScroll:()=>({contentRef:{current:null},onScroll(){},latest(){},showLatest:false})},
     './AgentPermissions':{...component('AgentPermissions'),defaultAgentPermissions:permissions},
     './ProjectDirectory':{...component('ProjectDirectory'),useProjectDirectory:()=>({value:'',change(){}})},
     './project-directory-preferences.mjs':projectPreferences,'./execution-hosts.mjs':executionHosts,'./conversation-organization-sync.mjs':organizationSync,'./conversation-message-reuse.mjs':{reuseConversationMessages},
@@ -170,7 +171,7 @@ function workspaceFixture({canUseCodex=false,isAdmin=false,foreignHostIds=[],sto
     './ui-motion.mjs':{...uiMotion,createUiMotionController:options=>uiMotion.createUiMotionController({window,document,...options})},
   };
   const deferredChildren=['AutomationsView','DownloadsView','UpdatesSettings','AccountsSettings','VoiceSettings','MemorySettings','CloudDockerView','ServiceLinksSettings','RemoteDesktopPanel','AppProxySettings','AndroidAppProxySettings','ServerProxyProfilesSettings','DesktopAssistantSettings','MusicMcpSettings','ComputerUseSettings','OpenCliSettings','OfficialAccountSettings','ClientBehaviorSettings','CentralServerSettings'];
-  for(const name of [...deferredChildren,'BrandMark','CompanionOptions','ChatMessages','ChatScrollDock','ConversationHistory','AgentQueue','AgentUserInput','CatV2','WorkspaceDisclosure'])modules[`./${name}`]=component(name);
+  for(const name of [...deferredChildren,'BrandMark','CompanionOptions','ChatMessages','ChatScrollDock','ConversationHistory','AgentQueue','AgentUserInput','CatV2','SpeechCompanion','WorkspaceDisclosure'])modules[`./${name}`]=component(name);
   const urlChanges=[],location={search,origin:'https://fixture.invalid',pathname:'/',hash:'',assign:path=>navigations.push(path)};
   Object.defineProperty(location,'href',{get:()=>`${location.origin}${location.pathname}${location.search}${location.hash}`});
   window.location=location;window.history={replaceState(_state,_title,value){const next=new URL(value,location.href);assert.equal(next.origin,location.origin,'workspace history sync must remain on the current service');Object.assign(location,{pathname:next.pathname,search:next.search,hash:next.hash});urlChanges.push(next.href);}};
@@ -757,12 +758,12 @@ test('an Agent GET completed after deletion cannot revive the conversation in hi
   assert.equal(f.selectedId,null);assert.deepEqual(f.history(),[]);delayed.release();await f.ready();assert.equal(f.selectedId,null);assert.deepEqual(f.history(),[]);
 });
 
-test('a state refresh requested before organization cannot restore deleted history or stale project metadata',async t=>{
+test('successful Chat completion avoids global state reads and preserves later history organization',async t=>{
   const active=conversation('active-for-refresh'),rename=conversation('keep-with-new-title'),removed=conversation('remove-before-refresh');
   const f=workspaceFixture({initialConversations:[active,rename,removed],initialProjects:[project('work')],handleAgentControl:true});t.after(()=>f.close());await f.ready();f.selectHistory(active.id);await f.ready();
-  const delayed=f.delayNext('/state');f.typeDraft('引发一次普通刷新');const sending=f.submit();await delayed.started;
+  const globalReads=f.calls.filter(path=>path==='/state').length;f.typeDraft('完成一次普通回复');await f.submit();await f.ready();
   await f.organize(rename.id,{title:'刷新也不能改回的名字',projectId:'work',archived:true});await f.renameProject('work','已经更新的项目');f.deleteHistory(removed.id);await f.click('删除对话');await f.ready();
-  delayed.release();await sending;await f.ready();
+  await f.ready();assert.equal(f.calls.filter(path=>path==='/state').length,globalReads,'terminal completion must not wait for a full-state refresh');
   const retained=f.history().find(item=>item.id===rename.id);assert.equal(retained.title,'刷新也不能改回的名字');assert.equal(retained.projectId,'work');assert.ok(retained.archivedAt);assert.equal(f.historyProps().projects.find(item=>item.id==='work').name,'已经更新的项目');assert.equal(f.history().some(item=>item.id===removed.id),false);
 });
 
