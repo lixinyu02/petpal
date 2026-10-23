@@ -668,6 +668,13 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (!user || user.disabled) return res.status(401).json({ error: '登录凭据无效、已过期或账号已停用。' });
     req.user = user; req.sessionHash = hash; req.bootstrap = bootstrap; next();
   });
+  // Only finite, authenticated startup snapshots negotiate compression. Keep
+  // streaming Chat/ASR/TTS, media and resumable downloads outside this wrapper.
+  const compressStateSnapshot = compression({
+    level: 4, threshold: 1024,
+    filter: (req, res) => req.method === 'GET' && res.statusCode === 200 && !req.headers.range &&
+      !res.getHeader('Content-Range') && compression.filter(req, res),
+  });
   const executorAuth = req => ({ userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap });
   app.use('/api/companion-routine',(_req,res,next)=>{res.setHeader('Cache-Control','no-store');next();});
   const routineRequest=req=>{requireCurrentAuth(req);if(Object.keys(req.query).length)throw failure(400,'每日陪伴接口不接受附加查询字段。');};
@@ -1051,12 +1058,12 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     } finally { probes.delete(probe); finish(); }
   });
 
-  app.get('/api/bootstrap', async (req, res) => {
+  app.get('/api/bootstrap', compressStateSnapshot, async (req, res) => {
     if (Object.keys(req.query).length) throw failure(400, '首页启动不接受查询参数。');
     const value = await publicState(req.user, { history: false, runtime: 'deferred' });
     requireCurrentAuth(req); res.json(value);
   });
-  app.get('/api/state', async (req, res) => {
+  app.get('/api/state', compressStateSnapshot, async (req, res) => {
     if (Object.keys(req.query).some(key => key !== 'runtime') || req.query.runtime !== undefined && req.query.runtime !== 'deferred') throw failure(400, '状态查询只接受 runtime=deferred。');
     const value = await publicState(req.user, { runtime: req.query.runtime ?? 'probe' }); requireCurrentAuth(req); res.json(value);
   });
@@ -1481,7 +1488,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.use('/api', (req, res) => res.status(404).json({ error: '接口不存在。' }));
   if (staticDir) {
     const directory = path.resolve(staticDir);
-    // Compression is limited to public UI files, never authenticated API streams
+    // This compression is limited to public UI files, never API streams
     // or multi-hundred-megabyte resumable installers.
     app.use(compression({filter:(req,res)=>!req.headers.range&&!res.getHeader('Content-Range')&&!/^\/downloads(?:\/|$)/.test(req.path)&&compression.filter(req,res)}));
     // Client package URLs are files, never SPA routes. In particular, an

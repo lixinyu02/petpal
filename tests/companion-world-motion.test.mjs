@@ -55,7 +55,7 @@ function fixture({reduced=false,hidden=false,authenticated=false,stateGate=null,
   const modules={
     react,'react/jsx-runtime':{jsx:element,jsxs:element},
     'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
-    './BrandMark':stub('BrandMark'),'./MessageMarkdown':stub('MessageMarkdown'),
+    './BrandMark':stub('BrandMark'),'./MessageMarkdown':stub('MessageMarkdown'),'./voice/VoiceReplyCaption':stub('VoiceReplyCaption'),
     './avatar/CompanionScene':{__esModule:true,default:scene},
     './avatar/preference':{useCompanion:()=>[effectiveCompanionKind(kind,true)],hydrateCompanion:async next=>{hydrations.push(next);if(hydrationGate)await hydrationGate.promise;kind=next;}},
     './api':{getSessionEpoch:()=>epoch,getIdentity:()=>authenticated?{instanceId:'fixture-instance',userId:'fixture-owner'}:null,initConnection:async()=>{apiReads.push('initConnection');return{token:authenticated};},loadInitialState:async options=>{assert.equal(options.history,undefined);startupSignal=options.signal;apiReads.push('/bootstrap');return stateGate&&++stateReads===1?await stateGate.promise:state;}},

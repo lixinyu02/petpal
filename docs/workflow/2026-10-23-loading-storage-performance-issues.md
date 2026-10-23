@@ -8,12 +8,12 @@
 
 - Goal: 优化打开速度和状态写入性能，保持可靠性。
 - Ordering rule: Complete issues in sequence.
-- Current status: issue-1 done; issue-2 todo
+- Current status: all done
 
 ## Issue List
 
 - [x] issue-1 减少重复物理写入与会话查找开销
-- [ ] issue-2 并行启动页面与数据并实际验收
+- [x] issue-2 并行启动页面与数据并实际验收
 
 ## issue-1
 
@@ -30,9 +30,9 @@
 
 - ID: issue-2
 - 标题: 并行启动页面与数据并实际验收
-- 范围: 登录门禁、页面模块预载、初始数据单次预取、构建部署与Chrome
+- 范围: 登录门禁、页面模块预载、初始数据单次预取、鉴权后的初始JSON协商压缩、构建部署与Chrome
 - 依赖: issue-1
 - 验收标准: 登录后页面与数据准备并行；无跨账号/跨模式复用或永久挂起；原有重试和兼容保持；真实页面、聊天及生产入口正常。
-- 状态: todo
-- 验证方式: pending
-- commit: pending
+- 状态: done
+- 验证方式: 主代理最终联动294/294通过；TypeScript、生产构建及49模块OpenUI入口检查通过。Chrome同限速三轮：已登录首页可用中位1560→1392ms、工作台2152→1713ms，历史传输111182→32456字节。真实Qwen保存/新会话读回通过；配置、账号及49下载保持。详见validation。
+- commit: 本 issue 提交

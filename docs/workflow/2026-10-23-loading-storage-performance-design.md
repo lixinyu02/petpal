@@ -2,7 +2,7 @@
 
 - Date: 2026-10-23
 - Complexity: L1
-- Status: updated
+- Status: final
 
 ## Background
 
@@ -21,6 +21,8 @@
 issue-1：紧凑JSON；仅对完全相同的准备结果且文件身份/大小/纳秒时间戳保持时省去物理写入。所有prepare、beforeCommit与commit语义保持；任何文件不确定性回到正常原子写入。会话查找使用保持首匹配语义的Map/Set。
 
 issue-2：验证登录成功后立即并行预载所选页面和对应bootstrap/state；预载结果短时、单次、按账号epoch及history模式隔离，取消/错误/超时/404兼容保持。未验证账号和原生被动悬浮窗口不预取私人状态。
+
+Chrome另确认工作台初始state为约111KB未压缩响应。仅为鉴权后的GET /api/bootstrap与GET /api/state增加协商压缩，保留no-store，不处理SSE、语音流、上传、下载、Range或鉴权失败响应。避免慢网络等待完整历史传输。
 
 ## Risks
 

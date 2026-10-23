@@ -97,6 +97,15 @@ let executorPendingScope:string|null=null;
 let executorRevision=0;
 let loginPersistenceError='';
 let loginPersistenceQueue:Promise<void>=Promise.resolve();
+type WarmInitialState = {epoch:number;identity:Identity;history:boolean;controller:AbortController;promise:Promise<State>;expiresAt:number;timer?:ReturnType<typeof setTimeout>};
+const warmInitialStates=new Map<boolean,WarmInitialState>();
+function releaseWarmInitialState(entry:WarmInitialState,reason?:Error){
+  if(warmInitialStates.get(entry.history)===entry)warmInitialStates.delete(entry.history);
+  clearTimeout(entry.timer);
+  if(reason)entry.controller.abort(reason);
+}
+function clearWarmInitialStates(){for(const entry of warmInitialStates.values())releaseWarmInitialState(entry,new SessionChangedError());}
+function currentWarmInitialState(entry:WarmInitialState){return entry.epoch===getSessionEpoch()&&!!getConnection().token&&identity?.instanceId===entry.identity.instanceId&&identity.userId===entry.identity.userId;}
 export const getLoginPersistenceError=()=>loginPersistenceError;
 function setLoginPersistenceError(message:string){
   if(loginPersistenceError===message)return;
@@ -145,6 +154,7 @@ export function normalizeServerUrl(value:string) {
 }
 function replaceConnection(next:Connection,credentialKind:CredentialKind,target:'local'|'remote'|undefined,reason:'change'|'restore'|'authenticate',persist:boolean) {
   const connection={url:normalizeServerUrl(next.url),token:next.token.trim()};
+  clearWarmInitialStates();
   executorScope=null;
   executorPendingScope=null;executorRevision++;
   void window.petpal?.executor?.disconnect().catch(()=>{});
@@ -183,6 +193,7 @@ function acceptIdentity(value:{instanceId?:string;user?:User}) {
   }
   if(identity?.instanceId===value.instanceId&&identity.userId===value.user.id)return;
   const changed=!!identity;
+  if(changed)clearWarmInitialStates();
   identity={instanceId:value.instanceId,userId:value.user.id};
   if(changed)window.dispatchEvent(Object.assign(new Event('petpal:session-change'),{detail:{reason:'identity'}}));
   notify();
@@ -241,21 +252,60 @@ export async function api<T = any>(path:string, options:RequestInit = {}):Promis
     const data=await responseJson(response,request);const route=path.split('?')[0];if(route==='/state'||route==='/bootstrap'||route==='/auth/me')acceptIdentity(data);request.assertCurrent();return data as T;
   }finally{request.close();}
 }
-/** Bound only page startup; streaming and interactive tasks keep their own lifecycle. */
-export async function loadInitialState({ history = false, signal, timeoutMs = 15000 }: { history?:boolean; signal?:AbortSignal; timeoutMs?:number } = {}):Promise<State> {
-  const controller=new AbortController();
+async function readInitialState(history:boolean,signal:AbortSignal):Promise<State>{
+  try { return await api<State>(history?'/state?runtime=deferred':'/bootstrap',{signal}); }
+  catch(error) {
+    // Only an absent endpoint permits legacy fallback; auth/network failures
+    // must not create a second request or conceal the original failure.
+    if(history||signal.aborted||(error as {status?:number}).status!==404)throw error;
+    return await api<State>('/state',{signal});
+  }
+}
+/** A misbehaving native transport must not hold startup past cancellation. */
+function waitForInitialState(pending:Promise<State>,signal:AbortSignal):Promise<State>{
+  return new Promise((resolve,reject)=>{
+    const abort=()=>{signal.removeEventListener('abort',abort);reject(signal.reason);};
+    if(signal.aborted){void pending.catch(()=>{});abort();return;}
+    signal.addEventListener('abort',abort,{once:true});
+    pending.then(value=>{signal.removeEventListener('abort',abort);resolve(value);},error=>{signal.removeEventListener('abort',abort);reject(error);});
+  });
+}
+async function initialStateRead(history:boolean,signal:AbortSignal|undefined,timeoutMs:number,pending?:Promise<State>):Promise<State>{
+  const controller=new AbortController(),epoch=getSessionEpoch();
   const abort=()=>controller.abort(signal?.reason);
   if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});
   const timer=setTimeout(()=>controller.abort(new Error('加载个人设置超时，请重试连接。')),timeoutMs);
   try {
-    try { return await api<State>(history?'/state?runtime=deferred':'/bootstrap',{signal:controller.signal}); }
-    catch(error) {
-      // Only an absent endpoint permits legacy fallback; auth/network failures
-      // must not create a second request or conceal the original failure.
-      if(history||controller.signal.aborted||(error as {status?:number}).status!==404)throw error;
-      return await api<State>('/state',{signal:controller.signal});
-    }
+    controller.signal.throwIfAborted();
+    const value=await waitForInitialState(pending??readInitialState(history,controller.signal),controller.signal);
+    if(epoch!==getSessionEpoch())throw new SessionChangedError();
+    controller.signal.throwIfAborted();return value;
   } finally { clearTimeout(timer);signal?.removeEventListener('abort',abort); }
+}
+/** Start only after LoginGate has verified this account, alongside its page module. */
+export function warmInitialState({history=false}:{history?:boolean}={}){
+  if(!identity||!getConnection().token)return;
+  const previous=warmInitialStates.get(history);
+  if(previous){if(currentWarmInitialState(previous)&&!previous.controller.signal.aborted&&previous.expiresAt>Date.now())return;releaseWarmInitialState(previous,new SessionChangedError());}
+  const controller=new AbortController(),epoch=getSessionEpoch(),owner={...identity};
+  let entry:WarmInitialState;
+  const pending=initialStateRead(history,controller.signal,15000);
+  entry={epoch,identity:owner,history,controller,expiresAt:Date.now()+15000,promise:pending.then(value=>{
+    if(!currentWarmInitialState(entry)||controller.signal.aborted)throw new SessionChangedError();
+    if(warmInitialStates.get(history)===entry){entry.expiresAt=Date.now()+5000;entry.timer=setTimeout(()=>releaseWarmInitialState(entry),5000);}
+    return value;
+  }).catch(error=>{releaseWarmInitialState(entry);throw error;})};
+  warmInitialStates.set(history,entry);void entry.promise.catch(()=>{});
+}
+/** Bound only page startup; streaming and interactive tasks keep their own lifecycle. */
+export async function loadInitialState({history=false,signal,timeoutMs=15000}:{history?:boolean;signal?:AbortSignal;timeoutMs?:number}={}):Promise<State>{
+  let entry=warmInitialStates.get(history);
+  if(entry&&(!currentWarmInitialState(entry)||entry.controller.signal.aborted||entry.expiresAt<=Date.now())){releaseWarmInitialState(entry,new SessionChangedError());entry=undefined;}
+  // A page's StrictMode cleanup cancels only its reader. The warm owner can
+  // finish for the replacement mount; a delivered snapshot is never cached.
+  const value=await initialStateRead(history,signal,timeoutMs,entry?.promise);
+  if(entry){if(!currentWarmInitialState(entry))throw new SessionChangedError();releaseWarmInitialState(entry);}
+  return value;
 }
 /** Binary responses retain the same immutable credentials and epoch fence as JSON. */
 export async function apiBlob(path:string, options:RequestInit = {}):Promise<Blob> {

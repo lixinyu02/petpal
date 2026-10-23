@@ -11,16 +11,20 @@ import { mountInteractionLayers } from './platform/interaction-layers.mjs';
 import {mountThemeLifecycle} from './platform/theme.ts';
 import { useViewport } from './platform/useViewport';
 import { useAndroidScreen } from './platform/useAndroidScreen';
-import { getIdentity, getSessionEpoch, initConnection, subscribeSession, type LoginSessionBridge } from './api';
+import { getIdentity, getSessionEpoch, initConnection, subscribeSession, warmInitialState, type LoginSessionBridge } from './api';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { PetOverlay as NativeOverlay, showPet } from './platform/overlay';
 import LoginGate from './auth/LoginGate';
 import { isPassiveNativeOverlay } from './auth/overlay-entry.mjs';
 const SessionNotifications=lazy(()=>import('./platform/SessionNotifications'));
-const App = lazy(() => import('./App'));
-const CompanionWorld = lazy(() => import('./CompanionWorld'));
+const loadApp=()=>import('./App'),loadCompanionWorld=()=>import('./CompanionWorld');
+const App = lazy(loadApp);
+const CompanionWorld = lazy(loadCompanionWorld);
 const PetOverlay = lazy(() => import('./pet/PetOverlay'));
 const params = new URLSearchParams(location.search);
+// Authentication remains the gate. Fetch independent page code and startup
+// data together only once /auth/me has confirmed the current account.
+const prepareVerifiedPage=()=>{void(params.has('chat')?loadApp():loadCompanionWorld()).catch(()=>{});warmInitialState({history:params.has('chat')});};
 const overlay = isPassiveNativeOverlay(location.href, Capacitor.isNativePlatform() || !!window.petpal);
 if(!overlay&&Capacitor.isNativePlatform()&&Capacitor.getPlatform()==='android'){
   window.petpalLoginSession=registerPlugin<LoginSessionBridge>('PetLoginSession');
@@ -61,6 +65,6 @@ function SessionRoot(){
     return()=>{alive=false;};
   },[epoch,ownerIdentity]);
   if(!ready)return<div className="loading-view">正在准备账号连接…</div>;
-  return<><Suspense fallback={null}>{!overlay&&Capacitor.getPlatform()==='android'&&Capacitor.isNativePlatform()&&<SessionNotifications/>}</Suspense><Suspense fallback={overlay?null:<div className="loading-view">小伴正在走来…</div>}>{overlay?<PetOverlay floating={params.has('pet')}/>:<LoginGate key={epoch}>{params.has('chat')?<App/>:<CompanionWorld/>}</LoginGate>}</Suspense></>;
+  return<><Suspense fallback={null}>{!overlay&&Capacitor.getPlatform()==='android'&&Capacitor.isNativePlatform()&&<SessionNotifications/>}</Suspense><Suspense fallback={overlay?null:<div className="loading-view">小伴正在走来…</div>}>{overlay?<PetOverlay floating={params.has('pet')}/>:<LoginGate key={epoch} onVerified={prepareVerifiedPage}>{params.has('chat')?<App/>:<CompanionWorld/>}</LoginGate>}</Suspense></>;
 }
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><SessionRoot/></React.StrictMode>);

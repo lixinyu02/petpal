@@ -49,7 +49,7 @@ export function ConnectionDialog({ close }: { close?(): void }) {
   return close ? <div ref={scrimEntrance} className="modal-backdrop" data-ui-layer="dialog" role="dialog" aria-modal="true">{formContent}</div> : <main ref={pageEntrance} className="login-page"><a href="/" className="login-brand"><BrandMark size={36}/><span>小伴<small>PetPal</small></span></a><div className="login-layout"><div className="login-welcome"><span>你的日常伙伴</span><h1>聊聊想法，<br/>一起把事情做好。</h1><img src={avatarPreview} alt="温柔的二次元伙伴" width="384" height="576" decoding="async" fetchPriority="high" onError={e => { e.currentTarget.style.display = 'none'; }}/></div>{formContent}</div></main>;
 }
 
-export default function LoginGate({ children }: { children: ReactNode }) {
+export default function LoginGate({children,onVerified}:{children:ReactNode;onVerified?():void}) {
   const [status, setStatus] = useState<'checking'|'ready'|'login'|'error'>(getConnection().token ? 'checking' : 'login');
   const [error, setError] = useState(''), [retry, setRetry] = useState(0);
   useEffect(() => {
@@ -59,10 +59,13 @@ export default function LoginGate({ children }: { children: ReactNode }) {
     void api('/auth/me', { signal: controller.signal }).then(value => {
       if (controller.signal.aborted) return;
       if (!value.instanceId || !value.user?.id) throw new Error('服务器没有返回有效的账号身份。');
+      // Speculative loading may fail; verified login still opens the normal
+      // page, whose loader and startup retry retain their own error handling.
+      try{onVerified?.();}catch{}
       setStatus('ready');
     }).catch(error => { if (!controller.signal.aborted && !isSessionChanged(error)) { setError(error.message); setStatus(getConnection().token ? 'error' : 'login'); } }).finally(() => clearTimeout(timeout));
     return () => { clearTimeout(timeout); controller.abort(); };
-  }, [retry]);
+  }, [retry,onVerified]);
   if (status === 'checking') return <div className="loading-view" role="status"><Loader2 className="spin" size={20} aria-hidden="true"/>正在验证登录…</div>;
   if (status === 'ready') return children;
   return <>{status === 'error' && <div className="login-retry" role="alert"><span>{error}</span><button onClick={() => setRetry(value => value + 1)}>重试连接</button></div>}<ConnectionDialog/></>;
