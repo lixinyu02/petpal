@@ -40,6 +40,13 @@ import org.junit.runner.RunWith;
 public class AndroidPermissionsRuntimeTest {
     private static final Instrumentation TEST = InstrumentationRegistry.getInstrumentation();
     private static final AtomicBoolean GATED = new AtomicBoolean();
+    private RuntimeUiAutomation windows;
+    @org.junit.Before public void initializeWindowObserver() {
+        if (!"true".equals(InstrumentationRegistry.getArguments().getString("petpalPermissionRuntime"))) return;
+        Assume.assumeTrue("Owned emulator only", Build.HARDWARE.contains("ranchu") || Build.HARDWARE.contains("goldfish"));
+        windows = new RuntimeUiAutomation();
+    }
+    @org.junit.After public void restoreWindowObserverFlags() { if (windows != null) windows.close(); }
     @CapacitorPlugin(name = "PermissionRuntimeStartupGate")
     public static class StartupGate extends Plugin {
         @Override public void load() {
@@ -58,7 +65,7 @@ public class AndroidPermissionsRuntimeTest {
     private static void until(String label, Probe probe) throws Exception {
         long end=System.nanoTime()+TimeUnit.SECONDS.toNanos(20);
         do { if(probe.ready()) return; Thread.sleep(80); } while(System.nanoTime()<end);
-        fail("Permission acceptance timeout: "+label);
+        fail("Permission acceptance timeout: "+label+"; windows="+RuntimeUiAutomation.describe());
     }
     private static class Session implements AutoCloseable {
         final Context context=TEST.getTargetContext();

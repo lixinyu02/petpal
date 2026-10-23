@@ -94,12 +94,55 @@ test('a saved login failure shows reconnect only and switching accounts is an ex
   click(f,'切换账号或服务器');await f.flush();const dialog=connectionDialog(f.tree);assert.ok(dialog);assert.equal(typeof dialog.props.close,'function');assert.equal(f.connection().token,'synthetic-session');dialog.props.close();await f.flush();assert.equal(connectionDialog(f.tree),undefined);assert.equal(f.connection().token,'synthetic-session');
 });
 
+test('native foreground notification alone reconnects when WebView emits no DOM lifecycle events',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const f=gateFixture();t.after(()=>f.close());f.requests[0].reject(new Error('offline request finished before return'));await f.flush();
+  f.event('petpal:native-resume');t.mock.timers.tick(249);await f.flush();assert.equal(f.requests.length,1);t.mock.timers.tick(1);await f.flush();assert.equal(f.requests.length,2);
+  f.requests[1].resolve(identity);await f.flush();assert.equal(f.tree,f.children);f.event('petpal:native-resume');t.mock.timers.tick(60000);await f.flush();assert.equal(f.requests.length,2,'a verified workspace must not issue redundant validation');
+});
+
+for(const recoveryEvent of ['focus','petpal:native-resume'])test(`${recoveryEvent} received during pending offline validation survives its late failure`,async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const f=gateFixture();t.after(()=>f.close());if(recoveryEvent==='focus'){f.online(false);f.online(true);}f.event(recoveryEvent);f.event(recoveryEvent);
+  assert.equal(f.requests.length,1);f.requests[0].reject(new Error('late offline 503'));await f.flush();t.mock.timers.tick(250);await f.flush();assert.equal(f.requests.length,2,'the one recovery event must not disappear while the old request is pending');
+  f.requests[1].resolve(identity);await f.flush();assert.equal(f.tree,f.children);
+});
+
+for(const recoveryEvent of ['focus','petpal:native-resume'])test(`${recoveryEvent} within reconnect cooldown retains one trailing retry and does not become a polling loop`,async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const f=gateFixture();t.after(()=>f.close());f.requests[0].reject(new Error('initial offline'));await f.flush();f.event(recoveryEvent);t.mock.timers.tick(250);await f.flush();assert.equal(f.requests.length,2);
+  f.requests[1].reject(new Error('still offline'));await f.flush();f.time(1000);if(recoveryEvent==='focus'){f.hidden(true);f.hidden(false);}f.event(recoveryEvent);f.event(recoveryEvent);t.mock.timers.tick(3999);await f.flush();assert.equal(f.requests.length,2);t.mock.timers.tick(1);await f.flush();assert.equal(f.requests.length,3,'the returning foreground event gets one retry after the remaining cooldown');
+  f.requests[2].reject(new Error('temporary retry failure'));await f.flush();t.mock.timers.tick(60000);await f.flush();assert.equal(f.requests.length,3,'failure without another recovery event must stop');
+});
+
+for(const reason of ['hidden','offline','switching','account-change','unmounted'])test(`native foreground notifications respect ${reason} and cannot revive a queued old login`,async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const environmentWindow=new EventTarget(),removed=[];const remove=environmentWindow.removeEventListener.bind(environmentWindow);environmentWindow.removeEventListener=(name,...args)=>{removed.push(name);remove(name,...args);};
+  const f=gateFixture({environmentWindow});t.after(()=>f.close());f.requests[0].reject(new Error('fixture offline'));await f.flush();f.event('petpal:native-resume');
+  if(reason==='hidden')f.hidden(true);else if(reason==='offline')f.online(false);else if(reason==='switching'){click(f,'切换账号或服务器');await f.flush();}else if(reason==='account-change')f.replace('synthetic-new-account');else f.close();
+  f.event('petpal:native-resume');t.mock.timers.tick(60000);await f.flush();assert.equal(f.requests.length,1);assert.notEqual(f.tree,f.children);assert.equal(f.lateUpdates,0);
+  if(reason==='unmounted')assert.ok(removed.includes('petpal:native-resume'),'the native listener must be detached with the component');
+  if(reason==='switching'){connectionDialog(f.tree).props.close();await f.flush();t.mock.timers.tick(60000);await f.flush();assert.equal(f.requests.length,1);f.event('petpal:native-resume');t.mock.timers.tick(250);await f.flush();assert.equal(f.requests.length,2);}
+});
+
+test('an in-flight validation timeout honors one remembered resume and fences the timed-out response',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const f=gateFixture();t.after(()=>f.close());f.event('focus');t.mock.timers.tick(15000);await f.flush();assert.equal(f.requests[0].signal.aborted,true);t.mock.timers.tick(250);await f.flush();assert.equal(f.requests.length,2);
+  f.requests[0].resolve(identity);await f.flush();assert.notEqual(f.tree,f.children);f.requests[1].reject(new Error('one retry failed'));await f.flush();t.mock.timers.tick(60000);await f.flush();assert.equal(f.requests.length,2);
+});
+
+test('successful validation discards pending recovery events instead of validating twice',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const f=gateFixture();t.after(()=>f.close());for(const name of ['focus','online','visibilitychange'])f.event(name);f.requests[0].resolve(identity);await f.flush();t.mock.timers.tick(60000);await f.flush();assert.equal(f.requests.length,1);assert.equal(f.tree,f.children);
+});
+
+for(const reason of ['hidden','offline','account-change'])test(`${reason} cancels a remembered event before a late validation failure`,async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const f=gateFixture();t.after(()=>f.close());f.event('focus');if(reason==='hidden')f.hidden(true);else if(reason==='offline')f.online(false);else f.replace('synthetic-new-account');
+  f.requests[0].reject(new Error('late failure'));await f.flush();t.mock.timers.tick(60000);await f.flush();assert.equal(f.requests.length,1);assert.notEqual(f.tree,f.children);
+  if(reason!=='account-change'){if(reason==='hidden')f.hidden(false);else f.online(true);t.mock.timers.tick(250);await f.flush();assert.equal(f.requests.length,2);}
+});
+
 test('foreground and network recovery events coalesce, remain single flight and never create passive polling',async t=>{
   t.mock.timers.enable({apis:['setTimeout']});const f=gateFixture();t.after(()=>f.close());f.requests[0].reject(new Error('fixture unavailable'));await f.flush();
   for(const name of ['online','focus','visibilitychange','focus'])f.event(name);t.mock.timers.tick(249);await f.flush();assert.equal(f.requests.length,1);t.mock.timers.tick(1);await f.flush();assert.equal(f.requests.length,2);
   for(const name of ['focus','online','visibilitychange'])f.event(name);t.mock.timers.tick(1000);await f.flush();assert.equal(f.requests.length,2);
-  f.requests[1].reject(new Error('still unavailable'));await f.flush();f.event('focus');t.mock.timers.tick(10000);await f.flush();assert.equal(f.requests.length,2,'a cooldown event cannot create a later background poll');
-  f.time(5001);f.event('focus');t.mock.timers.tick(250);await f.flush();assert.equal(f.requests.length,3);f.requests[2].resolve(identity);await f.flush();assert.equal(f.tree,f.children);
+  f.requests[1].reject(new Error('still unavailable'));await f.flush();f.event('focus');t.mock.timers.tick(5000);await f.flush();assert.equal(f.requests.length,3,'coalesced events authorize one trailing retry after cooldown');
+  f.requests[2].reject(new Error('trailing attempt unavailable'));await f.flush();t.mock.timers.tick(10000);await f.flush();assert.equal(f.requests.length,3,'a failed trailing retry without a new event never polls');
+  f.time(5001);f.event('focus');t.mock.timers.tick(250);await f.flush();assert.equal(f.requests.length,4);f.requests[3].resolve(identity);await f.flush();assert.equal(f.tree,f.children);
 });
 
 test('startup and automatic retries wait for both visibility and connectivity',async t=>{
@@ -113,6 +156,10 @@ test('opening account settings suppresses automatic reconnect until the user ret
   t.mock.timers.enable({apis:['setTimeout']});const f=gateFixture();t.after(()=>f.close());f.requests[0].reject(new Error('fixture offline'));await f.flush();
   f.event('focus');click(f,'切换账号或服务器');await f.flush();t.mock.timers.tick(250);f.event('online');t.mock.timers.tick(1000);await f.flush();assert.equal(f.requests.length,1);
   connectionDialog(f.tree).props.close();await f.flush();click(f,'重试连接');await f.flush();assert.equal(f.requests.length,2);assert.equal(f.connection().token,'synthetic-session');
+});
+
+test('opening and immediately closing account settings cancels an earlier queued resume intent',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});const f=gateFixture();t.after(()=>f.close());f.requests[0].reject(new Error('fixture offline'));await f.flush();f.event('focus');click(f,'切换账号或服务器');await f.flush();connectionDialog(f.tree).props.close();await f.flush();t.mock.timers.tick(60000);await f.flush();assert.equal(f.requests.length,1);
 });
 
 test('a vault read warning offers explicit non-destructive recovery and still validates restored credentials',async t=>{

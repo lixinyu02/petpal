@@ -48,7 +48,7 @@ public class MainActivity extends BridgeActivity {
         });
         return true;
     }
-    @Override public void onResume() { super.onResume(); updaterForeground = true; openOfficialSettings(); }
+    @Override public void onResume() { super.onResume(); updaterForeground = true; openOfficialSettings(); notifyPageResumed(); }
     @Override public void onPause() { updaterForeground = false; backNavigation.cancel(); super.onPause(); }
     @Override public void onDestroy() {
         backNavigation.cancel();
@@ -157,6 +157,22 @@ public class MainActivity extends BridgeActivity {
         return secureUpdaterBridge && updaterForeground && !isFinishing() && !isDestroyed()
             && getBridge() != null && getBridge().getWebView() == view && view.isShown()
             && BackNavigationPolicy.trustedPage(getBridge().getLocalUrl(), view.getUrl());
+    }
+
+    private void notifyPageResumed() {
+        if (rendererUnavailable || getBridge() == null || getBridge().getWebView() == null) return;
+        WebView view = getBridge().getWebView();
+        // Some providers keep document.visibilityState "visible" while Android
+        // pauses the Activity. Retain the actual Activity's lifecycle signal.
+        // Posting lets onResume finish, then rechecks this exact owner and page.
+        view.post(() -> {
+            if (rendererUnavailable || !activeLocalPage(view)) return;
+            try {
+                // Recheck the origin in the receiving main frame as well: a
+                // provider navigation may race the Java-side URL inspection.
+                view.evaluateJavascript("(function(){try {if(window!==window.top||location.origin!=='https://localhost')return false;var query=new URLSearchParams(location.search);if(query.has('overlay')||query.has('pet'))return false;window.dispatchEvent(new Event('petpal:native-resume'));return true;}catch(error){return false;}})()", null);
+            } catch (RuntimeException ignored) { /* Provider teardown is handled by recoverRenderer. */ }
+        });
     }
 
     private void requestPageBack() {

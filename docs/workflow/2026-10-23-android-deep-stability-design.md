@@ -3,7 +3,7 @@
 - Date: 2026-10-23
 - Complexity: L2
 - Baseline: main `6c4b8a6`，开始时工作区干净。
-- Status: implementation
+- Status: complete; source, final APK matrix and final web deployment verified
 
 ## Background / findings
 
@@ -37,6 +37,12 @@
 登录网络握手与body读取有界，超时恢复操作入口；持久化阶段须保证已发布账号与磁盘一致，不能简单为整个写入加AbortSignal后丢弃结果。vault只读恢复有独立超时/操作代际，迟到返回不覆盖新账号且可重试。
 
 WebView renderer退出由原生接管，销毁不可再用的WebView并恢复Activity，启动仍经账号验证。恢复次数有界，重复故障给出原生可操作的恢复视图；不记录聊天/凭据、不自动清数据。官方回跳/通知路由与旧插件清理须经过生命周期回归。
+
+## Issue-3 runtime finding / scope update
+
+API36 实际 APK 在离线后约 0.8 秒 HOME/返回时，45 秒仍停在重连页。`resume()` 会直接丢弃 active 请求期间或五秒冷却内的恢复事件：旧离线请求在事件之后才失败，或冷却结束后没有新事件，均可能没有自动重试。并入当前 issue-3 修复，先用真实 LoginGate 组件确定性复现，再保留一次恢复意图、等待旧请求结束及冷却后尾随重试。不能变成无事件的无限重试；仍保留账号 epoch、切换对话框、隐藏/离线门禁，以及成功后不多发验证。旧失败 APK/矩阵和线上部署证据保留，修复后重新冻结前端、构建独立最终 QA 包并验收和同步网页。
+
+第二轮最终包 API33/35 全过，API36 同一路径仍失败，非空原始失败收据证明 Activity 真正前台、页面 visible/focused/online、token 保留，但 HOME/返回全过程 DOM 恢复事件为空。增加可信当前主 frame 的原生 `petpal:native-resume` 通知，Activity onResume 后排队发送并重新检查实例/前台/页面来源/renderer；无敏感 payload，不扩大原生接口权限。LoginGate 使用既有有界恢复队列监听该通知，组件确定性测试覆盖只有原生通知、无 DOM 事件的恢复。第二轮失败包和截图/JSON保留，再制作第三轮最终候选与完整矩阵。
 
 ## Risks and verification
 

@@ -22,6 +22,13 @@ import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 public class BackgroundSettingsRuntimeTest {
     private MainActivity activity;
+    private RuntimeUiAutomation windows;
+    @org.junit.Before public void initializeWindowObserver() {
+        if (!"true".equals(InstrumentationRegistry.getArguments().getString("petpalSettingsRuntime"))) return;
+        org.junit.Assume.assumeTrue("Owned emulator only", android.os.Build.HARDWARE.contains("ranchu") || android.os.Build.HARDWARE.contains("goldfish"));
+        windows = new RuntimeUiAutomation();
+    }
+    @org.junit.After public void restoreWindowObserverFlags() { if (windows != null) windows.close(); }
     @Test public void missingHonorComponentsResolveToOwnDetailsWithoutLaunchingSettings() throws Exception {
         org.junit.Assume.assumeTrue("Explicit emulator settings acceptance only", "true".equals(InstrumentationRegistry.getArguments().getString("petpalSettingsRuntime")));
         org.junit.Assume.assumeTrue("Generic owned emulator only; no Honor device support claim", android.os.Build.HARDWARE.contains("ranchu") || android.os.Build.HARDWARE.contains("goldfish"));
@@ -59,7 +66,7 @@ public class BackgroundSettingsRuntimeTest {
     private void await(String label, Probe probe, long timeout) throws Exception {
         long end = System.currentTimeMillis() + timeout;
         while (System.currentTimeMillis() < end) { if (probe.check()) return; Thread.sleep(150); }
-        fail("Settings runtime timed out: " + label);
+        fail("Settings runtime timed out: " + label + "; windows=" + RuntimeUiAutomation.describe());
     }
     private String js(String source) throws Exception {
         CountDownLatch ready = new CountDownLatch(1); AtomicReference<String> result = new AtomicReference<>();
@@ -97,7 +104,7 @@ public class BackgroundSettingsRuntimeTest {
         await("secure local foreground bridge", () -> activity.hasSecureUpdaterBridge() && activity.isUpdaterForeground() && "true".equals(js("Boolean(window.Capacitor?.Plugins?.PetTaskNotifications)")),30000);
         invoke("backgroundSettings",new JSONObject()); JSONObject initial=result(); assertTrue(initial.toString(),initial.getBoolean("ok"));
         JSONObject status=initial.getJSONObject("value"); assertEquals("generic",status.getString("vendor"));
-        assertEquals(36,status.getInt("apiLevel")); assertTrue(status.has("batteryExempt"));
+        assertEquals(android.os.Build.VERSION.SDK_INT,status.getInt("apiLevel")); assertTrue(status.has("batteryExempt"));
         invoke("openBackgroundSettings",new JSONObject().put("kind","intent://arbitrary")); JSONObject denied=result(); assertFalse(denied.getBoolean("ok")); assertTrue(activity.isUpdaterForeground());
         JSONArray routes=new JSONArray();
         for(String kind:new String[]{"battery","autostart","notifications","app"}) {

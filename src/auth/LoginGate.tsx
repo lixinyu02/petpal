@@ -56,14 +56,34 @@ export default function LoginGate({children,onVerified}:{children:ReactNode;onVe
   const [status, setStatus] = useState<'checking'|'ready'|'login'|'error'>(getConnection().token ? 'checking' : needsVaultRetry()?'error':'login');
   const [error, setError] = useState(''), [retry, setRetry] = useState(0);
   const [switchOpen,setSwitchOpen]=useState(false),switching=useRef(false);
+  const cancelAutomatic=useRef<()=>void>(()=>{});
   useEffect(() => {
-    const epoch=getSessionEpoch();let alive=true,phase:typeof status='login',lastVerified=0,lastAutomatic=-Infinity;
+    const epoch=getSessionEpoch();let alive=true,phase:typeof status='login',lastVerified=0,lastAutomatic=-Infinity,resumeRequested=false;
     let scheduled:ReturnType<typeof setTimeout>|undefined;
     let active:{controller:AbortController;timer:ReturnType<typeof setTimeout>}|undefined;
     const current=()=>alive&&epoch===getSessionEpoch();
     const eligible=()=>current()&&!document.hidden&&window.navigator?.onLine!==false&&!switching.current;
     const update=(next:typeof status,message='')=>{if(current()){phase=next;setError(message);setStatus(next);}};
     const stopScheduled=()=>{clearTimeout(scheduled);scheduled=undefined;};
+    const cancelResume=()=>{resumeRequested=false;stopScheduled();};
+    cancelAutomatic.current=cancelResume;
+    const renewalDue=()=>phase==='ready'&&!!window.petpalLoginSession&&!window.petpal&&Date.now()-lastVerified>=24*60*60*1000;
+    const scheduleResume=()=>{
+      if(!resumeRequested)return;
+      if(!eligible()||!getConnection().token){cancelResume();return;}
+      if(active||scheduled)return;
+      if(phase!=='error'&&!renewalDue()){cancelResume();return;}
+      // Keep the event's intent through a pending request and the remaining
+      // cooldown. Consume it before retrying: another failure alone never polls.
+      const remaining=Math.min(5000,Math.max(0,5000-(Date.now()-lastAutomatic)));
+      scheduled=setTimeout(()=>{
+        scheduled=undefined;
+        if(!eligible()||!getConnection().token){cancelResume();return;}
+        if(active)return;
+        if(phase!=='error'&&!renewalDue()){cancelResume();return;}
+        resumeRequested=false;lastAutomatic=Date.now();validate(phase==='ready');
+      },Math.max(250,remaining));
+    };
     const validate=(keepReady=false)=>{
       if(active||!eligible())return;
       const controller=new AbortController();
@@ -71,12 +91,13 @@ export default function LoginGate({children,onVerified}:{children:ReactNode;onVe
         if(!current()||active!==attempt)return;
         active=undefined;controller.abort();
         if(!keepReady)update('error','连接验证超时，请检查网络或重试连接。');
+        scheduleResume();
       },15000)};active=attempt;
       if(!keepReady)update('checking');
       void api('/auth/me',{signal:controller.signal}).then(value=>{
         if(!current()||active!==attempt||controller.signal.aborted)return;
         if(!value.instanceId||!value.user?.id)throw new Error('服务器没有返回有效的账号身份。');
-        lastVerified=Date.now();
+        lastVerified=Date.now();cancelResume();
         // Refreshing a verified session keeps its workspace in place. Initial
         // verification alone may warm and reveal private startup data.
         if(!keepReady){try{onVerified?.();}catch{}if(current())update('ready');}
@@ -84,15 +105,14 @@ export default function LoginGate({children,onVerified}:{children:ReactNode;onVe
         if(!current()||active!==attempt||controller.signal.aborted||isSessionChanged(failure))return;
         if(!getConnection().token)update('login');
         else if(!keepReady)update('error',failure instanceof Error?failure.message:'服务暂时无法连接，请重试。');
-      }).finally(()=>{clearTimeout(attempt.timer);if(active===attempt)active=undefined;});
+      }).finally(()=>{clearTimeout(attempt.timer);if(active===attempt){active=undefined;scheduleResume();}});
     };
     const resume=()=>{
-      if(!eligible()){stopScheduled();return;}
-      const renew=phase==='ready'&&!!window.petpalLoginSession&&!window.petpal&&Date.now()-lastVerified>=24*60*60*1000;
-      if(active||scheduled||!getConnection().token||(phase!=='error'&&!renew)||Date.now()-lastAutomatic<5000)return;
-      scheduled=setTimeout(()=>{scheduled=undefined;if(!eligible()||active)return;lastAutomatic=Date.now();validate(phase==='ready');},250);
+      if(!eligible()){cancelResume();return;}
+      if(!getConnection().token||(phase!=='checking'&&phase!=='error'&&!renewalDue()))return;
+      resumeRequested=true;scheduleResume();
     };
-    document.addEventListener('visibilitychange',resume);window.addEventListener('online',resume);window.addEventListener('offline',resume);window.addEventListener('focus',resume);
+    document.addEventListener('visibilitychange',resume);window.addEventListener('online',resume);window.addEventListener('offline',resume);window.addEventListener('focus',resume);window.addEventListener('petpal:native-resume',resume);
     if(getConnection().token){
       if(eligible())validate();else update('error',document.hidden?'回到小伴后将自动重新连接。':'网络暂时不可用，联网后将自动重新连接。');
     }else if(needsVaultRetry()){
@@ -105,11 +125,11 @@ export default function LoginGate({children,onVerified}:{children:ReactNode;onVe
         }).catch(failure=>{if(current()&&!isSessionChanged(failure))update('error',getLoginPersistenceError()||'暂时无法读取保存的登录，请重试。');});
       }
     }else update('login');
-    return()=>{alive=false;stopScheduled();if(active){clearTimeout(active.timer);active.controller.abort();}document.removeEventListener('visibilitychange',resume);window.removeEventListener('online',resume);window.removeEventListener('offline',resume);window.removeEventListener('focus',resume);};
+    return()=>{alive=false;cancelResume();if(cancelAutomatic.current===cancelResume)cancelAutomatic.current=()=>{};if(active){clearTimeout(active.timer);active.controller.abort();}document.removeEventListener('visibilitychange',resume);window.removeEventListener('online',resume);window.removeEventListener('offline',resume);window.removeEventListener('focus',resume);window.removeEventListener('petpal:native-resume',resume);};
   }, [retry,onVerified]);
   if (status === 'checking') return <div className="loading-view" role="status"><Loader2 className="spin" size={20} aria-hidden="true"/>正在恢复账号连接…</div>;
   if (status === 'ready') return children;
   if(status==='login')return <ConnectionDialog/>;
   const vaultRetry=needsVaultRetry();
-  return <><main className="login-page login-reconnect-page"><a href="/" className="login-brand"><BrandMark size={32}/><span>小伴<small>PetPal</small></span></a><section className="login-reconnect" aria-labelledby="reconnect-title"><span className="dialog-icon"><Link2 size={24} aria-hidden="true"/></span><h1 id="reconnect-title">{vaultRetry?'恢复设备保存的登录':'登录已保存，重新连接即可'}</h1><p>{vaultRetry?'设备暂时未能读取登录信息，可以先重试恢复。':'暂时无法连接服务器，账号仍保留在这台设备上。'}</p><div className="login-retry" role="alert"><span>{error}</span></div><div className="login-reconnect-actions"><button className="primary-button" onClick={()=>setRetry(value=>value+1)}>{vaultRetry?'重试保存的登录':'重试连接'}</button><button className="secondary-button" onClick={()=>{switching.current=true;setSwitchOpen(true);}}>切换账号或服务器</button></div></section></main>{switchOpen&&<ConnectionDialog close={()=>{switching.current=false;setSwitchOpen(false);}}/>}</>;
+  return <><main className="login-page login-reconnect-page"><a href="/" className="login-brand"><BrandMark size={32}/><span>小伴<small>PetPal</small></span></a><section className="login-reconnect" aria-labelledby="reconnect-title"><span className="dialog-icon"><Link2 size={24} aria-hidden="true"/></span><h1 id="reconnect-title">{vaultRetry?'恢复设备保存的登录':'登录已保存，重新连接即可'}</h1><p>{vaultRetry?'设备暂时未能读取登录信息，可以先重试恢复。':'暂时无法连接服务器，账号仍保留在这台设备上。'}</p><div className="login-retry" role="alert"><span>{error}</span></div><div className="login-reconnect-actions"><button className="primary-button" onClick={()=>setRetry(value=>value+1)}>{vaultRetry?'重试保存的登录':'重试连接'}</button><button className="secondary-button" onClick={()=>{switching.current=true;cancelAutomatic.current();setSwitchOpen(true);}}>切换账号或服务器</button></div></section></main>{switchOpen&&<ConnectionDialog close={()=>{switching.current=false;setSwitchOpen(false);}}/>}</>;
 }

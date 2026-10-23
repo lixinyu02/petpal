@@ -142,7 +142,7 @@ public class PetLoginSessionAppTest {
         offline();
         MainActivity retained = activity;
         String marker = "retained-" + Long.toHexString(System.nanoTime());
-        assertTrue("Marker belongs to the actual current WebView", bool("(()=>{window.__loginReconnectFixture="+JSONObject.quote(marker)+";return true;})()"));
+        assertTrue("Marker belongs to the actual current WebView", bool("(()=>{window.__loginReconnectFixture="+JSONObject.quote(marker)+";window.__loginReconnectEvents=[];const record=event=>{window.__loginReconnectEvents.push({type:event.type,hidden:document.hidden,focused:document.hasFocus(),online:navigator.onLine,ms:Math.round(performance.now())});if(window.__loginReconnectEvents.length>32)window.__loginReconnectEvents.shift();};document.addEventListener('visibilitychange',record);for(const kind of ['focus','blur','online','offline','petpal:native-resume'])window.addEventListener(kind,record);return true;})()"));
         File ready = new File(context.getExternalFilesDir(null), "login-reconnect-ready.json");
         File background = new File(context.getExternalFilesDir(null), "login-reconnect-background.json");
         File release = new File(context.getExternalFilesDir(null), "login-reconnect-release");
@@ -158,10 +158,12 @@ public class PetLoginSessionAppTest {
         assertFalse("Foreground reconnect does not recreate the Activity", retained.isDestroyed() || retained.isFinishing());
         assertSame("Native Activity reference remains unchanged", retained, activity);
         assertTrue("Foreground reconnect does not reload its WebView", bool("window.__loginReconnectFixture==="+JSONObject.quote(marker)));
+        until("actual Activity resume reaches its same local main frame", () -> bool("window.__loginReconnectEvents.some(event=>event.type==='petpal:native-resume')"), 10000);
         accountPage();
         assertTrue("Automatic reconnect preserves the WebView after verification", bool("window.__loginReconnectFixture==="+JSONObject.quote(marker)));
-        Files.write(new File(context.getExternalFilesDir(null), "login-reconnect-result.json").toPath(),
-            "{\"sameActivity\":true,\"sameWebView\":true,\"automaticForegroundReconnect\":true,\"passwordNotEntered\":true}".getBytes(StandardCharsets.UTF_8));
+        JSONObject report = new JSONObject().put("sameActivity", true).put("sameWebView", true).put("automaticForegroundReconnect", true).put("passwordNotEntered", true)
+            .put("recovery", recoverySnapshot());
+        Files.write(new File(context.getExternalFilesDir(null), "login-reconnect-result.json").toPath(), report.toString().getBytes(StandardCharsets.UTF_8));
     }
     private void proxyPage() throws Exception {
         accountPage();
@@ -225,22 +227,29 @@ public class PetLoginSessionAppTest {
         try (FileOutputStream output = new FileOutputStream(new File(context.getExternalFilesDir(null), "login-app-" + stage + ".png"))) { assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, output)); }
         finally { screenshot.recycle(); }
     }
+    private JSONObject recoverySnapshot() throws Exception {
+        return new JSONObject(js("({visibility:document.visibilityState,focused:document.hasFocus(),online:navigator.onLine,retryVisible:Boolean(document.querySelector('.login-retry[role=alert]')),loadingVisible:Boolean(document.querySelector('.loading-view[role=status]')),workspaceVisible:Boolean(document.querySelector('button[aria-label=\"我的账号\"]')),events:Array.isArray(window.__loginReconnectEvents)?window.__loginReconnectEvents:[]})"));
+    }
     private void failureEvidence(String stage) {
         // Capture before AndroidJUnitRunner closes the Activity. Never call
         // evidence()/until() here, which would start another wait on failure.
         JSONObject report = new JSONObject();
         try {
             report.put("passed", false).put("stage", stage).put("lastWait", lastWait);
+            if (activity != null) report.put("nativeForeground", activity.isUpdaterForeground()).put("activityDestroyed", activity.isDestroyed()).put("activityFinishing", activity.isFinishing());
             if (activity != null && activity.getBridge() != null && activity.getBridge().getWebView() != null) {
+                report.put("recovery", recoverySnapshot());
                 String snapshot = js("(()=>{const section=document.querySelector('section.app-proxy-settings');const clean=(value,max=220)=>String(value||'').replace(/[\\x00-\\x1f\\x7f]/g,' ').slice(0,max);const picker=section?.querySelector('.app-proxy-server-picker select');return {chatRoute:new URLSearchParams(location.search).get('chat')==='1',nativeProxyPluginAvailable:Boolean(window.Capacitor?.isPluginAvailable?.('PetAppProxy')),loginFormPresent:Boolean(document.querySelector('.login-form')),accountPanelPresent:Boolean(document.querySelector('.account-identity')),activeTabs:Array.from(document.querySelectorAll('[role=tab][aria-selected=true]')).slice(0,8).map(node=>clean(node.textContent,60)),sectionExists:Boolean(section),sectionCount:document.querySelectorAll('section.app-proxy-settings').length,busy:section?.getAttribute('aria-busy')||'',heading:clean(section?.querySelector('h3')?.textContent),state:clean(section?.querySelector('.app-proxy-state')?.textContent),summary:Array.from(section?.querySelectorAll('.app-proxy-summary span')||[]).slice(0,8).map(node=>clean(node.textContent)),notes:Array.from(section?.querySelectorAll('.app-proxy-note')||[]).slice(0,12).map(node=>clean(node.textContent)),errors:Array.from(section?.querySelectorAll('[role=alert]')||[]).slice(0,6).map(node=>clean(node.textContent)),pickerExists:Boolean(picker),pickerDisabled:picker?picker.disabled:null,selectedLabel:clean(picker?.options[picker.selectedIndex]?.textContent,100),optionLabels:Array.from(picker?.options||[]).slice(0,128).map(option=>clean(option.textContent,100)),buttons:Array.from(section?.querySelectorAll('button')||[]).slice(0,24).map(button=>({label:clean(button.textContent,100),disabled:button.disabled})),mode:section?.querySelector('select[aria-label=\"应用代理模式\"]')?.value||'',autoStart:Boolean(section?.querySelector('.app-proxy-startup input')?.checked)};})()");
                 report.put("ui", new JSONObject(snapshot)); report.put("session", sessionSnapshot());
             } else report.put("domCaptured", false);
         } catch (Exception | AssertionError ignored) { try { report.put("domCaptured", false); } catch (Exception ignoredAgain) { } }
-        try { Files.write(new File(context.getExternalFilesDir(null), "login-app-" + stage + "-failure.json").toPath(), report.toString().getBytes(StandardCharsets.UTF_8)); } catch (Exception ignored) { }
+        try (FileOutputStream output = new FileOutputStream(new File(context.getExternalFilesDir(null), "login-app-" + stage + "-failure.json"))) {
+            output.write(report.toString().getBytes(StandardCharsets.UTF_8)); output.flush(); output.getFD().sync();
+        } catch (Exception ignored) { }
         Bitmap screenshot = null;
         try {
             screenshot = InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();
-            if (screenshot != null) try (FileOutputStream output = new FileOutputStream(new File(context.getExternalFilesDir(null), "login-app-" + stage + "-failure.png"))) { screenshot.compress(Bitmap.CompressFormat.PNG, 100, output); }
+            if (screenshot != null) try (FileOutputStream output = new FileOutputStream(new File(context.getExternalFilesDir(null), "login-app-" + stage + "-failure.png"))) { screenshot.compress(Bitmap.CompressFormat.PNG, 100, output); output.flush(); output.getFD().sync(); }
         } catch (Exception ignored) { }
         finally { if (screenshot != null) screenshot.recycle(); }
     }
