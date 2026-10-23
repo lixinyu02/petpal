@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import { Download, Loader2, Maximize, Minimize, RefreshCw, Settings2 } from 'lucide-react';
 import { getIdentity, getSessionEpoch, subscribeSession } from './api';
 import TaskNotificationsSettings from './TaskNotificationsSettings';
+import AndroidPermissionsSettings from './AndroidPermissionsSettings';
 import ThemeSettings from './ThemeSettings';
 import { supportsTaskNotifications } from './platform/task-notifications';
 import { readAppPreferencesStatus, type AppPreferences, type AppPreferencesStatus, type PreferencesBridge } from './platform/app-preferences';
@@ -174,6 +175,7 @@ export default function ClientBehaviorSettings({ connected, onDownload }: Props)
         <div className="client-behavior-footer"><span>每项更改会自动保存。</span><button type="button" className="secondary-button" disabled={!!busy} onClick={() => void load()}><RefreshCw size={14} aria-hidden="true" />重新读取</button></div>
       </>}
     </section>
+    {android && <AndroidPermissionsSettings connected={connected} />}
     {android && <TaskNotificationsSettings connected={connected} />}
   </>;
 }

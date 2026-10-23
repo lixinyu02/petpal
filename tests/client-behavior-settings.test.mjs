@@ -47,6 +47,7 @@ function fixture({ platform = 'desktop', connected = true, value = initial, read
     'lucide-react': new Proxy({}, { get: (_target, name) => Symbol.for(String(name)) }),
     './api': { getSessionEpoch: () => epoch, getIdentity: () => identity, subscribeSession: () => () => {} },
     './TaskNotificationsSettings': { __esModule: true, default: notificationComponent },
+    './AndroidPermissionsSettings': { __esModule: true, default: Symbol('AndroidPermissionsSettings') },
     './ThemeSettings': { __esModule: true, default: Symbol('ThemeSettings') },
     './platform/task-notifications': { supportsTaskNotifications: () => platform === 'android' },
     './platform/app-preferences': platformModule.exports,

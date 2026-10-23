@@ -44,7 +44,7 @@ public final class BackgroundSettingsPolicy {
             this.direct = direct; this.fallback = fallback; this.appPackageExtra = appPackageExtra; this.packageUri = packageUri;
         }
     }
-    private static Route system(String id, String action, boolean direct, boolean fallback, boolean appPackageExtra, boolean packageUri) {
+    static Route system(String id, String action, boolean direct, boolean fallback, boolean appPackageExtra, boolean packageUri) {
         return new Route(id, action, null, null, direct, fallback, appPackageExtra, packageUri);
     }
     private static Route oem(String id, String pkg, String activity) { return new Route(id, null, pkg, activity, true, false, false, false); }

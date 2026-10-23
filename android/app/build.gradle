@@ -45,6 +45,9 @@ dependencies {
     implementation 'org.yaml:snakeyaml:2.4'
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
+    // AndroidX test pulls older jdk7/jdk8 artifacts; align with the merged 1.8
+    // stdlib to avoid duplicate classes when assembling instrumentation APKs.
+    androidTestImplementation platform('org.jetbrains.kotlin:kotlin-bom:1.8.22')
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')

@@ -77,7 +77,7 @@ final class BackgroundSettings {
             (info.applicationInfo.flags & ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0, info.exported, appEnabled, activityEnabled, permissionGranted);
     }
 
-    private static Intent resolve(Context context, BackgroundSettingsPolicy.Route route) {
+    static Intent resolve(Context context, BackgroundSettingsPolicy.Route route) {
         PackageManager manager = context.getPackageManager();
         Intent request = intent(context, route);
         try {
