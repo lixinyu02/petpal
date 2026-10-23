@@ -3,7 +3,7 @@
 - Date: 2026-10-24
 - Complexity: L2
 - Related design: 2026-10-24-stable-release-0915-design.md
-- Current status: issue-1 in_progress
+- Current status: issue-2 in_progress
 
 ## issue-1
 
@@ -12,9 +12,9 @@
 - 范围: 版本0.9.15/Android27、当前正式版本与签名序号核验、隔离构建根和源码输入绑定
 - 依赖: UI连接修复已上线
 - 验收标准: 旧tag不动、主工作区保全、构建输入可核验
-- 状态: in_progress
-- 验证方式: 版本0.9.15/Android27；全量4024项首轮4017通过/6条件跳过/1短等待失败，同字节独立复验该文件5项全通过；合成凭据逐项审查后精确映射新增36项，主体扫描规则保持，19项边界测试/全源1862文件及源码包1799文件检查通过。隔离构建根待创建。
-- commit: pending
+- 状态: done
+- 验证方式: 版本0.9.15/Android27；全量4024项首轮4017通过/6条件跳过/1短等待失败，同字节独立复验该文件5项全通过；合成凭据逐项审查后精确映射新增36项，主体扫描规则保持，19项边界测试/全源1862文件及源码包1799文件检查通过。冻结产品d8f0040925b951aabaa5de669db9a6abfe8116fe；独立detached worktree位于.tools/release-0.9.15-build-root；node_modules及所需官方缓存物理复制，不共享可写生产依赖。
+- commit: d8f0040；本次入口验收提交
 
 ## issue-2
 
@@ -23,7 +23,7 @@
 - 范围: Windows EXE/ZIP、Ubuntu x64/ARM64、Android、Web；同issue内独立平台并行
 - 依赖: issue-1
 - 验收标准: 新包与冻结源码一致，实际可测平台运行通过，未验边界明确
-- 状态: todo
+- 状态: in_progress
 - 验证方式: 归档逐字节/签名连续性/私有数据/许可/运行证据
 - commit: pending
 
