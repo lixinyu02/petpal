@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day" data-ui-motion="full">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>小伴 · 合成聊天流畅性夹具</title>
+    <!-- BENCH_STYLES -->
+  </head>
+  <body>
+    <header class="benchmark-controls">
+      <h1>合成聊天流畅性测量</h1>
+      <p>真实 React DOM、ChatMessages、Markdown、动效与产品 CSS；仅合成消息，不连接账号或模型。</p>
+      <div class="benchmark-options">
+        <label>消息数<select id="message-count"><option value="100">100</option><option value="1000">1000</option></select></label>
+        <label>动效<select id="motion-policy"><option value="full">full</option><option value="reduced">reduced</option></select></label>
+        <label>滚动<select id="scroll-policy"><option value="follow">跟随末尾</option><option value="locked">上翻锁定</option></select></label>
+        <button id="benchmark-start" type="button">开始一次测量</button>
+        <button id="benchmark-cancel" type="button" disabled>取消本轮</button>
+      </div>
+      <p id="benchmark-status" role="status">正在读取冻结构建信息…</p>
+    </header>
+    <div id="chat-host" class="benchmark-chat-host"></div>
+    <details class="benchmark-report" open><summary>本轮原始 JSON 报告</summary><pre id="benchmark-report">尚未开始</pre></details>
+    <!-- BENCH_SCRIPT -->
+  </body>
+</html>
