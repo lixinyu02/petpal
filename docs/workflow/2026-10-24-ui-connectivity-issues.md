@@ -8,13 +8,13 @@
 
 - Goal: 修复有当前证据的UI及连接恢复缺陷。
 - Ordering rule: issue顺序推进，当前issue内并行独立调查。
-- Current status: issue-3 in_progress
+- Current status: done
 
 ## Issue List
 
 - [x] issue-1 当前界面与连接故障复现
 - [x] issue-2 最小修复与定向回归
-- [ ] issue-3 浏览器集成验收与交付
+- [x] issue-3 浏览器集成验收与交付
 
 ## issue-1
 
@@ -45,6 +45,6 @@
 - 范围: 同路径UI复验、构建/网页发布和报告
 - 依赖: issue-2
 - 验收标准: 有界面与状态证据，业务/下载/信任保全通过
-- 状态: in_progress
-- 验证方式: Chrome基线+IAB分步实际操作、完整资源SHA和运行态核验
-- commit: pending
+- 状态: done
+- 验证方式: Chrome最终412窄屏损坏2xx保存/刷新恢复及公网页面，IAB主故障流程；182回归、tsc/build/OpenUI通过。网页314文件SHA一致；本地/公网health200、匿名401、CORS204；旧资源/49下载和业务保全通过。报告2026-10-24-ui-connectivity-verification.md。
+- commit: 本issue提交
