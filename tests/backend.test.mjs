@@ -21,8 +21,9 @@ async function setup(t, options = {}) {
   t.after(async () => { await app.close(); await rm(directory, { recursive: true, force: true }); });
   return { app, url, request, directory };
 }
-async function upstream(t, mode = 'success') {
+async function upstream(t, mode = 'success',responses=[]) {
   const server = http.createServer((req, res) => {
+    responses.push(res);
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     res.write('data: {"choices":[{"delta":{"content":"actual fixture answer"}}]}\n\n');
     if (mode === 'success') res.end('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
@@ -140,6 +141,51 @@ test('concurrent send/delete is rejected and stop cancels upstream with durable 
   assert.equal((await request(`/api/conversations/${conversation.id}/stop`, { method: 'POST' })).status, 200);
   const state = await (await request('/api/state')).json(); assert.equal(state.conversations[0].messages[1].status, 'cancelled');
   const stream = events(await text); assert.equal(stream.at(-1).event, 'error');
+});
+
+test('a delayed old Chat stop cannot cancel the next turn, while its own targeted stop still works', {timeout:15000}, async t => {
+  const {request}=await setup(t),responses=[];
+  const {conversation}=await configured(request,await upstream(t,'hang',responses));
+  const route=`/api/conversations/${conversation.id}`;
+  const wait=async predicate=>{for(let attempt=0;attempt<200;attempt++){if(await predicate())return;await new Promise(resolve=>setTimeout(resolve,5));}assert.fail('chat fixture did not settle');};
+  const first=await request(`${route}/messages`,{method:'POST',body:{content:'first',clientRequestId:'turn-first'}});
+  await wait(()=>responses.length===1);
+  let releaseOldStop;const delayed=new Promise(resolve=>{releaseOldStop=resolve;});
+  const oldStop=(async()=>{await delayed;return request(`${route}/stop`,{method:'POST',body:{expectedRequestId:'turn-first'}});})();
+  await first.body.cancel();
+  await wait(async()=>(await (await request(route)).json()).messages.at(-1).status==='cancelled');
+  let second;
+  await wait(async()=>{
+    const candidate=await request(`${route}/messages`,{method:'POST',body:{content:'second',clientRequestId:'turn-second'}});
+    if(candidate.status===409){await candidate.arrayBuffer();return false;}
+    assert.equal(candidate.status,200);second=candidate;return true;
+  });
+  const output=second.text();
+  await wait(()=>responses.length===2);
+  releaseOldStop();const stale=await oldStop;assert.equal(stale.status,200);assert.deepEqual(await stale.json(),{ok:true,stopped:false});
+  assert.equal((await (await request(route)).json()).messages.at(-1).status,'streaming');
+  responses[1].end('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+  assert.equal(events(await output).at(-1).event,'done');
+  const third=await request(`${route}/messages`,{method:'POST',body:{content:'third',clientRequestId:'turn-third'}}),thirdOutput=third.text();
+  await wait(()=>responses.length===3);
+  const stopped=await request(`${route}/stop`,{method:'POST',body:{expectedRequestId:'turn-third'}});
+  assert.deepEqual(await stopped.json(),{ok:true,stopped:true});assert.equal(events(await thirdOutput).at(-1).data.conversation.messages.at(-1).status,'cancelled');
+  assert.deepEqual(await (await request(`${route}/stop`,{method:'POST',body:{expectedRequestId:'turn-third'}})).json(),{ok:true,stopped:false});
+});
+
+test('malformed Chat request identities fail before sending or stopping an upstream task',async t=>{
+  const {request,directory}=await setup(t),responses=[];
+  const {conversation}=await configured(request,await upstream(t,'hang',responses)),route=`/api/conversations/${conversation.id}`;
+  const before=await readFile(path.join(directory,'state.json'),'utf8');
+  for(const clientRequestId of [null,0,{},'', ' leading-space','line\nbreak','x'.repeat(129)]){
+    assert.equal((await request(`${route}/messages`,{method:'POST',body:{content:'must not send',clientRequestId}})).status,400);
+  }
+  assert.equal(responses.length,0);assert.equal(await readFile(path.join(directory,'state.json'),'utf8'),before);
+  const response=await request(`${route}/messages`,{method:'POST',body:{content:'valid',clientRequestId:'turn_valid-1'}}),output=response.text();
+  for(const expectedRequestId of [null,[], '', ' bad','x'.repeat(129)])assert.equal((await request(`${route}/stop`,{method:'POST',body:{expectedRequestId}})).status,400);
+  assert.equal((await (await request(route)).json()).messages.at(-1).status,'streaming');
+  // Empty legacy stop bodies keep cancelling the currently active reply.
+  assert.equal((await request(`${route}/stop`,{method:'POST',body:{}})).status,200);await output;
 });
 
 test('Codex run delegates to the bridge and saves thread continuity', async t => {

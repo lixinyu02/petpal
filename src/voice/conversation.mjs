@@ -89,7 +89,7 @@ export function createVoiceConversation(options) {
       job.chatStopFor=job.chatPending;
       // The server stop receipt waits until its active conversation slot is
       // released; a fetch abort alone can settle before upstream cleanup.
-      try{job.chatRelease=options.stopChat&&job.conversationId?Promise.resolve(options.stopChat(job.conversationId,job.abort.signal)):job.chatPending.then(()=>{},()=>{});}
+      try{job.chatRelease=options.stopChat&&job.conversationId?Promise.resolve(options.stopChat(job.conversationId,job.abort.signal,job.chatRequestId)):job.chatPending.then(()=>{},()=>{});}
       catch(error){job.chatRelease=Promise.reject(error);}
       void job.chatRelease.catch(()=>{});
     }
@@ -124,6 +124,7 @@ export function createVoiceConversation(options) {
         if(!active())return;job.conversationId=id;lastConversation={providerId:job.providerId,id};publish({conversationId:id});
       }
       await waitForRelease(job,turn);if(!active())return;
+      const clientRequestId=`${job.id}-${sequence}`;job.chatRequestId=clientRequestId;
       const pending=Promise.resolve(options.streamChat(job.conversationId,text,turn.signal,event=>{
         if(!active())return;
         if(event.type==='error'){display.flush();throw new Error(event.data.message||'回复未完成，请重试。');}
@@ -132,8 +133,8 @@ export function createVoiceConversation(options) {
           full+=event.data.text;display.push(event.data.text);for(const sentence of splitter.push(event.data.text))queue.enqueue(sentence);
         }
         if(event.type==='done'){display.flush();terminal=true;}
-      },chatRequest));job.chatPending=pending;
-      try{await pending;}finally{if(job.chatPending===pending)job.chatPending=null;}
+      },chatRequest,clientRequestId));job.chatPending=pending;
+      try{await pending;}finally{if(job.chatPending===pending){job.chatPending=null;job.chatRequestId=null;}}
       if(!active())throw turn.signal.reason||cancelled();
       if(!terminal)throw new Error('回复连接提前断开，已停止语音。');
       display.flush();for(const sentence of splitter.finish())queue.enqueue(sentence);

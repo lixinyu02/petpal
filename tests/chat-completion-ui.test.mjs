@@ -32,7 +32,7 @@ function fixture({events,streamError,readSnapshot}={}){
     connected:true,provider:{id:'provider-one'},chatAssistant:{snapshot(){}},chatScroll:{latest(){}},stopPresentation(){},
     setBusy(value){busy=value;},setError(value){error=typeof value==='function'?value(error):value;},setApprovals(){},setStatus(){},
     speech:{prepare(){},speakIfEnabled(text,id){spoken.push({text,id});}},speechRef:{current:{speakIfEnabled(text,id){spoken.push({text,id});}}},
-    abortRef:{current:null},requestSequence:{current:0},organizationRevision:{current:0},activeRef:{current:null},displayRef:{current:null},responseTimer:{current:null},
+    abortRef:{current:null},requestSequence:{current:0},organizationRevision:{current:0},activeRef:{current:null},activeChatRequest:{current:null},displayRef:{current:null},responseTimer:{current:null},
     chatRecoveryRef:{current:null},approvalAlive:{current:true},deletedConversationIds:{current:new Set()},
     setSelected(){},setState(update){if(deferState)queued.push(update);else apply(update);},setDraft(value){draft=value;},
     performancePhase(){},finishResponse(){},getSessionEpoch:()=>epoch,accountEpoch:1,isSessionChanged:()=>false,
@@ -151,6 +151,31 @@ test('a late stop-request error cannot overwrite a subsequently completed Chat',
   f.context.streamMessage=async(_id,_content,_signal,onEvent)=>onEvent({type:'done',data:{conversation:chat({messages:[{id:'new-reply',role:'assistant',content:'新任务回复',status:'complete'}]}),assistantMessageId:'new-reply'}});
   await f.submit();stopping.reject(new Error('旧停止请求失败'));await stopped;
   assert.equal(f.error,'');assert.equal(f.state.conversations[0].messages.at(-1).id,'new-reply');
+});
+
+test('a pre-meta stop keeps its original request ID when the next Chat starts immediately',async t=>{
+  const f=fixture();t.after(()=>f.close());const original=deferred(),stopping=deferred(),requests=[],stops=[];
+  f.context.streamMessage=async(_id,_content,signal,_onEvent,_images,_assistant,clientRequestId)=>{
+    requests.push(clientRequestId);
+    signal.addEventListener('abort',()=>original.reject(signal.reason),{once:true});
+    await original.promise;
+  };
+  const baseApi=f.context.api;
+  f.context.api=(path,options)=>{
+    if(path.endsWith('/stop')){stops.push(JSON.parse(options.body));return stopping.promise;}
+    return baseApi(path,options);
+  };
+  const first=f.submit();await f.flush();assert.equal(requests.length,1);assert.ok(requests[0]);
+  const stopped=f.context.stopCurrent();await first;assert.equal(f.busy,false);
+  assert.equal(stops[0].expectedRequestId,requests[0],'stopping before meta does not need a server message ID');
+  f.context.conversation=f.state.conversations[0];f.context.draft='立即继续';
+  f.context.streamMessage=async(_id,_content,_signal,onEvent,_images,_assistant,clientRequestId)=>{
+    requests.push(clientRequestId);
+    onEvent({type:'done',data:{conversation:chat({messages:[{id:'new-reply',role:'assistant',content:'新的完整回复',status:'complete'}]}),assistantMessageId:'new-reply'}});
+  };
+  await f.submit();assert.notEqual(requests[1],requests[0]);assert.equal(stops[0].expectedRequestId,requests[0]);
+  stopping.resolve({ok:true,stopped:false});await stopped;
+  assert.equal(f.state.conversations[0].messages.at(-1).content,'新的完整回复');assert.equal(f.error,'');
 });
 
 test('a new-conversation result cannot update the page after request ownership changed',async t=>{

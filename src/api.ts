@@ -322,10 +322,10 @@ export function logout() {
   if(previous.token){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4000);void connectionFetch(`${previous.url}/api/auth/logout`,{method:'POST',headers:{Authorization:`Bearer ${previous.token}`},signal:controller.signal}).catch(()=>{}).finally(()=>clearTimeout(timer));}
   return cleared;
 }
-export async function streamMessage(id:string,content:string,signal:AbortSignal,onEvent:(event:StreamEvent)=>void,attachmentIds:string[] = [],assistantRequest?:ChatAssistantRequest) {
+export async function streamMessage(id:string,content:string,signal:AbortSignal,onEvent:(event:StreamEvent)=>void,attachmentIds:string[] = [],assistantRequest?:ChatAssistantRequest,clientRequestId?:string) {
   const request=requests.begin(signal);let reader:ReadableStreamDefaultReader<Uint8Array>|undefined;
   try{
-    request.assertCurrent();const response=await connectionFetch(`${request.connection.url}/api/conversations/${encodeURIComponent(id)}/messages`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${request.connection.token}`},body:JSON.stringify({content,attachmentIds,...(assistantRequest?{assistant:assistantRequest.assistant,submissionId:assistantRequest.submissionId}:{})}),signal:request.signal});request.assertCurrent();
+    request.assertCurrent();const response=await connectionFetch(`${request.connection.url}/api/conversations/${encodeURIComponent(id)}/messages`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${request.connection.token}`},body:JSON.stringify({content,attachmentIds,...(assistantRequest?{assistant:assistantRequest.assistant,submissionId:assistantRequest.submissionId}:{}),...(clientRequestId!==undefined?{clientRequestId}:{})}),signal:request.signal});request.assertCurrent();
     if(!response.ok){await responseJson(response,request);return;}
     if(!response.body)throw new Error('当前环境不支持流式回复。');
     reader=response.body.getReader();const decoder=new TextDecoder();let buffer='',terminal=false;

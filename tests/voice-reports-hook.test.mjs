@@ -37,7 +37,7 @@ function harness(context){
     useCallback(callback,deps){const index=cursor++,previous=slots[index];if(!previous||!same(previous.deps,deps))slots[index]={callback,deps};return slots[index].callback;},
     useEffect(callback,deps){const index=cursor++,previous=slots[index];if(!previous||!same(previous.deps,deps)){const next={deps,cleanup:null};slots[index]=next;effects.push(()=>{previous?.cleanup?.();next.cleanup=callback();});}},
     api(path,options={}){calls.push({path,options});if(path==='/voice')return Promise.resolve(runtime.voiceConfig||{});if(path==='/voice/asr')return Promise.resolve({configured:true});if(path==='/conversations')return Promise.resolve(conversation([]));if(path.endsWith('/stop'))return Promise.resolve({ok:true});return baselines.length?baselines.shift().promise:Promise.resolve(baseline);},
-    streamMessage(id,text,signal,onEvent){calls.push({path:'messages',id,text});const pending=deferred(),entry={id,text,signal,onEvent,...pending};streams.push(entry);signal.addEventListener('abort',()=>pending.reject(signal.reason),{once:true});return pending.promise;},
+    streamMessage(id,text,signal,onEvent,attachmentIds,request,clientRequestId){calls.push({path:'messages',id,text});const pending=deferred(),entry={id,text,signal,onEvent,attachmentIds,request,clientRequestId,...pending};streams.push(entry);signal.addEventListener('abort',()=>pending.reject(signal.reason),{once:true});return pending.promise;},
     createCapture(handlers){const capture={handlers,stopped:false,async start(){},pause(){},stop(){this.stopped=true;}};captures.push(capture);return capture;},
     async openAsr(signal,onTranscript){const final=deferred(),session={signal,onTranscript,final,async send(){},finish:()=>final.promise,cancel(){}};sessions.push(session);return session;},
     speech:{engine:'cosyvoice',streamingEnabled:true,supported:true,unlock:async()=>true,stop(){},speakAsync(text,id,signal){const pending=deferred();plays.push({text,id,signal,...pending});signal.addEventListener('abort',()=>pending.reject(signal.reason),{once:true});return pending.promise;}},
@@ -81,6 +81,18 @@ test('real hook warms cue in start gesture, routes account speaker and acknowled
 test('session epoch changes still close cue context even when stale UI publication is suppressed',async context=>{
   const h=harness(context);await h.voice.start();h.runtime.epoch++;h.window.dispatchEvent(new Event('petpal:session-change'));
   assert.equal(h.cues[0].releases,1);assert.equal(h.captures[0].stopped,true);
+});
+
+test('voice hook targets the interrupted Chat request and retains its bounded stop signal',async context=>{
+  const h=harness(context);await h.voice.start();const first=await h.ask('先回答');
+  assert.ok(h.streams[0].clientRequestId);
+  const interrupted=h.voice.interrupt();await flush();
+  const stop=h.calls.find(call=>call.path.endsWith('/stop'));
+  assert.equal(JSON.parse(stop.options.body).expectedRequestId,h.streams[0].clientRequestId);
+  assert.equal(stop.options.signal.aborted,false);await interrupted;await first.finishing;
+  const second=await h.ask('再回答');assert.notEqual(h.streams[1].clientRequestId,h.streams[0].clientRequestId);
+  h.streams[1].onEvent({type:'done',data:{conversation:conversation([])}});h.streams[1].resolve();await second.finishing;
+  h.voice.stop();assert.equal(stop.options.signal.aborted,true,'the combined deadline and session signal still cancels on teardown');
 });
 
 test('late account settings cannot reactivate a stopped startup; logged-out voice acquires no microphone',async context=>{

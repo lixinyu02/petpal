@@ -13,7 +13,7 @@ function harness(overrides={}){
     unlock:async()=>{unlocks++;return true;},verify:async()=>{},stopSpeech(){outputStops++;},
     openAsr:async(signal,onTranscript)=>{const final=deferred(),session={signal,onTranscript,frames:[],ends:0,cancelled:0,final,async send(frame){this.frames.push(frame);},finish(){this.ends++;return final.promise;},cancel(){this.cancelled++;}};sessions.push(session);return session;},
     createChat:async()=> 'conversation',
-    streamChat:(id,text,signal,onEvent)=>{const pending=deferred();streams.push({id,text,signal,onEvent,...pending});return pending.promise;},
+    streamChat:(id,text,signal,onEvent,request,clientRequestId)=>{const pending=deferred();streams.push({id,text,signal,onEvent,request,clientRequestId,...pending});return pending.promise;},
     play:(text,id,signal)=>{const pending=deferred();plays.push({text,id,signal,...pending});return pending.promise;},...overrides,
   });
   return{machine,sessions,streams,plays,states,feed(level=.05){const frame=new Float32Array(6000).fill(level);callbacks.onFrame(frame,level);return frame;},expire(){current=false;},get counts(){return{starts,stops,unlocks,outputStops};}};
@@ -51,15 +51,17 @@ test('automatic speech interruption cannot deliver the old presentation timer in
 });
 
 test('sustained speech interrupts Chat and TTS immediately and submits the preserved opening words once',async()=>{
-  const released=deferred(),stopCalls=[],h=harness({stopChat:(id,signal)=>{stopCalls.push({id,signal});return released.promise;}});
+  const released=deferred(),stopCalls=[],h=harness({stopChat:(id,signal,expectedRequestId)=>{stopCalls.push({id,signal,expectedRequestId});return released.promise;}});
   await h.machine.start();const first=await asking(h);
   h.streams[0].onEvent({type:'delta',data:{text:'这是正在播放的第一句话。'}});await flush();assert.equal(h.plays.length,1);
   h.feed(0);const onset=h.feed(.055);assert.equal(h.machine.snapshot().phase,'speaking');h.feed(.06);await flush();
   assert.equal(h.streams[0].signal.aborted,true);assert.equal(h.plays[0].signal.aborted,true);assert.equal(h.machine.snapshot().phase,'listening');assert.equal(h.machine.snapshot().hasUtterance,true);
   assert.equal(h.sessions.length,2);assert.deepEqual(h.sessions[1].frames.map(frame=>frame.length),[4800,6000,6000]);assert.deepEqual(h.sessions[1].frames[1],onset);
   assert.equal(h.counts.starts,1);assert.equal(h.counts.unlocks,1);assert.equal(stopCalls.length,1);assert.equal(stopCalls[0].id,'conversation');
+  assert.ok(h.streams[0].clientRequestId);assert.equal(stopCalls[0].expectedRequestId,h.streams[0].clientRequestId);
   const second=h.machine.finishUtterance();h.sessions[1].final.resolve('换个话题');await flush();assert.equal(h.streams.length,1,'new turn awaits server cancellation receipt');
   released.resolve();await flush();assert.equal(h.streams.length,2);assert.equal(h.streams[1].text,'换个话题');
+  assert.notEqual(h.streams[1].clientRequestId,h.streams[0].clientRequestId,'each voice turn has its own cancellation target');
   const latest=h.machine.snapshot();h.streams[0].onEvent({type:'delta',data:{text:'迟到的旧回复'}});h.plays[0].resolve();h.streams[0].resolve();await first.finishing;assert.deepEqual(h.machine.snapshot(),latest);
   h.streams[1].onEvent({type:'done',data:{}});h.streams[1].resolve();await second;assert.equal(h.machine.snapshot().phase,'listening');h.machine.dispose();assert.equal(h.counts.stops,1);
 });

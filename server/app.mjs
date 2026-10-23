@@ -72,6 +72,12 @@ function string(value, label, maximum, { optional = false } = {}) {
   return value.trim();
 }
 
+function optionalChatRequestId(value) {
+  if(value===undefined)return undefined;
+  if(typeof value!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(value))throw failure(400,'聊天请求 ID 格式无效。');
+  return value;
+}
+
 function safeCodexStatus(value) {
   return value && typeof value === 'object' ? value : { available: false, error: 'Codex 状态不可用。' };
 }
@@ -1212,8 +1218,12 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     requireCurrentAuth(req); res.json({ conversation: visibleConversation(conversation) });
   });
   app.post('/api/conversations/:id/stop', async (req, res) => {
+    const expectedRequestId=optionalChatRequestId(req.body.expectedRequestId);
     const conversation = conversationById(req.params.id, req.user); const task = active.get(req.params.id);
     if (conversation.mode === 'codex') { await agentTasks.stop(conversation); res.json({ ok: true, stopped: Boolean(task), conversation: visibleConversation(conversation) }); return; }
+    // Legacy clients still stop the current turn. New clients cannot let a
+    // delayed cancellation of an old turn interrupt its replacement.
+    if(expectedRequestId!==undefined&&task?.clientRequestId!==expectedRequestId){res.json({ok:true,stopped:false});return;}
     task?.controller.abort(new DOMException('用户已停止生成。', 'AbortError'));
     if (task) await task.done;
     res.json({ ok: true, stopped: Boolean(task) });
@@ -1335,6 +1345,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
 
   app.post('/api/conversations/:id/messages', async (req, res) => {
     const conversation = conversationById(req.params.id, req.user); assertIdle(conversation.id);
+    const clientRequestId=optionalChatRequestId(req.body.clientRequestId);
     if (conversation.automationId) throw failure(409, '自动化结果会话只能查看或停止，请创建普通对话。');
     const collaborationOptions = normalizeChatAssistant(req.body.assistant, req.body.submissionId);
     if (collaborationOptions && conversation.mode !== 'chat') throw failure(400, 'Chat + Agent 仅用于聊天会话。');
@@ -1363,7 +1374,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const controller = new AbortController();
     let finish;
     const done = new Promise(resolve => { finish = resolve; });
-    const task = { controller, done, mode: conversation.mode, userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap, providerId: provider?.id ?? null, approvalIds: new Set(), replyMemoryPrivacy: { sensitiveInput: false, privateInputProtected: false }, ...(conversation.mode === 'codex' ? { bridge } : {}),
+    const task = { controller, done, mode: conversation.mode, userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap, providerId: provider?.id ?? null, approvalIds: new Set(), replyMemoryPrivacy: { sensitiveInput: false, privateInputProtected: false }, ...(conversation.mode === 'chat' ? {clientRequestId} : { bridge }),
       ...(collaborationOptions ? { assistantProviderId: collaborationOptions.providerId,
         ...(collaborationOptions.permissions.approval === 'review' ? { assistantReviewProviderId: collaborationOptions.permissions.reviewProviderId } : {}) } : {}) };
     active.set(conversation.id, task);

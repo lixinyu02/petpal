@@ -10,7 +10,7 @@ import {creationProjectId,conversationHistoryScope,mergeConversationOrganization
 import {reuseConversationMessages} from './conversation-message-reuse.mjs';
 import {watchCompanionBreakpoint} from './companion-mount.mjs';
 import {createChatDisplay,type ChatDisplay} from './chat-display.mjs';
-import {createChatCompletion,mergeChatCompletionSnapshot,readChatTerminalSnapshot,startChatRecovery,type ChatRecovery} from './chat-completion.mjs';
+import {createChatCompletion,createChatRequestId,mergeChatCompletionSnapshot,readChatTerminalSnapshot,startChatRecovery,type ChatRecovery} from './chat-completion.mjs';
 import {useChatScroll} from './useChatScroll';
 import {useUiEntrance} from './platform/ui-motion.ts';
 import {createVisiblePoll} from './platform/visible-poll.mjs';
@@ -183,6 +183,7 @@ export default function App() {
   const busyRef = useRef(false);
   const switchingModelRef = useRef(false);
   const activeRef = useRef<string | null>(null);
+  const activeChatRequest = useRef<{conversationId:string;clientRequestId:string}|null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const responseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -568,9 +569,10 @@ export default function App() {
     speech.prepare();
     const controller = new AbortController(); abortRef.current = controller;
     const requestId = ++requestSequence.current;
+    const clientRequestId=createChatRequestId();
     const isCurrentRequest=()=>approvalAlive.current&&requestSequence.current===requestId&&getSessionEpoch()===accountEpoch;
     const completion=createChatCompletion({isCurrent:isCurrentRequest,release:()=>{
-      setBusy(false);busyRef.current=false;activeRef.current=null;abortRef.current=null;setApprovals([]);setStatus('');
+      setBusy(false);busyRef.current=false;activeRef.current=null;activeChatRequest.current=null;abortRef.current=null;setApprovals([]);setStatus('');
     },speak:message=>speechRef.current.speakIfEnabled(message.content,`${message.id}-auto-${requestId}`)});
     const readRevision=organizationRevision.current;
     let target = conversation;
@@ -589,6 +591,7 @@ export default function App() {
       }
       controller.signal.throwIfAborted();
       activeRef.current = target.id;
+      activeChatRequest.current={conversationId:target.id,clientRequestId};
       const pending: Message[] = [...target.messages, { id: `user-${Date.now()}`, role: 'user', content,attachments:images }, { id: assistantId, role: 'assistant', content: '', status: 'streaming' }];
       setState(s => ({ ...s, conversations: s.conversations.map(c => c.id === target!.id ? { ...c, title: c.customTitle|| (c.messages.length ? c.title : content.slice(0, 32)), messages: pending } : c) }));
       setDraft('');
@@ -635,7 +638,7 @@ export default function App() {
           }
           if (!failed) finishResponse(responseText || finalReply?.content || '', assistantId, requestId);
         }
-      },images.map(item=>item.id),assistantRequest);
+      },images.map(item=>item.id),assistantRequest,clientRequestId);
     } catch (e) {
       if (!isCurrentRequest() || isSessionChanged(e)) return;
       display?.flush();
@@ -669,11 +672,14 @@ export default function App() {
     stopPresentation();
     const stoppedRequest=requestSequence.current;
     const active = currentMode==='codex'?conversation?.id:activeRef.current;
+    // Capture before abort releases this turn and another send can take ownership.
+    const chatRequest=activeChatRequest.current;
+    const expectedRequestId=currentMode==='chat'&&chatRequest&&chatRequest.conversationId===active?chatRequest.clientRequestId:undefined;
     displayRef.current?.close();
     abortRef.current?.abort();
     if (!active) return;
     setStatus('正在停止…');
-    try { await api(`/conversations/${encodeURIComponent(active)}/stop`, { method: 'POST' }); if(currentMode==='codex')await refreshConversation(active); }
+    try { await api(`/conversations/${encodeURIComponent(active)}/stop`, { method: 'POST',...(expectedRequestId?{body:JSON.stringify({expectedRequestId})}:{}) }); if(currentMode==='codex')await refreshConversation(active); }
     catch (e) { if(approvalAlive.current&&requestSequence.current===stoppedRequest&&getSessionEpoch()===accountEpoch&&!isSessionChanged(e))setError((e as Error).message); }
   }
   function recordApprovalDecision(key:string,value?:ApprovalDecision){

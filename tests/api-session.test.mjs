@@ -143,6 +143,16 @@ test('real API wrapper account-switch and native restore behavior',async t=>{
       writer.enqueue(new TextEncoder().encode('event: delta\ndata: {"text":"old private reply"}\n\n'));
       await assert.rejects(pending,api.SessionChangedError);assert.deepEqual(events,[]);
     });
+    await t.test('chat request correlation is optional and distinct from assistant submission identity',async()=>{
+      delete window.petpal;
+      const api=await freshApi();api.setConnection({url:'',token:'member'});const bodies=[];
+      install('fetch',async(_url,options)=>{bodies.push(JSON.parse(options.body));return new Response('event: done\ndata: {}\n\n');});
+      const assistant={hostId:'my-pc',providerId:'agent-model',permissions:{access:'full-access',approval:'auto'}};
+      await api.streamMessage('chat','hello',new AbortController().signal,()=>{},[],{assistant,submissionId:'dispatch-one'},'chat-turn-one');
+      assert.equal(bodies[0].clientRequestId,'chat-turn-one');assert.equal(bodies[0].submissionId,'dispatch-one');assert.deepEqual(bodies[0].assistant,assistant);
+      await api.streamMessage('chat','legacy',new AbortController().signal,()=>{});
+      assert.equal(Object.hasOwn(bodies[1],'clientRequestId'),false);assert.equal(Object.hasOwn(bodies[1],'submissionId'),false);
+    });
     for(const terminal of ['done','error'])await t.test(`${terminal} releases a completed SSE response without EOF or an unbounded cancel`,async()=>{
       delete window.petpal;
       const api=await freshApi();api.setConnection({url:'',token:'active'});

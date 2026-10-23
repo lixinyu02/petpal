@@ -1,4 +1,5 @@
 import type {Conversation,Message,State} from './api';
+export function createChatRequestId(random?:Pick<Crypto,'getRandomValues'>&Partial<Pick<Crypto,'randomUUID'>>):string;
 export function readChatTerminalSnapshot(value:unknown,conversationId:string,messageId?:string):{conversation:Conversation;reply:Message}|null;
 export function mergeChatCompletionSnapshot(previous:State,incoming:Conversation,options:{conversationId:string;isCurrent():boolean;preserveOrganization?:boolean;deletedIds?:Set<string>}):State;
 export type ChatCompletion={finish(reply?:Message,shouldSpeak?:boolean):boolean};

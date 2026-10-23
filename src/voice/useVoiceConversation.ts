@@ -54,14 +54,14 @@ export function useVoiceConversation(options:{allowed:boolean;scope:string;provi
       wakeCue:signal=>voiceCurrent()?wakeCue.play(signal):false,stopWakeCue:()=>wakeCue.stop(),releaseWakeCue:()=>wakeCue.release(),
       verify:async signal=>{const [config,voice]=await Promise.all([api<{configured:boolean}>('/voice/asr',{signal}),api<VoiceConfig>('/voice',{signal})]);if(!config.configured)throw new Error('尚未连接语音识别服务，请联系管理员在“语音与设备”中配置。');return {wake:voice.wake};},
       stopSpeech:()=>refs.current.speech.stop(),openAsr:openAsrSession,
-      stopChat:(id,signal)=>api(`/conversations/${encodeURIComponent(id)}/stop`,{method:'POST',signal:AbortSignal.any([signal,AbortSignal.timeout(10000)])}),
+      stopChat:(id,signal,expectedRequestId)=>api(`/conversations/${encodeURIComponent(id)}/stop`,{method:'POST',body:JSON.stringify({expectedRequestId}),signal:AbortSignal.any([signal,AbortSignal.timeout(10000)])}),
       createChat:async(providerId,signal)=>{const conversation=await api<Conversation>('/conversations',{method:'POST',body:JSON.stringify({mode:'chat',providerId}),signal});if(!conversation.id)throw new Error('未能创建语音聊天记录。');return conversation.id;},
       getChatRequest:()=>{
         // Capture before creating a conversation, so a slow connection cannot change the target.
         const assistant=refs.current.options.assistantSnapshot?.();
         return assistant?{assistant:{...assistant,permissions:{...assistant.permissions}},submissionId:crypto.randomUUID()}:undefined;
       },
-      streamChat:async(id,text,signal,onEvent,request)=>{
+      streamChat:async(id,text,signal,onEvent,request,clientRequestId)=>{
         const baseline=await reports.seed(id,signal);signal.throwIfAborted();
         if(!voiceCurrent())throw new DOMException('语音聊天已切换。','AbortError');
         if(baseline)acceptTasks(baseline);
@@ -70,7 +70,7 @@ export function useVoiceConversation(options:{allowed:boolean;scope:string;provi
           if(event.type==='task')setAssistantTasks(previous=>mergeAssistantTask(previous,event.data.task));
           if(event.type==='done'&&event.data.conversation)acceptTasks(event.data.conversation);
           onEvent(event);
-        },[],request);
+        },[],request,clientRequestId);
       },play:(text,id,signal)=>refs.current.speech.speakAsync(text,id,signal),
     });
     receiveReports.current=acceptTasks;

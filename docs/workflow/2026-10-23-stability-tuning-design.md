@@ -2,7 +2,7 @@
 
 - Date: 2026-10-23
 - Complexity: L1
-- Status: updated
+- Status: final
 
 ## Background
 
@@ -21,6 +21,8 @@
 ## Solution
 
 按 issue 顺序处理。将既有守护实现纳入仓库，保留进程身份、端口、维护标记与互斥保护，增加健康巡检和周期任务恢复；启动回执原子发布。先以隔离测试验证，再更新本机已有任务。聊天停止请求携带本轮身份，由服务端核对，旧客户端兼容路径保留。
+
+Chat 每轮发送 clientRequestId，停止携带 expectedRequestId，仅存储在活动任务内存中；不匹配立即返回 stopped:false。文字与语音均捕获原请求身份，普通LAN HTTP使用加密随机字节生成兼容UUID。旧客户端省略身份时保留 stop-current 行为，Agent 队列停止不变。
 
 ## Impact
 

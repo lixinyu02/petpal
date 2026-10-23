@@ -1,11 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createChatCompletion,mergeChatCompletionSnapshot,readChatTerminalSnapshot,startChatRecovery} from '../src/chat-completion.mjs';
+import {createChatCompletion,createChatRequestId,mergeChatCompletionSnapshot,readChatTerminalSnapshot,startChatRecovery} from '../src/chat-completion.mjs';
 
 const message=(id='reply',extra={})=>({id,role:'assistant',content:'完整回复',status:'complete',...extra});
 const chat=(extra={})=>({id:'chat-one',mode:'chat',title:'旧名称',messages:[message()],...extra});
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
 const flush=async()=>{for(let index=0;index<5;index++)await new Promise(resolve=>setImmediate(resolve));};
+
+test('Chat request IDs retain native UUIDs and use cryptographic bytes on plain LAN HTTP',()=>{
+  const native='a15f950b-364e-41af-9214-5017a24fd0cd';
+  assert.equal(createChatRequestId({randomUUID:()=>native}),native);
+  let seed=0;
+  const lan={getRandomValues(bytes){for(let i=0;i<bytes.length;i++)bytes[i]=seed+i;seed++;return bytes;}};
+  const first=createChatRequestId(lan),second=createChatRequestId(lan);
+  assert.match(first,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.notEqual(first,second);assert.equal(first,'00010203-0405-4607-8809-0a0b0c0d0e0f');
+});
 
 test('terminal snapshots identify the foreground reply and reject foreign or unfinished snapshots',()=>{
   const foreground=message(),background=message('report',{assistantTaskId:'task-one'});

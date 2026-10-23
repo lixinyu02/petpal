@@ -8,12 +8,12 @@
 
 - Goal: 修复已确认的服务恢复缺口与聊天停止竞争。
 - Ordering rule: Complete issues in sequence.
-- Current status: issue-1 done; issue-2 todo
+- Current status: all done
 
 ## Issue List
 
 - [x] issue-1 守护恢复与健康状态可靠性
-- [ ] issue-2 停止请求绑定本轮并完成网页验收
+- [x] issue-2 停止请求绑定本轮并完成网页验收
 
 ## issue-1
 
@@ -33,6 +33,6 @@
 - 范围: Chat 前后端停止任务身份核对、迟到请求回归、构建部署与 Chrome 验收
 - 依赖: issue-1
 - 验收标准: 停止上一条后快速发送下一条不会误停新回复；当前回复正常停止；保持鉴权与账号隔离。
-- 状态: todo
-- 验证方式: pending
-- commit: pending
+- 状态: done
+- 验证方式: 最终组合243项全通过；TypeScript、隔离生产构建、49模块OpenUI入口图检查通过。Chrome真实Qwen停止后重发完成，网络请求核对停止ID匹配原轮且下一轮不同；412×960无溢出/错误提示。网页与后端已部署，4账号/5模型/49下载保持；详见validation。
+- commit: 本 issue 提交
