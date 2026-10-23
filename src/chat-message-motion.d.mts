@@ -5,7 +5,7 @@ export interface MessageMotionTracker {
   saturated: boolean;
 }
 export interface MessageMotionLifecycle {
-  enter(ids: string[]): void;
+  enter(ids: readonly string[]): void;
   clear(): void;
   dispose(): void;
 }

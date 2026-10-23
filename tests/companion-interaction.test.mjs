@@ -253,6 +253,56 @@ test('joint sampling rechecks delayed gestures without a render and normalizes o
   f.dispatch('pointermove');hit=false;f.unbind.refresh();assert.equal(f.feedback.at(-1).phase,'cancel');
 });
 
+test('pointer intent, hit sampling and feedback share rectangles only within their current operation', t => {
+  let containerReads = 0, surfaceReads = 0, left = 0;
+  const container = { getBoundingClientRect: () => { containerReads++; return { left, top: 0, width: 100, height: 100 }; } };
+  const f = domFixture(t, {
+    onPointer: (_x, _y, readRect) => readRect(container),
+    pointAt: (x, _y, readRect) => { const rect = readRect(container); readRect(f.surface); return { hit: x >= rect.left, region: 'head' }; },
+    onFeedback: (value, readRect) => { if (value.phase !== 'cancel') readRect(container); return true; },
+  });
+  f.surface.getBoundingClientRect = () => { surfaceReads++; return { left, top: 0, width: 100, height: 100 }; };
+  f.dispatch('pointermove'); assert.equal(containerReads, 1); assert.equal(surfaceReads, 1);
+  f.dispatch('pointermove'); assert.equal(containerReads, 2); assert.equal(surfaceReads, 2, 'a new native event cannot use the previous event geometry');
+  f.unbind.refresh(); assert.equal(containerReads, 3); assert.equal(surfaceReads, 3);
+  left = 80; f.unbind.refresh(); assert.equal(containerReads, 4); assert.equal(surfaceReads, 4); assert.equal(f.surface.style.cursor, 'default');
+});
+
+test('delayed hover, hold and tap obtain fresh rectangles rather than retaining the arrival operation', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let left = 0, reads = 0;
+  const container = { getBoundingClientRect: () => { reads++; return { left, top: 0, width: 100, height: 100 }; } };
+  const f = domFixture(t, {
+    onPointer: (_x, _y, readRect) => readRect(container),
+    pointAt: (x, _y, readRect) => ({ hit: x >= readRect(container).left, region: 'head' }),
+    onFeedback: (value, readRect) => { if (value.phase !== 'cancel') readRect(container); return true; },
+  });
+  for (const mode of ['hover', 'hold', 'tap']) {
+    left = 0; f.dispatch('pointercancel', {}, f.win);
+    if (mode === 'hover') f.dispatch('pointermove');
+    else { f.dispatch('pointerdown'); if (mode === 'tap') f.dispatch('pointerup', {}, f.win); }
+    const before = reads; left = 80; t.mock.timers.tick(1000);
+    assert.equal(reads, before + 1, `${mode} timer performs a new geometry read`);
+    assert.deepEqual(f.emitted, [], mode); assert.equal(f.surface.style.cursor, 'default');
+  }
+});
+
+test('a reentrant pointer operation has fresh geometry and restores the outer operation cache', t => {
+  let left = 0, reads = 0, nesting = false;
+  const observed = [], container = { getBoundingClientRect: () => { reads++; return { left, top: 0, width: 100, height: 100 }; } };
+  const f = domFixture(t, {
+    onPointer: (_x, _y, readRect) => {
+      observed.push(readRect(container).left);
+      if (!nesting) { nesting = true; left = 20; f.dispatch('pointermove'); nesting = false; observed.push(readRect(container).left); }
+    },
+    pointAt: (_x, _y, readRect) => ({ hit: readRect(container).left <= 40 }),
+    onFeedback: (value, readRect) => { if (value.phase !== 'cancel') readRect(container); return true; },
+  });
+  f.dispatch('pointermove');
+  assert.deepEqual(observed, [0, 20, 0]); assert.equal(reads, 2);
+  left = 30; f.unbind.refresh(); assert.equal(reads, 3, 'the cache is released when the outer operation ends');
+});
+
 test('mouse hover changes the cursor only over the character and only hides it with visible feedback', t => {
   const f = domFixture(t); f.setHit(false); const emptyMove = f.dispatch('pointermove');
   assert.equal(emptyMove.defaultPrevented,false); assert.equal(f.surface.style.cursor,'default'); assert.equal(f.feedback.at(-1).phase,'cancel');

@@ -121,3 +121,13 @@ test('browser transform serialization cannot turn a stationary refresh into anot
   for(let frame=0;frame<30;frame++)f.update();assert.equal(writes,1);
   f.update({x:120});assert.equal(writes,2);
 });
+
+test('feedback can use an operation-local rectangle reader without retaining its old geometry', t => {
+  const f = fixture(t); let reads = 0, left = 10;
+  f.container.getBoundingClientRect = () => { throw new Error('the shared operation reader owns this measurement'); };
+  const readRect = element => { assert.equal(element, f.container); reads++; return { left, top: 20, width: 240, height: 360 }; };
+  const value = { phase: 'hover', x: 100, y: 140, pointerType: 'mouse', hit: true };
+  assert.equal(f.feedback.update(value, f.surface, readRect), true); assert.equal(f.element.style.transform, 'translate3d(90px,120px,0)');
+  left = 30; assert.equal(f.feedback.update(value, f.surface, readRect), true); assert.equal(f.element.style.transform, 'translate3d(70px,120px,0)');
+  assert.equal(reads, 2);
+});

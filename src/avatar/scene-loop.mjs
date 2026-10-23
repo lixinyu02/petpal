@@ -55,3 +55,21 @@ export function updateSceneDataset(dataset, values) {
     if (dataset[key] !== value) dataset[key] = value;
   }
 }
+
+/** Sample diagnostic numbers, never the animation itself. Semantic changes and
+ * the first two completed frames remain immediately observable by native hosts. */
+export function createSceneDatasetPublisher({ intervalMs = 100 } = {}) {
+  const interval = Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 100;
+  let publishedAt = null;
+  return {
+    publish(dataset, semantic, continuous, { now, frame }) {
+      const changed = Object.entries(semantic).some(([key, value]) => dataset[key] !== value);
+      if (frame > 2 && !changed && publishedAt !== null && now >= publishedAt && now - publishedAt + .001 < interval) return false;
+      // Keep formatting/allocation of continuous diagnostics behind the gate.
+      updateSceneDataset(dataset, { ...semantic, ...continuous() });
+      publishedAt = now;
+      return true;
+    },
+    invalidate() { publishedAt = null; },
+  };
+}

@@ -120,10 +120,22 @@ export function createCompanionGestures({ emit, getAction, onFeedback = () => {}
 export function bindCompanionGestures(surface, { hitTest, regionAt, pointAt, emit, getAction, onPointer = () => {}, onLeave = () => {}, onFeedback, enabled = () => true }) {
   const originalCursor = surface.style.cursor;
   let lastPoint = null, disposed = false;
+  let rectangles = null;
+  // Never retain geometry between events, refreshes or delayed gestures. One
+  // operation can share a container rect across pointer intent and feedback.
+  const readRect = element => {
+    if (!rectangles) return element.getBoundingClientRect();
+    if (!rectangles.has(element)) rectangles.set(element, element.getBoundingClientRect());
+    return rectangles.get(element);
+  };
+  const operation = callback => (...args) => {
+    const previous = rectangles; rectangles = new Map();
+    try { return callback(...args); } finally { rectangles = previous; }
+  };
   // One sample per operation, never across operations: animated geometry and
   // delayed gestures must still see the current layout.
   const sample = (x, y) => {
-    const current = pointAt ? pointAt(x, y) : { hit: hitTest(x, y), region: regionAt?.(x, y) };
+    const current = pointAt ? pointAt(x, y, readRect) : { hit: hitTest(x, y, readRect), region: regionAt?.(x, y, readRect) };
     return { hit: current.hit, ...((pointAt || regionAt) ? { region: current.region || undefined } : {}) };
   };
   const validPoint = point => {
@@ -134,23 +146,24 @@ export function bindCompanionGestures(surface, { hitTest, regionAt, pointAt, emi
     if (value.phase !== 'cancel' && !enabled()) value = { phase: 'cancel' };
     if (value.phase === 'cancel') lastPoint = null;
     else lastPoint = value;
-    const visible = onFeedback?.(value) === true;
+    const visible = onFeedback?.(value, readRect) === true;
     const cursor = value.phase !== 'cancel' && value.hit && value.pointerType === 'mouse' ? visible ? 'none' : 'pointer' : 'default';
     if (surface.style.cursor !== cursor) surface.style.cursor = cursor;
   };
   const gestures = createCompanionGestures({
     emit: (action, context) => { if (enabled()) emit(action, context); }, getAction, onFeedback: feedback,
     validatePoint: point => enabled() && (point.pointerType === 'keyboard' || validPoint(point)),
+    schedule: (callback, delay) => setTimeout(operation(callback), delay),
   });
   const point = event => ({ id: event.pointerId, x: event.clientX, y: event.clientY, pointerType: event.pointerType, button: event.button, buttons: event.buttons, isPrimary: event.isPrimary, ...(enabled() ? sample(event.clientX, event.clientY) : { hit: false }) });
-  const down = event => { if (enabled()) gestures.down(point(event)); };
-  const move = event => {
+  const down = operation(event => { if (enabled()) gestures.down(point(event)); });
+  const move = operation(event => {
     if (!enabled()) return;
-    onPointer(event.clientX, event.clientY);
+    onPointer(event.clientX, event.clientY, readRect);
     const next = point(event), active = gestures.move(next);
     if (!active && next.pointerType === 'mouse') feedback({ ...next, phase: next.hit ? 'hover' : 'cancel' });
-  };
-  const up = event => { if (enabled()) gestures.up(point(event)); };
+  });
+  const up = operation(event => { if (enabled()) gestures.up(point(event)); });
   const cancel = () => { gestures.cancel(); feedback({ phase: 'cancel' }); onLeave(); };
   const leave = event => {
     // Touch/pen pointerleave follows pointerup even when contact ended over the
@@ -165,7 +178,7 @@ export function bindCompanionGestures(surface, { hitTest, regionAt, pointAt, emi
   const keyDown = event => { if (enabled() && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); gestures.keyDown(event.key, event.repeat); } };
   const keyUp = event => { if (enabled() && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); gestures.keyUp(event.key); } };
   const click = event => { if (enabled() && event.detail === 0) gestures.activate(); };
-  const contextMenu = event => { if (enabled() && sample(event.clientX,event.clientY).hit) event.preventDefault(); };
+  const contextMenu = operation(event => { if (enabled() && sample(event.clientX,event.clientY).hit) event.preventDefault(); });
   surface.addEventListener('pointerdown', down); surface.addEventListener('pointermove', move); surface.addEventListener('pointerleave', leave);
   surface.addEventListener('keydown', keyDown); surface.addEventListener('keyup', keyUp); surface.addEventListener('click', click); surface.addEventListener('contextmenu', contextMenu); surface.addEventListener('blur', cancel);
   window.addEventListener('pointerdown', outsideDown); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', cancel); window.addEventListener('blur', cancel);
@@ -182,11 +195,11 @@ export function bindCompanionGestures(surface, { hitTest, regionAt, pointAt, emi
   };
   // Renderers call this after moving the character or swapping WebGL/fallback.
   // A stationary mouse must not retain an invisible hand over empty stage space.
-  unbind.refresh = () => {
-    if (disposed || !lastPoint) return;
+  const refresh = operation(() => {
     if (!enabled() || !validPoint(lastPoint)) cancel();
     else if (lastPoint.pointerType === 'mouse') feedback(lastPoint);
-  };
+  });
+  unbind.refresh = () => { if (!disposed && lastPoint) refresh(); };
   return unbind;
 }
 

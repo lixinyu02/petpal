@@ -44,13 +44,15 @@ export function canAnimateMessageMotion(document) {
 /** One delegated lifecycle per mounted list; no timers, frames or observers. */
 export function attachMessageMotion(list, document) {
   let disposed = false;
+  const activeRows = new Set();
   const window = document.defaultView;
   const finishRow = row => {
+    if (!activeRows.delete(row)) return;
     row.classList.remove('ui-message-enter');
     row.removeAttribute('data-ui-enter');
   };
   const clear = () => {
-    for (const row of list.children) finishRow(row);
+    for (const row of activeRows) finishRow(row);
   };
   const finish = event => {
     const row = event.target;
@@ -66,10 +68,14 @@ export function attachMessageMotion(list, document) {
   return {
     enter(ids) {
       if (disposed) return;
+      // Removed rows may never bubble animationend. Release only this
+      // lifecycle's active markers, without scanning static history.
+      for (const row of activeRows) if (row.parentElement !== list) finishRow(row);
       if (!canAnimateMessageMotion(document)) { clear(); return; }
       if (!ids.length) return;
       const arrivals = new Set(ids);
-      for (const row of list.children) if (arrivals.has(row.dataset.messageId)) {
+      for (const row of list.children) if (arrivals.has(row.dataset.messageId) && !activeRows.has(row)) {
+        activeRows.add(row);
         row.setAttribute('data-ui-enter', 'true');
         row.classList.add('ui-message-enter');
       }

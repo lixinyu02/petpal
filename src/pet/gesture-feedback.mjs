@@ -26,7 +26,7 @@ export function createCompanionFeedback(container, { motionQuery = globalThis.ma
     else if (reduced && element.dataset.phase === 'stroke') { clearTimer(); data('phase', 'press'); }
   };
   reduce(); motionQuery?.addEventListener?.('change', reduce);
-  function update(value, surface) {
+  function update(value, surface, readRect = element => element.getBoundingClientRect()) {
     if (disposed) return false;
     if (value.phase === 'cancel') { if (!owner || owner === surface) hide(); return false; }
     if (!value.hit || !Number.isFinite(value.x) || !Number.isFinite(value.y) || document.hidden || !['mouse', 'touch', 'pen'].includes(value.pointerType)) {
@@ -35,7 +35,7 @@ export function createCompanionFeedback(container, { motionQuery = globalThis.ma
     }
     if (value.phase === 'hover' && value.pointerType !== 'mouse') return false;
     if (value.phase === 'release' && value.pointerType !== 'mouse' && (owner !== surface || element.hidden)) return false;
-    const rect = container.getBoundingClientRect();
+    const rect = readRect(container);
     const x = value.x - rect.left, y = value.y - rect.top;
     if (x < 0 || y < 0 || x > rect.width || y > rect.height) { if (!owner || owner === surface) hide(); return false; }
     // Rendering refreshes repeat the last pointer input. Only a new phase,

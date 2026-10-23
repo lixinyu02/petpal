@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createVisibleSceneLoop, updateSceneDataset } from '../src/avatar/scene-loop.mjs';
+import { createVisibleSceneLoop, createSceneDatasetPublisher, updateSceneDataset } from '../src/avatar/scene-loop.mjs';
 import { createAvatarPerformance } from '../src/avatar/performance.mjs';
 import { createPetBehavior } from '../src/pet/behavior.mjs';
 
@@ -171,4 +171,38 @@ test('scene diagnostic values mutate only when changed and preserve all keys', (
   updateSceneDataset(dataset, { ...initial, mouthOpen: '0.500' });
   assert.deepEqual(writes.at(-1), ['mouthOpen', '0.500']); assert.equal(writes.length, 4);
   assert.deepEqual(storage, { ...initial, mouthOpen: '0.500' });
+});
+
+test('diagnostic sampling preserves the first two frames and skips continuous work between 100ms boundaries', () => {
+  const publisher = createSceneDatasetPublisher(), dataset = {}, formatted = [];
+  const semantic = { phase: 'idle', petAction: 'idle', expression: 'neutral', gesture: 'none' };
+  for (let frame = 1; frame <= 300; frame++) {
+    publisher.publish(dataset, semantic, () => { formatted.push(frame); return { renderFrames: String(frame), breath: String(frame / 300) }; }, { now: (frame - 1) * 1000 / 30, frame });
+    if (frame <= 2) assert.equal(dataset.renderFrames, String(frame), 'native readiness sees each of the first two completed frames');
+    assert.ok(frame - Number(dataset.renderFrames) <= 3, 'only the diagnostic counter is sampled');
+  }
+  assert.deepEqual(formatted.slice(0, 4), [1, 2, 5, 8]);
+  assert.equal(formatted.length, 101);
+  assert.equal(dataset.renderFrames, '299');
+});
+
+test('diagnostic semantic transitions publish immediately without waiting for the sample period', () => {
+  const publisher = createSceneDatasetPublisher(), dataset = {};
+  let frame = 1, now = 0;
+  const semantic = { phase: 'idle', petAction: 'idle', gesture: 'none', gestureCueId: '', expression: 'neutral', mouthShape: 'rest', microExpression: 'none', motionGroup: 'Idle', motionEnabled: 'true' };
+  const publish = () => publisher.publish(dataset, semantic, () => ({ renderFrames: String(frame) }), { now, frame });
+  publish(); frame++; now++; publish(); frame++; now++; assert.equal(publish(), false);
+  for (const [key, value] of Object.entries({ phase: 'listening', petAction: 'pet', gesture: 'sway', gestureCueId: 'gesture-1', expression: 'tender', mouthShape: 'O', microExpression: 'glance', motionGroup: 'TapHead', motionEnabled: 'false' })) {
+    semantic[key] = value; frame++; now++;
+    assert.equal(publish(), true, key); assert.equal(dataset[key], value); assert.equal(dataset.renderFrames, String(frame));
+  }
+});
+
+test('diagnostic invalidation and clock changes publish fresh numbers without changing the animation clock', () => {
+  const publisher = createSceneDatasetPublisher(), dataset = {}, semantic = { phase: 'idle' };
+  const publish = (frame, now) => publisher.publish(dataset, semantic, () => ({ renderFrames: String(frame), mouthOpen: String(frame) }), { now, frame });
+  publish(1, 100); publish(2, 133); assert.equal(publish(3, 166), false);
+  publisher.invalidate(); assert.equal(publish(4, 167), true, 'a resumed scene does not retain the hidden mouth snapshot');
+  assert.equal(publish(5, 168), false); assert.equal(publish(6, 50), true, 'a reset clock cannot suppress diagnostics indefinitely');
+  assert.equal(publish(7, 150 - 1e-10), true, 'floating point cadence boundaries do not add a stale frame');
 });

@@ -29,3 +29,14 @@ Chrome 打开：
 - 桌面 Chrome 需要实际保持前台、窗口无遮挡；禁止通过改写 `document.hidden` 或伪造焦点让样本通过。
 
 完整 JSON 始终显示于 `#benchmark-report`；静态服务另保存至输出目录的 `runs/`。初版自检的输出与补充评估保留在 `chat-baseline/` 根目录，该初版遇到了可见但约 1Hz 的 rAF，不能作为性能基线。
+
+## 独立真实 DOM 语义页
+
+性能页的 `fixture.tsx`、`fixture.css`、`index.html` 前后保持字节一致。语义检查通过单独入口和构建执行，不将 development StrictMode 混入性能样本：
+
+```powershell
+node scripts/benchmark-chat-ui.mjs build --semantics --output .data/deep-fluidity-20261023/chat-semantics/frozen-01 --label issue2-chat-semantics
+node scripts/benchmark-chat-ui.mjs serve --output .data/deep-fluidity-20261023/chat-semantics/frozen-01 --port 45331
+```
+
+打开 `http://127.0.0.1:45331/`，点击“运行全部语义检查”。十项检查使用实际 development React DOM 和 StrictMode：OpenUI 及同层行、头部删除、跨 32/64 边界重排、表单值/焦点/选择区/横向滚动、最新回调及实际 SDK 表单状态、朗读归属、权限控件状态、canonical ID、动画取消/策略变化/删除、会话 scope 隔离。JSON 见 `#semantics-report` 和该独立冻结目录的 `runs/`。任何一项失败即停止并保留错误，不将该页用于性能比较。

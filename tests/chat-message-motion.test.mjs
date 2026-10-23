@@ -156,3 +156,18 @@ test('arrival and cancellation lifecycle needs no timer, animation frame or obse
     if(observer===undefined)delete globalThis.MutationObserver;else globalThis.MutationObserver=observer;
   }
 });
+
+test('empty and reduced-motion updates never clear static history and active clears are idempotent',()=>{
+  const f=fixture(),history=f.row('history'),added=f.row('new');let removals=0,attributes=0,adds=0;
+  history.classList.remove=()=>assert.fail('static history class must not be touched');history.removeAttribute=()=>assert.fail('static history attribute must not be touched');
+  const remove=added.classList.remove,attribute=added.removeAttribute.bind(added),add=added.classList.add;added.classList.remove=name=>{removals++;remove(name);};added.removeAttribute=name=>{attributes++;attribute(name);};added.classList.add=name=>{adds++;add(name);};
+  const motion=attachMessageMotion(f.list,f.document);motion.clear();for(let i=0;i<100;i++)motion.enter([]);assert.equal(removals,0);assert.equal(attributes,0);
+  motion.enter(['new']);motion.enter(['new']);assert.equal(adds,1,'a repeated arrival cannot restart the current animation');motion.clear();motion.clear();assert.equal(removals,1);assert.equal(attributes,1);
+  f.policy('reduced');for(let i=0;i<100;i++)motion.enter([]);motion.dispose();assert.equal(removals,1);assert.equal(attributes,1);
+});
+
+test('removing an animating row releases its markers without waiting for an event or touching static rows',()=>{
+  const f=fixture(),history=f.row('history'),added=f.row('new');history.classList.remove=()=>assert.fail('static history must remain untouched');history.removeAttribute=()=>assert.fail('static history must remain untouched');
+  let clears=0;const remove=added.classList.remove;added.classList.remove=name=>{clears++;remove(name);};const motion=attachMessageMotion(f.list,f.document);motion.enter(['new']);f.list.children=[history];added.parentElement=null;
+  motion.enter([]);assert.equal(added.classList.contains('ui-message-enter'),false);assert.equal(added.dataset.uiEnter,undefined);assert.equal(clears,1);motion.clear();motion.dispose();assert.equal(clears,1);
+});

@@ -6,6 +6,7 @@ import { createAvatarPerformance } from '../src/avatar/performance.mjs';
 import { createAvatarPresence } from '../src/avatar/presence.mjs';
 import { createCompanionActionState } from '../src/avatar/action-state.mjs';
 import { animePoseTransform } from '../src/avatar/anime-pose-render.mjs';
+import { createSceneDatasetPublisher } from '../src/avatar/scene-loop.mjs';
 
 // Execute the real TSX effect/frame. Only React lifecycle/DOM, rendering and
 // asynchronous native readiness are controlled; the action state is real.
@@ -13,7 +14,7 @@ function createSceneHarness(props = {}) {
   const effects = [], frames = [], states = [], updates = [];
   const hooks = [], listeners = new Map();
   let hookIndex = 0, tree, currentProps = props;
-  let finishLoad, failLoad, fallbackImports = 0;
+  let finishLoad, failLoad, fallbackImports = 0, renders = 0;
   const Suspense = function Suspense() {}, AvatarLoading = function AvatarLoading() {};
   const attributes = new Map();
   const surface = {
@@ -61,6 +62,7 @@ function createSceneHarness(props = {}) {
     '../action-state.mjs': { createCompanionActionState },
     '../scene-loop.mjs': {
       createVisibleSceneLoop: callback => { frames.push(callback); return { setActive() {}, dispose() {} }; },
+      createSceneDatasetPublisher,
       updateSceneDataset: (dataset, values) => Object.assign(dataset, values),
     },
     '../../pet/interaction.mjs': { bindCompanionGestures: () => Object.assign(() => {}, { refresh() {} }) },
@@ -89,12 +91,13 @@ function createSceneHarness(props = {}) {
     get fallback() { return tree.props.children[0]?.type === Suspense ? tree.props.children[0].props.children : null; },
     get actionState() { return hooks.map(hook => hook?.ref?.current).find(value => typeof value?.consumeCommand === 'function'); },
     get fallbackImports() { return fallbackImports; },
+    get renders() { return renders; },
     async loadFallback() { await this.fallback.type.loader(); },
     surface, states, updates,
     async resolveNative() {
       finishLoad({
         update(_dt, _pose, _follow, options) { updates.push(options); },
-        render() {}, release() {}, react() {}, supportedParameters: [], motionGroup: 'Idle', mocVersion: 5, coreVersion: 6,
+        render() { renders++; }, release() {}, react() {}, supportedParameters: [], motionGroup: 'Idle', mocVersion: 5, coreVersion: 6,
       });
       await new Promise(resolve => setImmediate(resolve));
       render();
@@ -173,4 +176,25 @@ test('native rejection loads recovery only on demand and manual retry preserves 
   scene.retry(); assert.equal(scene.loading, true); assert.equal(scene.actionState, shared);
   await scene.resolveNative(); scene.frame(100);
   assert.equal(scene.surface.dataset.petAction, 'sleep'); assert.equal(scene.updates.at(-1).sleeping, true);
+});
+
+test('the actual Cubism frame keeps every update and render while diagnostic numbers are sampled', async t => {
+  const scene = createSceneHarness(); t.after(() => scene.dispose()); await scene.resolveNative();
+  for (let frame = 1; frame <= 300; frame++) {
+    scene.frame(100 + (frame - 1) * 1000 / 30);
+    if (frame <= 2) assert.equal(scene.surface.dataset.renderFrames, String(frame));
+    assert.ok(frame - Number(scene.surface.dataset.renderFrames) <= 3);
+  }
+  assert.equal(scene.renders, 300); assert.equal(scene.updates.length, 300);
+  assert.ok(Number(scene.surface.dataset.renderFrames) < 300, 'the diagnostic cadence is separate from drawing');
+});
+
+test('the actual Cubism frame publishes listening and rest semantics between diagnostic samples', async t => {
+  const scene = createSceneHarness(); t.after(() => scene.dispose()); await scene.resolveNative();
+  scene.frame(100); scene.frame(133); scene.frame(166); assert.equal(scene.surface.dataset.renderFrames, '2');
+  scene.rebuild({ performanceInput: { utteranceId: 'listen', text: '', phase: 'listening' } });
+  scene.frame(167); assert.equal(scene.surface.dataset.phase, 'listening'); assert.equal(scene.surface.dataset.renderFrames, '4');
+  scene.rebuild({ command: { id: 44, action: 'sleep' } }); scene.frame(168);
+  assert.equal(scene.surface.dataset.petAction, 'sleep'); assert.equal(scene.surface.dataset.motionEnabled, 'false'); assert.equal(scene.surface.dataset.renderFrames, '5');
+  assert.equal(scene.renders, 5);
 });

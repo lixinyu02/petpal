@@ -1,10 +1,11 @@
-import {memo,useLayoutEffect,useRef} from 'react';
+import {memo,useLayoutEffect,useRef,type ReactElement} from 'react';
 import {Copy,CornerDownRight,Loader2,PawPrint,Square,Volume2} from 'lucide-react';
 import {MessageImages} from './Attachments';
 import AssistantOutput from './openui/AssistantOutput';
 import type {Message} from './api';
 import {advanceMessageMotion,attachMessageMotion,canAnimateMessageMotion,createMessageMotionTracker} from './chat-message-motion.mjs';
 import type {MessageMotionLifecycle,MessageMotionTracker} from './chat-message-motion.mjs';
+import {prepareChatElements,type ChatElementSnapshot} from './chat-element-cache.mjs';
 
 type RowProps={message:Message;petName:string;mode:'chat'|'codex';working:boolean;busy:boolean;sleeping:boolean;supported:boolean;feedback:string;reading:boolean;pending:boolean;error:string;onRead(message:Message):void;onStop():void;onNotice(notice:string):void;onUseInPrompt?:(text:string)=>void};
 export const ChatMessageRow=memo(function ChatMessageRow({message,petName,mode,working,busy,sleeping,supported,feedback,reading,pending,error,onRead,onStop,onNotice,onUseInPrompt}:RowProps) {
@@ -26,11 +27,18 @@ export const ChatMessageRow=memo(function ChatMessageRow({message,petName,mode,w
     </div>
   </div>;
 });
+const createRowElement=(key:string,props:RowProps)=><ChatMessageRow key={key} {...props}/>;
 
 type Props={conversationId?:string;messages:Message[];petName:string;mode:'chat'|'codex';working:boolean;busy:boolean;sleeping:boolean;speechId:string;speechPlaying:boolean;speechPending:boolean;speechSupported:boolean;speechFeedback:string;speechError:string;onRead(message:Message):void;onStop():void;onNotice(notice:string):void;onUseInPrompt?:(text:string)=>void};
 /** Audio level and character boundaries belong to the portrait, not the message list. */
 export default memo(function ChatMessages({conversationId='new',messages,petName,mode,working,busy,sleeping,speechId,speechPlaying,speechPending,speechSupported,speechFeedback,speechError,onRead,onStop,onNotice,onUseInPrompt}:Props) {
   const list=useRef<HTMLDivElement>(null),tracker=useRef<MessageMotionTracker|null>(null),motion=useRef<MessageMotionLifecycle|null>(null),scope=useRef<string|null>(null);
+  const committed=useRef<ChatElementSnapshot<Message,RowProps,ReactElement>|null>(null);
+  const prepared=prepareChatElements(committed.current,conversationId,messages,message=>{
+    const owns=speechId.startsWith(message.id+'-manual-')||speechId.startsWith(message.id+'-auto-');
+    return {message,petName,mode,working,busy,sleeping,supported:speechSupported,feedback:speechFeedback,reading:owns&&speechPlaying,pending:owns&&speechPending,error:owns?speechError:'',onRead,onStop,onNotice,onUseInPrompt};
+  },createRowElement);
+  useLayoutEffect(()=>{committed.current=prepared;},[prepared]);
   useLayoutEffect(()=>{
     const element=list.current;if(!element)return;
     const lifecycle=attachMessageMotion(element,element.ownerDocument);motion.current=lifecycle;
@@ -40,11 +48,8 @@ export default memo(function ChatMessages({conversationId='new',messages,petName
     const element=list.current;if(!element)return;
     if(!tracker.current)tracker.current=createMessageMotionTracker();
     if(scope.current!==conversationId){motion.current?.clear();scope.current=conversationId;}
-    const arrivals=advanceMessageMotion(tracker.current,conversationId,messages.map(message=>message.id),canAnimateMessageMotion(element.ownerDocument));
+    const arrivals=advanceMessageMotion(tracker.current,conversationId,prepared.ids,canAnimateMessageMotion(element.ownerDocument));
     motion.current?.enter(arrivals);
-  },[messages,conversationId]);
-  return <div ref={list} className="messages">{messages.map(message=>{
-    const owns=speechId.startsWith(message.id+'-manual-')||speechId.startsWith(message.id+'-auto-');
-    return <ChatMessageRow key={`${conversationId}:${message.id}`} message={message} petName={petName} mode={mode} working={working} busy={busy} sleeping={sleeping} supported={speechSupported} feedback={speechFeedback} reading={owns&&speechPlaying} pending={owns&&speechPending} error={owns?speechError:''} onRead={onRead} onStop={onStop} onNotice={onNotice} onUseInPrompt={onUseInPrompt}/>;
-  })}</div>;
+  },[prepared.ids,conversationId]);
+  return <div ref={list} className="messages">{prepared.elements}</div>;
 });

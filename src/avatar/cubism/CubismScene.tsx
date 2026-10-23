@@ -5,8 +5,8 @@ import type { PetAction, PetBehaviorState, PetInteraction } from '../../pet/beha
 import { createAvatarPerformance, type PerformanceInput } from '../performance.mjs';
 import { createAvatarPresence } from '../presence.mjs';
 import { createCompanionActionState } from '../action-state.mjs';
-import { createVisibleSceneLoop, updateSceneDataset } from '../scene-loop.mjs';
-import { bindCompanionGestures, portraitContains, portraitCoordinates, cubismPortraitCoordinates, portraitRegion, type CompanionGestureContext } from '../../pet/interaction.mjs';
+import { createVisibleSceneLoop, createSceneDatasetPublisher, updateSceneDataset } from '../scene-loop.mjs';
+import { bindCompanionGestures, portraitContains, portraitCoordinates, cubismPortraitCoordinates, portraitRegion, type CompanionGestureContext, type CompanionRectReader } from '../../pet/interaction.mjs';
 import { createCompanionFeedback } from '../../pet/gesture-feedback.mjs';
 import { animePoseTransform } from '../anime-pose-render.mjs';
 import { createCubismAvatar, type CubismAvatar } from './runtime.mjs';
@@ -55,6 +55,7 @@ export default function CubismScene(props: CubismSceneProps) {
     const smallScreen = compact || matchMedia('(pointer: coarse)').matches;
     let localInput: PerformanceInput = { utteranceId: 'idle', text: '', phase: 'idle' };
     const loop = createVisibleSceneLoop(now => frame(now), { maxFps: 30 });
+    const diagnostics = createSceneDatasetPublisher();
     setMode('loading'); readyCallbackSent.current = false;
     container.dataset.avatarMode = 'loading'; delete container.dataset.cubismFallbackReason;
     surface.dataset.renderer = 'webgl'; surface.dataset.avatarRenderer = 'cubism'; surface.dataset.petCount = '1';
@@ -83,6 +84,7 @@ export default function CubismScene(props: CubismSceneProps) {
     const visibility = () => {
       const visible = !document.hidden && inView;
       last = 0;
+      diagnostics.invalidate();
       if (!visible) {
         unbind.refresh();
         performance.setInput(callbacks.current.performanceInput || localInput);
@@ -113,23 +115,23 @@ export default function CubismScene(props: CubismSceneProps) {
       emitState(); if (userGesture && context?.source !== 'hover') callbacks.current.onInteract?.(next);
     };
     const feedback = createCompanionFeedback(container, { motionQuery: media });
-    const hitCoordinates = (x: number, y: number) => (referencePortrait ? cubismPortraitCoordinates : portraitCoordinates)(surface.getBoundingClientRect(), x, y);
+    const hitCoordinates = (x: number, y: number, readRect: CompanionRectReader) => (referencePortrait ? cubismPortraitCoordinates : portraitCoordinates)(readRect(surface), x, y);
     const unbind = bindCompanionGestures(surface, {
       enabled: () => interactive && Boolean(runtime) && !disposed && !document.hidden && inView && surface.getAttribute('aria-hidden') !== 'true',
-      hitTest: (x, y) => portraitContains(hitCoordinates(x, y)),
-      pointAt: (x, y) => {
-        const point = hitCoordinates(x, y);
+      hitTest: (x, y, readRect) => portraitContains(hitCoordinates(x, y, readRect)),
+      pointAt: (x, y, readRect) => {
+        const point = hitCoordinates(x, y, readRect);
         if (!referencePortrait) return { hit: portraitContains(point) };
         const region = portraitRegion(point);
         return { hit: region !== null, region: region || undefined };
       },
       getAction: () => actionState.snapshot().action, emit: (next, context) => interact(next, true, context),
-      onPointer: (x, y) => { const rect = container.getBoundingClientRect(); pointerX = clamp((x - rect.left) / Math.max(1, rect.width) * 2 - 1); pointerY = clamp(1 - (y - rect.top) / Math.max(1, rect.height) * 2); },
+      onPointer: (x, y, readRect) => { const rect = readRect(container); pointerX = clamp((x - rect.left) / Math.max(1, rect.width) * 2 - 1); pointerY = clamp(1 - (y - rect.top) / Math.max(1, rect.height) * 2); },
       onLeave: () => { pointerX = pointerY = 0; delete surface.dataset.hoverRegion; },
-      onFeedback: value => {
+      onFeedback: (value, readRect) => {
         if (value.phase === 'cancel') { if (surface.dataset.hoverRegion !== undefined) delete surface.dataset.hoverRegion; }
         else if (value.region && surface.dataset.hoverRegion !== value.region) surface.dataset.hoverRegion = value.region;
-        return feedback.update(value, surface);
+        return feedback.update(value, surface, readRect);
       },
     });
     const lost = (event: Event) => { event.preventDefault(); fail('webgl-context-lost'); };
@@ -167,15 +169,16 @@ export default function CubismScene(props: CubismSceneProps) {
         runtime.render();
       }
       catch (error) { if (development) console.error('PetPal Cubism frame failed:', error); fail(error instanceof Error ? error.message : 'render-failed'); return; }
-      updateSceneDataset(surface.dataset, {
-        renderFrames: String(++frames), phase: input.phase, petAction: action, petReady: 'true', expression: pose.expression,
-        mouthOpen: (sleeping ? 0 : pose.mouthOpen).toFixed(3), mouthShape: pose.mouthShape,
-        blinkLeft: (sleeping ? 1 : pose.blinkLeft).toFixed(3), blinkRight: (sleeping ? 1 : pose.blinkRight).toFixed(3),
+      frames++;
+      diagnostics.publish(surface.dataset, {
+        phase: input.phase, petAction: action, petReady: 'true', expression: pose.expression, mouthShape: pose.mouthShape,
         speechSource: input.speech ? 'playback-progress' : 'text-progress', gesture: pose.gesture, gestureCueId: pose.gestureCueId, microExpression: pose.microExpression,
-        avatarPresence: 'cubism', gazeX: gazeX.toFixed(3), gazeY: gazeY.toFixed(3), headFollowX: follow.headX.toFixed(3), headFollowY: follow.headY.toFixed(3),
-        motionGroup: runtime.motionGroup,
-        breath: follow.breath.toFixed(3), motionEnabled: String(!media.matches && !sleeping), mocVersion: String(runtime.mocVersion), coreVersion: String(runtime.coreVersion),
-      });
+        avatarPresence: 'cubism', motionGroup: runtime.motionGroup, motionEnabled: String(!media.matches && !sleeping), mocVersion: String(runtime.mocVersion), coreVersion: String(runtime.coreVersion),
+      }, () => ({
+        renderFrames: String(frames), mouthOpen: (sleeping ? 0 : pose.mouthOpen).toFixed(3),
+        blinkLeft: (sleeping ? 1 : pose.blinkLeft).toFixed(3), blinkRight: (sleeping ? 1 : pose.blinkRight).toFixed(3),
+        gazeX: gazeX.toFixed(3), gazeY: gazeY.toFixed(3), headFollowX: follow.headX.toFixed(3), headFollowY: follow.headY.toFixed(3), breath: follow.breath.toFixed(3),
+      }), { now, frame: frames });
       if (frames === 1) { surface.style.visibility = 'visible'; surface.removeAttribute('aria-hidden'); surface.tabIndex = interactive ? 0 : -1; container.dataset.avatarMode = 'cubism'; setMode('cubism'); ready(); emitState(); }
     };
     void createCubismAvatar({ canvas: surface, modelUrl, signal: abort.signal, compact: smallScreen }).then(avatar => {

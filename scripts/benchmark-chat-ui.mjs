@@ -17,20 +17,21 @@ if(!['build','serve'].includes(command))throw new Error('Usage: node scripts/ben
 if(command==='build'){
   await mkdir(path.dirname(output),{recursive:true});await mkdir(output);await mkdir(path.join(output,'web'));
   const inputs=new Map(),buildId=randomUUID(),gitHead=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
-  const result=await build({absWorkingDir:root,entryPoints:[path.join(fixture,'fixture.tsx')],outdir:path.join(output,'web'),bundle:true,splitting:true,format:'esm',platform:'browser',target:'es2022',jsx:'automatic',minify:true,metafile:true,entryNames:'assets/fixture-[hash]',chunkNames:'assets/chunk-[hash]',assetNames:'assets/file-[hash]',define:{'process.env.NODE_ENV':'"production"','process.env.OPENUI_RUNTIME_TELEMETRY_ENABLED':'"0"'},plugins:[{name:'capture-frozen-inputs',setup(builder){builder.onLoad({filter:/\.(?:tsx?|jsx?|mjs|cjs|json|css|svg|png|webp|woff2?)$/},async({path:file})=>{
+  const semantic=args.includes('--semantics'),entryFile=semantic?'semantics.tsx':'fixture.tsx',htmlFile=semantic?'semantics.html':'index.html';
+  const result=await build({absWorkingDir:root,entryPoints:[path.join(fixture,entryFile)],outdir:path.join(output,'web'),bundle:true,splitting:true,format:'esm',platform:'browser',target:'es2022',jsx:'automatic',minify:true,metafile:true,entryNames:'assets/fixture-[hash]',chunkNames:'assets/chunk-[hash]',assetNames:'assets/file-[hash]',define:{'process.env.NODE_ENV':semantic?'"development"':'"production"','process.env.OPENUI_RUNTIME_TELEMETRY_ENABLED':'"0"'},plugins:[{name:'capture-frozen-inputs',setup(builder){builder.onLoad({filter:/\.(?:tsx?|jsx?|mjs|cjs|json|css|svg|png|webp|woff2?)$/},async({path:file})=>{
     const contents=await readFile(file),extension=path.extname(file),loader={'.ts':'ts','.tsx':'tsx','.js':'js','.jsx':'jsx','.mjs':'js','.cjs':'js','.json':'json','.css':'css','.svg':'file','.png':'file','.webp':'file','.woff':'file','.woff2':'file'}[extension];inputs.set(relative(file),{bytes:contents.length,sha256:sha(contents)});return{contents,loader};
   });}}]});
-  const entry=Object.entries(result.metafile.outputs).find(([,value])=>value.entryPoint===relative(path.join(fixture,'fixture.tsx')));
+  const entry=Object.entries(result.metafile.outputs).find(([,value])=>value.entryPoint===relative(path.join(fixture,entryFile)));
   if(!entry)throw new Error('Fixture entry was not emitted');
   const publicName=value=>path.relative(path.join(output,'web'),path.resolve(root,value)).replaceAll('\\','/');
-  const htmlSource=await readFile(path.join(fixture,'index.html'),'utf8');
+  const htmlSource=await readFile(path.join(fixture,htmlFile),'utf8');
   const html=htmlSource.replace('<!-- BENCH_STYLES -->',entry[1].cssBundle?`<link rel="stylesheet" href="/${publicName(entry[1].cssBundle)}">`:'').replace('<!-- BENCH_SCRIPT -->',`<script type="module" src="/${publicName(entry[0])}"></script>`);
   await writeFile(path.join(output,'web/index.html'),html);
-  inputs.set(relative(path.join(fixture,'index.html')),{bytes:Buffer.byteLength(htmlSource),sha256:sha(htmlSource)});
+  inputs.set(relative(path.join(fixture,htmlFile)),{bytes:Buffer.byteLength(htmlSource),sha256:sha(htmlSource)});
   const sorted=Object.fromEntries([...inputs].sort(([a],[b])=>a.localeCompare(b))),sourceDigest=sha(JSON.stringify(sorted));
   const files={};for(const filename of Object.keys(result.metafile.outputs)){const absolute=path.resolve(root,filename),contents=await readFile(absolute);files[publicName(filename)]={bytes:contents.length,sha256:sha(contents)};}
   files['index.html']={bytes:Buffer.byteLength(html),sha256:sha(html)};
-  const receipt={kind:'synthetic-real-react-chat-benchmark',buildId,label:option('--label',path.basename(output)),builtAt:new Date().toISOString(),gitHead,sourceDigest,dirtyPaths:execFileSync('git',['status','--short'],{cwd:root,encoding:'utf8'}).trim().split('\n').filter(Boolean),inputs:sorted,files,entry:publicName(entry[0]),renderer:'react-dom/profiling, production',output,syntheticOnly:true};
+  const receipt={kind:semantic?'synthetic-real-react-chat-semantics':'synthetic-real-react-chat-benchmark',buildId,label:option('--label',path.basename(output)),builtAt:new Date().toISOString(),gitHead,sourceDigest,dirtyPaths:execFileSync('git',['status','--short'],{cwd:root,encoding:'utf8'}).trim().split('\n').filter(Boolean),inputs:sorted,files,entry:publicName(entry[0]),renderer:semantic?'react-dom/client, development StrictMode':'react-dom/profiling, production',output,syntheticOnly:true};
   await writeFile(path.join(output,'build-result.json'),JSON.stringify(receipt,null,2)+'\n');
   console.log(JSON.stringify({output,buildId,sourceDigest,entry:receipt.entry,sourceInputs:inputs.size,files:Object.keys(files).length,serve:`node scripts/benchmark-chat-ui.mjs serve --output "${relative(output)}" --port 45329`},null,2));
 }else{
