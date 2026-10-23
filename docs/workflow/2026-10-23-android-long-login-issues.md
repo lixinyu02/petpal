@@ -8,13 +8,13 @@
 
 - Goal: 已登录安卓尽量长期保持，并在断网或临时存储失败后恢复。
 - Ordering rule: Complete issues in sequence.
-- Current status: issue-1/2完成，issue-3 in_progress。
+- Current status: 三个issue完成，详见validation。
 
 ## Issue List
 
 - [x] issue-1 长会话与可靠失效判断
 - [x] issue-2 保存登录的重连体验
-- [ ] issue-3 部署、Android运行验收与QA包
+- [x] issue-3 部署、Android运行验收与QA包
 
 ## issue-1
 
@@ -36,7 +36,7 @@
 - 验收标准: 断网不显示已退出；未验证不显示私有内容；事件去重、账号切换/卸载隔离、无后台轮询。
 - 状态: done
 - 验证方式: 102/102相关Node通过，含26项实际组件生命周期；TypeScript通过，自审修正本机桥接迟到返回。Chrome与Android运行验收随issue-3冻结包执行。
-- commit: 本issue提交（见Git历史）
+- commit: 65e60b3
 
 ## issue-3
 
@@ -45,6 +45,6 @@
 - 范围: 隔离构建、冷启动/进程重启、APK审计、网页与后端部署、状态保护和验收记录。
 - 依赖: issue-2
 - 验收标准: 测试与实际恢复有证据；业务数据、正式包、更新源和签名保持；提供独立测试包。
-- 状态: in_progress
-- 验证方式: 定向回归、ADB/模拟器、APK摘要、部署健康及保留检查。
-- commit: pending
+- 状态: done
+- 验证方式: 最终Node276/276、JVM117/117；API33/36各3原生+5真实App阶段；APK313资源/41源/签名/私密/zipalign；Chrome与公网保全验收通过，详见validation。
+- commit: 本issue提交（见Git历史）

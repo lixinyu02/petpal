@@ -23,7 +23,7 @@ import org.junit.runner.RunWith;
  * Staged actual-form acceptance, never a production account. The external
  * orchestrator owns adb reverse, backend availability, force-stop and relaunch.
  * Run only this class with -e stage
- * login/restored/offline/logout/cleared/proxy/proxyRestored.
+ * login/restored/offline/offlineThenForeground/logout/cleared/proxy/proxyRestored.
  * Reports contain booleans only; neither a token nor form password is emitted.
  */
 @RunWith(AndroidJUnit4.class)
@@ -134,6 +134,32 @@ public class PetLoginSessionAppTest {
         until("offline validation shows a retry state", () -> bool("document.querySelector('.login-retry[role=alert]')"), 30000);
         JSONObject session = sessionSnapshot(); assertTrue("Offline retry preserves the session", session.getBoolean("hasToken")); assertTrue("Offline retry retains its destination", session.getBoolean("correctUrl"));
         assertEncryptedFile(); assertFalse("Offline authentication does not unlock the workspace", bool("document.querySelector('button[aria-label=\"我的账号\"]')"));
+        assertFalse("Saved login reconnect never asks for the password again", bool("document.querySelector('.login-form input[autocomplete=current-password]')"));
+    }
+    private void offlineThenForeground() throws Exception {
+        offline();
+        MainActivity retained = activity;
+        String marker = "retained-" + Long.toHexString(System.nanoTime());
+        assertTrue("Marker belongs to the actual current WebView", bool("(()=>{window.__loginReconnectFixture="+JSONObject.quote(marker)+";return true;})()"));
+        File ready = new File(context.getExternalFilesDir(null), "login-reconnect-ready.json");
+        File background = new File(context.getExternalFilesDir(null), "login-reconnect-background.json");
+        File release = new File(context.getExternalFilesDir(null), "login-reconnect-release");
+        assertFalse("Each isolated fixture uses a fresh reconnect handshake", ready.exists() || background.exists() || release.exists());
+        Files.write(ready.toPath(), "{\"offlineReady\":true}".getBytes(StandardCharsets.UTF_8));
+        // The host removes only this emulator's loopback reverse for offline
+        // startup, then backgrounds the existing Activity, restores that reverse
+        // and resumes this same Activity. No page reload or retry button is used.
+        until("host backgrounds original Activity", () -> !retained.isUpdaterForeground(), 120000);
+        Files.write(background.toPath(), "{\"backgroundObserved\":true}".getBytes(StandardCharsets.UTF_8));
+        until("host restores the isolated loopback transport", release::isFile, 120000);
+        until("original Activity returns to foreground", retained::isUpdaterForeground, 30000);
+        assertFalse("Foreground reconnect does not recreate the Activity", retained.isDestroyed() || retained.isFinishing());
+        assertSame("Native Activity reference remains unchanged", retained, activity);
+        assertTrue("Foreground reconnect does not reload its WebView", bool("window.__loginReconnectFixture==="+JSONObject.quote(marker)));
+        accountPage();
+        assertTrue("Automatic reconnect preserves the WebView after verification", bool("window.__loginReconnectFixture==="+JSONObject.quote(marker)));
+        Files.write(new File(context.getExternalFilesDir(null), "login-reconnect-result.json").toPath(),
+            "{\"sameActivity\":true,\"sameWebView\":true,\"automaticForegroundReconnect\":true,\"passwordNotEntered\":true}".getBytes(StandardCharsets.UTF_8));
     }
     private void proxyPage() throws Exception {
         accountPage();
@@ -219,12 +245,12 @@ public class PetLoginSessionAppTest {
     @Test public void stagedActualApplicationLoginPersistence() throws Exception {
         String stage = InstrumentationRegistry.getArguments().getString("stage");
         org.junit.Assume.assumeTrue("Explicit staged emulator acceptance only", stage != null);
-        assertTrue("Known staged login operation", Arrays.asList("login", "restored", "offline", "logout", "cleared", "proxy", "proxyRestored", "themeNight", "themeDay", "nightRestored").contains(stage));
+        assertTrue("Known staged login operation", Arrays.asList("login", "restored", "offline", "offlineThenForeground", "logout", "cleared", "proxy", "proxyRestored", "themeNight", "themeDay", "nightRestored").contains(stage));
         org.junit.Assume.assumeTrue("Only an isolated Android emulator may run this fixture", Build.HARDWARE.contains("ranchu") || Build.HARDWARE.contains("goldfish") || Build.MODEL.contains("sdk"));
         context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         try {
             startChat();
-            switch (stage) { case "login": submitLogin(); break; case "restored": accountPage(); break; case "offline": offline(); break; case "logout": logout(); break; case "cleared": cleared(); break; case "proxy": proxy(); break; case "proxyRestored": proxyPage(); assertProxyRestored(); break; case "themeNight": chooseTheme("night"); break; case "themeDay": chooseTheme("day"); break; case "nightRestored": accountPage(); assertTheme("night"); break; default: throw new AssertionError(); }
+            switch (stage) { case "login": submitLogin(); break; case "restored": accountPage(); break; case "offline": offline(); break; case "offlineThenForeground": offlineThenForeground(); break; case "logout": logout(); break; case "cleared": cleared(); break; case "proxy": proxy(); break; case "proxyRestored": proxyPage(); assertProxyRestored(); break; case "themeNight": chooseTheme("night"); break; case "themeDay": chooseTheme("day"); break; case "nightRestored": accountPage(); assertTheme("night"); break; default: throw new AssertionError(); }
             evidence(stage);
         } catch (Exception | AssertionError failure) { failureEvidence(stage); throw failure; }
     }
