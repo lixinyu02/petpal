@@ -3,7 +3,7 @@
 - Date: 2026-10-24
 - Complexity: L2
 - Related design: 2026-10-24-stable-release-0915-design.md
-- Current status: issue-3 in_progress
+- Current status: issue-4 in_progress
 
 ## issue-1
 
@@ -34,9 +34,9 @@
 - 范围: 聚合prepare/sign、GitHub draft全量回读后正式latest、生产版本受控切换、服务器下载与软件升级清单
 - 依赖: issue-2
 - 验收标准: 六包十资产来源/完整SHA/签名正确，新旧正式资产保全
-- 状态: in_progress
-- 验证方式: GitHub与服务器完整回读、五平台更新信封验签
-- commit: pending
+- 状态: done
+- 验证方式: GitHub正式Latest Release422273614（非draft/prerelease）十资产全文SHA通过，旧0.9.14 tag/资产保持。服务器web/backend0.9.15已部署，实际guardian接管通过；原STOP失败和web-only恢复均保留证据，恢复未二次重启或回滚业务。目录及两源信封晋升sequence17；六canonical共1633334237B、合并11流2850070656B完整SHA通过，服务器优先、五客户端包、Windows ZIP优先。入口.data/release-0.9.15/{github-publication.json,backend-acceptance.json,prepared/receipts/server-full-readback.json}。
+- commit: 本次正式发布记录提交
 
 ## issue-4
 
@@ -45,6 +45,6 @@
 - 范围: 新服务/网页版本、运行态与业务保全、正式下载和更新入口
 - 依赖: issue-3
 - 验收标准: health/匿名认证/CORS/Chrome/客户端版本与正式源一致，报告可核验
-- 状态: todo
+- 状态: in_progress
 - 验证方式: 当前receipt身份、资产SHA、业务和信任比较
 - commit: pending
