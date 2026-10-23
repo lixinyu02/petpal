@@ -43,8 +43,12 @@ try {
   $env:PETPAL_ANDROID_WEB_DIR = $WebDirectory
   $env:PETPAL_ANDROID_VERSION = $version
   if (-not $SkipWebBuild) {
-    & npm.cmd run build -- --outDir $WebDirectory
+    & npx.cmd --no-install tsc --noEmit
+    if ($LASTEXITCODE -ne 0) { throw 'Web type check failed.' }
+    & npx.cmd --no-install vite build --outDir $WebDirectory
     if ($LASTEXITCODE -ne 0) { throw 'Web build failed.' }
+    & node scripts/verify-openui-web-build.mjs $WebDirectory
+    if ($LASTEXITCODE -ne 0) { throw 'Android web build verification failed.' }
   }
   if (-not (Test-Path -LiteralPath "$WebDirectory\index.html" -PathType Leaf)) { throw 'Android web build entry is missing.' }
   & node scripts/android-mihomo-package.mjs

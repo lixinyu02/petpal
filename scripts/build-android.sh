@@ -26,7 +26,9 @@ fi
 version="$(node --input-type=module -e 'import fs from "node:fs"; const v=fs.readFileSync("android/app/build.gradle","utf8").match(/versionName\s+"([0-9]+\.[0-9]+\.[0-9]+)"/); if(!v)throw Error("Invalid Android versionName"); console.log(v[1]);')"
 export PETPAL_ANDROID_WEB_DIR="${PETPAL_ANDROID_WEB_DIR:-$PWD/.data/android-web-build}"
 export PETPAL_ANDROID_VERSION="$version"
-npm run build -- --outDir "$PETPAL_ANDROID_WEB_DIR"
+npx --no-install tsc --noEmit
+npx --no-install vite build --outDir "$PETPAL_ANDROID_WEB_DIR"
+node scripts/verify-openui-web-build.mjs "$PETPAL_ANDROID_WEB_DIR"
 node scripts/android-mihomo-package.mjs
 npx --no-install cap sync android
 (cd android && bash "$gradle_path" --no-daemon --console plain assembleDebug)

@@ -38,6 +38,12 @@ final class AndroidPermissionState {
         boolean supported = activity.getPackageManager().hasSystemFeature(feature);
         boolean granted = ContextCompat.checkSelfPermission(activity, permission) == PackageManager.PERMISSION_GRANTED;
         SharedPreferences history = prefs(activity);
+        // A user may recover a repeated denial in Settings without a runtime
+        // callback. Remember the observed grant once, so subsequent one-time
+        // expiry/automatic revocation does not inherit that old denial.
+        if (granted && !"granted".equals(history.getString(permission + ".result", ""))) {
+            history.edit().putString(permission + ".result", "granted").apply();
+        }
         String state = AndroidPermissionPolicy.mediaState(supported, granted, history.getBoolean(permission + ".asked", false),
             ActivityCompat.shouldShowRequestPermissionRationale(activity, permission), "denied".equals(history.getString(permission + ".result", "")));
         // Android's public SDK exposes sensor-toggle capability but not the current

@@ -13,6 +13,8 @@ import android.os.Bundle;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultLauncher;
@@ -22,13 +24,17 @@ import androidx.core.app.ActivityOptionsCompat;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import com.getcapacitor.BridgeWebChromeClient;
+import com.getcapacitor.BridgeWebViewClient;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import java.io.ByteArrayInputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -149,7 +155,27 @@ public class LocalMediaPermissionRuntimeTest {
                 main(() -> {
                     assertTrue("Application scripts were disabled before first page load", GATED.get());
                     WebView view = activity.getBridge().getWebView(); view.stopLoading();
-                    view.loadDataWithBaseURL(url, "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><p>Local media permission fixture</p>", "text/html", "UTF-8", url);
+                    view.getSettings().setJavaScriptEnabled(false);
+                    // Old WebView versions can expose a loadDataWithBaseURL page
+                    // as data:. Use a real intercepted local navigation instead;
+                    // no JS/native bridge is needed by these direct Java probes.
+                    view.setWebViewClient(new BridgeWebViewClient(activity.getBridge()) {
+                        private WebResourceResponse response(boolean fixture) {
+                            String html = fixture ? "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'><p>Local media permission fixture</p>" : "";
+                            return new WebResourceResponse("text/html", "UTF-8", fixture ? 200 : 403, fixture ? "OK" : "Forbidden",
+                                Collections.singletonMap("Cache-Control", "no-store"), new ByteArrayInputStream(html.getBytes(StandardCharsets.UTF_8)));
+                        }
+                        @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                            return response(request.isForMainFrame() && "GET".equals(request.getMethod()) && url.equals(request.getUrl().toString()));
+                        }
+                        @Override public WebResourceResponse shouldInterceptRequest(WebView view, String request) {
+                            return response(url.equals(request));
+                        }
+                    });
+                    // The interceptor rejects every other URL. Disabling the
+                    // network flag avoids older WebView's data: error fallback.
+                    view.getSettings().setBlockNetworkLoads(false);
+                    view.loadUrl(url);
                     assertTrue(view.getWebChromeClient() instanceof LocalMediaChromeClient); client = (LocalMediaChromeClient) view.getWebChromeClient();
                     originalPermissions = field("permissionLauncher").get(client); originalActivities = field("activityLauncher").get(client);
                     field("permissionLauncher").set(client, permissions); field("activityLauncher").set(client, activities); return null;
@@ -163,15 +189,25 @@ public class LocalMediaPermissionRuntimeTest {
         Object listener() throws Exception { return field("permissionListener").get(client); }
         void choose(FileResult result, boolean capture) { assertTrue(client.onShowFileChooser(activity.getBridge().getWebView(), result, files(capture))); }
         @Override public void close() throws Exception {
-            main(() -> {
-                if (client != null) {
-                    field("permissionLauncher").set(client, originalPermissions); field("activityLauncher").set(client, originalActivities);
-                    activity.getBridge().getWebView().stopLoading(); activity.getBridge().getWebView().getSettings().setJavaScriptEnabled(false);
+            MainActivity closing = activity;
+            try {
+                main(() -> {
+                    if (client != null) {
+                        field("permissionLauncher").set(client, originalPermissions); field("activityLauncher").set(client, originalActivities);
+                        closing.getBridge().getWebView().stopLoading(); closing.getBridge().getWebView().getSettings().setJavaScriptEnabled(false);
+                        closing.getBridge().getWebView().getSettings().setBlockNetworkLoads(true);
+                    }
+                    if (closing != null && !closing.isDestroyed()) closing.finishAndRemoveTask();
+                    return null;
+                });
+                if (closing != null) {
+                    long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+                    while (System.nanoTime() < until && !main(closing::isDestroyed)) Thread.sleep(50);
+                    assertTrue("Fixture Activity fully destroyed before the next singleTask launch", main(closing::isDestroyed));
                 }
-                if (activity != null && !activity.isDestroyed()) activity.finish();
-                if (registered) application.unregisterActivityLifecycleCallbacks(lifecycle);
-                return null;
-            });
+            } finally {
+                main(() -> { if (registered) { application.unregisterActivityLifecycleCallbacks(lifecycle); registered = false; } return null; });
+            }
             if (savedHistory != null) {
                 SharedPreferences.Editor editor = context.getSharedPreferences("petpal_permission_history_v1", Context.MODE_PRIVATE).edit().clear();
                 for (Map.Entry<String, ?> item : savedHistory.entrySet()) {
