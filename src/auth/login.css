@@ -5,3 +5,8 @@
 @media(max-width:720px){.login-page{padding:calc(20px + var(--app-safe-top,0px)) calc(23px + var(--app-safe-right,0px)) calc(20px + var(--app-safe-bottom,0px)) calc(23px + var(--app-safe-left,0px))}.login-fields input{min-width:0;font-size:16px}}
 @media(max-height:600px){.login-page .login-layout{margin-top:12px}.login-page .login-welcome{display:none}.login-page .login-layout{display:block;max-width:420px}.login-page .login-form{padding:0}}
 .login-brand{max-width:100%;flex-wrap:wrap;row-gap:6px}.login-form .auth-modes{flex-wrap:wrap;column-gap:22px;row-gap:0}.login-form .auth-modes button{min-height:44px}.login-retry{flex-wrap:wrap;overflow-wrap:anywhere}.login-retry button{min-height:44px}
+.login-reconnect{width:min(100%,520px);margin:clamp(40px,13vh,140px) auto 0;padding:28px;border:1px solid var(--theme-hairline,var(--line));border-radius:16px;background:var(--theme-raised);color:var(--theme-ink)}
+.login-reconnect h1{font-size:clamp(22px,4.8vw,28px);line-height:1.4;font-weight:550;margin:20px 0 12px;text-wrap:balance}.login-reconnect>p{color:var(--theme-muted);font-size:14px;line-height:1.7;margin:0 0 20px}
+.login-reconnect .login-retry{justify-content:flex-start;padding:12px 14px;border-radius:8px;font-size:13px;line-height:1.65;min-width:0}.login-reconnect-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}.login-reconnect-actions button{min-height:44px;flex:1 1 170px;white-space:normal}
+@media(max-width:480px){.login-reconnect{padding:22px 18px;margin-top:clamp(32px,9vh,80px)}.login-reconnect-actions{gap:9px}.login-reconnect-actions button{flex-basis:100%}}
+@media(max-height:600px){.login-reconnect{margin-top:24px;padding:20px}.login-reconnect h1{margin-top:12px}}
