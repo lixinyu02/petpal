@@ -105,13 +105,25 @@ public class PetLoginSessionAppTest {
     private void assertTheme(String expected) throws Exception {
         until("real document and native appearance agree", () -> bool("document.documentElement.dataset.theme===" + JSONObject.quote(expected))
             && expected.equals(context.getSharedPreferences(ScreenInsetsController.APPEARANCE_PREFS, Context.MODE_PRIVATE).getString(ScreenInsetsController.PREFERENCE, null)), 15000);
-        String cssColor = "night".equals(expected) ? "rgb(24, 29, 27)" : "rgb(250, 251, 248)";
-        until("real computed document background follows the preference", () -> bool("getComputedStyle(document.documentElement).backgroundColor===" + JSONObject.quote(cssColor)), 5000);
+        // Match the current shared theme.mjs/theme.css/ScreenInsetsController
+        // contract; the former green-grey expectation predated that palette.
+        String cssColor = "night".equals(expected) ? "rgb(40, 40, 40)" : "rgb(250, 251, 248)";
+        try {
+            until("real computed document background follows the preference", () -> bool("getComputedStyle(document.documentElement).backgroundColor===" + JSONObject.quote(cssColor)), 5000);
+        } catch (AssertionError failure) {
+            throw new AssertionError("Expected computed background " + cssColor + "; actual theme=" + themeSnapshot(), failure);
+        }
         android.app.UiModeManager manager = context.getSystemService(android.app.UiModeManager.class);
         int expectedMode = "night".equals(expected) ? android.content.res.Configuration.UI_MODE_NIGHT_YES : android.content.res.Configuration.UI_MODE_NIGHT_NO;
         assertEquals("Actual Activity configuration follows its own theme", expectedMode, activity.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK);
         assertTrue("Theme changes preserve the authenticated session", sessionSnapshot().getBoolean("hasToken"));
         assertEncryptedFile();
+    }
+    private JSONObject themeSnapshot() throws Exception {
+        JSONObject report = new JSONObject(js("(()=>{const root=document.documentElement,style=getComputedStyle(root);return {theme:root.dataset.theme||'',preference:root.dataset.themePreference||'',documentBackground:style.backgroundColor,bodyBackground:document.body?getComputedStyle(document.body).backgroundColor:'',variables:Object.fromEntries(['--theme-surface','--theme-raised','--theme-surface-0','--theme-canvas','--theme-ink'].map(key=>[key,style.getPropertyValue(key).trim()]))};})()"));
+        report.put("nativePreference", context.getSharedPreferences(ScreenInsetsController.APPEARANCE_PREFS, Context.MODE_PRIVATE).getString(ScreenInsetsController.PREFERENCE, null));
+        report.put("nativeNightMode", activity.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK);
+        return report;
     }
     private void chooseTheme(String selected) throws Exception {
         accountPage();
@@ -222,6 +234,7 @@ public class PetLoginSessionAppTest {
         JSONObject report = new JSONObject().put("passed", true).put("stage", stage).put("actualMainActivity", true).put("actualFormOrUi", true)
             .put("hasSession", sessionSnapshot().getBoolean("hasToken")).put("encryptedVaultExists", vault().isFile()).put("apiLevel", Build.VERSION.SDK_INT);
         if (stage.startsWith("proxy")) report.put("proxy", nativeProxySnapshot());
+        if (Arrays.asList("themeNight", "themeDay", "nightRestored").contains(stage)) report.put("theme", themeSnapshot());
         Files.write(new File(context.getExternalFilesDir(null), "login-app-" + stage + ".json").toPath(), report.toString().getBytes(StandardCharsets.UTF_8));
         Bitmap screenshot = InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot(); assertNotNull("Visible app screenshot", screenshot);
         try (FileOutputStream output = new FileOutputStream(new File(context.getExternalFilesDir(null), "login-app-" + stage + ".png"))) { assertTrue(screenshot.compress(Bitmap.CompressFormat.PNG, 100, output)); }
@@ -238,7 +251,7 @@ public class PetLoginSessionAppTest {
             report.put("passed", false).put("stage", stage).put("lastWait", lastWait);
             if (activity != null) report.put("nativeForeground", activity.isUpdaterForeground()).put("activityDestroyed", activity.isDestroyed()).put("activityFinishing", activity.isFinishing());
             if (activity != null && activity.getBridge() != null && activity.getBridge().getWebView() != null) {
-                report.put("recovery", recoverySnapshot());
+                report.put("recovery", recoverySnapshot()); report.put("theme", themeSnapshot());
                 String snapshot = js("(()=>{const section=document.querySelector('section.app-proxy-settings');const clean=(value,max=220)=>String(value||'').replace(/[\\x00-\\x1f\\x7f]/g,' ').slice(0,max);const picker=section?.querySelector('.app-proxy-server-picker select');return {chatRoute:new URLSearchParams(location.search).get('chat')==='1',nativeProxyPluginAvailable:Boolean(window.Capacitor?.isPluginAvailable?.('PetAppProxy')),loginFormPresent:Boolean(document.querySelector('.login-form')),accountPanelPresent:Boolean(document.querySelector('.account-identity')),activeTabs:Array.from(document.querySelectorAll('[role=tab][aria-selected=true]')).slice(0,8).map(node=>clean(node.textContent,60)),sectionExists:Boolean(section),sectionCount:document.querySelectorAll('section.app-proxy-settings').length,busy:section?.getAttribute('aria-busy')||'',heading:clean(section?.querySelector('h3')?.textContent),state:clean(section?.querySelector('.app-proxy-state')?.textContent),summary:Array.from(section?.querySelectorAll('.app-proxy-summary span')||[]).slice(0,8).map(node=>clean(node.textContent)),notes:Array.from(section?.querySelectorAll('.app-proxy-note')||[]).slice(0,12).map(node=>clean(node.textContent)),errors:Array.from(section?.querySelectorAll('[role=alert]')||[]).slice(0,6).map(node=>clean(node.textContent)),pickerExists:Boolean(picker),pickerDisabled:picker?picker.disabled:null,selectedLabel:clean(picker?.options[picker.selectedIndex]?.textContent,100),optionLabels:Array.from(picker?.options||[]).slice(0,128).map(option=>clean(option.textContent,100)),buttons:Array.from(section?.querySelectorAll('button')||[]).slice(0,24).map(button=>({label:clean(button.textContent,100),disabled:button.disabled})),mode:section?.querySelector('select[aria-label=\"应用代理模式\"]')?.value||'',autoStart:Boolean(section?.querySelector('.app-proxy-startup input')?.checked)};})()");
                 report.put("ui", new JSONObject(snapshot)); report.put("session", sessionSnapshot());
             } else report.put("domCaptured", false);

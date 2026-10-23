@@ -3,7 +3,7 @@
 - Date: 2026-10-23
 - Complexity: L2
 - Baseline: main `a44330e`，开始时工作区干净
-- Status: baseline frozen; implementation selected
+- Status: complete; measured outcomes and limits in validation report
 
 ## Background
 

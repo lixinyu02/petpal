@@ -1,0 +1,60 @@
+import assert from 'node:assert/strict';
+import {spawn,execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {createWriteStream} from 'node:fs';
+import {mkdir,writeFile,readFile,copyFile} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import readline from 'node:readline';
+import path from 'node:path';
+import net from 'node:net';
+import {setTimeout as delay} from 'node:timers/promises';
+const root=path.resolve('.'),base=path.resolve(process.argv[2]||''),apk=path.resolve(process.argv[3]||''),auditFile=path.resolve(process.argv[4]||'');
+assert.ok(base.startsWith(path.resolve('.data/deep-fluidity-20261023')+path.sep),'Owned QA directory required');assert.ok(process.argv[3]&&process.argv[4],'Explicit candidate APK and its audit required');
+const adb='E:/Android/Sdk/platform-tools/adb.exe',emulator='E:/Android/Sdk/emulator/emulator.exe',serial='emulator-5592',avd='PetPal_Permissions_API36_20261023';
+const testApk=path.join(root,'android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk'),runner='com.petpal.app.test/androidx.test.runner.AndroidJUnitRunner',ext='/sdcard/Android/data/com.petpal.app/files';
+const exec=promisify(execFile),run=(file,args,timeout=30000)=>exec(file,args,{cwd:root,encoding:'utf8',timeout,maxBuffer:24*1024*1024,windowsHide:true}),ad=(args,timeout)=>run(adb,['-s',serial,...args],timeout),sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+const json=async(file,value)=>writeFile(path.join(base,file),JSON.stringify(value,null,2)+'\n');
+async function until(label,probe,timeout=120000){const end=Date.now()+timeout;while(Date.now()<end){if(await probe())return;await delay(300);}throw Error('Timeout: '+label);}
+async function listening(port){return new Promise(resolve=>{const socket=net.connect({port,host:'127.0.0.1'});socket.setTimeout(500);socket.once('connect',()=>{socket.destroy();resolve(true);});socket.once('error',()=>resolve(false));socket.once('timeout',()=>{socket.destroy();resolve(false);});});}
+async function ownedProcesses(){const script="$items=@(Get-CimInstance Win32_Process -Filter \"Name = 'qemu-system-x86_64.exe' OR Name = 'emulator.exe'\" | Where-Object { $_.CommandLine -match '(?:^|\\s)-avd\\s+PetPal_Permissions_API36_20261023(?:\\s|$)' } | Select-Object ProcessId,ParentProcessId,Name); ConvertTo-Json -InputObject $items -Compress";return JSON.parse((await run('powershell.exe',['-NoProfile','-NonInteractive','-Command',script])).stdout||'[]');}
+await mkdir(base);let em,fixture,verified=false,ready=false,closed,id=0,failure;const responses=new Map(),groups=[],cleanup={};
+async function verify(){assert.match((await ad(['emu','avd','name'])).stdout.trim(),new RegExp('^'+avd+'\\s+OK$'));assert.match((await ad(['shell','getprop','ro.hardware'])).stdout,/ranchu|goldfish/);assert.equal((await ad(['shell','getprop','ro.build.version.sdk'])).stdout.trim(),'36');verified=true;}
+async function fresh(){await verify();await ad(['shell','am','force-stop','com.petpal.app']);assert.match((await ad(['shell','pm','clear','com.petpal.app'])).stdout,/Success/);}
+async function pull(name,required=true){try{await ad(['pull',ext+'/'+name,path.join(base,name)]);return name.endsWith('.json')?JSON.parse(await readFile(path.join(base,name),'utf8')):null;}catch(error){if(required)throw error;return null;}}
+async function group(label,className,count,flags={}){
+ await verify();await ad(['logcat','-c']);const args=['shell','am','instrument','-w','-r','-e','class','com.petpal.app.'+className];for(const[key,value]of Object.entries(flags))args.push('-e',key,String(value));args.push(runner);
+ let result;try{result=await ad(args,240000);}catch(error){result={stdout:error.stdout||'',stderr:(error.stderr||'')+'\n'+error.message};}
+ await writeFile(path.join(base,label+'-instrumentation.log'),result.stdout+result.stderr);await writeFile(path.join(base,label+'-logcat.log'),(await ad(['logcat','-d','-v','threadtime'])).stdout);
+ if(!new RegExp('OK \\('+count+' tests?\\)').test(result.stdout)){if(flags.stage){await pull('login-app-'+flags.stage+'-failure.json',false);await pull('login-app-'+flags.stage+'-failure.png',false);}throw Error('Failed candidate runtime '+label);}
+ assert.doesNotMatch(result.stdout,/FAILURES!!!|INSTRUMENTATION_FAILED|Test run failed to complete/);groups.push({label,className,passed:count,skipped:0});await json('partial-result.json',{groups,passed:groups.reduce((n,g)=>n+g.passed,0)});console.log(JSON.stringify({label,passed:count}));
+}
+async function stage(stage){await group('session-'+stage,'PetLoginSessionAppTest',1,{stage});const value=await pull('login-app-'+stage+'.json');await pull('login-app-'+stage+'.png');assert.equal(value.passed,true);}
+async function command(command,label){const current=++id;fixture.stdin.write(JSON.stringify({id:current,command,label})+'\n');await until('fixture response',()=>responses.has(current),15000);const value=responses.get(current);assert.equal(value.ok,true);return value;}
+async function exists(file){try{await ad(['shell','test','-f',ext+'/'+file]);return true;}catch{return false;}}
+try{
+ const audit=JSON.parse(await readFile(auditFile,'utf8'));assert.equal(audit.passed,true);assert.equal(sha(await readFile(apk)),audit.app.sha256);for(const source of audit.nativeSourceInputs)assert.equal(sha(await readFile(path.join(root,source.path))),source.sha256);
+ assert.ok(!(await run(adb,['devices'])).stdout.includes(serial));assert.equal((await ownedProcesses()).length,0);for(const port of[5592,5593,45321])assert.equal(await listening(port),false);
+ await copyFile(testApk,path.join(base,'instrumentation.apk'));await json('identity.json',{app:audit.app,testApkSha256:sha(await readFile(testApk)),nativeSourceInputs:audit.nativeSourceInputs,physicalOem:false,syntheticOnly:true});
+ em=spawn(emulator,['-avd',avd,'-port','5592','-no-window','-no-audio','-no-snapshot','-no-boot-anim','-gpu','swiftshader_indirect'],{cwd:root,windowsHide:true,env:{...process.env,ANDROID_AVD_HOME:'E:/Android/Avd',ANDROID_USER_HOME:'E:/Android/AndroidUser'},stdio:['ignore','pipe','pipe']});em.stdout.pipe(createWriteStream(path.join(base,'emulator.out.log')));em.stderr.pipe(createWriteStream(path.join(base,'emulator.err.log')));
+ await until('owned API36 boot',async()=>{if(em.exitCode!==null)throw Error('Emulator exited');try{return(await ad(['shell','getprop','sys.boot_completed'])).stdout.trim()==='1';}catch{return false;}},240000);await verify();await ad(['shell','input','keyevent','82']);await ad(['shell','svc','power','stayon','true']);await ad(['shell','wm','size','412x960']);await ad(['shell','wm','density','160']);await ad(['shell','settings','put','system','font_scale','1.0']);await ad(['shell','settings','put','secure','show_ime_with_hard_keyboard','1']);
+ await ad(['install','-r',apk],120000);await ad(['install','-r',testApk],120000);
+ await fresh();await group('packaged-startup','PackagedFrontendRuntimeTest',1,{petpalFrontendRuntime:true});await pull('packaged-frontend-runtime-result.json');await pull('packaged-frontend-runtime.png');
+ await fresh();await group('screen-ime-theme','ScreenInsetsRuntimeTest',5,{petpalScreenRuntime:true});
+ await fresh();await group('native-resume','NativeResumeRuntimeTest',1,{petpalResumeRuntime:true});const resume=await pull('native-resume-runtime-result.json');assert.equal(resume.passed,true);
+ await fresh();await group('renderer-recovery','RendererRecoveryRuntimeTest',1,{petpalRendererRuntime:true});const renderer=await pull('renderer-recovery-result.json');assert.equal(renderer.passed,true);assert.equal(renderer.realProviderTerminations,3);assert.equal(renderer.loginFileUnchanged,true);
+ await fresh();fixture=spawn(process.execPath,[path.join(root,'scripts/android-session-fixture.mjs'),base],{cwd:root,windowsHide:true,stdio:['pipe','pipe','pipe']});const log=createWriteStream(path.join(base,'fixture.log'));fixture.stderr.pipe(createWriteStream(path.join(base,'fixture.err.log')));readline.createInterface({input:fixture.stdout}).on('line',line=>{log.write(line+'\n');let value;try{value=JSON.parse(line);}catch{return;}if(value.ready)ready=true;if(value.closed)closed=value;if(value.id)responses.set(value.id,value);});await until('fixture ready',()=>{if(fixture.exitCode!==null)throw Error('Fixture exited');return ready;},30000);
+ await ad(['reverse','tcp:45321','tcp:45321']);await stage('login');const baseline=await command('snapshot','baseline');assert.equal(baseline.exactlyOneLogin,true);assert.equal(baseline.rememberDevice,true);
+ await ad(['shell','am','force-stop','com.petpal.app']);await command('advance8d','advanced');await stage('restored');const restored=await command('snapshot','restored');for(const key of['sameTokenHash','createdAtUnchanged','exactlyOneLogin','rememberDevice','expiryFuture','renewedAfterEightDays','fakeClockEightDays'])assert.equal(restored[key],true,key);
+ await ad(['shell','am','force-stop','com.petpal.app']);await ad(['reverse','--remove','tcp:45321']);const pending=stage('offlineThenForeground');void pending.catch(()=>{});await until('offline ready',()=>exists('login-reconnect-ready.json'));await ad(['shell','input','keyevent','KEYCODE_HOME']);await until('background retained',()=>exists('login-reconnect-background.json'));await ad(['reverse','tcp:45321','tcp:45321']);await ad(['shell','touch',ext+'/login-reconnect-release']);await ad(['shell','am','start','-W','-n','com.petpal.app/.MainActivity']);await pending;
+ const reconnect=await pull('login-reconnect-result.json');for(const key of['sameActivity','sameWebView','automaticForegroundReconnect'])assert.equal(reconnect[key],true);const reconnected=await command('snapshot','reconnected');assert.equal(reconnected.sameTokenHash,true);
+ for(const theme of['themeNight','nightRestored','themeDay']){await ad(['shell','am','force-stop','com.petpal.app']);await stage(theme);}
+ await ad(['shell','am','force-stop','com.petpal.app']);await stage('logout');await ad(['shell','am','force-stop','com.petpal.app']);await stage('cleared');const cleared=await command('snapshot','cleared');assert.equal(cleared.sessionPresent,false);assert.equal(cleared.exactlyOneLogin,true);
+ assert.equal(groups.reduce((n,g)=>n+g.passed,0),16);await json('result.json',{passed:true,api:36,tests:16,skipped:0,groups,baseline,restored,reconnected,reconnect,cleared,resume,renderer,productionTouched:false,physicalOemAcceptance:false,api33And35Repeated:false,reason:'Native main source and permissions unchanged; API36 focuses on changed packaged frontend and lifecycle semantics'});
+}catch(error){failure=error;await json('failure.json',{failed:true,error:error.message,completed:groups});console.error(error.message);}
+finally{
+ if(fixture&&fixture.exitCode===null){fixture.stdin.write(JSON.stringify({command:'close'})+'\n');await until('fixture stopped',()=>fixture.exitCode!==null,30000).catch(()=>fixture.kill());}cleanup.fixtureClosed=closed||null;
+ if(verified){try{await verify();try{await ad(['reverse','--remove','tcp:45321']);}catch{}await ad(['shell','am','force-stop','com.petpal.app']);await ad(['shell','sync']);await ad(['emu','kill']);}catch(error){cleanup.deviceStopError=error.message;}}
+ if(em)await until('owned emulator exited',()=>em.exitCode!==null,45000).catch(()=>{cleanup.processTimeout=true;});cleanup.emulatorExited=!em||em.exitCode!==null;cleanup.remainingOwnedProcesses=await ownedProcesses();cleanup.ports={};for(const port of[5592,5593,45321])cleanup.ports[port]=await listening(port);
+ if(em&&cleanup.emulatorExited&&!cleanup.remainingOwnedProcesses.length&&!cleanup.ports[5592]&&!cleanup.ports[5593]&&(await run(adb,['devices'])).stdout.includes(serial)){await run(adb,['disconnect',serial]);cleanup.staleTransportDisconnected=true;}cleanup.ownedTransportAbsent=!(await run(adb,['devices'])).stdout.includes(serial);await json('cleanup.json',cleanup);if(cleanup.remainingOwnedProcesses.length||Object.values(cleanup.ports).some(Boolean)||!cleanup.ownedTransportAbsent)process.exitCode=1;
+}
+if(failure)process.exitCode=1;

@@ -3,13 +3,13 @@
 - Date: 2026-10-23
 - Complexity: L2
 - Related design: 2026-10-23-deep-fluidity-design.md
-- Current status: issue-3 in_progress
+- Current status: complete
 
 ## Issue List
 
 - [x] issue-1 可复现性能基线与热点确认
 - [x] issue-2 实测热点优化与语义回归
-- [ ] issue-3 前后对照、最终QA包与交付
+- [x] issue-3 前后对照、最终QA包与交付
 
 ## issue-1
 
@@ -40,6 +40,6 @@
 - 范围: 冻结资源、API36真实性能及关键兼容运行、独立APK审计、必要网页保全同步、报告与清理。
 - 依赖: issue-2
 - 验收标准: 最终包与源码/资源一致，前后条件和收益/边界明确，关键功能不退化，正式源和业务数据保持。
-- 状态: in_progress
-- 验证方式: Chrome、ADB运行与帧指标、APK资源/签名/CRC、保全和清理核验。
-- commit: pending
+- 状态: done
+- 验证方式: before/after Android各9轮、同一AVD交错启动6计量+6预热、97项Node、10项Chrome语义与API36关键16项通过，APK资源/签名/CRC/原生45源/权限全核对；启动未证实加速、部分reduced指标回退留痕。保留首次ADB工具失败与旧主题断言失败，主题测试更正后完整16项通过。网页已上线，617源码门禁、239protected/2614oldAssets/49正式下载/rawstate/trust及PID保持；Chrome公网入口、内外health/auth/CORS及清理通过。完整证据和边界见validation与三个对照报告。
+- commit: test(issue-3): validate fluidity gains and Android delivery
