@@ -2,7 +2,7 @@
 
 - Date: 2026-10-24
 - Complexity: L2
-- Status: approved scope, implementation
+- Status: completed; stable release and production acceptance recorded
 
 ## Background and Goal
 
