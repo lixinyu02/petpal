@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param([ValidateRange(0,65535)][int]$Port = 0)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'Service-Lifecycle.ps1')
 
 function Resolve-PetPalServiceNetworkSettings {
     param([AllowNull()][object]$Settings)
@@ -32,7 +33,7 @@ $petpalSettings = Join-Path $petpalData 'service-settings.json'
 $petpalConfiguredOrigins = ''
 $petpalConfig = $null
 if (Test-Path -LiteralPath $petpalSettings) {
-    $petpalConfig = Get-Content -LiteralPath $petpalSettings -Raw | ConvertFrom-Json
+    $petpalConfig = Get-Content -LiteralPath $petpalSettings -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($Port -eq 0 -and $petpalConfig.port) { $Port = [int]$petpalConfig.port }
     if ($petpalConfig.codexHttpOrigins) { $petpalConfiguredOrigins = [string]$petpalConfig.codexHttpOrigins }
 }
@@ -70,7 +71,7 @@ try {
     foreach ($petpalName in $petpalOldEnv.Keys) { [Environment]::SetEnvironmentVariable($petpalName, $petpalOldEnv[$petpalName], 'Process') }
 }
 $petpalStarted = $petpalProcess.StartTime.ToUniversalTime().ToString('o')
-@{pid=$petpalProcess.Id;startedAt=$petpalStarted;url=$petpalUrl;listenHost=$petpalNetwork.ListenHost;networkOrigins=@($petpalNetwork.NetworkOrigins);stdout=$petpalOut;stderr=$petpalErr} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $petpalData 'service-process.json') -Encoding UTF8
+Write-PetPalAtomicReceipt -Path (Join-Path $petpalData 'service-process.json') -Value @{pid=$petpalProcess.Id;startedAt=$petpalStarted;url=$petpalUrl;listenHost=$petpalNetwork.ListenHost;networkOrigins=@($petpalNetwork.NetworkOrigins);stdout=$petpalOut;stderr=$petpalErr}
 $petpalReady = $null
 for ($petpalAttempt = 0; $petpalAttempt -lt 30; $petpalAttempt++) {
     $petpalProcess.Refresh()
