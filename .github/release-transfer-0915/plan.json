@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 1,
+  "repository": "lixinyu02/petpal",
+  "tag": "v0.9.15",
+  "sourceRevision": "d8f0040925b951aabaa5de669db9a6abfe8116fe",
+  "contractHash": "3da7622338516d967963a8e4db647ccdba60dd8e291b2e272d74e0048dbf1709",
+  "branch": "release-transfer-v0.9.15",
+  "prerelease": false,
+  "mode": "https-mirror",
+  "mirrorBaseUrl": "https://magicdatou.top:44318/downloads/updates/",
+  "releaseId": 422273614,
+  "stableLatest": "v0.9.14",
+  "stableLatestId": 418674946,
+  "sequence": 17,
+  "assets": [
+    {
+      "name": "PetPal-0.9.15-Windows-x64.exe",
+      "size": 254060984,
+      "sha256": "56098e28645ed1090eb5e5add2f2d50cd2ec952b7c243909eed3ca00ce4a679b"
+    },
+    {
+      "name": "PetPal-0.9.15-Windows-x64.zip",
+      "size": 416597818,
+      "sha256": "d42ead39a152de3c6d0de48fceeaa02651757f1734f7285665914aab68e960f6"
+    },
+    {
+      "name": "PetPal-0.9.15-Ubuntu-x64.tar.gz",
+      "size": 384847254,
+      "sha256": "d254acaf5b6c3accce9e9edc3c192d0e6b36da77575763e63755e6a3d66acff2"
+    },
+    {
+      "name": "PetPal-0.9.15-Ubuntu-arm64.tar.gz",
+      "size": 377126441,
+      "sha256": "ba5eb219e7dad6724ac9df4a72a25a9fd5020b57ba0a751bf04a91b5b02cb914"
+    },
+    {
+      "name": "PetPal-0.9.15-Android-debug.apk",
+      "size": 149598203,
+      "sha256": "ba7413ee8dfdd20361b662ad0064c6be9a36f03ad687f5fdbad61014719d5535"
+    },
+    {
+      "name": "PetPal-0.9.15-Web.zip",
+      "size": 51103537,
+      "sha256": "0830fce84e8f48731afc5e5f0cdde5b43e5570d418f97cfe4b99aafe92dcea2a"
+    },
+    {
+      "name": "release-manifest.json",
+      "size": 2096,
+      "sha256": "cc37701b6a6a31a304ab51e179e0e8b335eae4cb42c5dbbafed7b0f00588dc71"
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "size": 576,
+      "sha256": "c798bc8a51ff44900332a32972d3acacbd32ab7fc3932966208ad43f659ad1f1"
+    },
+    {
+      "name": "petpal-update.json",
+      "size": 10726,
+      "sha256": "263b55ab67b676f1de0a92c3faab65af6b8bd1e518592c2c4885a2e12b51321b"
+    },
+    {
+      "name": "petpal-update-public-key.txt",
+      "size": 113,
+      "sha256": "7fd650afe5e5a7e1d35e0f2515e0ee7b604aa3dec7b8253593c485a3fa8febdb"
+    }
+  ],
+  "targets": [
+    "PetPal-0.9.15-Windows-x64.exe",
+    "PetPal-0.9.15-Windows-x64.zip",
+    "PetPal-0.9.15-Ubuntu-x64.tar.gz",
+    "PetPal-0.9.15-Ubuntu-arm64.tar.gz",
+    "PetPal-0.9.15-Android-debug.apk",
+    "PetPal-0.9.15-Web.zip",
+    "release-manifest.json",
+    "SHA256SUMS.txt",
+    "petpal-update.json",
+    "petpal-update-public-key.txt"
+  ],
+  "completedAssets": [
+    {
+      "id": 670292447,
+      "name": "release-manifest.json",
+      "size": 2096,
+      "digest": "sha256:cc37701b6a6a31a304ab51e179e0e8b335eae4cb42c5dbbafed7b0f00588dc71"
+    },
+    {
+      "id": 670292453,
+      "name": "SHA256SUMS.txt",
+      "size": 576,
+      "digest": "sha256:c798bc8a51ff44900332a32972d3acacbd32ab7fc3932966208ad43f659ad1f1"
+    },
+    {
+      "id": 670292448,
+      "name": "petpal-update.json",
+      "size": 10726,
+      "digest": "sha256:263b55ab67b676f1de0a92c3faab65af6b8bd1e518592c2c4885a2e12b51321b"
+    },
+    {
+      "id": 670292449,
+      "name": "petpal-update-public-key.txt",
+      "size": 113,
+      "digest": "sha256:7fd650afe5e5a7e1d35e0f2515e0ee7b604aa3dec7b8253593c485a3fa8febdb"
+    }
+  ],
+  "productionContext": {
+    "backendVersion": "0.9.14",
+    "catalogVersion": "0.9.14",
+    "downloadVersions": {
+      "android": "0.9.14",
+      "ubuntu": "0.9.14",
+      "windows": "0.9.14"
+    },
+    "updateSequence": 16,
+    "catalogPromoted": false
+  },
+  "reviewedTemplatesSha256": "8d399d28ac9a682d7b7cb5237e5005719ac3a86aafce82bfc26d6055c88a8097",
+  "localPlanHash": "c0a7146005f83e5bf84422c0f2be1f3527fd93e82045223037df212a466f0041",
+  "rootGate": {
+    "schemaVersion": 1,
+    "version": "0.9.15",
+    "sourceRevision": "d8f0040925b951aabaa5de669db9a6abfe8116fe",
+    "contractHash": "3da7622338516d967963a8e4db647ccdba60dd8e291b2e272d74e0048dbf1709",
+    "planHash": "c0a7146005f83e5bf84422c0f2be1f3527fd93e82045223037df212a466f0041",
+    "releaseId": 422273614,
+    "sequence": 17,
+    "branch": "release-transfer-v0.9.15",
+    "action": "one cloud byte transfer for six packages and ten official body readbacks",
+    "authorizedBy": "/root",
+    "explicitAuthorization": true,
+    "observedAt": "2026-10-23T20:25:20.012Z",
+    "localUploadersAbsent": true,
+    "priorPackageUploadsAbsent": true,
+    "unexpectedAssetsAbsent": true,
+    "noAutomaticRetry": true,
+    "sixMirrorPackagesReady": true,
+    "metadataAlreadyUploadedAndFrozen": true,
+    "draftOnly": true,
+    "priorPackagePostCount": 0,
+    "cloudRunAttempt": 1,
+    "newCloudPerAssetPostLimit": 1,
+    "allowedPostNames": [
+      "PetPal-0.9.15-Windows-x64.exe",
+      "PetPal-0.9.15-Windows-x64.zip",
+      "PetPal-0.9.15-Ubuntu-x64.tar.gz",
+      "PetPal-0.9.15-Ubuntu-arm64.tar.gz",
+      "PetPal-0.9.15-Android-debug.apk",
+      "PetPal-0.9.15-Web.zip"
+    ],
+    "completedAssets": [
+      {
+        "id": 670292447,
+        "name": "release-manifest.json",
+        "size": 2096,
+        "digest": "sha256:cc37701b6a6a31a304ab51e179e0e8b335eae4cb42c5dbbafed7b0f00588dc71"
+      },
+      {
+        "id": 670292453,
+        "name": "SHA256SUMS.txt",
+        "size": 576,
+        "digest": "sha256:c798bc8a51ff44900332a32972d3acacbd32ab7fc3932966208ad43f659ad1f1"
+      },
+      {
+        "id": 670292448,
+        "name": "petpal-update.json",
+        "size": 10726,
+        "digest": "sha256:263b55ab67b676f1de0a92c3faab65af6b8bd1e518592c2c4885a2e12b51321b"
+      },
+      {
+        "id": 670292449,
+        "name": "petpal-update-public-key.txt",
+        "size": 113,
+        "digest": "sha256:7fd650afe5e5a7e1d35e0f2515e0ee7b604aa3dec7b8253593c485a3fa8febdb"
+      }
+    ],
+    "evidence": [
+      {
+        "path": ".data/release-0.9.15/prepared/receipts/signed.json",
+        "sha256": "44aaa1e5d8481cf8b9d9f5c6c8c76fd26bbb0b3b8b4ee44ba48d1ca9e814f123"
+      },
+      {
+        "path": ".data/release-0.9.15/prepared/receipts/server-staged.json",
+        "sha256": "0037e4467f119861fb5c7b45a4ad13f1a21de5d98dae5791eee3240b3af4dca7"
+      },
+      {
+        "path": ".data/release-0.9.15/prepared/receipts/server-readback.json",
+        "sha256": "7d00c2f23eaede9c70cfba98380b777fc8298569c4de7ed96b70ddd0a03ffc04"
+      },
+      {
+        "path": ".data/release-0.9.15/prepared/receipts/server-extra-zip-readback.json",
+        "sha256": "eed086aef1b827b89f1395ab3fed2121281aec8dfa62c12daf931cf82ee0a99a"
+      },
+      {
+        "path": ".data/release-0.9.15/transfer-source/proofs/root-fresh-ready.json",
+        "sha256": "bc266c039b769ded4ec574bc8fb10ab66ab98a70e86cf70e4716a8431eeda20e"
+      },
+      {
+        "path": ".data/release-0.9.15/transfer-source/proofs/github-metadata-upload.json",
+        "sha256": "8d01c1cbabfc8ac881859465f2cbd8e00b3427ff6369a146547fba025a020ca1"
+      }
+    ],
+    "reviewedTemplatesSha256": "8d399d28ac9a682d7b7cb5237e5005719ac3a86aafce82bfc26d6055c88a8097",
+    "productionContext": {
+      "backendVersion": "0.9.14",
+      "catalogVersion": "0.9.14",
+      "downloadVersions": {
+        "android": "0.9.14",
+        "ubuntu": "0.9.14",
+        "windows": "0.9.14"
+      },
+      "updateSequence": 16,
+      "catalogPromoted": false
+    }
+  },
+  "rootGateBytes": "eyJzY2hlbWFWZXJzaW9uIjoxLCJ2ZXJzaW9uIjoiMC45LjE1Iiwic291cmNlUmV2aXNpb24iOiJkOGYwMDQwOTI1Yjk1MWFhYmFhNWRlNjY5ZGI5YTZhYmZlODExNmZlIiwiY29udHJhY3RIYXNoIjoiM2RhNzYyMjMzODUxNmQ5Njc5NjNhOGU0ZGI2NDdjY2RiYTYwZGQ4ZTI5MWIyZTI3MmQ3NGUwMDQ4ZGJmMTcwOSIsInBsYW5IYXNoIjoiYzBhNzE0NjAwNWY4M2U1YmY4NDQyMmMwZjJiZTFmMzUyN2ZkOTNlODIwNDUyMjMwMzdkZjIxMmE0NjZmMDA0MSIsInJlbGVhc2VJZCI6NDIyMjczNjE0LCJzZXF1ZW5jZSI6MTcsImJyYW5jaCI6InJlbGVhc2UtdHJhbnNmZXItdjAuOS4xNSIsImFjdGlvbiI6Im9uZSBjbG91ZCBieXRlIHRyYW5zZmVyIGZvciBzaXggcGFja2FnZXMgYW5kIHRlbiBvZmZpY2lhbCBib2R5IHJlYWRiYWNrcyIsImF1dGhvcml6ZWRCeSI6Ii9yb290IiwiZXhwbGljaXRBdXRob3JpemF0aW9uIjp0cnVlLCJvYnNlcnZlZEF0IjoiMjAyNi0xMC0yM1QyMDoyNToyMC4wMTJaIiwibG9jYWxVcGxvYWRlcnNBYnNlbnQiOnRydWUsInByaW9yUGFja2FnZVVwbG9hZHNBYnNlbnQiOnRydWUsInVuZXhwZWN0ZWRBc3NldHNBYnNlbnQiOnRydWUsIm5vQXV0b21hdGljUmV0cnkiOnRydWUsInNpeE1pcnJvclBhY2thZ2VzUmVhZHkiOnRydWUsIm1ldGFkYXRhQWxyZWFkeVVwbG9hZGVkQW5kRnJvemVuIjp0cnVlLCJkcmFmdE9ubHkiOnRydWUsInByaW9yUGFja2FnZVBvc3RDb3VudCI6MCwiY2xvdWRSdW5BdHRlbXB0IjoxLCJuZXdDbG91ZFBlckFzc2V0UG9zdExpbWl0IjoxLCJhbGxvd2VkUG9zdE5hbWVzIjpbIlBldFBhbC0wLjkuMTUtV2luZG93cy14NjQuZXhlIiwiUGV0UGFsLTAuOS4xNS1XaW5kb3dzLXg2NC56aXAiLCJQZXRQYWwtMC45LjE1LVVidW50dS14NjQudGFyLmd6IiwiUGV0UGFsLTAuOS4xNS1VYnVudHUtYXJtNjQudGFyLmd6IiwiUGV0UGFsLTAuOS4xNS1BbmRyb2lkLWRlYnVnLmFwayIsIlBldFBhbC0wLjkuMTUtV2ViLnppcCJdLCJjb21wbGV0ZWRBc3NldHMiOlt7ImlkIjo2NzAyOTI0NDcsIm5hbWUiOiJyZWxlYXNlLW1hbmlmZXN0Lmpzb24iLCJzaXplIjoyMDk2LCJkaWdlc3QiOiJzaGEyNTY6Y2MzNzcwMWI2YTZhMzFhMzA0YWI1MWUxNzllMGU4YjMzNWVhZTRjYjQyYzVkYmJhZmVkN2IwZjAwNTg4ZGM3MSJ9LHsiaWQiOjY3MDI5MjQ1MywibmFtZSI6IlNIQTI1NlNVTVMudHh0Iiwic2l6ZSI6NTc2LCJkaWdlc3QiOiJzaGEyNTY6Yzc5OGJjOGE1MWZmNDQ5MDAzMzJhMzI5NzJkM2FjYWNiZDMyYWI3ZmMzOTMyOTY2MjA4YWQ0M2Y2NTlhZDFmMSJ9LHsiaWQiOjY3MDI5MjQ0OCwibmFtZSI6InBldHBhbC11cGRhdGUuanNvbiIsInNpemUiOjEwNzI2LCJkaWdlc3QiOiJzaGEyNTY6MjYzYjU1YWI2N2I2NzZmMWRlMGE5MmMzZmFhYjY1YWY2YjhiZDFlNTE4NTkyYzJjNDg4NWEyZTEyYjUxMzIxYiJ9LHsiaWQiOjY3MDI5MjQ0OSwibmFtZSI6InBldHBhbC11cGRhdGUtcHVibGljLWtleS50eHQiLCJzaXplIjoxMTMsImRpZ2VzdCI6InNoYTI1Njo3ZmQ2NTBhZmU1ZTVhN2UxZDM1ZTBmMjUxNWUwZWU3YjYwNGFhM2RlYzdiODI1MzU5M2M0ODVhM2ZhOGZlYmRiIn1dLCJldmlkZW5jZSI6W3sicGF0aCI6Ii5kYXRhL3JlbGVhc2UtMC45LjE1L3ByZXBhcmVkL3JlY2VpcHRzL3NpZ25lZC5qc29uIiwic2hhMjU2IjoiNDRhYWExZTVkODQ4MWNmOGI5ZDlmNWM2YzhjNzZmZDI2YmJiMGIzYjhiNGVlNDRiYTQ4ZDFjYTllODE0ZjEyMyJ9LHsicGF0aCI6Ii5kYXRhL3JlbGVhc2UtMC45LjE1L3ByZXBhcmVkL3JlY2VpcHRzL3NlcnZlci1zdGFnZWQuanNvbiIsInNoYTI1NiI6IjAwMzdlNDQ2N2YxMTk4NjFmYjVjN2I0NWE0YWQxM2YxYTIxZGU1ZDk4ZGFlNTc5MWVlZTMyNDBiM2FmNGRjYTcifSx7InBhdGgiOiIuZGF0YS9yZWxlYXNlLTAuOS4xNS9wcmVwYXJlZC9yZWNlaXB0cy9zZXJ2ZXItcmVhZGJhY2suanNvbiIsInNoYTI1NiI6IjdkMDBjMmYyM2VhZWRlOWM3MGNmYmE5ODM4MGI3NzdmYzgyOTg1NjljNGRlN2VkOTZiNzBkZGQwYTAzZmZjMDQifSx7InBhdGgiOiIuZGF0YS9yZWxlYXNlLTAuOS4xNS9wcmVwYXJlZC9yZWNlaXB0cy9zZXJ2ZXItZXh0cmEtemlwLXJlYWRiYWNrLmpzb24iLCJzaGEyNTYiOiJlZWQwODZhZWYxYjgyN2I4OWYxMzk1YWIzZmVkMjEyMTI4MWFlYzhkZmE2MmMxMmRhZjkzMWNmODJlZTBhOTlhIn0seyJwYXRoIjoiLmRhdGEvcmVsZWFzZS0wLjkuMTUvdHJhbnNmZXItc291cmNlL3Byb29mcy9yb290LWZyZXNoLXJlYWR5Lmpzb24iLCJzaGEyNTYiOiJiYzI2NmMwMzliNzY5ZGVkNGVjNTc0YmM4ZmIxMGFiNjZhYjk4YTcwZTg2Y2Y3MGU0NzE2YTg0MzFlZWRhMjBlIn0seyJwYXRoIjoiLmRhdGEvcmVsZWFzZS0wLjkuMTUvdHJhbnNmZXItc291cmNlL3Byb29mcy9naXRodWItbWV0YWRhdGEtdXBsb2FkLmpzb24iLCJzaGEyNTYiOiI4ZDAxYzFjYmFiZmM4YWM4ODE4NTk0NjVmMmNiZDhlMDBiMzQyN2ZmNjM2OWExNDY1NDdmYmEwMjVhMDIwY2ExIn1dLCJyZXZpZXdlZFRlbXBsYXRlc1NoYTI1NiI6IjhkMzk5ZDI4YWM5YTY4MmQ3YjdjYjUyMzdlNTAwNTcxOWFjM2E4NmFhZmNlODJiZmMyNmQ2MDU1Yzg4YTgwOTciLCJwcm9kdWN0aW9uQ29udGV4dCI6eyJiYWNrZW5kVmVyc2lvbiI6IjAuOS4xNCIsImNhdGFsb2dWZXJzaW9uIjoiMC45LjE0IiwiZG93bmxvYWRWZXJzaW9ucyI6eyJhbmRyb2lkIjoiMC45LjE0IiwidWJ1bnR1IjoiMC45LjE0Iiwid2luZG93cyI6IjAuOS4xNCJ9LCJ1cGRhdGVTZXF1ZW5jZSI6MTYsImNhdGFsb2dQcm9tb3RlZCI6ZmFsc2V9fQ==",
+  "rootGateSha256": "86e6eefee3494e8de44d1e85fdcb0149f7598f4ad6c434e991cb15a5f9c8e4e1"
+}
