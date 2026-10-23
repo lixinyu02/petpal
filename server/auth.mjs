@@ -4,6 +4,24 @@ import { isAdministrator, normalizeUserRole } from './user-roles.mjs';
 
 const scrypt = promisify(scryptCallback);
 export const SESSION_LIFETIME = 7 * 24 * 60 * 60 * 1000;
+export const REMEMBERED_SESSION_IDLE = 90 * 24 * 60 * 60 * 1000;
+export const REMEMBERED_SESSION_ABSOLUTE = 365 * 24 * 60 * 60 * 1000;
+export const SESSION_RENEWAL_INTERVAL = 24 * 60 * 60 * 1000;
+const invalidSession = () => Object.assign(new Error('登录凭据已过期或已撤销。'), { status: 401, code: 'session_invalid' });
+export const sessionIsActive = (session, at = Date.now()) => Boolean(session && Number.isFinite(session.expiresAt) && session.expiresAt > at &&
+  (session.rememberDevice !== true || Number.isFinite(session.absoluteExpiresAt) && session.absoluteExpiresAt > at));
+export function rememberedSessionPatch(session, at = Date.now()) {
+  if (!sessionIsActive(session, at)) throw invalidSession();
+  const created = Date.parse(session.createdAt);
+  if (!Number.isFinite(created)) throw Object.assign(new Error('登录会话缺少有效创建时间，请重新登录。'), { status: 409 });
+  const absoluteExpiresAt = Math.min(created + REMEMBERED_SESSION_ABSOLUTE, session.rememberDevice === true ? session.absoluteExpiresAt : Infinity);
+  if (absoluteExpiresAt <= at) throw invalidSession();
+  if (session.rememberDevice === true && Number.isFinite(session.renewedAt) && at - session.renewedAt < SESSION_RENEWAL_INTERVAL) return null;
+  return { rememberDevice: true, absoluteExpiresAt, expiresAt: Math.min(at + REMEMBERED_SESSION_IDLE, absoluteExpiresAt), renewedAt: at, lastSeenAt: at };
+}
+export const publicSession = session => session ? { expiresAt: session.expiresAt, rememberDevice: session.rememberDevice === true,
+  ...(session.rememberDevice === true ? { absoluteExpiresAt: session.absoluteExpiresAt } : {}) } : null;
+export const sessionActivity = session => Number.isFinite(session.lastSeenAt) ? session.lastSeenAt : Number.isFinite(session.renewedAt) ? session.renewedAt : Date.parse(session.createdAt) || 0;
 const invalid = message => Object.assign(new Error(message), { status: 400 });
 export const tokenHash = value => createHash('sha256').update(value).digest('hex');
 export function secureEqual(left, right) {
@@ -28,9 +46,11 @@ export async function verifyPassword(password, stored) {
   const expected = Buffer.from(valid ? stored.hash : '0'.repeat(128), 'hex');
   return timingSafeEqual(value, expected) && Boolean(valid);
 }
-export function newSession(userId) {
+export function newSession(userId, { rememberDevice = false, clock = Date.now } = {}) {
   const token = randomBytes(32).toString('base64url');
-  return { token, session: { tokenHash: tokenHash(token), userId, createdAt: new Date().toISOString(), expiresAt: Date.now() + SESSION_LIFETIME } };
+  const at = clock(), session = { tokenHash: tokenHash(token), userId, createdAt: new Date(at).toISOString(), expiresAt: at + SESSION_LIFETIME };
+  if (rememberDevice) Object.assign(session, rememberedSessionPatch(session, at));
+  return { token, session };
 }
 export function publicUser(user, ownerId) {
   const isOwner = user.id === ownerId;

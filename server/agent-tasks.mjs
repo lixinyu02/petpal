@@ -6,6 +6,7 @@ import { validApprovalReview } from './approval-review.mjs';
 import { approvalMetadata } from './agent-user-inputs.mjs';
 import { createReplyMemoryJobs, replyMemoryPrivacyGuard } from './reply-memory-jobs.mjs';
 import { prepareOutputRendering, withOutputGuide, validOutputRendering } from './openui-policy.mjs';
+import { watchAuthorizationDeadline } from './authorization-deadline.mjs';
 
 const failure = (status, message, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 const now = () => new Date().toISOString();
@@ -273,7 +274,7 @@ export function createAgentTasks({ store, active, approvals, userInputs, getBrid
     let result, error;
     try {
       const expiresAt = check(entry); task.controller.signal.throwIfAborted();
-      if (Number.isFinite(expiresAt)) expiry = setTimeout(() => { void revoke(value => value.sessionHash === entry.auth.sessionHash).catch(() => {}); }, Math.max(0, expiresAt - Date.now()));
+      expiry = watchAuthorizationDeadline({ expiresAt, authorize: () => check(entry, authorizeRemoval), onExpire: () => { void revoke(value => value.sessionHash === entry.auth.sessionHash).catch(() => {}); } });
       task.bridge = getBridge(entry);
       const images = entry.hostId && entry.hostId !== 'central' ? [] : await resolveImages(entry.auth.userId, entry.attachmentIds); check(entry); task.controller.signal.throwIfAborted();
       const reviewChanged = (conversation.threadReviewFingerprint ?? '') !== (entry.reviewFingerprint ?? '');
@@ -305,7 +306,7 @@ export function createAgentTasks({ store, active, approvals, userInputs, getBrid
       result = await task.bridge.run({ conversationId: conversation.id, prompt, threadId: resetThread ? undefined : conversation.threadId, permissions: entry.permissions, images, attachmentIds: entry.attachmentIds, ...(reviewConfig ? { reviewConfig, authorizeReview: () => { check(entry); return true; } } : {}), ...(entry.projectDirectory ? { projectDirectory: entry.projectDirectory, projectAccess: entry.projectAccess } : {}), ...(entry.model ? { model: entry.model } : {}), ...(entry.effort ? { effort: entry.effort } : {}), signal: task.controller.signal, onEvent });
       check(entry); task.controller.signal.throwIfAborted();
     } catch (caught) { error = caught; }
-    clearTimeout(expiry);
+    expiry?.();
     await lock(conversation, async () => {
       try {
         if (error) {

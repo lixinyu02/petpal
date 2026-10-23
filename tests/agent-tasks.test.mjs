@@ -382,6 +382,15 @@ test('expiration cancels a running task without needing another HTTP request', a
   await until(() => f.snapshot().run.status === 'cancelled'); assert.equal(f.calls[0].args.signal.aborted, true);
 });
 
+test('a 90-day session starts normally and renewing a running task avoids its old deadline', async t => {
+  const options = { expiresAt: Date.now() + 90 * 24 * 60 * 60 * 1000 }, f = fixture(t, options);
+  await f.submit(payload('long-session')); await until(() => f.calls.length === 1); await delay(35);
+  assert.equal(f.calls[0].args.signal.aborted, false); await f.finish();
+  options.expiresAt = Date.now() + 40; await f.submit(payload('renewed-session')); await until(() => f.calls.length === 2);
+  options.expiresAt = Date.now() + 90 * 24 * 60 * 60 * 1000; await delay(80);
+  assert.equal(f.calls[1].args.signal.aborted, false); await f.finish();
+});
+
 test('restart pauses pending work, invalidates in-flight status and preserves duplicate receipts', async t => {
   const f = fixture(t); await f.submit(payload('first')); await until(() => f.calls.length === 1); await f.submit(payload('pending'));
   const recovered = structuredClone(f.saved().conversations[0]); recovered.agent.queue[0].auth.generation = 4;

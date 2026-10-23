@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { watchAuthorizationDeadline } from './authorization-deadline.mjs';
 import { normalizeAgentPermissions } from './agent-permissions.mjs';
 import { normalizeAttachmentIds } from './attachments.mjs';
 import { validateProjectDirectoryText, validateStoredProjectDirectory } from './project-directory.mjs';
@@ -103,7 +104,7 @@ export function createChatAssistant({ store, agentTasks, authorize, resolveHost,
     if (!chat) throw fail(404, '聊天协作回执不存在。'); return chat;
   };
   const update = chat => { chat.updatedAt = now(); };
-  function release(record) { const job=jobs.get(record.id);if(job)clearTimeout(job.expiry);jobs.delete(record.id); }
+  function release(record) { const job=jobs.get(record.id);job?.expiry?.();jobs.delete(record.id); }
 
   async function prepare(chat, auth, options, userContent, attachments = []) {
     const normalized = normalizeChatAssistant({ enabled: true, hostId: options?.hostId, providerId: options?.providerId, permissions: options?.permissions, projectDirectory: options?.projectDirectory }, options?.submissionId);
@@ -124,7 +125,7 @@ export function createChatAssistant({ store, agentTasks, authorize, resolveHost,
       chat.assistantTasks ??= []; chat.assistantTasks.push(record); update(chat);
       try { await store.save(); } catch(error) { chat.assistantTasks.splice(chat.assistantTasks.indexOf(record),1);throw error; }
       const job={...auth,providerId:normalized.providerId,...(normalized.permissions.approval==='review'&&normalized.permissions.reviewProviderId?{reviewProviderId:normalized.permissions.reviewProviderId}:{}),auth:{...auth},options:normalized,record,chat,entry:{conversationId:chat.id,auth:{...auth},hostId:normalized.hostId}};jobs.set(record.id,job);
-      if(Number.isFinite(expiresAt)){job.expiry=setTimeout(()=>{void revoke(value=>value===job).catch(()=>{});},Math.max(0,expiresAt-Date.now()));job.expiry.unref?.();}
+      job.expiry=watchAuthorizationDeadline({expiresAt,authorize:()=>authorize(job.auth,job.options,chat),onExpire:()=>{void revoke(value=>value===job).catch(()=>{});}});
       return {record,duplicate:false};
     });
   }

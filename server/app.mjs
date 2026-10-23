@@ -7,7 +7,7 @@ import { networkInterfaces } from 'node:os';
 import { JsonStore, publicProvider, isCompanionKind, defaultSettings } from './store.mjs';
 import { normalizeBaseUrl, normalizeReasoningEffort, normalizeSupportsImages, assertImageSupport, streamProvider, testProvider } from './providers.mjs';
 import { CodexBridge } from './codex.mjs';
-import { tokenHash, secureEqual, username, hashPassword, verifyPassword, newSession, publicUser, createLoginLimiter } from './auth.mjs';
+import { tokenHash, secureEqual, username, hashPassword, verifyPassword, newSession, publicUser, createLoginLimiter, sessionIsActive, sessionActivity, publicSession, rememberedSessionPatch } from './auth.mjs';
 import { defaultVoiceSettings, publicVoiceSettings, patchVoiceSettings } from './voice.mjs';
 import { defaultCodexConfig, publicCodexConfig, patchCodexConfig, validateStoredCodexConfig, parseCodexHttpOrigins, CODEX_TOOL_VERSION } from './codex-config.mjs';
 import { createDesktopTools } from './desktop-tools.mjs';
@@ -121,7 +121,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const mobileOfficial = await new MobileOfficialAccounts({ ...mobileOfficialOptions, authorize: auth => {
     if (!auth || auth.bootstrap || shuttingDown) throw failure(401, '手机官方模型需要有效的小伴账号登录。');
     const user = state.users.find(item => item.id === auth.userId && !item.disabled);
-    const session = state.sessions.find(item => item.userId === auth.userId && item.tokenHash === auth.sessionHash && item.expiresAt > Date.now());
+    const session = state.sessions.find(item => item.userId === auth.userId && item.tokenHash === auth.sessionHash && sessionIsActive(item));
     if (!user || !session) throw failure(401, '手机模型登记的登录已过期或已撤销。');
   }, onChange: (userId, change) => officialChange(userId, change) }).init();
   officialAccounts = combineOfficialAccounts(officialAccounts, mobileOfficial);
@@ -184,6 +184,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const probes = new Set();
   const approvals = new Map();
   const limitLogin = createLoginLimiter();
+  const sessionRenewals = new Map();
   let shuttingDown = false;
   const app = express();
   app.disable('x-powered-by');
@@ -223,7 +224,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type,If-Match');
+      res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type,If-Match,X-PetPal-Remember-Device');
       res.setHeader('Access-Control-Expose-Headers', 'X-PetPal-Speech-Emotion,X-PetPal-Speech-Intensity,X-PetPal-Speech-Source,ETag,X-Content-SHA256');
       if (req.method === 'OPTIONS') return res.sendStatus(204);
     }
@@ -269,14 +270,14 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   };
   const requireCurrentAuth = req => {
     if (shuttingDown) throw failure(503, '服务正在退出。');
-    if (req.user.disabled || !state.users.some(user => user.id === req.user.id && !user.disabled) || (!req.bootstrap && !state.sessions.some(session => session.tokenHash === req.sessionHash && session.userId === req.user.id && session.expiresAt > Date.now()))) throw failure(401, '登录凭据已过期或已撤销。');
+    if (req.user.disabled || !state.users.some(user => user.id === req.user.id && !user.disabled) || (!req.bootstrap && !state.sessions.some(session => session.tokenHash === req.sessionHash && session.userId === req.user.id && sessionIsActive(session)))) throw failure(401, '登录凭据已过期或已撤销。');
   };
   // Only the native final handoff may recheck an existing owner session after
   // backend.close(); no HTTP route accepts the allowClosing option.
   updates.assertOwnerSession = (value, { allowClosing = false } = {}) => {
     if (typeof value !== 'string' || !value || value.length > 4096) throw failure(401, '登录凭据无效或已撤销。');
     const sessionHash = tokenHash(value), bootstrap = secureEqual(sessionHash, ownerTokenHash);
-    const session = bootstrap ? null : state.sessions.find(item => item.tokenHash === sessionHash && item.expiresAt > Date.now());
+    const session = bootstrap ? null : state.sessions.find(item => item.tokenHash === sessionHash && sessionIsActive(item));
     const user = state.users.find(item => item.id === (bootstrap ? state.ownerId : session?.userId));
     if (!user || user.disabled) throw failure(401, '登录凭据无效或已撤销。');
     if (!isOwner(user)) throw failure(403, '仅主机 owner 可以安装桌面更新。');
@@ -403,14 +404,14 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       return { user, expiresAt: undefined };
     }
     const user = state.users.find(item => item.id === auth.userId);
-    const session = state.sessions.find(item => item.userId === user?.id && item.tokenHash === auth.sessionHash && item.expiresAt > Date.now());
+    const session = state.sessions.find(item => item.userId === user?.id && item.tokenHash === auth.sessionHash && sessionIsActive(item));
     const bootstrap = auth.bootstrap && secureEqual(auth.sessionHash, ownerTokenHash) && isOwner(user ?? {});
     if (!user || user.disabled || (!bootstrap && !session)) throw failure(401, 'Agent 提交所属账号或登录已失效。');
     return { user, expiresAt: bootstrap ? undefined : session.expiresAt };
   };
   const authorizeAsrIdentity = auth => {
     const user = state.users.find(item => item.id === auth.userId);
-    const session = state.sessions.find(item => item.userId === auth.userId && item.tokenHash === auth.sessionHash && item.expiresAt > Date.now());
+    const session = state.sessions.find(item => item.userId === auth.userId && item.tokenHash === auth.sessionHash && sessionIsActive(item));
     const bootstrap = auth.bootstrap && secureEqual(auth.sessionHash, ownerTokenHash) && isOwner(user ?? {});
     if (!user || user.disabled || (!bootstrap && !session)) throw failure(401, '识别所属登录已失效。');
     return { expiresAt: bootstrap ? undefined : session.expiresAt };
@@ -444,7 +445,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   };
   const authorizeExecutorSession = auth => {
     const user = state.users.find(item => item.id === auth.userId);
-    const session = state.sessions.find(item => item.userId === auth.userId && item.tokenHash === auth.sessionHash && item.expiresAt > Date.now());
+    const session = state.sessions.find(item => item.userId === auth.userId && item.tokenHash === auth.sessionHash && sessionIsActive(item));
     const bootstrap = auth.bootstrap && secureEqual(auth.sessionHash, ownerTokenHash) && isOwner(user ?? {});
     if (!user || user.disabled || (!bootstrap && !session)) throw failure(401, '执行电脑登录已结束。');
     requireCodex(user);
@@ -626,9 +627,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const verified = await verifyPassword(req.body?.password, savedPassword);
     if (shuttingDown) throw failure(503, '服务正在退出。');
     if (!verified || !user || user.disabled || user.password !== savedPassword) throw failure(401, '账号或密码无效。');
-    const { token: sessionToken, session } = newSession(user.id);
-    state.sessions = state.sessions.filter(item => item.expiresAt > Date.now());
-    const previous = state.sessions.filter(item => item.userId === user.id);
+    if (req.body?.rememberDevice !== undefined && typeof req.body.rememberDevice !== 'boolean') throw failure(400, '记住设备选项无效。');
+    const { token: sessionToken, session } = newSession(user.id, { rememberDevice: req.body?.rememberDevice === true });
+    state.sessions = state.sessions.filter(item => sessionIsActive(item));
+    const previous = state.sessions.filter(item => item.userId === user.id).sort((left, right) => sessionActivity(left) - sessionActivity(right));
     const expired = new Set(previous.slice(0, Math.max(0, previous.length - 7)).map(item => item.tokenHash));
     if (expired.size) {
       state.sessions = state.sessions.filter(item => !expired.has(item.tokenHash));
@@ -637,7 +639,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (expired.size) await stopTasks(task => expired.has(task.sessionHash));
     if (shuttingDown) throw failure(503, '服务正在退出。');
     if (user.disabled || user.password !== savedPassword || !state.sessions.includes(session)) throw failure(401, '登录凭据已撤销，请重新登录。');
-    res.json({ token: sessionToken, user: visibleUser(user) });
+    res.json({ token: sessionToken, user: visibleUser(user), session: publicSession(session) });
   });
   // Native background credentials are deliberately excluded from session auth.
   app.get('/api/notifications/companion-feed',(req,res)=>{
@@ -660,12 +662,12 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   });
   app.use('/api', (req, res, next) => {
     const auth = req.headers.authorization;
-    if (!auth?.startsWith('Bearer ') || auth.length > 4103) return res.status(401).json({ error: '登录凭据无效或未填写。' });
+    if (!auth?.startsWith('Bearer ') || auth.length > 4103) return res.status(401).json({ error: '登录凭据无效或未填写。', code: 'session_invalid' });
     const hash = tokenHash(auth.slice(7));
     const bootstrap = secureEqual(hash, ownerTokenHash);
-    const session = bootstrap ? null : state.sessions.find(item => item.tokenHash === hash && item.expiresAt > Date.now());
+    const session = bootstrap ? null : state.sessions.find(item => item.tokenHash === hash && sessionIsActive(item));
     const user = state.users.find(item => item.id === (bootstrap ? state.ownerId : session?.userId));
-    if (!user || user.disabled) return res.status(401).json({ error: '登录凭据无效、已过期或账号已停用。' });
+    if (!user || user.disabled) return res.status(401).json({ error: '登录凭据无效、已过期或账号已停用。', code: 'session_invalid' });
     req.user = user; req.sessionHash = hash; req.bootstrap = bootstrap; next();
   });
   // Only finite, authenticated startup snapshots negotiate compression. Keep
@@ -840,7 +842,27 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   });
   app.post('/api/agent/executors/:connectionId/events', (req, res) => res.json(executors.events(req.params.connectionId, executorAuth(req), req.body)));
   app.delete('/api/agent/executors/:connectionId', (req, res) => res.json(executors.disconnect(req.params.connectionId, executorAuth(req))));
-  app.get('/api/auth/me', (req, res) => res.json({ instanceId: state.instanceId, user: visibleUser(req.user) }));
+  app.get('/api/auth/me', async (req, res) => {
+    const authorize = () => {
+      if (shuttingDown) throw failure(503, '服务正在退出。');
+      try { requireCurrentAuth(req); } catch (error) { if (error.status === 401) error.code = 'session_invalid'; throw error; }
+    };
+    authorize();
+    const session = req.bootstrap ? null : state.sessions.find(item => item.tokenHash === req.sessionHash && item.userId === req.user.id);
+    if (session && req.headers['x-petpal-remember-device'] === '1') {
+      if (rememberedSessionPatch(session)) {
+        let renewing = sessionRenewals.get(session);
+        if (!renewing) {
+          renewing = store.save({ sessionRenewal: { session, authorize } });
+          sessionRenewals.set(session, renewing);
+          void renewing.finally(() => { if (sessionRenewals.get(session) === renewing) sessionRenewals.delete(session); }).catch(() => {});
+        }
+        await renewing;
+      }
+      authorize();
+    }
+    res.json({ instanceId: state.instanceId, user: visibleUser(req.user), session: publicSession(session) });
+  });
   app.get('/api/downloads', async (req, res) => {
     if (Object.keys(req.query).length) throw failure(400, '下载目录不接受自定义地址或查询参数。');
     const catalog = await downloads.list(); requireCurrentAuth(req); res.json(catalog);
@@ -1511,7 +1533,8 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.use((error, req, res, next) => {
     if (res.headersSent) return next(error);
     const status = error.status ?? (error.type === 'entity.too.large' ? 413 : 500);
-    res.status(status).json({ error: status >= 500 ? '服务暂时无法完成请求，请检查后台和数据目录。' : error.type === 'entity.parse.failed' ? '请求 JSON 格式无效。' : error.message });
+    res.status(status).json({ error: status >= 500 ? '服务暂时无法完成请求，请检查后台和数据目录。' : error.type === 'entity.parse.failed' ? '请求 JSON 格式无效。' : error.message,
+      ...(status === 401 && error.code === 'session_invalid' ? { code: 'session_invalid' } : {}) });
   });
   const listeners = new Set();
   const hostingPolicies = new WeakMap();

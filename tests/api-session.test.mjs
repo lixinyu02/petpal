@@ -50,13 +50,13 @@ test('real API wrapper account-switch and native restore behavior',async t=>{
       await assert.rejects(api.loadInitialState({history:true}),error=>error.status===404);
       assert.deepEqual(calls.slice(2),['https://startup.example/api/state?runtime=deferred']);
     });
-    await t.test('startup auth, server and network failures do not create a fallback request',async()=>{
+    await t.test('startup failures never use legacy fallback and only an unclassified 401 confirms login',async()=>{
       for(const failure of [401,403,503,'network']){
         const api=await freshApi();api.setConnection({url:'https://startup.example',token:'member'});const calls=[];
         const networkError=new TypeError('fixture network unavailable');
         install('fetch',async url=>{calls.push(url);if(failure==='network')throw networkError;return json({error:`fixture ${failure}`},failure);});
         await assert.rejects(api.loadInitialState(),error=>failure==='network'?error===networkError:error.status===failure);
-        assert.deepEqual(calls,['https://startup.example/api/bootstrap']);assert.equal(api.getIdentity(),null);
+        assert.deepEqual(calls,['https://startup.example/api/bootstrap',...(failure===401?['https://startup.example/api/auth/me']:[])]);assert.equal(api.getIdentity(),null);
         assert.equal(api.getConnection().token,failure===401?'':'member');
       }
     });

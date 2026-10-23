@@ -34,6 +34,25 @@ test('prepare persists a receipt before any model decision and retries reuse it 
   assert.doesNotMatch(JSON.stringify(assistantTasksSnapshot(f.chat)),/private-session|fingerprint|permissions|provider-one/);
 });
 
+test('a long device session keeps Chat + Agent usable and a renewal outlives the old decision deadline', async t => {
+  let expiresAt = Date.now() + 90 * 24 * 60 * 60 * 1000;
+  const f = fixture(t, { authorize: () => expiresAt });
+  const first = await f.manager.prepare(f.chat, f.auth, f.options, 'long session', []);
+  await new Promise(resolve => setTimeout(resolve, 35)); assert.equal(first.record.status, 'deciding');
+  await f.manager.finishDecision(first.record);
+  expiresAt = Date.now() + 40;
+  const options = { ...f.options, submissionId: randomUUID() }, next = await f.manager.prepare(f.chat, f.auth, options, 'renewed decision', []);
+  expiresAt = Date.now() + 90 * 24 * 60 * 60 * 1000;
+  await new Promise(resolve => setTimeout(resolve, 80)); assert.equal(next.record.status, 'deciding');
+  await f.manager.dispatch(next.record, 'isolated background action'); assert.equal(f.submitted.length, 1);
+});
+
+test('an expired Chat + Agent decision is cancelled without waiting for another request', async t => {
+  const expiresAt = Date.now() + 40, f = fixture(t, { authorize: () => expiresAt });
+  const { record } = await f.manager.prepare(f.chat, f.auth, f.options, 'short isolated session', []);
+  await until(() => record.status === 'cancelled'); assert.equal(f.submitted.length, 0);
+});
+
 test('concurrent identical foreground submissions reserve only one durable receipt',async t=>{
   const f=fixture(t),gate=deferred();let saved=false;
   f.store.save=async()=>{await gate.promise;saved=true;};

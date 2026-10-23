@@ -101,6 +101,82 @@ test('Android encrypted-session integration keeps authentication and storage in 
       const f=fixture();disk.set('petpal.connection',JSON.stringify(record()));window.petpalLoginSession.read=async()=>{throw new Error('corrupt ciphertext');};const api=await fresh();await api.initConnection('https://default.example');assert.equal(api.getConnection().token,'');assert.match(api.getLoginPersistenceError(),/无法恢复/);assert.equal(f.calls.length,0);
       install('fetch',async()=>json({token:'synthetic-replacement'}));await api.login('https://default.example','alice','synthetic-password');assert.equal(api.getLoginPersistenceError(),'');assert.equal(f.stored().token,'synthetic-replacement');
     });
+    await t.test('Android requests remembered login and renews only GET identity checks without persisting password',async()=>{
+      const f=fixture(),api=await fresh();await api.initConnection('https://saved.example');const calls=[];
+      install('fetch',async(url,options)=>{calls.push({url,options});return json(url.endsWith('/auth/login')?{token:'synthetic-remembered'}:{instanceId:'server-fixture',user:{id:'alice'}});});
+      await api.login('https://saved.example','alice','synthetic-login-password');
+      assert.deepEqual(JSON.parse(calls[0].options.body),{username:'alice',password:'synthetic-login-password',rememberDevice:true});
+      await api.api('/auth/me');assert.equal(calls[1].options.headers.get('X-PetPal-Remember-Device'),'1');
+      await api.api('/state');assert.equal(calls[2].options.headers.has('X-PetPal-Remember-Device'),false);
+      await api.api('/auth/me',{method:'POST'});assert.equal(calls[3].options.headers.has('X-PetPal-Remember-Device'),false);
+      await api.connectWithToken({url:'https://saved.example',token:'synthetic-pairing'});assert.equal(calls[4].options.headers.get('X-PetPal-Remember-Device'),'1');
+      assert.equal(JSON.stringify(f.calls).includes('synthetic-login-password'),false);
+    });
+    for(const desktop of [false,true])await t.test(`${desktop?'Desktop':'Web'} never automatically requests an Android remembered session`,async()=>{
+      fixture();delete window.petpalLoginSession;const api=await fresh();await api.initConnection('https://saved.example');if(desktop)window.petpal={};const calls=[];
+      install('fetch',async(url,options)=>{calls.push({url,options});return json(url.endsWith('/auth/login')?{token:'synthetic-normal'}:{instanceId:'server-fixture',user:{id:'alice'}});});
+      await api.login('https://saved.example','alice','synthetic-password');await api.api('/auth/me');
+      assert.equal(Object.hasOwn(JSON.parse(calls[0].options.body),'rememberDevice'),false);assert.equal(calls[1].options.headers.has('X-PetPal-Remember-Device'),false);
+    });
+    await t.test('business 401 cannot erase saved login when the current account remains valid',async()=>{
+      const f=fixture(record()),api=await fresh();await api.initConnection();const calls=[];
+      install('fetch',async(url,options)=>{calls.push(url);if(url.endsWith('/auth/me')){assert.equal(options.headers.get('X-PetPal-Remember-Device'),'1');return json({instanceId:'server-fixture',user:{id:'alice'}});}return json({error:'upstream credentials unavailable'},401);});
+      await assert.rejects(api.api('/voice/config'),error=>error.status===401&&error.message==='upstream credentials unavailable');assert.deepEqual(calls,['https://saved.example/api/voice/config','https://saved.example/api/auth/me']);assert.equal(f.stored().token,'synthetic-saved-token');assert.equal(api.getIdentity(),null);
+    });
+    for(const outcome of ['offline','server','unknown'])await t.test(`an uncertain ${outcome} login confirmation preserves durable login and the original business error`,async()=>{
+      const f=fixture(record()),api=await fresh();await api.initConnection();
+      install('fetch',async url=>{if(!url.endsWith('/auth/me'))return json({error:'original business error'},401);if(outcome==='offline')throw new TypeError('synthetic network error');return json({error:'temporary confirmation error'},outcome==='server'?503:403);});
+      await assert.rejects(api.api('/voice/config'),error=>error.status===401&&error.message==='original business error');assert.equal(f.stored().token,'synthetic-saved-token');assert.equal(api.getConnection().token,'synthetic-saved-token');
+    });
+    await t.test('an explicit invalid-session code clears only the current saved login without an extra confirmation',async()=>{
+      const f=fixture(record()),api=await fresh();await api.initConnection();let calls=0;
+      install('fetch',async()=>{calls++;return json({error:'session revoked',code:'session_invalid'},401);});
+      await assert.rejects(api.api('/state'),error=>error.status===401&&error.code==='session_invalid');assert.equal(calls,1);assert.equal(f.stored(),null);assert.equal(api.getConnection().token,'');
+    });
+    await t.test('concurrent healthy confirmations preserve both original business errors and never publish unverified identity',async()=>{
+      const f=fixture(record()),api=await fresh();await api.initConnection();const wait=deferred();let confirmations=0;
+      install('fetch',async url=>{if(!url.endsWith('/auth/me'))return json({error:'upstream authorization'},401);confirmations++;return wait.promise;});
+      const first=assert.rejects(api.api('/voice/config'),error=>error.status===401&&error.message==='upstream authorization'),second=assert.rejects(api.api('/state'),error=>error.status===401&&error.message==='upstream authorization');await flush();assert.equal(confirmations,1);
+      wait.resolve(json({instanceId:'server-fixture',user:{id:'alice'}}));await Promise.all([first,second]);assert.equal(f.stored().token,'synthetic-saved-token');assert.equal(api.getIdentity(),null);
+    });
+    await t.test('concurrent business 401s share one independent confirmation while a cancelled caller exits immediately',async()=>{
+      const f=fixture(record()),api=await fresh();await api.initConnection();const wait=deferred(),cancel=new AbortController();let confirmations=0,signal;
+      install('fetch',async(url,options)=>{if(!url.endsWith('/auth/me'))return json({error:'business authorization'},401);confirmations++;signal=options.signal;return wait.promise;});
+      const first=api.api('/voice/config',{signal:cancel.signal}),firstRejected=assert.rejects(first,/synthetic caller cancelled/),second=api.api('/state'),secondRejected=assert.rejects(second,error=>error.status===401);await flush();assert.equal(confirmations,1);
+      cancel.abort(new Error('synthetic caller cancelled'));await firstRejected;assert.equal(signal.aborted,false);assert.equal(api.getConnection().token,'synthetic-saved-token');
+      wait.resolve(json({error:'legacy expired'},401));await secondRejected;assert.equal(f.stored(),null);assert.equal(api.getConnection().token,'');
+    });
+    await t.test('a late shared confirmation cannot erase a newer account or leak its result across epochs',async()=>{
+      const f=fixture(record()),api=await fresh();await api.initConnection();const wait=deferred();let signal;
+      install('fetch',async(url,options)=>{if(url.endsWith('/auth/login'))return json({token:'synthetic-new-account'});if(url.endsWith('/auth/me')){signal=options.signal;return wait.promise;}return json({error:'old business error'},401);});
+      const pending=api.api('/state'),rejected=assert.rejects(pending,api.SessionChangedError);await flush();await api.login('https://other.example','bob','synthetic-password');await rejected;assert.equal(signal.aborted,true);
+      wait.resolve(json({error:'legacy expired'},401));await flush();assert.equal(api.getConnection().token,'synthetic-new-account');assert.equal(f.stored().token,'synthetic-new-account');
+    });
+    await t.test('a stalled confirmation is bounded and retains saved login',async t=>{
+      const f=fixture(record()),api=await fresh();await api.initConnection();t.mock.timers.enable({apis:['setTimeout']});let signal;
+      install('fetch',async(url,options)=>{if(url.endsWith('/auth/me')){signal=options.signal;return new Promise(()=>{});}return json({error:'original business timeout'},401);});
+      const pending=api.api('/state'),rejected=assert.rejects(pending,error=>error.status===401&&error.message==='original business timeout');await flush();t.mock.timers.tick(5000);await rejected;assert.equal(signal.aborted,true);assert.equal(f.stored().token,'synthetic-saved-token');
+    });
+    await t.test('a temporary vault read failure supports explicit single-flight retry and clears its warning after restoration',async()=>{
+      const f=fixture(record()),api=await fresh(),wait=deferred();let reads=0;
+      window.petpalLoginSession.read=async()=>{reads++;if(reads===1)throw new Error('private transient read error');return wait.promise;};
+      await api.initConnection('https://default.example');assert.equal(api.getConnection().token,'');assert.match(api.getLoginPersistenceError(),/无法恢复/);
+      const first=api.retrySavedLogin(),second=api.retrySavedLogin();assert.equal(first,second);assert.equal(reads,2);wait.resolve({connection:record()});await first;
+      assert.equal(api.getConnection().token,'synthetic-saved-token');assert.equal(api.getLoginPersistenceError(),'');assert.equal(api.getIdentity(),null);assert.equal(f.stored().token,'synthetic-saved-token');await api.retrySavedLogin();assert.equal(reads,2);
+    });
+    for(const action of ['logout','new-login'])await t.test(`a late vault retry cannot overwrite ${action}`,async()=>{
+      fixture();const api=await fresh();await api.initConnection('https://default.example');const wait=deferred();window.petpalLoginSession.read=()=>wait.promise;
+      const pending=api.retrySavedLogin(),rejected=assert.rejects(pending,api.SessionChangedError);if(action==='logout')await api.logout();else{install('fetch',async()=>json({token:'synthetic-current-account'}));await api.login('https://other.example','bob','synthetic-password');}
+      wait.resolve({connection:record()});await rejected;assert.equal(api.getConnection().token,action==='logout'?'':'synthetic-current-account');
+    });
+    await t.test('a failed vault retry keeps the private file and never exposes its native exception',async()=>{
+      const f=fixture(record()),api=await fresh();window.petpalLoginSession.read=async()=>{throw new Error('private keystore error');};await api.initConnection('https://default.example');
+      await assert.rejects(api.retrySavedLogin(),error=>/无法恢复/.test(error.message)&&!error.message.includes('private keystore'));assert.equal(f.stored().token,'synthetic-saved-token');assert.equal(api.getConnection().token,'');
+    });
+    await t.test('a successful empty vault read clears a transient warning without inventing a login',async()=>{
+      fixture();const api=await fresh();let reads=0;window.petpalLoginSession.read=async()=>{if(++reads===1)throw new Error('synthetic temporary lock');return{connection:null};};
+      await api.initConnection('https://default.example');assert.match(api.getLoginPersistenceError(),/无法恢复/);await api.retrySavedLogin();assert.equal(api.getLoginPersistenceError(),'');assert.deepEqual(api.getConnection(),{url:'https://default.example',token:''});assert.equal(reads,2);
+    });
     await t.test('Web and desktop without the Android bridge retain their session-only behavior',async()=>{
       fixture();delete window.petpalLoginSession;const api=await fresh();await api.initConnection('https://web.example');install('fetch',async()=>json({token:'synthetic-web-token'}));await api.login('https://web.example','alice','synthetic-password');
       assert.equal(JSON.parse(disk.get('petpal.connection')).token,'synthetic-web-token');disk.clear();const restarted=await fresh();await restarted.initConnection('https://web.example');assert.equal(restarted.getConnection().token,'');

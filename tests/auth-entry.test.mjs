@@ -139,7 +139,8 @@ for (const credential of ['anonymous', 'expired', 'disabled', 'logged-out']) {
       const result = await response.json();
       assert.equal(response.status, 401, `${credential}: ${method} ${route}`);
       assert.equal(typeof result.error, 'string');
-      assert.deepEqual(Object.keys(result), ['error'], 'denial must not include account, voice, model, or task data');
+      assert.deepEqual(Object.keys(result).sort(), ['code', 'error'], 'denial must not include account, voice, model, or task data');
+      assert.equal(result.code, 'session_invalid', 'only authoritative authentication denial invalidates a saved login');
       assert.doesNotMatch(result.error, /private-auth-entry|isolated-provider-key|isolated-voice-key/);
       assert.deepEqual(f.calls, beforeCalls, `${method} ${route} reached a protected runtime before authentication`);
     }

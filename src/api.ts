@@ -97,6 +97,16 @@ let executorPendingScope:string|null=null;
 let executorRevision=0;
 let loginPersistenceError='';
 let loginPersistenceQueue:Promise<void>=Promise.resolve();
+let savedLoginRetry:{epoch:number;promise:Promise<Connection>}|undefined;
+let sessionValidation:{epoch:number;promise:Promise<boolean>}|undefined;
+// Only the Android entry installs this vault bridge. Desktop has its own
+// connection bridge and must retain its existing session lifetime.
+const remembersAndroidDevice=()=>Boolean(window.petpalLoginSession&&!window.petpal);
+function authenticationHeaders(token:string){
+  const headers=new Headers({Authorization:`Bearer ${token}`});
+  if(remembersAndroidDevice())headers.set('X-PetPal-Remember-Device','1');
+  return headers;
+}
 type WarmInitialState = {epoch:number;identity:Identity;history:boolean;controller:AbortController;promise:Promise<State>;expiresAt:number;timer?:ReturnType<typeof setTimeout>};
 const warmInitialStates=new Map<boolean,WarmInitialState>();
 function releaseWarmInitialState(entry:WarmInitialState,reason?:Error){
@@ -211,18 +221,42 @@ export function initConnection(defaultUrl = '') {
         const saved=(await window.petpalLoginSession.read()).connection;
         if(epoch!==getSessionEpoch())return getConnection();
         const restored=restoreTargetConnection(saved,native);
-        if(restored){setConnection(restored.connection,restored.credentialKind,restored.target,'restore');return getConnection();}
-      }catch{if(epoch!==getSessionEpoch())return getConnection();nativeReadFailed=true;loginPersistenceError='无法恢复设备保存的登录，请重新登录；原私有文件已保留。';}
+        if(restored){setConnection(restored.connection,restored.credentialKind,restored.target,'restore');setLoginPersistenceError('');return getConnection();}
+      }catch{if(epoch!==getSessionEpoch())return getConnection();nativeReadFailed=true;loginPersistenceError='无法恢复设备保存的登录，请重试；原私有文件已保留。';}
     }
     try{const saved=!nativeReadFailed&&sessionStorage.getItem('petpal.connection');if(saved){const parsed=JSON.parse(saved);if(typeof parsed.url==='string'&&typeof parsed.token==='string'){
       const restored=restoreTargetConnection(parsed,native);
-      if(restored){if(window.petpalLoginSession&&restored.connection.token){await persistLogin({...restored.connection,credentialKind:restored.credentialKind,target:restored.target},()=>{if(epoch!==getSessionEpoch())throw new SessionChangedError();},()=>{setConnection(restored.connection,restored.credentialKind,restored.target,'restore');});}else setConnection(restored.connection,restored.credentialKind,restored.target,'restore');return getConnection();}
+      if(restored){if(window.petpalLoginSession&&restored.connection.token){await persistLogin({...restored.connection,credentialKind:restored.credentialKind,target:restored.target},()=>{if(epoch!==getSessionEpoch())throw new SessionChangedError();},()=>{setConnection(restored.connection,restored.credentialKind,restored.target,'restore');});}else setConnection(restored.connection,restored.credentialKind,restored.target,'restore');setLoginPersistenceError('');return getConnection();}
     }}}catch{if(epoch!==getSessionEpoch())return getConnection();try{sessionStorage.removeItem('petpal.connection');}catch{}}
     if(native)setConnection({url:defaultUrl || native.url,token:''},'none',undefined,'restore');
     else if(defaultUrl)setConnection({url:defaultUrl,token:''},'none',undefined,'restore');
     return getConnection();
   })();
   return initialization.then(()=>getConnection());
+}
+/** Retry a temporary vault read failure without deleting or replacing its file. */
+export function retrySavedLogin(defaultUrl=''):Promise<Connection>{
+  if(getConnection().token||!window.petpalLoginSession)return Promise.resolve(getConnection());
+  const epoch=getSessionEpoch();
+  if(savedLoginRetry?.epoch===epoch)return savedLoginRetry.promise;
+  const bridge=window.petpalLoginSession;
+  const entry={epoch,promise:Promise.resolve(getConnection())};
+  entry.promise=(async()=>{
+    try{
+      const saved=(await bridge.read()).connection;
+      if(epoch!==getSessionEpoch())throw new SessionChangedError();
+      const restored=restoreTargetConnection(saved,nativeConnection);
+      const replacing=!!restored||!getConnection().url&&!!defaultUrl;
+      if(restored)void setConnection(restored.connection,restored.credentialKind,restored.target,'restore');
+      else if(replacing)void setConnection({url:defaultUrl,token:''},'none',undefined,'restore');
+      if(getSessionEpoch()!==epoch+(replacing?1:0))throw new SessionChangedError();
+      setLoginPersistenceError('');return getConnection();
+    }catch(error){
+      if(epoch!==getSessionEpoch()||isSessionChanged(error))throw new SessionChangedError();
+      const message='无法恢复设备保存的登录，请重试；原私有文件已保留。';setLoginPersistenceError(message);throw new Error(message);
+    }finally{if(savedLoginRetry===entry)savedLoginRetry=undefined;}
+  })();
+  savedLoginRetry=entry;return entry.promise;
 }
 export async function switchExecutionTarget(target:'local'|'remote',defaultRemoteUrl='https://magicdatou.top:44318') {
   const sequence=++targetSwitchSequence,epoch=getSessionEpoch();
@@ -239,17 +273,37 @@ export async function switchExecutionTarget(target:'local'|'remote',defaultRemot
   else setConnection({url:target==='local'?nativeConnection!.url:defaultRemoteUrl,token:''},'none',target);
 }
 function message(data:any,status:number){return data.error?.message||data.error||data.message||`请求失败 (${status})`;}
-async function responseJson(response:Response,request:ReturnType<typeof requests.begin>) {
+function confirmInvalidSession(request:ReturnType<typeof requests.begin>):Promise<boolean>{
+  if(sessionValidation?.epoch===request.epoch)return sessionValidation.promise;
+  // A business endpoint's 401 may belong to an upstream service. Confirm using
+  // an independent, bounded request shared by this account epoch; aborting one
+  // caller must not cancel another caller's confirmation.
+  const controller=new AbortController(),validation=requests.begin(controller.signal);
+  const timer=setTimeout(()=>controller.abort(new Error('登录验证暂时不可用。')),5000);
+  const entry={epoch:request.epoch,promise:Promise.resolve(false)};
+  entry.promise=waitForInitialState(connectionFetch(`${request.connection.url}/api/auth/me`,{headers:authenticationHeaders(request.connection.token),signal:validation.signal}).then(response=>{
+    validation.assertCurrent();void response.body?.cancel().catch(()=>{});return response.status===401;
+  }),validation.signal).catch(()=>false).finally(()=>{clearTimeout(timer);validation.close();if(sessionValidation===entry)sessionValidation=undefined;});
+  sessionValidation=entry;return entry.promise;
+}
+async function responseJson(response:Response,request:ReturnType<typeof requests.begin>,route='') {
   const data=await response.json().catch(()=>({}));request.assertCurrent();
-  if(!response.ok){if(response.status===401&&request.connection.token)await setConnection({url:request.connection.url,token:''}).catch(()=>{});throw Object.assign(new Error(message(data,response.status)),{status:response.status});}
+  if(!response.ok){
+    if(response.status===401&&request.connection.token){
+      const invalid=data?.code==='session_invalid'||route==='/auth/me'||await waitForInitialState(confirmInvalidSession(request),request.signal);
+      request.assertCurrent();
+      if(invalid)await setConnection({url:request.connection.url,token:''}).catch(()=>{});
+    }
+    throw Object.assign(new Error(message(data,response.status)),{status:response.status,...(typeof data?.code==='string'?{code:data.code}:{})});
+  }
   return data;
 }
 export async function api<T = any>(path:string, options:RequestInit = {}):Promise<T> {
   const request=requests.begin(options.signal);
   try{
-    request.assertCurrent();const headers=new Headers(options.headers);if(!headers.has('Content-Type'))headers.set('Content-Type','application/json');headers.set('Authorization',`Bearer ${request.connection.token}`);
+    request.assertCurrent();const headers=new Headers(options.headers),route=path.split('?')[0];if(!headers.has('Content-Type'))headers.set('Content-Type','application/json');headers.set('Authorization',`Bearer ${request.connection.token}`);if(route==='/auth/me'&&(!options.method||options.method.toUpperCase()==='GET')&&remembersAndroidDevice())headers.set('X-PetPal-Remember-Device','1');
     const response=await connectionFetch(`${request.connection.url}/api${path}`,{...options,headers,signal:request.signal});request.assertCurrent();
-    const data=await responseJson(response,request);const route=path.split('?')[0];if(route==='/state'||route==='/bootstrap'||route==='/auth/me')acceptIdentity(data);request.assertCurrent();return data as T;
+    const data=await responseJson(response,request,route);if(route==='/state'||route==='/bootstrap'||route==='/auth/me')acceptIdentity(data);request.assertCurrent();return data as T;
   }finally{request.close();}
 }
 async function readInitialState(history:boolean,signal:AbortSignal):Promise<State>{
@@ -262,7 +316,7 @@ async function readInitialState(history:boolean,signal:AbortSignal):Promise<Stat
   }
 }
 /** A misbehaving native transport must not hold startup past cancellation. */
-function waitForInitialState(pending:Promise<State>,signal:AbortSignal):Promise<State>{
+function waitForInitialState<T>(pending:Promise<T>,signal:AbortSignal):Promise<T>{
   return new Promise((resolve,reject)=>{
     const abort=()=>{signal.removeEventListener('abort',abort);reject(signal.reason);};
     if(signal.aborted){void pending.catch(()=>{});abort();return;}
@@ -361,11 +415,11 @@ async function acceptLogin(request:ReturnType<typeof requests.begin>,connection:
 export async function connectWithToken(next:Connection) {
   const url=normalizeServerUrl(next.url),token=next.token.trim();if(!token)throw new Error('请输入配对令牌。');
   const request=requests.begin();
-  try{const response=await connectionFetch(`${url}/api/auth/me`,{headers:{Authorization:`Bearer ${token}`},signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.instanceId!=='string'||!data.instanceId||typeof data.user?.id!=='string'||!data.user.id)throw new Error('服务身份响应无效。');const reason=!identity&&request.connection.url===url?'authenticate':'change';await acceptLogin(request,{url,token},'pairing',reason,()=>acceptIdentity(data));}finally{request.close();}
+  try{const response=await connectionFetch(`${url}/api/auth/me`,{headers:authenticationHeaders(token),signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.instanceId!=='string'||!data.instanceId||typeof data.user?.id!=='string'||!data.user.id)throw new Error('服务身份响应无效。');const reason=!identity&&request.connection.url===url?'authenticate':'change';await acceptLogin(request,{url,token},'pairing',reason,()=>acceptIdentity(data));}finally{request.close();}
 }
 export async function login(urlValue:string,username:string,password:string) {
   const url=normalizeServerUrl(urlValue),request=requests.begin();
-  try{const response=await connectionFetch(`${url}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim(),password}),signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.token!=='string'||!data.token)throw new Error('登录响应缺少会话凭据。');const reason=!identity&&request.connection.url===url?'authenticate':'change';await acceptLogin(request,{url,token:data.token},'session',reason);}finally{request.close();}
+  try{const response=await connectionFetch(`${url}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim(),password,...(remembersAndroidDevice()?{rememberDevice:true}:{})}),signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.token!=='string'||!data.token)throw new Error('登录响应缺少会话凭据。');const reason=!identity&&request.connection.url===url?'authenticate':'change';await acceptLogin(request,{url,token:data.token},'session',reason);}finally{request.close();}
 }
 export function logout() {
   const previous=getConnection(),cleared=setConnection({url:previous.url,token:''});

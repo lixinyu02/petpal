@@ -11,6 +11,8 @@ import { validateStoredNotifications } from './notifications.mjs';
 import { validateStoredAutomations } from './automation-schema.mjs';
 import { validateStoredOrganization, createOrganizationPersistence } from './conversation-organization.mjs';
 import { canAccessExecutionHost, normalizeUserRole } from './user-roles.mjs';
+import { createSessionPersistence } from './session-persistence.mjs';
+import { REMEMBERED_SESSION_ABSOLUTE } from './auth.mjs';
 
 export const isCompanionKind = value => value === 'anime' || value === 'cat';
 const isChatAssistantHostId = value => value === null || typeof value === 'string' && (value === 'central' || /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value));
@@ -86,6 +88,9 @@ export class JsonStore {
     const principal = state.users.find(user => user.id === state.ownerId);
     if (!principal || principal.disabled || principal.role !== 'admin') throw new Error('本地主机 owner 无效，不能停用或降权。');
     if (state.sessions.some(session => !ids.has(session.userId) || !/^[a-f0-9]{64}$/.test(session.tokenHash) || !Number.isFinite(session.expiresAt))) throw new Error('本地登录会话数据无效。');
+    if (state.sessions.some(session => session.rememberDevice !== undefined && typeof session.rememberDevice !== 'boolean' || session.rememberDevice === true &&
+      (!Number.isFinite(session.absoluteExpiresAt) || !Number.isFinite(session.renewedAt) || !Number.isFinite(session.lastSeenAt) || !Number.isFinite(Date.parse(session.createdAt)) ||
+       session.expiresAt > session.absoluteExpiresAt || session.absoluteExpiresAt > Date.parse(session.createdAt) + REMEMBERED_SESSION_ABSOLUTE))) throw new Error('本地长期登录会话数据无效。');
     if (validateStoredAttachments(state)) changed = true;
     if (validateExecutionHosts(state)) changed = true;
     for (const user of state.users) {
@@ -112,6 +117,7 @@ export class JsonStore {
     if (validateStoredOrganization(state)) changed = true;
     this.organizationPersistence = createOrganizationPersistence(this);
     this.agentRecoveryPersistence = createAgentRecoveryPersistence(this);
+    this.sessionPersistence = createSessionPersistence(this);
     this.#chatAssistantHosts = new Map(state.users.map(user => [user.id, (user.id === state.ownerId ? state.settings : user.settings).chatAssistantHostId]));
     if (identityMigrated && raw) {
       const backup = path.join(this.directory, `state.identity.backup-${createHash('sha256').update(raw).digest('hex').slice(0, 16)}.json`);
@@ -181,6 +187,7 @@ export class JsonStore {
       // An unrelated concurrent save cannot capture an undurable event or
       // overwrite a newly committed feed with an older in-memory copy.
       const snapshot = JSON.parse(captured);
+      this.sessionPersistence?.prepare(snapshot, operation?.sessionRenewal);
       this.organizationPersistence?.prepare(snapshot, operation?.organization);
       this.#prepareChatAssistantHosts(snapshot, operation?.chatAssistantDefaultHost);
       this.agentRecoveryPersistence?.prepare(snapshot, operation?.agentRecovery);
@@ -188,6 +195,7 @@ export class JsonStore {
       await this.automationPersistence?.prepare(snapshot, operation);
       const contents = `${JSON.stringify(snapshot)}\n`;
       if (await this.#unchangedFile(contents)) {
+        this.sessionPersistence?.beforeCommit(snapshot);
         this.organizationPersistence?.beforeCommit(snapshot);
         this.agentRecoveryPersistence?.beforeCommit(snapshot);
       } else {
@@ -200,6 +208,7 @@ export class JsonStore {
             try { written = await handle.stat({ bigint: true }); } catch { /* Optional cache metadata only. */ }
           } finally { await handle.close(); }
           await chmod(temporary, 0o600).catch(error => { if (process.platform !== 'win32') throw error; });
+          this.sessionPersistence?.beforeCommit(snapshot);
           this.organizationPersistence?.beforeCommit(snapshot);
           this.agentRecoveryPersistence?.beforeCommit(snapshot);
           const file = this.file;
@@ -210,6 +219,7 @@ export class JsonStore {
       // Every logical save still prepares and commits independently, including
       // notification events and authorization checks on an unchanged snapshot.
       this.#commitChatAssistantHosts(snapshot);
+      this.sessionPersistence?.commit(snapshot);
       this.organizationPersistence?.commit(snapshot);
       this.agentRecoveryPersistence?.commit(snapshot);
       this.automationPersistence?.commit(snapshot.automations, snapshot);
