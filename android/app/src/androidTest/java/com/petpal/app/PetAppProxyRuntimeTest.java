@@ -75,6 +75,11 @@ public class PetAppProxyRuntimeTest {
             field(manager, "directory", directory); field(manager, "scope", "synthetic-scope");
             field(manager, "yaml", "proxies:\n  - {name: synthetic, type: socks5, server: 127.0.0.1, port: " + node.listener.getLocalPort() + "}\nrules:\n  - MATCH,synthetic\n");
             JSONObject enabled = manager.start("synthetic-scope", manager.generation()); assertTrue(enabled.toString(), enabled.getBoolean("running"));
+            // An old Activity's delayed cleanup must not change this manager's
+            // process-global native or WebView route. All following probes must
+            // still reach the synthetic node through the newly enabled core.
+            PetAppProxyState retired = new PetAppProxyState(context); retired.invalidate(); retired.clear();
+            assertTrue(manager.status().getBoolean("running"));
             running = (Process) field(manager, "process"); assertNotNull(running); assertTrue(running.isAlive());
             int port = (Integer) field(manager, "port");
             try (Socket proxy = new Socket("127.0.0.1", port)) {

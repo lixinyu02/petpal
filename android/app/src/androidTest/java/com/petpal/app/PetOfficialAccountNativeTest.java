@@ -36,6 +36,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.json.JSONArray;
@@ -61,6 +62,13 @@ public class PetOfficialAccountNativeTest {
         final CopyOnWriteArrayList<JSONObject> inferenceBodies = new CopyOnWriteArrayList<>();
         final CopyOnWriteArrayList<Map<String, String>> grants = new CopyOnWriteArrayList<>();
         final CountDownLatch tokenEntered = new CountDownLatch(1), tokenContinue = new CountDownLatch(1), tokenPrepared = new CountDownLatch(1);
+        final CountDownLatch modelsEntered = new CountDownLatch(1), modelsContinue = new CountDownLatch(1), connectEntered = new CountDownLatch(1), connectContinue = new CountDownLatch(1), verifyEntered = new CountDownLatch(1), verifyContinue = new CountDownLatch(1);
+        final AtomicInteger modelCalls = new AtomicInteger(), connectCalls = new AtomicInteger(), verifyCalls = new AtomicInteger();
+        final CopyOnWriteArrayList<String> disconnectedRelays = new CopyOnWriteArrayList<>();
+        final Object relayServerGate = new Object();
+        volatile int blockModelsAt = -1, blockConnectAt = -1, blockVerifyAt = -1;
+        volatile int unauthorizedVerifyAt = -1, unauthorizedModelsAt = -1;
+        volatile String modelDisplay = "GPT 6 Luna", activeRelay = "";
         volatile String authorize, user = "native-user", endpoint = "https://fixture.invalid", responseMode = "complete", badClaim = "";
         volatile String callbackBody = "";
         volatile Map<String, String> callbackHeaders = new HashMap<>();
@@ -117,7 +125,7 @@ public class PetOfficialAccountNativeTest {
                 if (connected) return; connected = true;
                 try {
                     JSONObject json = new JSONObject(); String path = uri.getPath(); responseCode = 200;
-                    if (path.equals("/api/auth/me")) json.put("instanceId", "native-instance").put("user", new JSONObject().put("id", user));
+                    if (path.equals("/api/auth/me")) { int call = verifyCalls.incrementAndGet(); if (call == blockVerifyAt) { verifyEntered.countDown(); if (!verifyContinue.await(10, TimeUnit.SECONDS)) throw new IOException(); } if (call == unauthorizedVerifyAt) responseCode = 401; json.put("instanceId", "native-instance").put("user", new JSONObject().put("id", user)); }
                     else if (path.endsWith("/oauth/token")) {
                         Map<String, String> grant = fields(posted.toString("UTF-8")); grants.add(grant);
                         if (blockToken) { tokenEntered.countDown(); if (!tokenContinue.await(10, TimeUnit.SECONDS)) throw new IOException(); }
@@ -127,11 +135,11 @@ public class PetOfficialAccountNativeTest {
                         tokenPrepared.countDown();
                     } else if (path.endsWith("/oauth/revoke")) revoked++;
                     else if (path.equals("/.well-known/jwks.json")) { RSAPublicKey key = (RSAPublicKey) rsa.getPublic(); json.put("keys", new JSONArray().put(new JSONObject().put("kid", "fixture-key").put("kty", "RSA").put("alg", "RS256").put("use", "sig").put("n", b64(unsigned(key.getModulus().toByteArray()))).put("e", b64(unsigned(key.getPublicExponent().toByteArray()))))); }
-                    else if (path.equals("/v1/models")) { assertTrue(getRequestProperty("Authorization").startsWith("Bearer synthetic-")); json.put("models", new JSONArray().put(new JSONObject().put("slug", "gpt-6-luna").put("visibility", "list").put("display_name", "GPT 6 Luna").put("input_modalities", new JSONArray().put("text").put("image")))); }
-                    else if (path.equals("/api/mobile-official/connect")) { JSONObject body = new JSONObject(posted.toString("UTF-8")); JSONArray available = body.getJSONArray("models"), out = new JSONArray(); for (int i = 0; i < available.length(); i++) out.put(new JSONObject(available.getJSONObject(i).toString()).put("id", "fixture-provider")); json.put("relayId", "fixture_relay").put("models", out).put("pollMs", 25000); }
+                    else if (path.equals("/v1/models")) { String display = modelDisplay; int call = modelCalls.incrementAndGet(); if (call == blockModelsAt) { modelsEntered.countDown(); if (!modelsContinue.await(10, TimeUnit.SECONDS)) throw new IOException(); } if (call == unauthorizedModelsAt) responseCode = 401; assertTrue(getRequestProperty("Authorization").startsWith("Bearer synthetic-")); json.put("models", new JSONArray().put(new JSONObject().put("slug", "gpt-6-luna").put("visibility", "list").put("display_name", display).put("input_modalities", new JSONArray().put("text").put("image")))); }
+                    else if (path.equals("/api/mobile-official/connect")) { int call = connectCalls.incrementAndGet(); if (call == blockConnectAt) { connectEntered.countDown(); if (!connectContinue.await(10, TimeUnit.SECONDS)) throw new IOException(); } JSONObject body = new JSONObject(posted.toString("UTF-8")); JSONArray available = body.getJSONArray("models"), out = new JSONArray(); for (int i = 0; i < available.length(); i++) out.put(new JSONObject(available.getJSONObject(i).toString()).put("id", "fixture-provider")); String id = "fixture_relay_" + call; synchronized (relayServerGate) { activeRelay = id; } json.put("relayId", id).put("models", out).put("pollMs", 25000); }
                     else if (path.endsWith("/poll")) { JSONObject command = commands.poll(200, TimeUnit.MILLISECONDS); if (cancelled) throw new IOException(); json.put("commands", command == null ? new JSONArray() : new JSONArray().put(command)); }
                     else if (path.endsWith("/reply")) replies.add(new JSONObject(posted.toString("UTF-8")));
-                    else if (path.endsWith("/disconnect")) disconnected++;
+                    else if (path.endsWith("/disconnect")) { String id = path.split("/")[3]; disconnectedRelays.add(id); synchronized (relayServerGate) { if (id.equals(activeRelay)) activeRelay = ""; } disconnected++; }
                     else if (path.equals("/v1/responses")) { inferenceBodies.add(new JSONObject(posted.toString("UTF-8"))); if ("unauthorized".equals(responseMode)) { responseCode = 401; response = "{\"error\":{\"code\":\"invalid_api_key\"}}".getBytes(StandardCharsets.UTF_8); return; } if ("blocked".equals(responseMode)) { while (!cancelled) Thread.sleep(20); throw new IOException(); } String delta = "large".equals(responseMode) ? "中文🧡".repeat(12000) + "synthetic-access" : "hello synthetic-access"; String stream = "event: response.output_text.delta\ndata: " + new JSONObject().put("type", "response.output_text.delta").put("delta", delta) + "\n\n"; if ("complete".equals(responseMode) || "large".equals(responseMode)) stream += "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":3,\"output_tokens\":5,\"total_tokens\":8}}}\n\n"; response = stream.getBytes(StandardCharsets.UTF_8); return; }
                     else throw new IOException("Unexpected synthetic route");
                     response = json.toString().getBytes(StandardCharsets.UTF_8);
@@ -147,9 +155,108 @@ public class PetOfficialAccountNativeTest {
             @Override public void disconnect() { cancelled = true; }
             @Override public boolean usingProxy() { return false; }
         }
-        @Override public void close() { runtime.close(); tokenContinue.countDown(); }
+        @Override public void close() { tokenContinue.countDown(); modelsContinue.countDown(); connectContinue.countDown(); verifyContinue.countDown(); runtime.close(); }
     }
     private static byte[] unsigned(byte[] value) { return value.length > 1 && value[0] == 0 ? java.util.Arrays.copyOfRange(value, 1, value.length) : value; }
+
+    @Test public void lateModelDirectoryAfterLogoutCannotReconnectOrPublishAnError() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.bind(); fixture.login(); int before = fixture.connectCalls.get(); fixture.blockModelsAt = fixture.modelCalls.get() + 1;
+            ExecutorService workers = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> old = workers.submit(() -> { try { fixture.runtime.refresh(); } catch (Exception error) { throw new RuntimeException(error); } });
+                assertTrue(fixture.modelsEntered.await(5, TimeUnit.SECONDS)); fixture.runtime.logout(); fixture.modelsContinue.countDown(); old.get(10, TimeUnit.SECONDS);
+                JSONObject status = fixture.runtime.status(); assertEquals("signed-out", status.getString("state")); assertFalse(status.getBoolean("relayConnected")); assertEquals(0, status.getJSONArray("models").length());
+                assertEquals(before, fixture.connectCalls.get()); assertFalse(status.has("modelsError"));
+            } finally { fixture.modelsContinue.countDown(); workers.shutdownNow(); }
+        }
+    }
+
+    @Test public void selectedProfileRevisionWinsOverALateOldModelDirectory() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.bind(); fixture.login(); String profile = fixture.runtime.status().getString("activeProfileId"); fixture.blockModelsAt = fixture.modelCalls.get() + 1;
+            ExecutorService workers = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> old = workers.submit(() -> { try { fixture.runtime.refresh(); } catch (Exception error) { throw new RuntimeException(error); } });
+                assertTrue(fixture.modelsEntered.await(5, TimeUnit.SECONDS)); fixture.modelDisplay = "Latest selected profile"; fixture.runtime.select(profile);
+                fixture.modelsContinue.countDown(); old.get(10, TimeUnit.SECONDS);
+                JSONObject status = fixture.runtime.status(); assertTrue(status.getBoolean("relayConnected")); assertEquals("Latest selected profile", status.getJSONArray("models").getJSONObject(0).getString("displayName")); assertFalse(status.has("modelsError"));
+            } finally { fixture.modelsContinue.countDown(); workers.shutdownNow(); }
+        }
+    }
+
+    @Test public void aRelayRegistrationReturningAfterLogoutIsDisposedWithoutPublishing() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.bind(); fixture.login(); fixture.modelDisplay = "Force a new registration"; fixture.blockConnectAt = fixture.connectCalls.get() + 1;
+            ExecutorService workers = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> old = workers.submit(() -> { try { fixture.runtime.refresh(); } catch (Exception error) { throw new RuntimeException(error); } });
+                assertTrue(fixture.connectEntered.await(5, TimeUnit.SECONDS)); fixture.runtime.logout(); fixture.connectContinue.countDown(); old.get(10, TimeUnit.SECONDS);
+                String stale = "fixture_relay_" + fixture.blockConnectAt; until(() -> fixture.disconnectedRelays.contains(stale));
+                assertFalse(fixture.runtime.status().getBoolean("relayConnected")); assertEquals(0, fixture.runtime.status().getJSONArray("models").length()); assertEquals("", fixture.activeRelay);
+            } finally { fixture.connectContinue.countDown(); workers.shutdownNow(); }
+        }
+    }
+
+    @Test public void overlappingRefreshRegistrationsRemainOrderedAndOnlyTheNewestDirectoryWins() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.bind(); fixture.login(); fixture.modelDisplay = "Older directory"; fixture.blockConnectAt = fixture.connectCalls.get() + 1;
+            ExecutorService workers = Executors.newFixedThreadPool(2);
+            try {
+                Future<?> old = workers.submit(() -> { try { fixture.runtime.refresh(); } catch (Exception error) { throw new RuntimeException(error); } });
+                assertTrue(fixture.connectEntered.await(5, TimeUnit.SECONDS)); int directoryCalls = fixture.modelCalls.get(); fixture.modelDisplay = "Newest directory";
+                Future<?> latest = workers.submit(() -> { try { fixture.runtime.refresh(); } catch (Exception error) { throw new RuntimeException(error); } });
+                until(() -> fixture.modelCalls.get() > directoryCalls); assertEquals(fixture.blockConnectAt, fixture.connectCalls.get());
+                fixture.connectContinue.countDown(); old.get(10, TimeUnit.SECONDS); latest.get(10, TimeUnit.SECONDS);
+                JSONObject status = fixture.runtime.status(); assertTrue(status.getBoolean("relayConnected")); assertEquals("Newest directory", status.getJSONArray("models").getJSONObject(0).getString("displayName")); assertFalse(status.has("modelsError"));
+                until(() -> fixture.disconnectedRelays.contains("fixture_relay_" + fixture.blockConnectAt));
+                assertEquals("fixture_relay_" + (fixture.blockConnectAt + 1), fixture.activeRelay); assertFalse(fixture.disconnectedRelays.contains(fixture.activeRelay));
+            } finally { fixture.connectContinue.countDown(); workers.shutdownNow(); }
+        }
+    }
+
+    @Test public void aLateInitialBindCannotReplaceTheNewScopeOrItsAuthorizationAttempt() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.blockVerifyAt = 1; ExecutorService workers = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> old = workers.submit(() -> { try { return fixture.bind(); } catch (Exception error) { throw new RuntimeException(error); } });
+                assertTrue(fixture.verifyEntered.await(5, TimeUnit.SECONDS)); String current = fixture.bind(); fixture.runtime.start(null); String attempt = fixture.runtime.pendingAttemptId(); assertNotNull(attempt);
+                fixture.verifyContinue.countDown(); assertThrows(java.util.concurrent.ExecutionException.class, () -> old.get(10, TimeUnit.SECONDS));
+                fixture.runtime.checkScope(current); assertEquals(attempt, fixture.runtime.pendingAttemptId()); assertEquals("signing-in", fixture.runtime.status().getString("state"));
+            } finally { fixture.verifyContinue.countDown(); workers.shutdownNow(); }
+        }
+    }
+
+    @Test public void anOldRequired401CannotClearTheNewScopeOrAuthorizationAttempt() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.bind(); fixture.blockVerifyAt = fixture.verifyCalls.get() + 1; fixture.unauthorizedVerifyAt = fixture.blockVerifyAt;
+            ExecutorService workers = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> old = workers.submit(() -> { try { return fixture.runtime.refresh(); } catch (Exception error) { throw new RuntimeException(error); } });
+                assertTrue(fixture.verifyEntered.await(5, TimeUnit.SECONDS)); fixture.user = "new-synthetic-user"; String current = fixture.bind(); fixture.runtime.start(null); String attempt = fixture.runtime.pendingAttemptId();
+                fixture.verifyContinue.countDown(); assertThrows(java.util.concurrent.ExecutionException.class, () -> old.get(10, TimeUnit.SECONDS));
+                fixture.runtime.checkScope(current); assertNotNull(attempt); assertEquals(attempt, fixture.runtime.pendingAttemptId());
+            } finally { fixture.verifyContinue.countDown(); workers.shutdownNow(); }
+        }
+    }
+
+    @Test public void lateInvalidGrantCannotClearTheNewlySelectedProfileRevision() throws Exception {
+        try (Fixture fixture = new Fixture()) {
+            fixture.bind(); fixture.login(); String selected = fixture.runtime.status().getString("activeProfileId");
+            fixture.unauthorizedModelsAt = fixture.modelCalls.get() + 1; fixture.blockToken = true; fixture.invalidGrant = true;
+            ExecutorService workers = Executors.newFixedThreadPool(2);
+            try {
+                Future<?> old = workers.submit(() -> { try { return fixture.runtime.refresh(); } catch (Exception error) { throw new RuntimeException(error); } });
+                assertTrue(fixture.tokenEntered.await(5, TimeUnit.SECONDS)); fixture.modelDisplay = "Current revision survives";
+                Future<?> current = workers.submit(() -> { try { return fixture.runtime.select(selected); } catch (Exception error) { throw new RuntimeException(error); } });
+                // select saves its new revision before waiting behind accessGate.
+                until(() -> fixture.runtime.status().getJSONArray("models").length() == 0);
+                fixture.tokenContinue.countDown(); old.get(10, TimeUnit.SECONDS); current.get(10, TimeUnit.SECONDS);
+                JSONObject status = fixture.runtime.status(); assertEquals("signed-in", status.getString("state")); assertTrue(status.getBoolean("relayConnected"));
+                assertEquals("Current revision survives", status.getJSONArray("models").getJSONObject(0).getString("displayName")); assertFalse(status.has("modelsError"));
+            } finally { fixture.tokenContinue.countDown(); workers.shutdownNow(); }
+        }
+    }
 
     @Test public void pkceSignedCallbackRealKeystoreAndNativeRelayComplete() throws Exception {
         try (Fixture fixture = new Fixture()) {

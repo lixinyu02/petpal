@@ -44,7 +44,20 @@ final class PetAppProxyState {
     private static final int SETTINGS_BYTES = PetAppProxyPolicy.MAX_BYTES * 6 + 2 * 1024 * 1024;
     private final Context context;
     private final ConnectionFactory network;
-    private final Handler main = new Handler(Looper.getMainLooper());
+    private static final Handler main = new Handler(Looper.getMainLooper());
+    private static final PetAppProxyRouting routing = new PetAppProxyRouting(PetNetwork::proxy, task -> { if (!main.post(task)) throw new IllegalStateException(); }, (port, completed) -> {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) {
+            if (port > 0) throw new IllegalStateException("Android System WebView 不支持应用代理。");
+            completed.complete(null); return;
+        }
+        if (port == 0) ProxyController.getInstance().clearProxyOverride(Runnable::run, () -> completed.complete(null));
+        else {
+            ProxyConfig.Builder config = new ProxyConfig.Builder().addProxyRule("http://127.0.0.1:" + port);
+            for (String rule : Arrays.asList("localhost", "*.localhost", "*.local", "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "[::1]", "fc00::/7", "fe80::/10")) config.addBypassRule(rule);
+            ProxyController.getInstance().setProxyOverride(config.build(), Runnable::run, () -> completed.complete(null));
+        }
+    });
+    private volatile PetAppProxyRouting.Lease proxyLease;
     private volatile long generation;
     private volatile String scope = "";
     private volatile Process process;
@@ -64,10 +77,10 @@ final class PetAppProxyState {
     PetAppProxyState(Context context) { this(context, PetNetwork::open); }
     PetAppProxyState(Context context, ConnectionFactory network) { this.context = context.getApplicationContext(); this.network = network; }
     long generation() { return generation; }
+    String restartRequired() { return routing.failureMessage(); }
     synchronized void invalidate() {
-        generation++; scope = ""; serverToken = ""; serverBase = ""; PetNetwork.proxy(0); state = "stopping";
+        generation++; scope = ""; serverToken = ""; serverBase = ""; routing.release(proxyLease); state = "stopping";
         // Revocation must not wait behind a slow subscription or /auth/me read.
-        main.post(() -> { if (WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) ProxyController.getInstance().clearProxyOverride(Runnable::run, () -> { }); });
     }
     private void check(long expected) throws InterruptedException { if (expected != generation || Thread.currentThread().isInterrupted()) throw new InterruptedException(); }
     boolean current(String expected) { return expected != null && !scope.isEmpty() && scope.equals(expected); }
@@ -95,6 +108,7 @@ final class PetAppProxyState {
         for (String candidate : Build.SUPPORTED_ABIS) if (targets.has(candidate)) { abi = candidate; break; }
     }
     private String unavailable() {
+        if (!routing.failureMessage().isEmpty()) return routing.failureMessage();
         try { metadata(); } catch (Exception missing) { return "此安装包未包含已校验的 Android 代理内核，请安装完整新版客户端。"; }
         if (Build.VERSION.SDK_INT < manifest.optInt("minimumApi", 34)) return "内置代理暂支持 Android 14 及以上；其他功能可继续使用。";
         if (abi.isEmpty()) return "此设备架构暂未提供内置代理内核。";
@@ -106,7 +120,7 @@ final class PetAppProxyState {
         return new JSONObject().put("supported", reason.isEmpty()).put("unavailableReason", reason).put("scope", scope)
             .put("platform", "android").put("abi", abi).put("version", manifest == null ? "1.19.32" : manifest.optString("version", "1.19.32"))
             .put("state", state).put("running", "running".equals(state)).put("configured", !yaml.isEmpty()).put("autoStart", autoStart)
-            .put("remoteConfigured", !remote.isEmpty()).put("remoteUpdatedAt", updatedAt).put("groups", groups).put("error", error)
+            .put("remoteConfigured", !remote.isEmpty()).put("remoteUpdatedAt", updatedAt).put("groups", groups).put("error", routing.failureMessage().isEmpty() ? error : routing.failureMessage())
             .put("source", source).put("mode", mode).put("serverProfileId", serverProfileId).put("serverProfileName", serverProfileName)
             .put("serverProfileRevision", serverProfileRevision).put("serverProfileUpdatedAt", serverProfileUpdatedAt)
             .put("serverUpdateAvailable", serverUpdateAvailable).put("serverStatus", serverStatus);
@@ -247,23 +261,6 @@ final class PetAppProxyState {
             return new JSONObject(utf8(read(connection.getInputStream(), 1024 * 1024)));
         } finally { connection.disconnect(); }
     }
-    private void webProxy(boolean enable, long expected) throws Exception {
-        CountDownLatch done = new CountDownLatch(1); final Exception[] failure = new Exception[1];
-        main.post(() -> {
-            try {
-                if (enable && generation != expected) { failure[0] = new InterruptedException(); done.countDown(); return; }
-                if (!WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) { if (enable) throw new IllegalStateException("Android System WebView 不支持应用代理。"); done.countDown(); return; }
-                if (!enable) ProxyController.getInstance().clearProxyOverride(Runnable::run, done::countDown);
-                else {
-                    ProxyConfig.Builder config = new ProxyConfig.Builder().addProxyRule("http://127.0.0.1:" + port);
-                    for (String rule : Arrays.asList("localhost", "*.localhost", "*.local", "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "[::1]", "fc00::/7", "fe80::/10")) config.addBypassRule(rule);
-                    ProxyController.getInstance().setProxyOverride(config.build(), Runnable::run, done::countDown);
-                }
-            } catch (Exception problem) { failure[0] = problem; done.countDown(); }
-        });
-        if (!done.await(8, TimeUnit.SECONDS)) throw new IllegalStateException("应用代理设置未及时生效，请关闭后重试。");
-        if (failure[0] != null) throw failure[0];
-    }
     private void refreshGroups() throws Exception {
         JSONObject all = controller("/proxies", "GET", null).optJSONObject("proxies"); JSONArray next = new JSONArray(); Set<String> loaded = new LinkedHashSet<>();
         if (all != null) for (java.util.Iterator<String> names = all.keys(); names.hasNext();) {
@@ -339,26 +336,30 @@ final class PetAppProxyState {
             Set<String> requiredNames = PetAppProxyPolicy.requiredProxyNames(yaml); long configDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
             do { check(expected); refreshGroups(); if (loadedProxyNames.containsAll(requiredNames)) break; if (!process.isAlive()) throw new IllegalStateException("代理配置尚未就绪。"); Thread.sleep(80); } while (System.nanoTime() < configDeadline);
             if (!loadedProxyNames.containsAll(requiredNames)) throw new IllegalStateException("代理节点配置未及时就绪，已保留配置。");
-            restorePolicy(expected); check(expected); webProxy(true, expected);
-            synchronized (this) { check(expected); PetNetwork.proxy(port); state = "running"; }
+            restorePolicy(expected); check(expected);
+            final PetAppProxyRouting.Lease lease;
+            synchronized (this) { check(expected); proxyLease = lease = routing.acquire(); }
+            routing.enable(lease, port).await();
+            synchronized (this) { check(expected); if (!routing.owns(lease)) throw new InterruptedException(); state = "running"; }
             Process running = process; Thread watcher = new Thread(() -> {
                 try { running.waitFor(); } catch (InterruptedException interrupted) { return; }
                 synchronized (PetAppProxyState.this) {
                     if (process != running || !"running".equals(state)) return;
-                    PetNetwork.proxy(0); state = "error"; error = "代理内核已退出，请关闭后重新启用；任务不会自动重发。";
+                    routing.release(lease); state = "error"; error = "代理内核已退出，请关闭后重新启用；任务不会自动重发。";
                 }
-                main.post(() -> { if (WebViewFeature.isFeatureSupported(WebViewFeature.PROXY_OVERRIDE)) ProxyController.getInstance().clearProxyOverride(Runnable::run, () -> { }); });
             }, "PetPal-proxy-exit"); watcher.setDaemon(true); watcher.start();
             return status();
         } catch (Exception failure) {
             try { stop(); } catch (Exception cleanup) { }
-            if (generation == expected) { state = "error"; error = "代理未能启用，请检查配置、系统版本和 WebView。"; }
+            if (generation == expected) { state = "error"; error = routing.failureMessage().isEmpty() ? "代理未能启用，请检查配置、系统版本和 WebView。" : routing.failureMessage(); }
             throw failure;
         }
     }
     JSONObject stop() throws Exception {
-        PetNetwork.proxy(0); state = "stopping"; Exception failure = null;
-        try { webProxy(false, generation); } catch (Exception problem) { failure = problem; }
+        state = "stopping"; Exception failure = null;
+        PetAppProxyRouting.Request released;
+        synchronized (this) { released = routing.release(proxyLease); proxyLease = null; }
+        try { if (released != null) released.await(); } catch (Exception problem) { failure = problem; }
         Process previous = process;
         if (previous != null) { previous.destroy(); if (!previous.waitFor(3, TimeUnit.SECONDS)) { previous.destroyForcibly(); if (!previous.waitFor(3, TimeUnit.SECONDS)) throw new IllegalStateException("代理内核退出尚未确认，请退出小伴后重试。"); } process = null; }
         if (directory != null) { File runtime = new File(directory, "runtime.yaml"); if (runtime.exists() && !runtime.delete()) failure = new IllegalStateException("临时代理配置清理失败，请退出小伴后检查。"); }

@@ -65,10 +65,11 @@ class PetOfficialAccountRuntime implements AutoCloseable {
     private final AtomicFile storage;
     private final ExecutorService callbacks = Executors.newSingleThreadExecutor(), requests = Executors.newFixedThreadPool(4);
     private final ScheduledExecutorService clock = Executors.newSingleThreadScheduledExecutor();
-    private final Object gate = new Object(), accessGate = new Object();
+    private final Object gate = new Object(), accessGate = new Object(), registrationGate = new Object();
     private JSONObject vault;
     private Scope scope;
     private long generation;
+    private long bindingGeneration, refreshGeneration;
     private boolean closed;
     private Attempt attempt;
     private ReturnNavigation returnNavigation;
@@ -76,9 +77,10 @@ class PetOfficialAccountRuntime implements AutoCloseable {
     private String error = "", modelsError = "";
     private JSONArray models = new JSONArray();
     private Relay relay;
+    private static final class SupersededRefresh extends IOException { }
     private final Map<String, String> retryClients = new HashMap<>();
     private final Map<String, Running> running = new ConcurrentHashMap<>();
-    private final Set<HttpURLConnection> connections = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private final Map<HttpURLConnection, Scope> connections = new ConcurrentHashMap<>();
 
     private static final class Scope {
         final URI url; final String token, instanceId, userId, key, id = UUID.randomUUID().toString(); final long generation;
@@ -186,13 +188,17 @@ class PetOfficialAccountRuntime implements AutoCloseable {
     }
     JSONObject bind(JSONObject input) throws Exception {
         URI url = PetOfficialAccountPolicy.backend(input.getString("url")); String token = PetOfficialAccountPolicy.text(input.getString("token"), 4096, false), instance = PetOfficialAccountPolicy.id(input.getString("instanceId")), user = PetOfficialAccountPolicy.id(input.getString("userId"));
-        Scope existing; synchronized (gate) { existing = scope; }
-        if (existing != null && (!existing.url.equals(url) || !PetOfficialAccountPolicy.equal(existing.token, token) || !existing.instanceId.equals(instance) || !existing.userId.equals(user))) clearScope();
-        init(); Scope selected;
-        synchronized (gate) { if (closed) throw failure(); selected = scope == null ? new Scope(url, token, instance, user, generation) : scope; }
+        init(); final Scope selected; final long binding; Relay previous = null;
+        synchronized (gate) {
+            if (closed) throw failure(); binding = ++bindingGeneration;
+            Scope existing = scope;
+            if (existing != null && (!existing.url.equals(url) || !PetOfficialAccountPolicy.equal(existing.token, token) || !existing.instanceId.equals(instance) || !existing.userId.equals(user))) previous = clearScopeLocked();
+            selected = scope == null ? new Scope(url, token, instance, user, generation) : scope;
+        }
+        disconnectRelay(previous);
         verify(selected);
-        synchronized (gate) { if (closed || selected.generation != generation) throw failure(); scope = selected; error = ""; }
-        if (signedIn(active(selected)) && plan(active(selected))) { try { refreshModels(selected); } catch (Exception failure) { modelsFailed(selected); } }
+        synchronized (gate) { if (closed || binding != bindingGeneration || selected.generation != generation) throw failure(); scope = selected; error = ""; }
+        if (signedIn(active(selected)) && plan(active(selected))) { try { refreshModels(selected); } catch (Exception failure) { modelsFailed(selected, failure); } }
         assertCurrent(selected); return new JSONObject().put("scopeId", selected.id).put("status", status());
     }
     void checkScope(String id) throws Exception { synchronized (gate) { if (scope == null || !scope.id.equals(id)) throw new IOException("小伴登录已变化，请重新打开官方账号设置。"); assertCurrent(scope); } }
@@ -201,7 +207,7 @@ class PetOfficialAccountRuntime implements AutoCloseable {
         JSONObject response = backend(value, "/api/auth/me", null, 15000, false);
         if (!value.instanceId.equals(response.optString("instanceId")) || response.optJSONObject("user") == null || !value.userId.equals(response.getJSONObject("user").optString("id"))) throw new IOException("小伴登录身份已变化，请重新登录。");
     }
-    private Scope required() throws Exception { init(); Scope value; synchronized (gate) { value = scope; } if (value == null) throw new IOException("请先登录小伴账号。"); assertCurrent(value); try { verify(value); } catch (AuthFailure failure) { clearScope(); throw failure; } assertCurrent(value); return value; }
+    private Scope required() throws Exception { init(); Scope value; synchronized (gate) { value = scope; } if (value == null) throw new IOException("请先登录小伴账号。"); assertCurrent(value); try { verify(value); } catch (AuthFailure failure) { clearScope(value); throw failure; } assertCurrent(value); return value; }
     private JSONObject active(Scope value) throws Exception { synchronized (gate) { assertCurrent(value); JSONObject entry = profile(value, vault); return entry == null ? null : new JSONObject(entry.toString()); } }
     /** This is the only connection creation point; no cookies or browser headers. */
     protected HttpURLConnection open(URI uri, boolean official) throws Exception {
@@ -210,7 +216,7 @@ class PetOfficialAccountRuntime implements AutoCloseable {
     }
     private static byte[] bytes(InputStream input, int maximum) throws Exception { if (input == null) return new byte[0]; ByteArrayOutputStream out = new ByteArrayOutputStream(); byte[] buffer = new byte[8192]; for (int count; (count = input.read(buffer)) != -1;) { if (out.size() + count > maximum) throw failure(); out.write(buffer, 0, count); } return out.toByteArray(); }
     private JSONObject json(URI uri, String bearer, byte[] body, String contentType, int timeout, boolean official, Scope value, boolean requireCurrent) throws Exception {
-        if (requireCurrent) assertCurrent(value); HttpURLConnection connection = open(uri, official); connections.add(connection);
+        if (requireCurrent) assertCurrent(value); HttpURLConnection connection = open(uri, official); connections.put(connection, value);
         Relay polling = null; synchronized (gate) { if (!official && uri.getPath().endsWith("/poll") && relay != null && relay.scope == value) { polling = relay; polling.poll = connection; } }
         try {
             connection.setReadTimeout(timeout); connection.setRequestProperty("Accept", "application/json"); if (bearer != null) connection.setRequestProperty("Authorization", "Bearer " + bearer);
@@ -373,7 +379,7 @@ class PetOfficialAccountRuntime implements AutoCloseable {
             if (profile == null) { if (profiles.length() >= 64) throw failure(); String id = UUID.randomUUID().toString(); profile = new JSONObject().put("id", id).put("clientId", clientId).put("subject", claims.getString("sub")).put("label", (email.isEmpty() ? "ChatGPT 账号" : email) + " · " + id.substring(0, 6)); profiles.put(profile); }
             copy(tokens, profile); profile.put("email", email).put("revision", UUID.randomUUID().toString()); user.put("activeProfileId", profile.getString("id")).put("usage", emptyUsage()); save(draft); retryClients.remove(next.scope.key);
         }
-        finish(next, plan(tokens) ? "" : "已登录，但尚未允许使用 ChatGPT 套餐，请重新授权。"); if (plan(tokens)) try { refreshModels(next.scope); } catch (Exception failure) { modelsFailed(next.scope); }
+        finish(next, plan(tokens) ? "" : "已登录，但尚未允许使用 ChatGPT 套餐，请重新授权。"); if (plan(tokens)) try { refreshModels(next.scope); } catch (Exception failure) { modelsFailed(next.scope, failure); }
     }
     private static Map<String, String> map(String... pairs) { Map<String, String> out = new HashMap<>(); for (int i = 0; i < pairs.length; i += 2) out.put(pairs[i], pairs[i + 1]); return out; }
     private static void copy(JSONObject from, JSONObject to) throws Exception { for (Iterator<String> keys = from.keys(); keys.hasNext();) { String name = keys.next(); to.put(name, from.get(name)); } }
@@ -386,41 +392,90 @@ class PetOfficialAccountRuntime implements AutoCloseable {
                 JSONObject response = form(TOKEN, map("grant_type", "refresh_token", "client_id", current.getString("clientId"), "refresh_token", current.getString("refreshToken"), "resource", RESOURCE), value), tokens = credentials(response, current);
                 if (response.has("id_token")) verifyId(response.getString("id_token"), current.getString("clientId"), null, current.getString("subject"), value);
                 synchronized (gate) { assertCurrent(value); JSONObject draft = new JSONObject(vault.toString()), selected = profile(value, draft); if (selected == null || !selected.getString("id").equals(current.getString("id")) || !selected.getString("revision").equals(current.getString("revision"))) throw failure(); copy(tokens, selected); save(draft); }
-                JSONObject refreshed = active(value); if (!plan(refreshed)) { revokeRelay(); throw new AuthFailure(); } return refreshed;
-            } catch (AuthFailure failure) { revokeRelay(); synchronized (gate) { assertCurrent(value); JSONObject draft = new JSONObject(vault.toString()), selected = profile(value, draft); if (selected != null && selected.getString("id").equals(current.getString("id"))) { clearTokens(selected); save(draft); } error = "官方登录已失效，请重新登录。"; } emit(); throw failure; }
+                JSONObject refreshed = active(value); if (!plan(refreshed)) throw new AuthFailure(); return refreshed;
+            } catch (AuthFailure failure) {
+                Relay previous = null;
+                try {
+                    synchronized (gate) {
+                        assertCurrent(value); JSONObject draft = new JSONObject(vault.toString()), selected = profile(value, draft);
+                        if (selected != null && selected.getString("id").equals(current.getString("id")) && selected.getString("revision").equals(current.getString("revision"))) {
+                            refreshGeneration++; previous = detachRelayLocked(); clearTokens(selected); save(draft); error = "官方登录已失效，请重新登录。";
+                        }
+                    }
+                } finally { disconnectRelay(previous); }
+                emit(); throw failure;
+            }
         }
     }
     private static void clearTokens(JSONObject profile) throws Exception { profile.put("accessToken", "").put("refreshToken", "").put("idToken", "").put("expiresAt", 0).put("scopes", new JSONArray()).put("revision", UUID.randomUUID().toString()); }
     JSONObject cancelLocal(String scopeId) throws Exception { checkScope(scopeId); synchronized (gate) { checkScope(scopeId); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; callbackReceipt = null; error = ""; } emit(); return status(); }
     JSONObject select(String id) throws Exception {
-        Scope value = required(); PetOfficialAccountPolicy.uuid(id); revokeRelay(); synchronized (gate) { assertCurrent(value); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; callbackReceipt = null; JSONObject draft = new JSONObject(vault.toString()), user = user(value, draft); boolean found = false; JSONArray profiles = user.getJSONArray("profiles"); for (int i = 0; i < profiles.length(); i++) if (id.equals(profiles.getJSONObject(i).optString("id"))) { profiles.getJSONObject(i).put("revision", UUID.randomUUID().toString()); found = true; } if (!found) throw failure(); user.put("activeProfileId", id).put("usage", emptyUsage()); save(draft); error = ""; }
-        try { refreshModels(value); } catch (Exception failure) { modelsFailed(value); } emit(); return status();
+        Scope value = required(); PetOfficialAccountPolicy.uuid(id); Relay previous = null;
+        try {
+            synchronized (gate) {
+                assertCurrent(value); JSONObject draft = new JSONObject(vault.toString()), user = user(value, draft); boolean found = false; JSONArray profiles = user.getJSONArray("profiles");
+                for (int i = 0; i < profiles.length(); i++) if (id.equals(profiles.getJSONObject(i).optString("id"))) { profiles.getJSONObject(i).put("revision", UUID.randomUUID().toString()); found = true; }
+                if (!found) throw failure();
+                refreshGeneration++; previous = detachRelayLocked(); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; callbackReceipt = null;
+                user.put("activeProfileId", id).put("usage", emptyUsage()); save(draft); error = "";
+            }
+        } finally { disconnectRelay(previous); }
+        try { refreshModels(value); } catch (Exception failure) { modelsFailed(value, failure); } emit(); return status();
     }
     JSONObject logout() throws Exception {
-        Scope value = required(); JSONObject previous = active(value); revokeRelay(); synchronized (gate) { assertCurrent(value); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; callbackReceipt = null; JSONObject draft = new JSONObject(vault.toString()), profile = profile(value, draft); if (profile != null) clearTokens(profile); user(value, draft).put("usage", emptyUsage()); save(draft); error = ""; }
+        Scope value = required(); JSONObject previous; Relay oldRelay = null;
+        try {
+            synchronized (gate) {
+                assertCurrent(value); previous = active(value); refreshGeneration++; oldRelay = detachRelayLocked(); if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; callbackReceipt = null;
+                JSONObject draft = new JSONObject(vault.toString()), profile = profile(value, draft); if (profile != null) clearTokens(profile); user(value, draft).put("usage", emptyUsage()); save(draft); error = "";
+            }
+        } finally { disconnectRelay(oldRelay); }
         if (previous != null && !previous.optString("refreshToken").isEmpty()) try { form(REVOKE, map("token", previous.getString("refreshToken"), "token_type_hint", "refresh_token", "client_id", previous.getString("clientId")), value); } catch (Exception failure) { synchronized (gate) { if (scope == value) error = "已退出手机账号，官方会话撤销未确认，可在 ChatGPT 设置断开此应用。"; } }
         emit(); return status();
     }
-    JSONObject refresh() throws Exception { Scope value = required(); try { refreshModels(value); } catch (Exception failure) { modelsFailed(value); } return status(); }
-    JSONObject resumeUsage() throws Exception { Scope value = required(); synchronized (gate) { JSONObject draft = new JSONObject(vault.toString()), usage = user(value, draft).optJSONObject("usage"); if (usage == null) usage = emptyUsage(); usage.put("state", "unverified"); user(value, draft).put("usage", usage); save(draft); } try { refreshModels(value); } catch (Exception failure) { modelsFailed(value); } return status(); }
-    private void modelsFailed(Scope value) { synchronized (gate) { if (scope != value) return; modelsError = "暂时无法读取官方模型或登记手机连接；请更新小伴服务并检查网络。"; } emit(); }
+    JSONObject refresh() throws Exception { Scope value = required(); try { refreshModels(value); } catch (Exception failure) { modelsFailed(value, failure); } return status(); }
+    JSONObject resumeUsage() throws Exception { Scope value = required(); synchronized (gate) { JSONObject draft = new JSONObject(vault.toString()), usage = user(value, draft).optJSONObject("usage"); if (usage == null) usage = emptyUsage(); usage.put("state", "unverified"); user(value, draft).put("usage", usage); save(draft); } try { refreshModels(value); } catch (Exception failure) { modelsFailed(value, failure); } return status(); }
+    private void modelsFailed(Scope value, Exception failure) { synchronized (gate) { if (scope != value || failure instanceof SupersededRefresh) return; modelsError = "暂时无法读取官方模型或登记手机连接；请更新小伴服务并检查网络。"; } emit(); }
     private JSONArray directory(JSONObject data) throws Exception {
         JSONArray source = data.getJSONArray("models"), out = new JSONArray(); if (source.length() > 4096) throw failure(); Set<String> slugs = new HashSet<>();
         for (int i = 0; i < source.length() && out.length() < 256; i++) { JSONObject item = source.optJSONObject(i); if (item == null) continue; String slug = item.optString("slug"); if (!"list".equals(item.optString("visibility")) || item.optBoolean("hidden") || !slug.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,159}") || !slugs.add(slug)) continue; String display = item.optString("display_name", slug); try { PetOfficialAccountPolicy.text(display, 160, true); } catch (Exception ignored) { display = slug; } JSONArray modalities = item.optJSONArray("input_modalities"); if (modalities == null) modalities = item.optJSONArray("inputModalities"); boolean images = false; if (modalities != null) for (int j = 0; j < modalities.length(); j++) if ("image".equals(modalities.optString(j))) images = true; out.put(new JSONObject().put("model", slug).put("displayName", display).put("supportsImages", images)); }
         return out;
     }
     private void refreshModels(Scope value) throws Exception {
-        JSONObject credentials = access(value, false), response;
-        try { response = json(URI.create(MODELS), credentials.getString("accessToken"), null, null, 15000, true, value, true); }
-        catch (AuthFailure expired) { credentials = access(value, true); response = json(URI.create(MODELS), credentials.getString("accessToken"), null, null, 15000, true, value, true); }
-        JSONArray available = directory(response); String revision = credentials.getString("revision");
-        synchronized (gate) { assertCurrent(value); if (relay != null && !relay.stopped && relay.revision.equals(revision) && sameDirectory(models, available)) { modelsError = ""; return; } }
-        revokeRelay(); verify(value); assertCurrent(value);
-        JSONObject registered = backend(value, "/api/mobile-official/connect", new JSONObject().put("deviceId", vault.getString("deviceId")).put("revision", revision).put("models", available), 15000, false); String id = PetOfficialAccountPolicy.text(registered.getString("relayId"), 160, false); if (!id.matches("[A-Za-z0-9_-]+")) throw failure();
-        try { assertCurrent(value); } catch (Exception stale) { try { backend(value, "/api/mobile-official/" + id + "/disconnect", new JSONObject(), 5000, false); } catch (Exception ignored) { } throw stale; }
-        JSONArray ids = registered.getJSONArray("models"); if (ids.length() != available.length()) throw failure();
-        Set<String> received = new HashSet<>(); for (int i = 0; i < ids.length(); i++) { JSONObject item = ids.getJSONObject(i); PetOfficialAccountPolicy.id(item.getString("id")); boolean known = false; for (int j = 0; j < available.length(); j++) if (available.getJSONObject(j).getString("model").equals(item.getString("model"))) known = true; if (!known || !received.add(item.getString("model"))) throw failure(); PetOfficialAccountPolicy.text(item.getString("displayName"), 320, true); if (!(item.get("supportsImages") instanceof Boolean)) throw failure(); }
-        Relay next = new Relay(value, id, revision); synchronized (gate) { assertCurrent(value); models = new JSONArray(ids.toString()); modelsError = ""; relay = next; } new Thread(() -> poll(next), "petpal-official-relay").start(); emit();
+        final long refresh;
+        synchronized (gate) { assertCurrent(value); refresh = ++refreshGeneration; }
+        JSONObject credentials = null; String candidate = null;
+        try {
+            credentials = access(value, false); assertRefresh(value, refresh, credentials); JSONObject response;
+            try { response = json(URI.create(MODELS), credentials.getString("accessToken"), null, null, 15000, true, value, true); }
+            catch (AuthFailure expired) { assertRefresh(value, refresh, credentials); credentials = access(value, true); assertRefresh(value, refresh, credentials); response = json(URI.create(MODELS), credentials.getString("accessToken"), null, null, 15000, true, value, true); }
+            assertRefresh(value, refresh, credentials); JSONArray available = directory(response); String revision = credentials.getString("revision");
+            // Serialize registrations: an older server request must finish before
+            // its successor can register and replace this device's relay.
+            synchronized (registrationGate) {
+                synchronized (gate) { assertRefresh(value, refresh, credentials); if (relay != null && !relay.stopped && relay.revision.equals(revision) && sameDirectory(models, available)) { modelsError = ""; return; } }
+                revokeRelay(); verify(value); assertRefresh(value, refresh, credentials);
+                JSONObject registered = backend(value, "/api/mobile-official/connect", new JSONObject().put("deviceId", vault.getString("deviceId")).put("revision", revision).put("models", available), 15000, false);
+                candidate = PetOfficialAccountPolicy.text(registered.getString("relayId"), 160, false); if (!candidate.matches("[A-Za-z0-9_-]+")) { candidate = null; throw failure(); }
+                assertRefresh(value, refresh, credentials);
+                JSONArray ids = registered.getJSONArray("models"); if (ids.length() != available.length()) throw failure();
+                Set<String> received = new HashSet<>(); for (int i = 0; i < ids.length(); i++) { JSONObject item = ids.getJSONObject(i); PetOfficialAccountPolicy.id(item.getString("id")); boolean known = false; for (int j = 0; j < available.length(); j++) if (available.getJSONObject(j).getString("model").equals(item.getString("model"))) known = true; if (!known || !received.add(item.getString("model"))) throw failure(); PetOfficialAccountPolicy.text(item.getString("displayName"), 320, true); if (!(item.get("supportsImages") instanceof Boolean)) throw failure(); }
+                Relay next = new Relay(value, candidate, revision);
+                synchronized (gate) { assertRefresh(value, refresh, credentials); models = new JSONArray(ids.toString()); modelsError = ""; relay = next; candidate = null; }
+                new Thread(() -> poll(next), "petpal-official-relay").start(); emit();
+            }
+        } catch (Exception failure) {
+            assertRefresh(value, refresh, credentials); throw failure;
+        } finally { if (candidate != null) disconnectRelay(new Relay(value, candidate, "")); }
+    }
+    private void assertRefresh(Scope value, long refresh, JSONObject credentials) throws Exception {
+        synchronized (gate) {
+            assertCurrent(value); if (refreshGeneration != refresh) throw new SupersededRefresh();
+            if (credentials != null) {
+                JSONObject selected = profile(value, vault);
+                if (!signedIn(selected) || !plan(selected) || !selected.getString("id").equals(credentials.getString("id")) || !selected.getString("revision").equals(credentials.getString("revision"))) throw new SupersededRefresh();
+            }
+        }
     }
     private static boolean sameDirectory(JSONArray registered, JSONArray available) throws Exception { if (registered.length() != available.length()) return false; for (int i = 0; i < available.length(); i++) { JSONObject a = available.getJSONObject(i), b = registered.getJSONObject(i); if (!a.getString("model").equals(b.getString("model")) || !a.getString("displayName").equals(b.getString("displayName")) || a.getBoolean("supportsImages") != b.getBoolean("supportsImages")) return false; } return true; }
     private void poll(Relay value) {
@@ -441,7 +496,7 @@ class PetOfficialAccountRuntime implements AutoCloseable {
             timeout = clock.schedule(() -> { request.timedOut = true; HttpURLConnection active = request.connection; if (active != null) active.disconnect(); }, Math.max(0, request.deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
             check(request); JSONObject credentials = access(request.relay.scope, false); check(request); if (!request.relay.revision.equals(credentials.getString("revision"))) throw failure(); String model = PetOfficialAccountPolicy.text(input.getString("model"), 200, false); boolean known = false; synchronized (gate) { for (int i = 0; i < models.length(); i++) if (model.equals(models.getJSONObject(i).getString("model"))) known = true; } if (!known) throw failure();
             JSONObject body = new JSONObject(input.toString()); body.put("store", false).put("stream", true); byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8); if (bytes.length > MAX_REQUEST) throw failure();
-            connection = open(URI.create(RESPONSES), true); request.connection = connection; connections.add(connection); check(request); if (request.timedOut || System.nanoTime() >= request.deadline) throw failure(); connection.setReadTimeout(600000); connection.setRequestMethod("POST"); connection.setRequestProperty("Authorization", "Bearer " + credentials.getString("accessToken")); connection.setRequestProperty("Accept", "text/event-stream"); connection.setRequestProperty("Content-Type", "application/json"); connection.setDoOutput(true); connection.setFixedLengthStreamingMode(bytes.length); try (OutputStream output = connection.getOutputStream()) { output.write(bytes); }
+            connection = open(URI.create(RESPONSES), true); request.connection = connection; connections.put(connection, request.relay.scope); check(request); if (request.timedOut || System.nanoTime() >= request.deadline) throw failure(); connection.setReadTimeout(600000); connection.setRequestMethod("POST"); connection.setRequestProperty("Authorization", "Bearer " + credentials.getString("accessToken")); connection.setRequestProperty("Accept", "text/event-stream"); connection.setRequestProperty("Content-Type", "application/json"); connection.setDoOutput(true); connection.setFixedLengthStreamingMode(bytes.length); try (OutputStream output = connection.getOutputStream()) { output.write(bytes); }
             int status = connection.getResponseCode(); if (status != 200) { if (status == 401) expireAccess(request, credentials); observeFailure(request, status, connection.getErrorStream()); throw failure(); } String mime = connection.getContentType(); if (mime != null && !mime.trim().isEmpty() && !mime.toLowerCase(java.util.Locale.ROOT).startsWith("text/event-stream")) throw failure();
             boolean completed = false, terminal = false; StringBuilder frame = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT).onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)))) {
@@ -473,10 +528,20 @@ class PetOfficialAccountRuntime implements AutoCloseable {
         if (!state.isEmpty()) { synchronized (gate) { assertRelay(request.relay); JSONObject draft = new JSONObject(vault.toString()), usage = user(request.relay.scope, draft).getJSONObject("usage"); usage.put("state", state).put("checkedAt", stamp()); save(draft); } emit(); }
     }
     private void stopRelay(Relay previous) { if (previous == null) return; previous.stopped = true; HttpURLConnection poll = previous.poll; if (poll != null) poll.disconnect(); for (Running request : running.values()) if (request.relay == previous) request.cancel(); }
-    private void revokeRelay() {
-        Relay previous; synchronized (gate) { previous = relay; relay = null; models = new JSONArray(); modelsError = ""; } stopRelay(previous);
+    private Relay detachRelayLocked() { Relay previous = relay; relay = null; models = new JSONArray(); modelsError = ""; return previous; }
+    private void disconnectRelay(Relay previous) {
+        stopRelay(previous);
         if (previous != null) { Thread worker = new Thread(() -> { try { backend(previous.scope, "/api/mobile-official/" + previous.id + "/disconnect", new JSONObject(), 5000, false); } catch (Exception ignored) { } }, "petpal-official-disconnect"); worker.setDaemon(true); worker.start(); }
     }
-    void clearScope() { synchronized (gate) { generation++; scope = null; if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; callbackReceipt = null; retryClients.clear(); error = ""; } revokeRelay(); for (HttpURLConnection connection : connections) connection.disconnect(); emit(); }
+    private void revokeRelay() { Relay previous; synchronized (gate) { previous = detachRelayLocked(); } disconnectRelay(previous); }
+    private Relay clearScopeLocked() { generation++; refreshGeneration++; scope = null; if (attempt != null) attempt.close(); attempt = null; returnNavigation = null; callbackReceipt = null; retryClients.clear(); error = ""; return detachRelayLocked(); }
+    void clearScope() { clearScope(null); }
+    private void clearScope(Scope expected) {
+        final Relay previous; final long cancelledBefore;
+        synchronized (gate) { if (expected != null && (scope != expected || expected.generation != generation)) return; bindingGeneration++; previous = clearScopeLocked(); cancelledBefore = generation; }
+        disconnectRelay(previous);
+        for (Map.Entry<HttpURLConnection, Scope> entry : connections.entrySet()) if (entry.getValue().generation < cancelledBefore) entry.getKey().disconnect();
+        emit();
+    }
     @Override public void close() { synchronized (gate) { closed = true; } clearScope(); callbacks.shutdownNow(); requests.shutdownNow(); clock.shutdownNow(); }
 }

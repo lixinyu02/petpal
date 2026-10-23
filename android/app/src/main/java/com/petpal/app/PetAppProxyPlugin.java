@@ -51,7 +51,7 @@ public final class PetAppProxyPlugin extends Plugin {
                     activity.runOnUiThread(() -> { if (trusted(false)) call.resolve(response); else call.reject("应用页面已变化，代理操作已结束。"); });
                 } catch (Exception failure) {
                     // Native, subscription and YAML errors are untrusted: never echo their details.
-                    activity.runOnUiThread(() -> call.reject(failure instanceof InterruptedException ? "登录已变化，代理操作已取消。" : "应用代理操作未完成，请检查配置、系统版本和网络。"));
+                    activity.runOnUiThread(() -> call.reject(!manager.restartRequired().isEmpty() ? manager.restartRequired() : failure instanceof InterruptedException ? "登录已变化，代理操作已取消。" : "应用代理操作未完成，请检查配置、系统版本和网络。"));
                 }
             });
     }

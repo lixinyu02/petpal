@@ -53,7 +53,9 @@ public class PetLoginSessionAppTest {
         assertTrue("Encrypted no-backup login file exists", vault().isFile());
         assertTrue("Encrypted login file is bounded", vault().length() > 40 && vault().length() <= 32768);
         String bytes = new String(Files.readAllBytes(vault().toPath()), StandardCharsets.UTF_8); JSONObject envelope = new JSONObject(bytes);
-        assertEquals("Only an encryption envelope is stored", 3, envelope.length()); assertEquals(1, envelope.getInt("version"));
+        int version=envelope.getInt("version");assertTrue("Supported encrypted vault",version==1||version==2);
+        assertEquals("Only an encryption envelope is stored",version==1?3:4,envelope.length());
+        if(version==2)assertTrue("Restricted random key id",envelope.getString("keyId").matches("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"));
         assertTrue(envelope.getString("iv").length() > 8); assertTrue(envelope.getString("data").length() > 20);
         assertFalse("No plaintext password", bytes.contains(PASSWORD)); assertFalse("No plaintext username", bytes.contains(USER));
         assertFalse("No plaintext endpoint", bytes.contains(URL)); assertFalse("No plaintext credential field", envelope.has("token"));

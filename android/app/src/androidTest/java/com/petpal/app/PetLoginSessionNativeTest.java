@@ -9,6 +9,10 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.UUID;
+import java.security.KeyStore;
+import javax.crypto.Cipher;
+import javax.crypto.SecretKey;
+import android.util.Base64;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -35,6 +39,26 @@ public class PetLoginSessionNativeTest {
             assertFalse(disk.contains("synthetic-native-login-token")); assertFalse(disk.contains("fixture.invalid")); assertFalse(disk.contains("must-not-be-saved"));
             JSONObject restored = new PetLoginSessionState(fixture.context).read().getJSONObject("connection");
             assertEquals("synthetic-native-login-token", restored.getString("token")); assertEquals("https://fixture.invalid", restored.getString("url")); assertEquals(4, restored.length()); assertFalse(restored.has("password"));
+        }
+    }
+    @Test public void realAndroidKeystoreLegacyV1RemainsReadableAndWritable() throws Exception {
+        String alias="petpal.login-session.test."+UUID.randomUUID();
+        try(Fixture fixture=new Fixture()) {
+            PetLoginSessionState.AndroidKeys keys=new PetLoginSessionState.AndroidKeys();
+            SecretKey key=keys.create(alias);
+            Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,key);
+            cipher.updateAAD("PetPal Login Session v1".getBytes(StandardCharsets.UTF_8));
+            JSONObject saved=fixture.login("synthetic-real-v1").put("version",1);saved.remove("password");
+            JSONObject envelope=new JSONObject().put("version",1).put("iv",Base64.encodeToString(cipher.getIV(),Base64.NO_WRAP))
+                .put("data",Base64.encodeToString(cipher.doFinal(saved.toString().getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP));
+            Files.write(fixture.saved().toPath(),envelope.toString().getBytes(StandardCharsets.UTF_8));
+            PetLoginSessionState state=new PetLoginSessionState(fixture.context,keys,null,alias);
+            assertEquals("synthetic-real-v1",state.read().getJSONObject("connection").getString("token"));
+            state.write(fixture.login("synthetic-real-v1-next"),state.reserve());
+            assertEquals(1,new JSONObject(new String(Files.readAllBytes(fixture.saved().toPath()),StandardCharsets.UTF_8)).getInt("version"));
+            assertEquals("synthetic-real-v1-next",new PetLoginSessionState(fixture.context,keys,null,alias).read().getJSONObject("connection").getString("token"));
+        } finally {
+            KeyStore keys=KeyStore.getInstance("AndroidKeyStore");keys.load(null);keys.deleteEntry(alias);
         }
     }
     @Test public void logoutAndNewerWritesRejectQueuedOldAccountSaves() throws Exception {
