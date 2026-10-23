@@ -134,8 +134,8 @@ export function ExecutionHostPicker({hosts,value,onChange,disabled=false,loading
   const groups=useMemo(()=>groupExecutionHosts(choices,query),[choices,query]);
   const selected=choices.find(choice=>choice.id===value),hasDesktop=choices.some(host=>host.kind==='desktop'&&host.online&&!host.missing);
   const legacyDesktop=typeof window!=='undefined'&&!!window.petpal&&!window.petpal.executor;
-  const unavailable=!!selected&&!selected.online;
-  const selectionLabel=selected?`${selected.name}${selected.disambiguator?` · ${selected.disambiguator}`:''}${selected.isLocal?' · 此电脑':''}${selected.missing?' · 未连接':!selected.online?' · 离线':''}`:loading?'正在寻找执行电脑…':'选择执行电脑';
+  const unavailable=!error&&!!selected&&!selected.online;
+  const selectionLabel=selected?`${selected.name}${selected.disambiguator?` · ${selected.disambiguator}`:''}${selected.isLocal?' · 此电脑':''}${error?' · 状态待刷新':selected.missing?' · 未连接':!selected.online?' · 离线':''}`:loading?'正在寻找执行电脑…':'选择执行电脑';
   function selectable(choice:ExecutionHostChoice){return allowOffline?!disabled&&!choice.missing&&hosts.some(host=>host.id===choice.id):canSelectExecutionHost(choice,disabled);}
   function choose(choice:ExecutionHostChoice,event:MouseEvent<HTMLButtonElement>){
     if(!selectable(choice)||!hosts.some(host=>host.id===choice.id&&(allowOffline||host.online)))return;
@@ -146,7 +146,7 @@ export function ExecutionHostPicker({hosts,value,onChange,disabled=false,loading
     <WorkspaceDisclosure className="workspace-host-picker" label={`${label}：${selectionLabel}${disabled?'，暂时不能切换':''}`} summary={<>
       {selected?.kind==='central'||selected?.kind==='docker'?<Cloud size={18} aria-hidden="true"/>:<Monitor size={18} aria-hidden="true"/>}
       <span className="workspace-host-current"><small>{label}</small><strong title={selectionLabel}>{selectionLabel}</strong></span>
-      {selected&&<span className={`workspace-host-connection${unavailable?' is-offline':''}`} aria-hidden="true"/>}
+      {selected&&!error&&<span className={`workspace-host-connection${unavailable?' is-offline':''}`} aria-hidden="true"/>}
     </>}>
       <div className="workspace-host-menu-heading"><h3>选择执行电脑</h3>{onRefresh&&<button type="button" className="workspace-host-refresh" disabled={loading} aria-label={`刷新${label}`} onClick={onRefresh}>{loading?<Loader2 size={17} className="spin" aria-hidden="true"/>:<RefreshCw size={17} aria-hidden="true"/>}</button>}</div>
       <label className="workspace-host-search" htmlFor={`${id}-search`}><Search size={17} aria-hidden="true"/><input id={`${id}-search`} aria-label={`搜索${label}`} placeholder="搜索电脑名称或系统" value={query} onChange={event=>setQuery(event.target.value)} autoComplete="off" autoCorrect="off" spellCheck={false}/></label>
@@ -155,7 +155,7 @@ export function ExecutionHostPicker({hosts,value,onChange,disabled=false,loading
         {groups.map(group=><section className="workspace-host-group" key={group.id} aria-labelledby={`${id}-${group.id}`}><h4 id={`${id}-${group.id}`}>{group.label}<span>{group.choices.length}</span></h4>
           {group.choices.map(choice=><button type="button" className={`workspace-host-option${choice.id===value?' is-selected':''}`} key={choice.id} aria-pressed={choice.id===value} disabled={!selectable(choice)} onClick={event=>choose(choice,event)}>
             <span className="workspace-host-option-icon">{choice.kind==='central'||choice.kind==='docker'?<Cloud size={17} aria-hidden="true"/>:<Monitor size={17} aria-hidden="true"/>}</span>
-            <span className="workspace-host-option-copy"><strong title={choice.name}>{choice.name}</strong><span>{choice.platformLabel}{choice.isLocal?' · 此电脑':''} · {choice.missing?'未连接':choice.online?'已连接':'离线'}{choice.disambiguator&&<> · {choice.disambiguator}</>}</span>{choice.ownerLabel&&<span className="workspace-host-owner">{choice.isOwn?'我的电脑':'所属用户'} · {choice.ownerLabel}</span>}<small>{choice.note}</small></span>
+            <span className="workspace-host-option-copy"><strong title={choice.name}>{choice.name}</strong><span>{choice.platformLabel}{choice.isLocal?' · 此电脑':''} · {error?'状态待刷新':choice.missing?'未连接':choice.online?'已连接':'离线'}{choice.disambiguator&&<> · {choice.disambiguator}</>}</span>{choice.ownerLabel&&<span className="workspace-host-owner">{choice.isOwn?'我的电脑':'所属用户'} · {choice.ownerLabel}</span>}<small>{error?'保留上次电脑列表，刷新成功后更新状态。':choice.note}</small></span>
             <span className="workspace-host-selected">{choice.id===value&&<Check size={17} aria-label="已选中"/>}</span>
           </button>)}
         </section>)}

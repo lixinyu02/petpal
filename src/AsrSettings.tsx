@@ -49,8 +49,9 @@ export default function AsrSettings({ connected, scope }: { connected:boolean; s
     });
   }
   function test() {
-    void run(signal => api<{ok?:boolean;busy?:boolean}>('/voice/asr/test', {method:'POST',body:'{}',signal}), value => {
-      setMessage(value.busy ? '服务已连接，目前有其他语音会话，稍后即可使用。' : '服务已连接，流式语音识别可用。');
+    void run(signal => api<{ok?:boolean;busy?:boolean;configVerified?:boolean;protocolVerified?:boolean}>('/voice/asr/test', {method:'POST',body:'{}',signal}), value => {
+      const verified = value.configVerified && value.protocolVerified;
+      setMessage(`${verified ? '服务与协议检查通过。' : '服务已连接。'}${value.busy ? '目前有其他语音会话，请稍后开启语音聊天验证识别效果。' : '开启语音聊天后可验证麦克风和识别效果。'}`);
     });
   }
   return <section className="asr-settings" aria-label="流式语音识别服务">

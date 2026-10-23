@@ -8,6 +8,13 @@ const source=ts.transpileModule(await readFile(new URL('../src/auth/LoginGate.ts
 const nodes=tree=>Array.isArray(tree)?tree.flatMap(nodes):!tree||typeof tree!=='object'?[]:[tree,...nodes(tree.props?.children)];
 const text=tree=>Array.isArray(tree)?tree.map(text).join(''):tree==null||typeof tree==='boolean'?'':typeof tree!=='object'?typeof tree==='symbol'?'':String(tree):text(tree.props?.children);
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
+test('connection dialogs expose their visible heading as the accessible dialog name', t => {
+  const f=fixture('',{onClose(){}});t.after(()=>f.close());
+  const dialog=f.find('div',props=>props.role==='dialog');assert.ok(dialog);
+  assert.equal(dialog.props['aria-modal'],'true');
+  const heading=f.find('h2',props=>props.id===dialog.props['aria-labelledby']);
+  assert.ok(heading);assert.equal(text(heading),'登录你的小伴');
+});
 function fixture(initial='',{onClose,ownerConnection,apiBridge,environmentWindow}={}){
   const window=environmentWindow||new EventTarget(),hooks=[],effects=[],logins=[],pairings=[];window.petpalLoginSession??={};if(ownerConnection)window.petpal={connection:ownerConnection};let savedError=initial,index=0,tree,dirty=false,mounted=true,lateUpdates=0,clearWait,loginWait,clears=0,epoch=0;
   const react={useRef(initial){const at=index++;return hooks[at]??=( {current:initial});},useState(initial){const at=index++;hooks[at]||={value:initial};return[hooks[at].value,value=>{if(!mounted)lateUpdates++;hooks[at].value=typeof value==='function'?value(hooks[at].value):value;dirty=true;}];},useEffect(effect,deps){const at=index++;if(!hooks[at])effects.push(()=>{hooks[at]={cleanup:effect(),deps};});}};

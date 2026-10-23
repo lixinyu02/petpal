@@ -99,10 +99,21 @@ test('verified startup warmups preserve authentication, cancellation and one-use
       f.respond(async()=>json(state('third-user')));await f.api.api('/auth/me');
       await f.api.loadInitialState();assert.equal(f.api.getIdentity().userId,'third-user');assert.equal(f.calls.length,5);
     });
-    await t.test('an unauthorized warm response clears login and cannot provide startup data',async t=>{
+    await t.test('an unclassified warm 401 confirms invalid login before clearing it',async t=>{
       const f=await fixture(t);f.respond(async()=>json({error:'expired'},401));f.api.warmInitialState();
+      await assert.rejects(f.api.loadInitialState());assert.equal(f.api.getConnection().token,'');assert.equal(f.api.getIdentity(),null);
+      assert.deepEqual(f.calls.map(call=>call.url),['https://fixture.example/api/bootstrap','https://fixture.example/api/auth/me']);
+      f.api.warmInitialState();await flush();assert.equal(f.calls.length,2);
+    });
+    await t.test('an explicit session-invalid warm response clears login without another validation',async t=>{
+      const f=await fixture(t);f.respond(async()=>json({error:'expired',code:'session_invalid'},401));f.api.warmInitialState();
       await assert.rejects(f.api.loadInitialState());assert.equal(f.api.getConnection().token,'');assert.equal(f.api.getIdentity(),null);assert.equal(f.calls.length,1);
-      f.api.warmInitialState();await flush();assert.equal(f.calls.length,1);
+    });
+    await t.test('an upstream warm 401 preserves a verified account and allows a later startup read',async t=>{
+      const f=await fixture(t);f.respond(async url=>url.endsWith('/auth/me')?json(state()):json({error:'upstream unavailable'},401));f.api.warmInitialState();
+      await assert.rejects(f.api.loadInitialState(),error=>error.status===401);assert.equal(f.api.getConnection().token,'synthetic-member-token');assert.equal(f.api.getIdentity().userId,'member');
+      assert.deepEqual(f.calls.map(call=>call.url),['https://fixture.example/api/bootstrap','https://fixture.example/api/auth/me']);
+      f.respond(async()=>json(state()));assert.deepEqual(await f.api.loadInitialState(),state());assert.equal(f.calls.length,3);
     });
     await t.test('pre-cancelled readers leave warm data available and issue no extra fetch',async t=>{
       const f=await fixture(t),reason=new Error('already cancelled');f.api.warmInitialState();await flush();

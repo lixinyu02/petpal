@@ -8,12 +8,12 @@
 
 - Goal: 修复有当前证据的UI及连接恢复缺陷。
 - Ordering rule: issue顺序推进，当前issue内并行独立调查。
-- Current status: issue-2 in_progress
+- Current status: issue-3 in_progress
 
 ## Issue List
 
 - [x] issue-1 当前界面与连接故障复现
-- [ ] issue-2 最小修复与定向回归
+- [x] issue-2 最小修复与定向回归
 - [ ] issue-3 浏览器集成验收与交付
 
 ## issue-1
@@ -34,9 +34,9 @@
 - 范围: 仅issue-1确认缺陷的产品/测试文件
 - 依赖: issue-1
 - 验收标准: 缺陷复现变为通过，登录/消息/请求隔离保持
-- 状态: in_progress
-- 验证方式: 定向测试与TypeScript
-- commit: pending
+- 状态: done
+- 验证方式: 13个定向文件182测试点通过，tsc通过；隔离Vite生产构建/OpenUI校验通过。360窄屏旧版select376px越出315px父容器，修复后315px/44px且箭头可见；连接成功JSON/超时/hosts、Agent恢复、保存互锁及401契约回归通过；追加实际api+SettingsView回归，明确2xx但正文损坏后只刷新、不重复创建，普通网络失败仍保留草稿。执行电脑状态读取失败时不显示旧绿色在线标记。
+- commit: 本issue提交
 
 ## issue-3
 
@@ -45,6 +45,6 @@
 - 范围: 同路径UI复验、构建/网页发布和报告
 - 依赖: issue-2
 - 验收标准: 有界面与状态证据，业务/下载/信任保全通过
-- 状态: todo
-- 验证方式: Chrome实际操作、完整资源SHA和运行态核验
+- 状态: in_progress
+- 验证方式: Chrome基线+IAB分步实际操作、完整资源SHA和运行态核验
 - commit: pending

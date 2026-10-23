@@ -1,0 +1,21 @@
+/* These controls belong to App, not the lazy-loaded account settings chunk. */
+.default-model-setting{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;
+  gap:12px 16px;padding:16px 0 24px;min-width:0;
+}
+.default-model-setting label{
+  display:grid;gap:8px;min-width:0;margin:0;font-size:12px;color:var(--theme-muted);
+}
+.default-model-setting select{
+  width:100%;min-width:0;max-width:100%;min-height:44px;padding:9px 12px;
+  border:1px solid var(--theme-control-border);border-radius:8px;
+  background:var(--theme-input);color:var(--theme-ink);font:inherit;
+  text-overflow:ellipsis;
+}
+.default-model-setting>button{white-space:nowrap;min-height:44px}
+.settings-tabs{overflow-x:auto}
+.settings-tabs button{white-space:nowrap}
+@media(max-width:650px){
+  .default-model-setting{grid-template-columns:minmax(0,1fr)}
+  .default-model-setting>button{justify-self:start}
+}

@@ -30,7 +30,7 @@ const snapshot=(extra={})=>({id:'agent-one',mode:'codex',title:'Agent',messages:
 const reply=(id,status='complete',content=id)=>({id,role:'assistant',status,content});
 
 function fixture(t,{hidden=false,online=true,automation=false,selected='agent-one',mode='codex'}={}){
-  const requests=[],timers=new Map(),document=new Surface(),window=new Surface(),spoken=[],phases=[],errors=[],submissions=[],queued=[];
+  const requests=[],timers=new Map(),document=new Surface(),window=new Surface(),spoken=[],phases=[],errors=[],pollErrors=[],submissions=[],queued=[];
   document.hidden=hidden;window.navigator={onLine:online};
   let epoch=1,clock=0,timerId=0,mounted=true,lateUpdates=0,deferUpdates=false;
   const initial=snapshot(automation?{automationId:'automation-one'}:{});
@@ -53,6 +53,7 @@ function fixture(t,{hidden=false,online=true,automation=false,selected='agent-on
     agentSubmissionRef:{current:null},resolveSubmission:value=>submissions.push(value),
     speechRef:{current:{speakIfEnabled:(text,id)=>spoken.push({text,id})}},performancePhase:(...args)=>phases.push(args),
     setError:value=>{if(!mounted){lateUpdates++;return;}errors.push(typeof value==='function'?value(errors.at(-1)||''):value);},
+    setAgentPollError:value=>{if(!mounted){lateUpdates++;return;}pollErrors.push(typeof value==='function'?value(pollErrors.at(-1)||''):value);},
     api(path,options={}){
       assert.equal(path,'/conversations/agent-one');assert.equal(options.method,undefined,'passive polling cannot stop or mutate an Agent');
       const pending=deferred();requests.push({path,options,epoch,...pending});return pending.promise;
@@ -65,7 +66,7 @@ function fixture(t,{hidden=false,online=true,automation=false,selected='agent-on
   const flush=async()=>{for(let index=0;index<10;index++)await new Promise(resolve=>setImmediate(resolve));};
   const close=()=>{if(!mounted)return;cleanup?.();context.approvalAlive.current=false;mounted=false;};
   t.after(async()=>{close();for(const request of requests)request.resolve(snapshot());await flush();assert.equal(lateUpdates,0);assert.equal(timers.size,0);assert.equal(document.listenerCount+window.listenerCount,0);});
-  return{context,requests,timers,document,window,spoken,phases,errors,submissions,get state(){return state;},get loaded(){return loaded;},close,flush,
+  return{context,requests,timers,document,window,spoken,phases,errors,pollErrors,submissions,get state(){return state;},get loaded(){return loaded;},close,flush,
     async resolve(index,value=snapshot()){requests[index].resolve(value);await flush();},
     async reject(index,error){requests[index].reject(error);await flush();},
     hide(value){document.hidden=value;document.dispatchEvent(new Event('visibilitychange'));},
@@ -83,6 +84,27 @@ test('Agent uses 800ms running and 2500ms idle reads, suppressing initial comple
   await f.resolve(1,snapshot({agent:{revision:2,run:{status:'completed'},submissions:[]},messages:[reply('new-completion')]}));
   assert.deepEqual(f.spoken.map(value=>value.text),['new-completion']);
   await f.advance(2499);assert.equal(f.requests.length,2);await f.advance(1);assert.equal(f.requests.length,3);
+});
+
+test('Agent read failures recover their own error without clearing an action error or replaying work',async t=>{
+  const f=fixture(t);
+  f.context.setError('A command failed independently');
+  assert.equal(f.requests[0].options.timeoutMs,12000);
+  await f.reject(0,Object.assign(new Error('Status read timed out'),{name:'TimeoutError'}));
+  assert.equal(f.pollErrors.at(-1),'Status read timed out');
+  await f.advance(2500);assert.equal(f.requests.length,2);
+  await f.resolve(1,snapshot({agent:{revision:2,run:{status:'completed'},submissions:[]}}));
+  assert.equal(f.pollErrors.at(-1),'');
+  assert.deepEqual(f.errors,['A command failed independently']);
+  assert.equal(f.submissions.length,0);
+});
+
+test('Agent rejects an incomplete success snapshot without replacing the displayed conversation',async t=>{
+  const f=fixture(t),before=f.state;
+  await f.resolve(0,{id:'agent-one'});
+  assert.equal(f.state,before);assert.match(f.pollErrors.at(-1),/对话状态/);
+  await f.advance(2500);await f.resolve(1,snapshot());
+  assert.equal(f.pollErrors.at(-1),'');
 });
 
 test('Agent hidden or offline startup performs no GET until both allow a fresh read',async t=>{

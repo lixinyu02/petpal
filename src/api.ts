@@ -313,7 +313,16 @@ function confirmInvalidSession(request:ReturnType<typeof requests.begin>):Promis
   sessionValidation=entry;return entry.promise;
 }
 async function responseJson(response:Response,request:ReturnType<typeof requests.begin>,route='') {
-  const data=await response.json().catch(()=>({}));request.assertCurrent();
+  let data:any;
+  try{data=await waitForInitialState(response.json(),request.signal);}
+  catch(error){
+    request.assertCurrent();
+    // A successful status does not make a truncated or unreadable body usable.
+    // Error responses may still have an empty/non-JSON proxy error page.
+    if(response.ok)throw Object.assign(new Error('服务响应不完整或格式无效，请重试。',{cause:error}),{status:response.status,code:'invalid_response'});
+    data={};
+  }
+  request.assertCurrent();
   if(!response.ok){
     if(response.status===401&&request.connection.token){
       const invalid=data?.code==='session_invalid'||route==='/auth/me'||await waitForInitialState(confirmInvalidSession(request),request.signal);
@@ -324,13 +333,25 @@ async function responseJson(response:Response,request:ReturnType<typeof requests
   }
   return data;
 }
-export async function api<T = any>(path:string, options:RequestInit = {}):Promise<T> {
-  const request=requests.begin(options.signal);
+export type ApiRequestOptions = RequestInit & {timeoutMs?:number};
+/** A caller may bound a finite JSON operation; streaming tasks retain their own lifecycle. */
+export async function api<T = any>(path:string, options:ApiRequestOptions = {}):Promise<T> {
+  const {timeoutMs,...init}=options;
+  if(timeoutMs!==undefined&&(!Number.isFinite(timeoutMs)||timeoutMs<=0||timeoutMs>2147483647))throw new TypeError('请求超时须为有效的正毫秒数。');
+  const controller=new AbortController(),abort=()=>controller.abort(init.signal?.reason);
+  if(init.signal?.aborted)abort();else init.signal?.addEventListener('abort',abort,{once:true});
+  const request=requests.begin(controller.signal);
+  const timer=timeoutMs===undefined?undefined:setTimeout(()=>controller.abort(Object.assign(new Error('服务请求超时，请检查连接后重试。'),{name:'TimeoutError',code:'request_timeout'})),timeoutMs);
   try{
-    request.assertCurrent();const headers=new Headers(options.headers),route=path.split('?')[0];if(!headers.has('Content-Type'))headers.set('Content-Type','application/json');headers.set('Authorization',`Bearer ${request.connection.token}`);if(route==='/auth/me'&&(!options.method||options.method.toUpperCase()==='GET')&&remembersAndroidDevice())headers.set('X-PetPal-Remember-Device','1');
-    const response=await connectionFetch(`${request.connection.url}/api${path}`,{...options,headers,signal:request.signal});request.assertCurrent();
+    request.assertCurrent();const headers=new Headers(init.headers),route=path.split('?')[0];if(!headers.has('Content-Type'))headers.set('Content-Type','application/json');headers.set('Authorization',`Bearer ${request.connection.token}`);if(route==='/auth/me'&&(!init.method||init.method.toUpperCase()==='GET')&&remembersAndroidDevice())headers.set('X-PetPal-Remember-Device','1');
+    const pending=connectionFetch(`${request.connection.url}/api${path}`,{...init,headers,signal:request.signal}).then(response=>{
+      try{request.assertCurrent();}
+      catch(error){try{void response.body?.cancel().catch(()=>{});}catch{}throw error;}
+      return response;
+    });
+    const response=await waitForInitialState(pending,request.signal);request.assertCurrent();
     const data=await responseJson(response,request,route);if(route==='/state'||route==='/bootstrap'||route==='/auth/me')acceptIdentity(data);request.assertCurrent();return data as T;
-  }finally{request.close();}
+  }finally{clearTimeout(timer);init.signal?.removeEventListener('abort',abort);request.close();}
 }
 async function readInitialState(history:boolean,signal:AbortSignal):Promise<State>{
   try { return await api<State>(history?'/state?runtime=deferred':'/bootstrap',{signal}); }
@@ -341,7 +362,7 @@ async function readInitialState(history:boolean,signal:AbortSignal):Promise<Stat
     return await api<State>('/state',{signal});
   }
 }
-/** A misbehaving native transport must not hold startup past cancellation. */
+/** A misbehaving transport must not hold a caller past cancellation. */
 function waitForInitialState<T>(pending:Promise<T>,signal:AbortSignal):Promise<T>{
   return new Promise((resolve,reject)=>{
     const abort=()=>{signal.removeEventListener('abort',abort);reject(signal.reason);};

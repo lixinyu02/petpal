@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
+import ts from 'typescript';
 import {canSelectExecutionHost,executionHostChoices,groupExecutionHosts} from '../src/execution-host-picker.mjs';
 
 const hosts=[
@@ -89,4 +92,40 @@ test('administrators see device owners and can search display names or usernames
   assert.deepEqual(groupExecutionHosts(choices,'鲍勃').flatMap(group=>group.choices.map(choice=>choice.id)),['other']);
   assert.equal(groupExecutionHosts(choices,'secret-owner-id').length,0);
   assert.equal(canSelectExecutionHost(choices[0]),true);assert.equal(canSelectExecutionHost(choices[2]),true);
+});
+
+const pickerSource=ts.transpileModule(await readFile(new URL('../src/WorkspaceControls.tsx',import.meta.url),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
+const pickerNodes=tree=>Array.isArray(tree)?tree.flatMap(pickerNodes):!tree||typeof tree!=='object'?[]:[tree,...pickerNodes(tree.props?.children),...pickerNodes(tree.props?.summary)];
+const pickerText=tree=>Array.isArray(tree)?tree.map(pickerText).join(''):tree==null||typeof tree==='boolean'?'':typeof tree!=='object'?String(tree):pickerText(tree.props?.children);
+function renderPicker(overrides={}){
+  const changes=[],react={useId:()=> 'host-fixture',useState:value=>[value,()=>{}],useRef:value=>({current:value}),useEffect(){},useMemo:callback=>callback()};
+  const modules={react,'react/jsx-runtime':{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})},'react-dom':{},'lucide-react':new Proxy({},{get:(_target,name)=>Symbol.for(name)}),'./execution-host-picker.mjs':{executionHostChoices,groupExecutionHosts,canSelectExecutionHost},'./WorkspaceDisclosure':{__esModule:true,default:Symbol('WorkspaceDisclosure')}};
+  const module={exports:{}};vm.runInNewContext(pickerSource,{module,exports:module.exports,window:{},require:name=>modules[name]||{}});
+  const tree=module.exports.ExecutionHostPicker({hosts,value:'mine',localHostId:'mine',onChange:id=>changes.push(id),...overrides});
+  const all=pickerNodes(tree),options=all.filter(node=>node.type==='button'&&node.props.className?.startsWith('workspace-host-option'));
+  return{all,options,changes,find:(type,predicate)=>all.find(node=>node.type===type&&predicate(node.props))};
+}
+
+test('failed host refresh labels retained entries as pending without online dots or selection changes',()=>{
+  const before=renderPicker(),failed=renderPicker({error:'合成 hosts 503'});
+  assert.equal(failed.options.length,before.options.length);
+  assert.deepEqual(failed.options.map(option=>[option.props['aria-pressed'],option.props.disabled]),before.options.map(option=>[option.props['aria-pressed'],option.props.disabled]));
+  for(const option of failed.options){assert.match(pickerText(option),/状态待刷新/);assert.doesNotMatch(pickerText(option),/已连接|CLI 可用|未连接|离线/);}
+  assert.ok(failed.find('strong',props=>props.title==='办公电脑 · 此电脑 · 状态待刷新'));
+  assert.equal(failed.find('span',props=>props.className?.startsWith('workspace-host-connection')),undefined);
+  assert.equal(pickerText(failed.find('span',props=>props.className==='workspace-target-error')),'合成 hosts 503');
+  assert.deepEqual(failed.changes,[]);
+  const other=failed.options.find(option=>pickerText(option).includes('书房电脑'));
+  other.props.onClick({currentTarget:{closest:()=>null}});assert.deepEqual(failed.changes,['other'],'presentation must preserve existing selection behavior');
+  const recovered=renderPicker();assert.ok(recovered.find('span',props=>props.className==='workspace-host-connection'));
+  assert.match(pickerText(recovered.options.find(option=>option.props['aria-pressed'])),/已连接/);
+});
+
+test('a refresh failure does not relabel a retained selection as a newly confirmed offline host',()=>{
+  const failed=renderPicker({value:'old',error:'合成 hosts 无效响应'});
+  assert.ok(failed.find('strong',props=>props.title==='旧电脑 · 状态待刷新'));
+  assert.equal(failed.find('span',props=>props.className==='workspace-target-host is-offline'),undefined);
+  const recovered=renderPicker({value:'old'});
+  assert.ok(recovered.find('span',props=>props.className==='workspace-target-host is-offline'));
+  assert.ok(recovered.find('span',props=>props.className==='workspace-host-connection is-offline'));
 });
