@@ -9,7 +9,7 @@ import path from 'node:path';
 import net from 'node:net';
 import {setTimeout as delay} from 'node:timers/promises';
 const root=path.resolve('.'),base=path.resolve(process.argv[2]||''),apk=path.resolve(process.argv[3]||''),auditFile=path.resolve(process.argv[4]||'');
-assert.ok(base.startsWith(path.resolve('.data/deep-fluidity-20261023')+path.sep),'Owned QA directory required');assert.ok(process.argv[3]&&process.argv[4],'Explicit candidate APK and its audit required');
+assert.ok(['.data/deep-fluidity-20261023','.data/fluidity-followup-20261023'].some(directory=>base.startsWith(path.resolve(directory)+path.sep)),'Owned QA directory required');assert.ok(process.argv[3]&&process.argv[4],'Explicit candidate APK and its audit required');
 const adb='E:/Android/Sdk/platform-tools/adb.exe',emulator='E:/Android/Sdk/emulator/emulator.exe',serial='emulator-5592',avd='PetPal_Permissions_API36_20261023';
 const testApk=path.join(root,'android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk'),runner='com.petpal.app.test/androidx.test.runner.AndroidJUnitRunner',ext='/sdcard/Android/data/com.petpal.app/files';
 const exec=promisify(execFile),run=(file,args,timeout=30000)=>exec(file,args,{cwd:root,encoding:'utf8',timeout,maxBuffer:24*1024*1024,windowsHide:true}),ad=(args,timeout)=>run(adb,['-s',serial,...args],timeout),sha=bytes=>createHash('sha256').update(bytes).digest('hex');

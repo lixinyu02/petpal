@@ -7,7 +7,7 @@ import {JsonStore} from '../server/store.mjs';
 import {hashPassword} from '../server/auth.mjs';
 import {createPetServer} from '../server/app.mjs';
 const base=path.resolve(process.argv[2]||'');
-if(!base.startsWith(path.resolve('.data/deep-fluidity-20261023')+path.sep))throw Error('Owned performance directory required');
+if(!['.data/deep-fluidity-20261023','.data/fluidity-followup-20261023'].some(directory=>base.startsWith(path.resolve(directory)+path.sep)))throw Error('Owned performance directory required');
 const directory=path.join(base,'private-fixture');await mkdir(directory);
 const seed=await new JsonStore(directory).init();const owner=seed.state.users[0];
 owner.username='syncfixture';owner.displayName='隔离性能验收';owner.password=await hashPassword('SyntheticSync123a');

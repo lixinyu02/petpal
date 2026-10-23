@@ -8,13 +8,13 @@
 
 - Goal: 减少已测剩余流式与启动开销并完成有边界的验收交付。
 - Ordering rule: Complete issues in sequence; parallelize read-only investigation and independent work within the active issue.
-- Current status: issue-2 complete; issue-3 next
+- Current status: completed; web delivered 2026-10-24, formal clients unchanged
 
 ## Issue List
 
 - [x] issue-1 冻结基线与确认热点
 - [x] issue-2 实现并验证热点优化
-- [ ] issue-3 集成运行验收与交付
+- [x] issue-3 集成运行验收与交付
 
 ## issue-1
 
@@ -25,7 +25,7 @@
 - 验收标准: 原始基线可运行，产品代码未混入候选，设计具体化
 - 状态: done
 - 验证方式: 当前源码冻结 1950 inputs / 13 files，与上一轮最终 sourceDigest 相同；已审计全行投影/浅比较与启动静态依赖。新性能样本将在同一组交错采集。
-- commit: 本 issue 提交
+- commit: `048a252`
 
 ## issue-2
 
@@ -36,7 +36,7 @@
 - 验收标准: 内容/状态/焦点/滚动保持，保留可解释的同条件改善
 - 状态: done
 - 验证方式: 合并定向118/118与TypeScript通过；Chrome聊天12个交错有效样本、10/10真实StrictMode语义与100条上翻锁定通过。真实人物启动6次有效交错，程序242→5、编译484→10，ready中位884.3→544.7ms；模型/纹理/原GLSL保持。独立测量与边界见本轮chat/avatar报告。
-- commit: 本 issue 提交
+- commit: `148e0bd`
 
 ## issue-3
 
@@ -45,6 +45,6 @@
 - 范围: 冻结生产构建、Android 对应回归与 QA 包、网页部署/报告
 - 依赖: issue-2
 - 验收标准: 构建与运行通过，业务/正式下载保持，明确性能和平台边界
-- 状态: todo
-- 验证方式: 资源/包摘要、API36 关键运行、公开入口、保全收据
-- commit: pending
+- 状态: done
+- 验证方式: 冻结314网页资源/313 APK资源、独立ZIP/签名/对齐审计；API36 16/16与第二组9/9前台性能样本通过，三次12500字流式SHA一致。首组受干扰样本保留；流式228–229ms长任务明确残留。本机/公网完整响应SHA、health200/匿名401/CORS204、Chrome新入口通过；452保护文件/2661旧assets/49正式下载及原始业务状态保持，后端身份未变，测试运行已清理。详见本轮validation/Android/avatar/chat报告。
+- commit: 本 issue 提交（仅验收文档与QA证据根门禁，产品源保持`148e0bd`）

@@ -2,7 +2,7 @@
 
 - Date: 2026-10-23
 - Complexity: L2
-- Status: implementation selected
+- Status: completed 2026-10-24; measured Chrome gains, Android QA and web delivery accepted
 - Baseline: `a3834f9`，开始时 main 与 origin/main 同步且工作区干净
 
 ## Background

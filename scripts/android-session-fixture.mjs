@@ -5,7 +5,7 @@ import {JsonStore} from '../server/store.mjs';
 import {hashPassword} from '../server/auth.mjs';
 import {createPetServer} from '../server/app.mjs';
 const base=path.resolve(process.argv[2]||'');
-if(!base.startsWith(path.resolve('.data/deep-fluidity-20261023')+path.sep))throw Error('Owned synthetic session directory required');
+if(!['.data/deep-fluidity-20261023','.data/fluidity-followup-20261023'].some(directory=>base.startsWith(path.resolve(directory)+path.sep)))throw Error('Owned synthetic session directory required');
 const dataDir=path.join(base,'private-session-fixture');await mkdir(dataDir);
 const seed=await new JsonStore(dataDir).init();seed.state.users[0].username='syncfixture';seed.state.users[0].displayName='隔离长期登录验收';seed.state.users[0].password=await hashPassword('SyntheticSync123a');await seed.save();
 const realNow=Date.now.bind(Date);let offset=0,baseline,loginCount=0,authMeRequests=0,authMeSuccess=0;Date.now=()=>realNow()+offset;

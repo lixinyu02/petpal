@@ -15,7 +15,7 @@ const root=path.resolve('.');
 const options={};const args=process.argv.slice(2);
 for(let i=0;i<args.length;i++){if(args[i]==='--summarize-only'){options.summarizeOnly=true;continue;}if(args[i].startsWith('--')){const key=args[i].slice(2);assert.ok(['output','apk','audit','web','expected-apk-sha','phase'].includes(key),'Known CLI option');assert.ok(args[i+1]&&!args[i+1].startsWith('--'),'Option requires a value');options[key]=args[++i];}else{assert.equal(options.output,undefined,'One output directory');options.output=args[i];}}
 const base=path.resolve(options.output||'.data/deep-fluidity-20261023/android-baseline');
-assert.ok(base.startsWith(path.resolve('.data/deep-fluidity-20261023')+path.sep),'Owned evidence directory required');
+assert.ok(['.data/deep-fluidity-20261023','.data/fluidity-followup-20261023'].some(directory=>base.startsWith(path.resolve(directory)+path.sep)),'Owned evidence directory required');
 const baseline=path.join(root,'.data/android-deep-stability-20261023');
 const auditFile=path.resolve(options.audit||path.join(baseline,'native-final-03/apk-audit/android-apk-audit.json'));
 const appApk=path.resolve(options.apk||path.join(baseline,'apk-final-03/PetPal-0.9.14-Android-debug.apk'));
