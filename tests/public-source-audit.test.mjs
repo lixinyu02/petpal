@@ -197,6 +197,44 @@ test('reviewed cloud, memory and lifecycle credentials require their exact file 
   }
 });
 
+test('reviewed connection fixtures require exact files and literals without bypassing credential or path rules',async()=>{
+  const reviewed=[
+    ['scripts/android-fluidity-fixture.mjs',['synthetic-local-key','synthetic-performance-bootstrap']],
+    ['scripts/android-session-fixture.mjs',['synthetic-session-bootstrap-never-production']],
+    ['tests/android-login-gate-ui.test.mjs',['synthetic-session','synthetic-restored','synthetic-old-account','synthetic-original','synthetic-late-network','synthetic-stale-read','synthetic-committed']],
+    ['tests/android-login-session.test.mjs',['synthetic-remembered','synthetic-login-password','synthetic-pairing','synthetic-normal','synthetic-new-account','synthetic-current-account','synthetic-pairing-candidate','synthetic-too-late','synthetic-committed-new','synthetic-write-candidate','synthetic-write-to-revoke','synthetic-after-read-timeout']],
+    ['tests/api-request-lifecycle.test.mjs',['synthetic-session','synthetic-replacement']],
+    ['tests/api-session.test.mjs',['original-session','synthetic-candidate']],
+    ['tests/auth-session-renewal.test.mjs',['isolated-fixture-password','incorrect-fixture-password','synthetic-unknown-token']],
+    ['tests/initial-state-warmup.test.mjs',['synthetic-member-token','synthetic-new-token']],
+    ['tests/model-settings-save.test.mjs',['synthetic-provider-session']],
+    ['tests/openui-api.test.mjs',['synthetic-ui-key','synthetic-ui-agent-key']],
+    ['tests/state-response-compression.test.mjs',['isolated-compression-owner','private-provider-key']],
+  ];
+  for(const [name,values] of reviewed){
+    const contents=await readFile(new URL(`../${name}`,import.meta.url));
+    assert.deepEqual(inspect(name,contents),[],name);
+    for(const value of values){
+      assert.ok(contents.includes(value),'Reviewed literal must still occur in its fixture');
+      for(const key of ['apiKey','accessToken','refreshToken','password','token','secret'])assert.deepEqual(inspect(name,JSON.stringify({[key]:value})),[],name);
+      const text=JSON.stringify({token:value});
+      for(const other of ['tests/unreviewed-connection-fixture.test.mjs',`docs/${name}`,name[0].toUpperCase()+name.slice(1)])assert.ok(reasons(inspect(other,text)).includes('unreviewed literal credential'),other);
+      assert.ok(reasons(inspect(name,JSON.stringify({token:value+'-changed'}))).includes('unreviewed literal credential'),name);
+      if(value.length>=24){
+        assert.deepEqual(inspect(name,`Bearer ${value}`),[],name);
+        assert.ok(reasons(inspect(name,`Bearer ${value}-changed`)).includes('literal bearer value'),name);
+        assert.ok(reasons(inspect('docs/config.txt',`Bearer ${value}`)).includes('literal bearer value'),name);
+      }
+      assert.ok(reasons(inspect(`.data/${name}`,text)).includes('runtime, credentials, or generated artifact path'),name);
+      assert.ok(reasons(inspect(name,text,'120000')).includes('non-regular source entry'),name);
+    }
+    for(const key of ['apiKey','password','refreshToken'])assert.ok(reasons(inspect(name,JSON.stringify({[key]:credential()}))).includes('unreviewed literal credential'),name);
+    assert.ok(reasons(inspect(name,privateSample('RSA'))).includes('private key material'),name);
+    const provider=['sk','proj','z'.repeat(32)].join('-');
+    assert.ok(reasons(inspect(name,JSON.stringify({apiKey:provider}))).includes('provider key value'),name);
+  }
+});
+
 test('path restrictions apply case insensitively and source entry metadata remains bounded',()=>{
   for(const name of ['docs/PRIVATE.PEM','docs/auth.JSON','.RELEASE-PRIVATE/key.txt','NODE_MODULES/test.txt','docs/data.SQLITE'])assert.ok(reasons(inspect(name,'not-sensitive')).includes('runtime, credentials, or generated artifact path'));
   assert.ok(reasons(inspect('public/asset.png','relative-target','120000')).includes('non-regular source entry'));
