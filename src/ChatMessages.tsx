@@ -30,14 +30,16 @@ export const ChatMessageRow=memo(function ChatMessageRow({message,petName,mode,w
 const createRowElement=(key:string,props:RowProps)=><ChatMessageRow key={key} {...props}/>;
 
 type Props={conversationId?:string;messages:Message[];petName:string;mode:'chat'|'codex';working:boolean;busy:boolean;sleeping:boolean;speechId:string;speechPlaying:boolean;speechPending:boolean;speechSupported:boolean;speechFeedback:string;speechError:string;onRead(message:Message):void;onStop():void;onNotice(notice:string):void;onUseInPrompt?:(text:string)=>void};
+type RowInputs=Omit<Props,'conversationId'|'messages'>;
+const projectRowProperties=(message:Message,{petName,mode,working,busy,sleeping,speechId,speechPlaying,speechPending,speechSupported,speechFeedback,speechError,onRead,onStop,onNotice,onUseInPrompt}:RowInputs):RowProps=>{
+  const owns=speechId.startsWith(message.id+'-manual-')||speechId.startsWith(message.id+'-auto-');
+  return {message,petName,mode,working,busy,sleeping,supported:speechSupported,feedback:speechFeedback,reading:owns&&speechPlaying,pending:owns&&speechPending,error:owns?speechError:'',onRead,onStop,onNotice,onUseInPrompt};
+};
 /** Audio level and character boundaries belong to the portrait, not the message list. */
-export default memo(function ChatMessages({conversationId='new',messages,petName,mode,working,busy,sleeping,speechId,speechPlaying,speechPending,speechSupported,speechFeedback,speechError,onRead,onStop,onNotice,onUseInPrompt}:Props) {
+export default memo(function ChatMessages({conversationId='new',messages,...inputs}:Props) {
   const list=useRef<HTMLDivElement>(null),tracker=useRef<MessageMotionTracker|null>(null),motion=useRef<MessageMotionLifecycle|null>(null),scope=useRef<string|null>(null);
-  const committed=useRef<ChatElementSnapshot<Message,RowProps,ReactElement>|null>(null);
-  const prepared=prepareChatElements(committed.current,conversationId,messages,message=>{
-    const owns=speechId.startsWith(message.id+'-manual-')||speechId.startsWith(message.id+'-auto-');
-    return {message,petName,mode,working,busy,sleeping,supported:speechSupported,feedback:speechFeedback,reading:owns&&speechPlaying,pending:owns&&speechPending,error:owns?speechError:'',onRead,onStop,onNotice,onUseInPrompt};
-  },createRowElement);
+  const committed=useRef<ChatElementSnapshot<Message,RowInputs,RowProps,ReactElement>|null>(null);
+  const prepared=prepareChatElements(committed.current,conversationId,messages,inputs,projectRowProperties,createRowElement);
   useLayoutEffect(()=>{committed.current=prepared;},[prepared]);
   useLayoutEffect(()=>{
     const element=list.current;if(!element)return;

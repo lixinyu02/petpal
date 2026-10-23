@@ -42,7 +42,8 @@ async function actualFixture(t, { readControl, manifestOverride, waitShaders = f
   assert.ok(source.includes('import(/* @vite-ignore */ url)'), 'Gate only the existing Framework import transport');
   source = source.replace('import(/* @vite-ignore */ url)', `Promise.resolve(globalThis[${JSON.stringify(key)}])`)
     .replace("'./resources.mjs'", JSON.stringify(new URL('../src/avatar/cubism/resources.mjs', import.meta.url).href))
-    .replace("'./parameters.mjs'", JSON.stringify(new URL('../src/avatar/cubism/parameters.mjs', import.meta.url).href));
+    .replace("'./parameters.mjs'", JSON.stringify(new URL('../src/avatar/cubism/parameters.mjs', import.meta.url).href))
+    .replace("'./shader-profile.mjs'", JSON.stringify(new URL('../src/avatar/cubism/shader-profile.mjs', import.meta.url).href));
   const runtime = await import(`data:text/javascript;base64,${Buffer.from(source + `\n// fixture ${fixtureId}`).toString('base64')}`);
   const window = { location: { href: 'https://petpal.test/', origin: 'https://petpal.test' } };
   const document = { defaultView: window, createElement: () => ({ dataset: {}, removed: false, remove() { this.removed = true; } }), head: { appendChild(script) { scripts.push(script); } } };

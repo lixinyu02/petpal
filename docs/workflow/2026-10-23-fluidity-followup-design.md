@@ -24,13 +24,12 @@
 3. 同条件 Chrome 交错 before/after、StrictMode DOM 语义、定向 Node 和 TypeScript/生产构建；按真实产品变更验证 Android APK。保留失败与慢样本，并区分模拟器、浏览器和真机。
 4. 自审、每 issue 提交和报告；若上线前端，使用新目录、新状态快照，先资源后 HTML 原子替换，无后端代码变化不重启后端。
 
-## Risks
-
 ## Selected hotspots
 
 - ChatMessages 的每次尾部更新仍投影全部 1000 行，分配 props、两次 Object.keys 并拼接朗读 ID。改为传入完整共享输入对象和稳定 projection/factory；共享输入浅比较一次，只有消息或输入发生变化时才投影。仍保留 O(N) ID/引用扫描；factory 变更强制重建、输入增删键也失效、metadata-only 变更发布新快照。
 - 当前基线冻结 `.data/fluidity-followup-20261023/chat-before`：build `09274c19-91e3-4614-a3fa-7028c5793b4d`，1950 项实际输入、source digest `9c5da6161cb1bb33223976cd36cdb8d0282c2bab399084c2a07d8f1756155f09`，与上一轮最终源摘要一致。前后冻结一起进行新的交错测量，不复用历史性能数字。
 - 启动调查发现 useSpeech 静态引入 Markdown 语音 AST 依赖；先审计同步调用契约及可测量边界。旧 Android 首字前约 2 秒 rAF 长帧没有 trace 归因，不预设为该依赖或 JS 连续阻塞。
+- 不仓促拆 AST：现有语音同步 boolean 与报告队列依赖同一解析器，已有消息和首条回复仍需要它。继续验证更具体的 Cubism 启动热点：官方为全部扩展混合组合预编 shader，而本模型可能只用基础模式。仅官方模型明确 `isBlendModeEnabled() === false` 时，在该 GL 实例的注册阶段跳过扩展组合，保留全部基础与复制程序；不改 vendor 或画质，未知/扩展模型仍走完整路径。先冻结真实人物基线，再证明实际程序数/画面/取消/多实例和启动指标。
 
 ## Risks
 

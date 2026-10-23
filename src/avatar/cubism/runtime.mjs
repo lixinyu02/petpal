@@ -1,5 +1,6 @@
 import { createCubismResourceLoader, fetchCubismBytes, validateCubismModel } from './resources.mjs';
 import { createCubismParameterBridge, cubismParameterTargets } from './parameters.mjs';
+import { configureCubismShaderProfile } from './shader-profile.mjs';
 
 export const CUBISM_RUNTIME_ROOT = '/avatars/cubism-runtime/';
 export const CUBISM_CORE_URL = '/vendor/live2d/live2dcubismcore.min.js';
@@ -377,10 +378,11 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
   // A failed speculative read also interrupts this canvas's shared dependency
   // wait, without cancelling the shared Core/Framework for other canvases.
   signal = downloads.signal;
-  let lease, avatar, module, disposed = false, initialized = false;
+  let lease, avatar, module, shaderProfile, disposed = false, initialized = false;
   const textures = [], motions = new Map(), expressions = new Map();
   const release = () => {
     if (disposed) return; disposed = true;
+    shaderProfile?.dispose();
     try {
       avatar?.release();
       for (const texture of textures) gl.deleteTexture(texture);
@@ -455,8 +457,10 @@ export async function createCubismAvatar({ canvas, modelUrl = DEFAULT_MODEL, sig
       const texture = await loadTexture(gl, resources.textures[index], bytes, signal); textures.push(texture); renderer.bindTexture(index, texture);
     }
     const shaderPath = localRuntimeUrl(`${CUBISM_RUNTIME_ROOT}Shaders/WebGL/`, location);
+    const shader = framework.CubismShaderManager_WebGL.getInstance().getShader(gl);
+    shaderProfile = configureCubismShaderProfile(shader, model, { signal });
     renderer.loadShaders(shaderPath);
-    await waitForCubismShaders(framework.CubismShaderManager_WebGL.getInstance().getShader(gl), { signal });
+    await waitForCubismShaders(shader, { signal });
     stopped(signal); initialized = true;
     const matrix = new framework.CubismMatrix44();
     const modelMatrix = avatar.getModelMatrix();

@@ -8,12 +8,12 @@
 
 - Goal: 减少已测剩余流式与启动开销并完成有边界的验收交付。
 - Ordering rule: Complete issues in sequence; parallelize read-only investigation and independent work within the active issue.
-- Current status: issue-1 complete; issue-2 next
+- Current status: issue-2 complete; issue-3 next
 
 ## Issue List
 
 - [x] issue-1 冻结基线与确认热点
-- [ ] issue-2 实现并验证热点优化
+- [x] issue-2 实现并验证热点优化
 - [ ] issue-3 集成运行验收与交付
 
 ## issue-1
@@ -34,9 +34,9 @@
 - 范围: 当前热点最小实现、定向回归、Chrome 交错对照与真实 DOM
 - 依赖: issue-1
 - 验收标准: 内容/状态/焦点/滚动保持，保留可解释的同条件改善
-- 状态: todo
-- 验证方式: Node、TypeScript、Chrome profiling/StrictMode
-- commit: pending
+- 状态: done
+- 验证方式: 合并定向118/118与TypeScript通过；Chrome聊天12个交错有效样本、10/10真实StrictMode语义与100条上翻锁定通过。真实人物启动6次有效交错，程序242→5、编译484→10，ready中位884.3→544.7ms；模型/纹理/原GLSL保持。独立测量与边界见本轮chat/avatar报告。
+- commit: 本 issue 提交
 
 ## issue-3
 
