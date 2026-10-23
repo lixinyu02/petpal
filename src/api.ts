@@ -98,6 +98,9 @@ let executorRevision=0;
 let loginPersistenceError='';
 let loginPersistenceQueue:Promise<void>=Promise.resolve();
 let savedLoginRetry:{epoch:number;promise:Promise<Connection>}|undefined;
+let savedLoginReadGeneration=0;
+type SavedLoginRead={epoch:number;generation:number;controller:AbortController;promise:ReturnType<LoginSessionBridge['read']>};
+let savedLoginRead:SavedLoginRead|undefined;
 let sessionValidation:{epoch:number;promise:Promise<boolean>}|undefined;
 // Only the Android entry installs this vault bridge. Desktop has its own
 // connection bridge and must retain its existing session lifetime.
@@ -120,6 +123,28 @@ export const getLoginPersistenceError=()=>loginPersistenceError;
 function setLoginPersistenceError(message:string){
   if(loginPersistenceError===message)return;
   loginPersistenceError=message;window.dispatchEvent(new Event('petpal:login-persistence-error'));
+}
+function invalidateSavedLoginRead(){
+  savedLoginReadGeneration++;
+  const previous=savedLoginRead;savedLoginRead=undefined;
+  previous?.controller.abort(new SessionChangedError());
+}
+/** Native reads are side-effect free. A stalled bridge may be abandoned, but
+ * its late result must never take ownership of a newer restoration or login. */
+function readSavedLogin(bridge:LoginSessionBridge):ReturnType<LoginSessionBridge['read']>{
+  const epoch=getSessionEpoch();
+  if(savedLoginRead?.epoch===epoch)return savedLoginRead.promise;
+  const controller=new AbortController(),generation=++savedLoginReadGeneration;
+  const entry:SavedLoginRead={epoch,generation,controller,promise:Promise.resolve({connection:null})};
+  savedLoginRead=entry;
+  const timer=setTimeout(()=>controller.abort(new Error('读取设备登录超时，请重试。')),15000);
+  let pending:ReturnType<LoginSessionBridge['read']>;
+  try{pending=bridge.read();}catch(error){pending=Promise.reject(error);}
+  entry.promise=waitForInitialState(pending,controller.signal).then(value=>{
+    if(savedLoginRead!==entry||generation!==savedLoginReadGeneration||epoch!==getSessionEpoch())throw new SessionChangedError();
+    return value;
+  }).finally(()=>{clearTimeout(timer);if(savedLoginRead===entry)savedLoginRead=undefined;});
+  return entry.promise;
 }
 function persistLogin(connection:SavedLoginConnection,assertCurrent:()=>void=()=>{},commit:()=>void=()=>{}):Promise<void>{
   const epoch=getSessionEpoch(),fence=()=>{if(epoch!==getSessionEpoch())throw new SessionChangedError();assertCurrent();};
@@ -164,6 +189,7 @@ export function normalizeServerUrl(value:string) {
 }
 function replaceConnection(next:Connection,credentialKind:CredentialKind,target:'local'|'remote'|undefined,reason:'change'|'restore'|'authenticate',persist:boolean) {
   const connection={url:normalizeServerUrl(next.url),token:next.token.trim()};
+  invalidateSavedLoginRead();
   clearWarmInitialStates();
   executorScope=null;
   executorPendingScope=null;executorRevision++;
@@ -218,7 +244,7 @@ export function initConnection(defaultUrl = '') {
     let nativeReadFailed=false;
     if(window.petpalLoginSession){
       try{
-        const saved=(await window.petpalLoginSession.read()).connection;
+        const saved=(await readSavedLogin(window.petpalLoginSession)).connection;
         if(epoch!==getSessionEpoch())return getConnection();
         const restored=restoreTargetConnection(saved,native);
         if(restored){setConnection(restored.connection,restored.credentialKind,restored.target,'restore');setLoginPersistenceError('');return getConnection();}
@@ -243,8 +269,8 @@ export function retrySavedLogin(defaultUrl=''):Promise<Connection>{
   const entry={epoch,promise:Promise.resolve(getConnection())};
   entry.promise=(async()=>{
     try{
-      const saved=(await bridge.read()).connection;
-      if(epoch!==getSessionEpoch())throw new SessionChangedError();
+      const saved=(await readSavedLogin(bridge)).connection;
+      if(epoch!==getSessionEpoch()||savedLoginRetry!==entry||getConnection().token)throw new SessionChangedError();
       const restored=restoreTargetConnection(saved,nativeConnection);
       const replacing=!!restored||!getConnection().url&&!!defaultUrl;
       if(restored)void setConnection(restored.connection,restored.credentialKind,restored.target,'restore');
@@ -412,14 +438,32 @@ async function acceptLogin(request:ReturnType<typeof requests.begin>,connection:
     if(getSessionEpoch()!==nextEpoch)throw new SessionChangedError();accepted?.();
   });
 }
+/** Bound the handshake and body only. Once the native write starts, account
+ * publication stays in persistLogin's transaction, without a UI/network timer
+ * that could report failure after the vault has already changed. */
+async function readAuthenticationResponse(request:ReturnType<typeof requests.begin>,url:string,options:RequestInit){
+  const network=new AbortController(),sessionChanged=()=>network.abort(request.signal.reason);
+  if(request.signal.aborted)sessionChanged();else request.signal.addEventListener('abort',sessionChanged,{once:true});
+  const timer=setTimeout(()=>network.abort(new Error('连接登录服务超时，请检查网络或服务地址后重试。')),15000);
+  try{
+    return await waitForInitialState((async()=>{
+      request.assertCurrent();network.signal.throwIfAborted();
+      const response=await connectionFetch(url,{...options,signal:network.signal});
+      request.assertCurrent();network.signal.throwIfAborted();
+      const data=await response.json().catch(()=>({}));
+      request.assertCurrent();network.signal.throwIfAborted();
+      return{response,data};
+    })(),network.signal);
+  }finally{clearTimeout(timer);request.signal.removeEventListener('abort',sessionChanged);}
+}
 export async function connectWithToken(next:Connection) {
   const url=normalizeServerUrl(next.url),token=next.token.trim();if(!token)throw new Error('请输入配对令牌。');
   const request=requests.begin();
-  try{const response=await connectionFetch(`${url}/api/auth/me`,{headers:authenticationHeaders(token),signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.instanceId!=='string'||!data.instanceId||typeof data.user?.id!=='string'||!data.user.id)throw new Error('服务身份响应无效。');const reason=!identity&&request.connection.url===url?'authenticate':'change';await acceptLogin(request,{url,token},'pairing',reason,()=>acceptIdentity(data));}finally{request.close();}
+  try{const {response,data}=await readAuthenticationResponse(request,`${url}/api/auth/me`,{headers:authenticationHeaders(token)});request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.instanceId!=='string'||!data.instanceId||typeof data.user?.id!=='string'||!data.user.id)throw new Error('服务身份响应无效。');const reason=!identity&&request.connection.url===url?'authenticate':'change';await acceptLogin(request,{url,token},'pairing',reason,()=>acceptIdentity(data));}finally{request.close();}
 }
 export async function login(urlValue:string,username:string,password:string) {
   const url=normalizeServerUrl(urlValue),request=requests.begin();
-  try{const response=await connectionFetch(`${url}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim(),password,...(remembersAndroidDevice()?{rememberDevice:true}:{})}),signal:request.signal});const data=await response.json().catch(()=>({}));request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.token!=='string'||!data.token)throw new Error('登录响应缺少会话凭据。');const reason=!identity&&request.connection.url===url?'authenticate':'change';await acceptLogin(request,{url,token:data.token},'session',reason);}finally{request.close();}
+  try{const {response,data}=await readAuthenticationResponse(request,`${url}/api/auth/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim(),password,...(remembersAndroidDevice()?{rememberDevice:true}:{})})});request.assertCurrent();if(!response.ok)throw new Error(message(data,response.status));if(typeof data.token!=='string'||!data.token)throw new Error('登录响应缺少会话凭据。');const reason=!identity&&request.connection.url===url?'authenticate':'change';await acceptLogin(request,{url,token:data.token},'session',reason);}finally{request.close();}
 }
 export function logout() {
   const previous=getConnection(),cleared=setConnection({url:previous.url,token:''});

@@ -201,6 +201,13 @@ test('real API wrapper account-switch and native restore behavior',async t=>{
       await assert.rejects(api.connectWithToken({url:'',token:'malformed'}),/身份/);
       assert.equal(api.getConnection().token,'active');
     });
+    for(const flow of ['password','pairing'])await t.test(`a session switch promptly cancels ${flow} response decoding without waiting for its network deadline`,async t=>{
+      delete window.petpal;disk.clear();const api=await freshApi();await api.setConnection({url:'https://original.example',token:'original-session'},'session');t.mock.timers.enable({apis:['setTimeout']});const body=deferred(),entered=deferred();let signal;
+      install('fetch',async(_url,options)=>{signal=options.signal;return{ok:true,status:200,json:()=>{entered.resolve();return body.promise;}};});
+      const pending=flow==='password'?api.login('https://candidate.example','candidate','synthetic-password'):api.connectWithToken({url:'https://candidate.example',token:'synthetic-candidate'}),rejected=assert.rejects(pending,api.SessionChangedError);await entered.promise;
+      await api.setConnection({url:'https://current.example',token:'current-session'},'session');await rejected;assert.equal(signal.aborted,true);t.mock.timers.tick(60000);
+      body.resolve(flow==='password'?{token:'late-candidate'}:{instanceId:'late-instance',user:{id:'late-user'}});await new Promise(resolve=>setImmediate(resolve));assert.deepEqual(api.getConnection(),{url:'https://current.example',token:'current-session'});assert.equal(api.getIdentity(),null);
+    });
     await t.test('login uses anonymous credentials and persists session kind; logout clears immediately',async()=>{
       const api=await freshApi();api.setConnection({url:'',token:'owner'});let request;
       install('fetch',async(url,options)=>{request={url,options};return json({token:'member-token',user:{id:'member'}});});

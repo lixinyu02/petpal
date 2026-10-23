@@ -8,12 +8,12 @@ const source=ts.transpileModule(await readFile(new URL('../src/auth/LoginGate.ts
 const nodes=tree=>Array.isArray(tree)?tree.flatMap(nodes):!tree||typeof tree!=='object'?[]:[tree,...nodes(tree.props?.children)];
 const text=tree=>Array.isArray(tree)?tree.map(text).join(''):tree==null||typeof tree==='boolean'?'':typeof tree!=='object'?typeof tree==='symbol'?'':String(tree):text(tree.props?.children);
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return{promise,resolve,reject};};
-function fixture(initial='',{onClose,ownerConnection}={}){
-  const window=new EventTarget(),hooks=[],effects=[],logins=[],pairings=[];window.petpalLoginSession={};if(ownerConnection)window.petpal={connection:ownerConnection};let savedError=initial,index=0,tree,dirty=false,mounted=true,lateUpdates=0,clearWait,loginWait,clears=0,epoch=0;
+function fixture(initial='',{onClose,ownerConnection,apiBridge,environmentWindow}={}){
+  const window=environmentWindow||new EventTarget(),hooks=[],effects=[],logins=[],pairings=[];window.petpalLoginSession??={};if(ownerConnection)window.petpal={connection:ownerConnection};let savedError=initial,index=0,tree,dirty=false,mounted=true,lateUpdates=0,clearWait,loginWait,clears=0,epoch=0;
   const react={useRef(initial){const at=index++;return hooks[at]??=( {current:initial});},useState(initial){const at=index++;hooks[at]||={value:initial};return[hooks[at].value,value=>{if(!mounted)lateUpdates++;hooks[at].value=typeof value==='function'?value(hooks[at].value):value;dirty=true;}];},useEffect(effect,deps){const at=index++;if(!hooks[at])effects.push(()=>{hooks[at]={cleanup:effect(),deps};});}};
   const modules={react,'react/jsx-runtime':{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})},'lucide-react':new Proxy({},{get:(_target,key)=>Symbol.for(String(key))}),
     '../platform/ui-motion.ts':{useUiEntrance:()=>null},'../BrandMark':{default:Symbol('BrandMark')},'../avatar/preview':{avatarPreview:'synthetic-preview.png'},
-    '../api':{getConnection:()=>({url:'https://fixture.invalid',token:''}),getSessionEpoch:()=>epoch,getLoginPersistenceError:()=>savedError,isSessionChanged:error=>error?.name==='SessionChangedError',clearSavedLogin:async()=>{clears++;if(clearWait)await clearWait.promise;savedError='';window.dispatchEvent(new Event('petpal:login-persistence-error'));},login:async(...args)=>{logins.push(args);if(loginWait)await loginWait.promise;},connectWithToken:async(...args)=>{pairings.push(args);}},
+    '../api':{getConnection:()=>({url:'https://fixture.invalid',token:''}),getSessionEpoch:()=>epoch,getLoginPersistenceError:()=>savedError,isSessionChanged:error=>error?.name==='SessionChangedError',clearSavedLogin:async()=>{clears++;if(clearWait)await clearWait.promise;savedError='';window.dispatchEvent(new Event('petpal:login-persistence-error'));},login:async(...args)=>{logins.push(args);if(loginWait)await loginWait.promise;},connectWithToken:async(...args)=>{pairings.push(args);},...apiBridge},
   };
   const module={exports:{}};vm.runInNewContext(source,{module,exports:module.exports,window,Event,require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),name);return modules[name];}});
   const render=()=>{index=0;dirty=false;effects.length=0;tree=module.exports.ConnectionDialog({close:onClose});for(const effect of effects)effect();};
@@ -37,8 +37,8 @@ test('initial persistence errors are shown and a closed login view unsubscribes 
 });
 
 /** Exercise the real login effect; warm loading is never an alternative gate. */
-function gateFixture({token='synthetic-session',onVerified=()=>{},persistenceError='',native=true,online=true,hidden=false}={}){
-  const hooks=[],effects=[],requests=[],restorations=[],children=Symbol('authenticated-workspace'),window=new EventTarget(),document=new EventTarget();window.navigator={onLine:online};if(native)window.petpalLoginSession={};document.hidden=hidden;let index=0,tree,dirty=false,mounted=true,lateUpdates=0,epoch=0,now=10000;
+function gateFixture({token='synthetic-session',onVerified=()=>{},persistenceError='',native=true,online=true,hidden=false,apiBridge,environmentWindow}={}){
+  const hooks=[],effects=[],requests=[],restorations=[],children=Symbol('authenticated-workspace'),window=environmentWindow||new EventTarget(),document=new EventTarget();window.navigator={onLine:online};if(native)window.petpalLoginSession??={};document.hidden=hidden;let index=0,tree,dirty=false,mounted=true,lateUpdates=0,epoch=0,now=10000;
   const react={
     useRef(initial){const at=index++;return hooks[at]??={current:initial};},
     useState(initial){const at=index++;hooks[at]||={value:initial};return[hooks[at].value,next=>{if(!mounted)lateUpdates++;const value=typeof next==='function'?next(hooks[at].value):next;if(!Object.is(value,hooks[at].value)){hooks[at].value=value;dirty=true;}}];},
@@ -48,7 +48,7 @@ function gateFixture({token='synthetic-session',onVerified=()=>{},persistenceErr
     '../platform/ui-motion.ts':{useUiEntrance:()=>null},'../BrandMark':{default:Symbol('BrandMark')},'../avatar/preview':{avatarPreview:'synthetic-preview.png'},
     '../api':{getConnection:()=>({url:'https://fixture.invalid',token}),getSessionEpoch:()=>epoch,getLoginPersistenceError:()=>persistenceError,isSessionChanged:error=>error?.name==='SessionChangedError',retrySavedLogin:()=>{const pending=deferred();restorations.push(pending);return pending.promise.then(value=>{token=value?.token||'';persistenceError='';return{url:'https://fixture.invalid',token};});},api:(_route,options)=>{
       let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});requests.push({signal:options.signal,resolve,reject});return promise;
-    }},
+    },...apiBridge},
   };
   const module={exports:{}};vm.runInNewContext(source,{module,exports:module.exports,window,document,AbortController,setTimeout,clearTimeout,Error,Date:class extends Date{static now(){return now;}},require:name=>{if(name.endsWith('.css'))return{};assert.ok(Object.hasOwn(modules,name),name);return modules[name];}});
   const render=()=>{index=0;dirty=false;effects.length=0;tree=module.exports.default({children,onVerified});for(const effect of effects)effect();};
@@ -161,4 +161,45 @@ test('dialog authentication and owner connection callbacks cannot update a close
     const f=fixture(),wait=f.waitLogin();f.find('form').props.onSubmit({preventDefault(){}});await f.flush();if(lifecycle==='unmount')f.close();else f.replaceSession();wait.reject(new Error('late synthetic login failure'));await f.flush();assert.equal(f.lateUpdates,0);f.close();
     const ownerWait=deferred(),owner=fixture('',{ownerConnection:()=>ownerWait.promise});owner.find('button',props=>text(props.children)==='以本机管理员身份登录').props.onClick();await owner.flush();if(lifecycle==='unmount')owner.close();else owner.replaceSession();ownerWait.resolve({url:'http://127.0.0.1:4318',token:'synthetic-owner'});await owner.flush();assert.equal(owner.pairings.length,0);assert.equal(owner.lateUpdates,0);owner.close();
   });
+});
+
+// Integrate the real API deadlines with real component event handlers. Only
+// browser transport and the native vault are substituted; no service is used.
+const moduleUrl=value=>'data:text/javascript;base64,'+Buffer.from(ts.transpileModule(value,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText).toString('base64');
+const nativeUrl=moduleUrl(await readFile(new URL('../src/auth/native-fetch.ts',import.meta.url),'utf8'));
+let apiSource=(await readFile(new URL('../src/api.ts',import.meta.url),'utf8')).replaceAll("'./auth/native-fetch'",JSON.stringify(nativeUrl)),apiRevision=0;
+for(const name of ['connection-targets','request-scope'])apiSource=apiSource.replaceAll(`'./auth/${name}.mjs'`,JSON.stringify(new URL(`../src/auth/${name}.mjs`,import.meta.url).href));
+for(const name of ['speech-stream','speech-emotion'])apiSource=apiSource.replaceAll(`'./avatar/${name}.mjs'`,JSON.stringify(new URL(`../src/avatar/${name}.mjs`,import.meta.url).href));
+async function realApiFixture(t){
+  const names=['window','location','history','sessionStorage','fetch'],original=new Map(names.map(name=>[name,Object.getOwnPropertyDescriptor(globalThis,name)])),disk=new Map(),window=new EventTarget();let saved={url:'https://fixture.invalid',token:'synthetic-original',credentialKind:'session',target:'remote'};
+  const install=(name,value)=>Object.defineProperty(globalThis,name,{configurable:true,writable:true,value});
+  window.speechSynthesis={cancel(){}};window.petpalLoginSession={read:async()=>({connection:saved}),write:async value=>{saved=structuredClone(value);},clear:async()=>{saved=null;}};
+  install('window',window);install('location',{origin:'https://localhost',hash:'',pathname:'/',search:''});install('history',{replaceState(){}});install('sessionStorage',{getItem:name=>disk.get(name)??null,setItem:(name,value)=>disk.set(name,value),removeItem:name=>disk.delete(name)});
+  t.after(()=>{for(const[name,value]of original)if(value)Object.defineProperty(globalThis,name,value);else delete globalThis[name];});
+  return{api:await import(moduleUrl(apiSource+`\n// component integration ${++apiRevision}`)),window,install,saved:()=>saved,commit:value=>{saved=structuredClone(value);}};
+}
+const json=body=>new Response(JSON.stringify(body),{status:200,headers:{'content-type':'application/json'}});
+
+test('the real login network timeout releases the dialog without clearing the saved account',async t=>{
+  const h=await realApiFixture(t);await h.api.initConnection();t.mock.timers.enable({apis:['setTimeout']});const wait=deferred();let signal;
+  h.install('fetch',async(_url,options)=>{signal=options.signal;return wait.promise;});const f=fixture('',{apiBridge:h.api,environmentWindow:h.window,onClose(){}});t.after(()=>f.close());
+  f.find('form').props.onSubmit({preventDefault(){}});await f.flush();assert.equal(f.find('fieldset').props.disabled,true);assert.match(f.text(),/正在登录/);assert.equal(f.find('section').props['aria-busy'],true);
+  t.mock.timers.tick(15000);await f.flush();assert.match(f.text(),/连接登录服务超时/);assert.equal(f.find('fieldset').props.disabled,false);assert.equal(f.find('button',props=>props['aria-label']==='关闭连接窗口').props.disabled,false);assert.equal(h.api.getConnection().token,'synthetic-original');assert.equal(h.saved().token,'synthetic-original');assert.equal(signal.aborted,true);
+  wait.resolve(json({token:'synthetic-late-network'}));await f.flush();assert.equal(h.api.getConnection().token,'synthetic-original');
+});
+
+test('the real vault timeout restores recovery and switch controls and a later attempt still requires authentication',async t=>{
+  const h=await realApiFixture(t);h.window.petpalLoginSession.read=async()=>{throw new Error('synthetic initial lock');};await h.api.initConnection('https://fixture.invalid');t.mock.timers.enable({apis:['setTimeout']});const wait=deferred();h.window.petpalLoginSession.read=()=>wait.promise;
+  const f=gateFixture({apiBridge:h.api,environmentWindow:h.window});t.after(()=>f.close());click(f,'重试保存的登录');await f.flush();assert.match(f.text(),/正在恢复账号连接/);t.mock.timers.tick(15000);await f.flush();
+  assert.ok(f.find('button',props=>text(props.children)==='重试保存的登录'));assert.ok(f.find('button',props=>text(props.children)==='切换账号或服务器'));assert.equal(h.api.getConnection().token,'');assert.equal(h.saved().token,'synthetic-original');
+  wait.resolve({connection:{url:'https://fixture.invalid',token:'synthetic-stale-read',credentialKind:'session',target:'remote'}});await f.flush();assert.equal(h.api.getConnection().token,'');
+  h.window.petpalLoginSession.read=async()=>({connection:h.saved()});click(f,'重试保存的登录');await f.flush();assert.equal(h.api.getIdentity(),null);assert.equal(h.api.getConnection().token,'synthetic-original');f.close();
+  h.install('fetch',async()=>json(identity));let verified=0;const resumed=gateFixture({apiBridge:h.api,environmentWindow:h.window,onVerified:()=>{verified++;}});t.after(()=>resumed.close());await resumed.flush();assert.equal(verified,1);assert.equal(resumed.tree,resumed.children);
+});
+
+test('a native write already committed to disk cannot be timed out by the login dialog',async t=>{
+  const h=await realApiFixture(t);await h.api.initConnection();t.mock.timers.enable({apis:['setTimeout']});const callback=deferred();h.window.petpalLoginSession.write=async value=>{h.commit(value);await callback.promise;};h.install('fetch',async()=>json({token:'synthetic-committed'}));
+  const f=fixture('',{apiBridge:h.api,environmentWindow:h.window,onClose(){}});t.after(()=>f.close());f.find('form').props.onSubmit({preventDefault(){}});await f.flush();assert.equal(h.saved().token,'synthetic-committed');assert.equal(h.api.getConnection().token,'synthetic-original');
+  t.mock.timers.tick(60000);await f.flush();assert.equal(f.find('fieldset').props.disabled,true);assert.equal(f.find('div',props=>props.role==='alert'),undefined);assert.equal(f.find('button',props=>props['aria-label']==='关闭连接窗口').props.disabled,true);
+  callback.resolve();await f.flush();assert.equal(h.api.getConnection().token,h.saved().token);assert.equal(h.api.getConnection().token,'synthetic-committed');
 });

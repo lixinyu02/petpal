@@ -35,7 +35,7 @@ export function ConnectionDialog({ close }: { close?(): void }) {
   }
   const pageEntrance = useUiEntrance<HTMLElement>('login-page', !close);
   const scrimEntrance = useUiEntrance<HTMLDivElement>('connection-dialog', !!close);
-  const formContent = <section className={close ? 'modal' : 'login-form'} aria-labelledby="connection-title">
+  const formContent = <section className={close ? 'modal' : 'login-form'} aria-labelledby="connection-title" aria-busy={busy}>
     <div className="modal-heading"><span className="dialog-icon"><Link2 size={23} aria-hidden="true"/></span>{close && <button className="icon-button" disabled={busy} data-ui-dismiss="dialog" aria-label="关闭连接窗口" onClick={()=>{if(!locked.current)close();}}><X size={20} aria-hidden="true"/></button>}</div>
     <h2 id="connection-title">登录你的小伴</h2><p>聊天、语音与 Agent 工作，都从你的账号开始。{window.petpal?.executor && '登录后，此电脑会出现在同账号的 Agent 执行列表中。'}</p>
     <div className="auth-modes" role="group" aria-label="登录方式"><button aria-pressed={method === 'password'} className={method === 'password' ? 'active' : ''} onClick={() => setMethod('password')}>账号密码</button><button aria-pressed={method === 'token'} className={method === 'token' ? 'active' : ''} onClick={() => setMethod('token')}>管理员配对</button></div>
@@ -43,7 +43,7 @@ export function ConnectionDialog({ close }: { close?(): void }) {
       <label>服务地址<input placeholder="默认当前服务，也可填写其他服务器地址" value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} autoComplete="url"/></label>
       {method === 'password' ? <><label>账号名称<input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required maxLength={40}/></label><label>登录密码<input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required maxLength={256}/></label></> : <label>配对令牌<input type="password" value={form.token} onChange={e => setForm({ ...form, token: e.target.value })} required autoComplete="off"/></label>}
       {error && <div className="form-error" role="alert">{error}</div>}
-      <button className="primary-button full-button" type="submit">{busy ? <Loader2 className="spin" size={17} aria-hidden="true"/> : <ArrowRight size={17} aria-hidden="true"/>}登录并继续</button>
+      <button className="primary-button full-button" type="submit">{busy ? <Loader2 className="spin" size={17} aria-hidden="true"/> : <ArrowRight size={17} aria-hidden="true"/>}{busy?'正在登录…':'登录并继续'}</button>
     </fieldset></form>
     {window.petpalLoginSession&&getLoginPersistenceError()&&!needsVaultRetry()&&<button type="button" className="secondary-button full-button" disabled={busy} onClick={()=>void clearDeviceLogin()}>清除设备保存的登录</button>}
     {window.petpal && <button className="secondary-button full-button auth-owner" disabled={busy} onClick={localOwner}>以本机管理员身份登录</button>}

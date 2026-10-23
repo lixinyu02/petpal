@@ -177,6 +177,51 @@ test('Android encrypted-session integration keeps authentication and storage in 
       fixture();const api=await fresh();let reads=0;window.petpalLoginSession.read=async()=>{if(++reads===1)throw new Error('synthetic temporary lock');return{connection:null};};
       await api.initConnection('https://default.example');assert.match(api.getLoginPersistenceError(),/无法恢复/);await api.retrySavedLogin();assert.equal(api.getLoginPersistenceError(),'');assert.deepEqual(api.getConnection(),{url:'https://default.example',token:''});assert.equal(reads,2);
     });
+    for(const flow of ['password','pairing'])for(const stage of ['headers','body'])await t.test(`${flow} authentication bounds a stalled ${stage} without replacing saved credentials`,async t=>{
+      const f=fixture(record()),api=await fresh();await api.initConnection();t.mock.timers.enable({apis:['setTimeout']});const wait=deferred();let signal,settled=false;
+      install('fetch',async(_url,options)=>{signal=options.signal;return stage==='headers'?wait.promise:{ok:true,status:200,json:()=>wait.promise};});
+      const pending=flow==='password'?api.login('https://other.example','bob','synthetic-password'):api.connectWithToken({url:'https://other.example',token:'synthetic-pairing-candidate'});
+      const rejected=assert.rejects(pending,/连接登录服务超时/);void pending.then(()=>{settled=true;},()=>{settled=true;});await flush();t.mock.timers.tick(14999);await flush();assert.equal(settled,false);t.mock.timers.tick(1);await rejected;
+      assert.equal(signal.aborted,true);assert.equal(api.getConnection().token,'synthetic-saved-token');assert.equal(f.stored().token,'synthetic-saved-token');assert.equal(f.calls.some(call=>call[0]==='write'),false);
+      install('fetch',async()=>json({token:'synthetic-current-account'}));await api.login('https://current.example','carol','synthetic-password');
+      const late=flow==='password'?{token:'synthetic-too-late'}:{instanceId:'late-server',user:{id:'late-user'}};wait.resolve(stage==='headers'?json(late):late);await flush();assert.equal(api.getConnection().token,'synthetic-current-account');assert.equal(f.stored().token,'synthetic-current-account');
+    });
+    for(const flow of ['password','pairing'])await t.test(`${flow} authentication stops its network deadline before awaiting a committed native write callback`,async t=>{
+      fixture(record());const api=await fresh();await api.initConnection();t.mock.timers.enable({apis:['setTimeout']});const callback=deferred(),written=deferred();let saved=record(),signal,settled=false;
+      window.petpalLoginSession.write=async value=>{saved=structuredClone(value);written.resolve();await callback.promise;};
+      install('fetch',async(_url,options)=>{signal=options.signal;return json(flow==='password'?{token:'synthetic-committed-new'}:{instanceId:'fixture-server',user:{id:'fixture-user'}});});
+      const pending=flow==='password'?api.login('https://other.example','bob','synthetic-password'):api.connectWithToken({url:'https://other.example',token:'synthetic-committed-new'});void pending.then(()=>{settled=true;},()=>{settled=true;});await written.promise;
+      assert.equal(saved.token,'synthetic-committed-new');assert.equal(api.getConnection().token,'synthetic-saved-token');t.mock.timers.tick(60000);await flush();assert.equal(settled,false,'a native commit cannot be abandoned by a network/UI timeout');assert.equal(signal.aborted,false);
+      callback.resolve();await pending;assert.equal(api.getConnection().token,saved.token);assert.equal(saved.token,'synthetic-committed-new');assert.equal(signal.aborted,false);
+    });
+    await t.test('a late native write failure reports storage failure rather than a cleared network deadline',async t=>{
+      const f=fixture(record()),api=await fresh();await api.initConnection();t.mock.timers.enable({apis:['setTimeout']});const wait=f.block();install('fetch',async()=>json({token:'synthetic-write-candidate'}));
+      const pending=api.login('https://other.example','bob','synthetic-password'),rejected=assert.rejects(pending,/synthetic secure storage unavailable/);await flush();t.mock.timers.tick(60000);await flush();wait.reject(new Error('synthetic secure storage unavailable'));await rejected;
+      assert.equal(api.getConnection().token,'synthetic-saved-token');assert.equal(f.stored().token,'synthetic-saved-token');
+    });
+    await t.test('logout still revokes an in-flight durable login after its network deadline is disarmed',async t=>{
+      const f=fixture(record()),api=await fresh();await api.initConnection();t.mock.timers.enable({apis:['setTimeout']});const wait=f.block();install('fetch',async()=>json({token:'synthetic-write-to-revoke'}));
+      const pending=api.login('https://other.example','bob','synthetic-password'),rejected=assert.rejects(pending);await flush();t.mock.timers.tick(60000);await flush();await api.logout();wait.resolve();await rejected;assert.equal(api.getConnection().token,'');assert.equal(f.stored(),null);
+    });
+    await t.test('initial native restoration has a deadline, skips stale mirrors and can recover without deleting the private vault',async t=>{
+      const f=fixture(record()),api=await fresh(),wait=deferred();disk.set('petpal.connection',JSON.stringify(record('synthetic-stale-mirror')));window.petpalLoginSession.read=()=>wait.promise;t.mock.timers.enable({apis:['setTimeout']});
+      let initialized=false;const initial=api.initConnection('https://default.example').then(()=>{initialized=true;});await flush();t.mock.timers.tick(14999);await flush();assert.equal(initialized,false);t.mock.timers.tick(1);await initial;
+      assert.deepEqual(api.getConnection(),{url:'https://default.example',token:''});assert.match(api.getLoginPersistenceError(),/无法恢复.*已保留/);assert.equal(f.stored().token,'synthetic-saved-token');assert.equal(f.calls.some(call=>['clear','write'].includes(call[0])),false);
+      window.petpalLoginSession.read=async()=>({connection:record('synthetic-recovered-current')});await api.retrySavedLogin();assert.equal(api.getConnection().token,'synthetic-recovered-current');assert.equal(api.getLoginPersistenceError(),'');wait.resolve({connection:record('synthetic-too-late-initial')});await flush();assert.equal(api.getConnection().token,'synthetic-recovered-current');assert.equal(api.getLoginPersistenceError(),'');
+    });
+    await t.test('a native retry timeout releases single-flight ownership and fences its late result during a newer same-epoch read',async t=>{
+      const f=fixture(record()),api=await fresh();window.petpalLoginSession.read=async()=>{throw new Error('synthetic initial lock');};await api.initConnection('https://default.example');t.mock.timers.enable({apis:['setTimeout']});const firstRead=deferred(),secondRead=deferred();let reads=0;
+      window.petpalLoginSession.read=()=>++reads===1?firstRead.promise:secondRead.promise;
+      const first=api.retrySavedLogin(),same=api.retrySavedLogin(),rejected=assert.rejects(first,/无法恢复.*已保留/);assert.equal(first,same);t.mock.timers.tick(15000);await rejected;assert.equal(api.getConnection().token,'');assert.equal(f.stored().token,'synthetic-saved-token');
+      const second=api.retrySavedLogin();assert.notEqual(first,second);assert.equal(reads,2);firstRead.resolve({connection:record('synthetic-old-read')});await flush();assert.equal(api.getConnection().token,'');assert.match(api.getLoginPersistenceError(),/无法恢复/);
+      secondRead.resolve({connection:record('synthetic-new-read')});await second;assert.equal(api.getConnection().token,'synthetic-new-read');assert.equal(api.getLoginPersistenceError(),'');
+    });
+    for(const action of ['logout','new-login'])await t.test(`a timed-out native read cannot undo a later ${action} or publish a stale warning`,async t=>{
+      fixture();const api=await fresh();await api.initConnection('https://default.example');t.mock.timers.enable({apis:['setTimeout']});const wait=deferred();window.petpalLoginSession.read=()=>wait.promise;
+      const pending=api.retrySavedLogin(),rejected=assert.rejects(pending,/无法恢复/);t.mock.timers.tick(15000);await rejected;
+      if(action==='logout')await api.logout();else{install('fetch',async()=>json({token:'synthetic-after-read-timeout'}));await api.login('https://other.example','bob','synthetic-password');}
+      const warning=api.getLoginPersistenceError();wait.resolve({connection:record('synthetic-delayed-read')});await flush();assert.equal(api.getConnection().token,action==='logout'?'':'synthetic-after-read-timeout');assert.equal(api.getLoginPersistenceError(),warning);
+    });
     await t.test('Web and desktop without the Android bridge retain their session-only behavior',async()=>{
       fixture();delete window.petpalLoginSession;const api=await fresh();await api.initConnection('https://web.example');install('fetch',async()=>json({token:'synthetic-web-token'}));await api.login('https://web.example','alice','synthetic-password');
       assert.equal(JSON.parse(disk.get('petpal.connection')).token,'synthetic-web-token');disk.clear();const restarted=await fresh();await restarted.initConnection('https://web.example');assert.equal(restarted.getConnection().token,'');

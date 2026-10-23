@@ -2,6 +2,11 @@ package com.petpal.app;
 
 import android.os.Bundle;
 import android.content.Intent;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
+import android.view.ViewGroup;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebView;
 import androidx.activity.OnBackPressedCallback;
 import com.getcapacitor.BridgeActivity;
@@ -13,15 +18,36 @@ public class MainActivity extends BridgeActivity {
     private boolean secureUpdaterBridge;
     private boolean updaterForeground;
     private boolean officialSettingsRequested;
+    private boolean rendererUnavailable;
+    private static final RendererRecoveryPolicy RENDERER_RECOVERY = new RendererRecoveryPolicy();
     private final BackNavigationPolicy backNavigation = new BackNavigationPolicy();
     private OnBackPressedCallback nativeBack;
     private ScreenInsetsController screenInsets;
     private final WebViewListener backPageListener = new WebViewListener() {
         @Override public void onPageStarted(WebView view) { backNavigation.cancel(); }
-        @Override public void onPageLoaded(WebView view) { openOfficialSettings(); }
+        @Override public void onPageLoaded(WebView view) { if (!rendererUnavailable) openOfficialSettings(); }
+        @Override public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) { return recoverRenderer(view); }
     };
     public boolean hasSecureUpdaterBridge() { return secureUpdaterBridge; }
     public boolean isUpdaterForeground() { return updaterForeground; }
+    static void retryRendererByUser() { RENDERER_RECOVERY.retryByUser(); }
+    private boolean recoverRenderer(WebView view) {
+        if (getBridge() == null || getBridge().getWebView() != view) return false;
+        if (rendererUnavailable) return true;
+        rendererUnavailable = true; secureUpdaterBridge = false; updaterForeground = false; officialSettingsRequested = false; backNavigation.cancel();
+        if (screenInsets != null) { screenInsets.close(); screenInsets = null; }
+        if (view.getParent() instanceof ViewGroup) ((ViewGroup) view.getParent()).removeView(view);
+        view.destroy();
+        boolean automatic = RENDERER_RECOVERY.automatic(SystemClock.elapsedRealtime());
+        // Post outside the provider callback. Normal Activity destruction closes
+        // plugins once; their owner fences protect any successor's native state.
+        new Handler(Looper.getMainLooper()).post(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (automatic) recreate();
+            else { startActivity(new Intent(this, RendererRecoveryActivity.class)); finish(); }
+        });
+        return true;
+    }
     @Override public void onResume() { super.onResume(); updaterForeground = true; openOfficialSettings(); }
     @Override public void onPause() { updaterForeground = false; backNavigation.cancel(); super.onPause(); }
     @Override public void onDestroy() {
@@ -114,7 +140,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void openOfficialSettings() {
-        if (!officialSettingsRequested || !updaterForeground || getBridge() == null || getBridge().getWebView() == null) return;
+        if (rendererUnavailable || !officialSettingsRequested || !updaterForeground || getBridge() == null || getBridge().getWebView() == null) return;
         WebView view = getBridge().getWebView();
         if (!UpdaterPolicy.trustedPage(getBridge().getLocalUrl(), view.getUrl())) return;
         officialSettingsRequested = false;
@@ -145,6 +171,7 @@ public class MainActivity extends BridgeActivity {
         try {
             // evaluateJavascript always targets the main frame. No function is exposed to frames.
             view.evaluateJavascript("(function(){try {if(window!==window.top)return true;return !window.dispatchEvent(new CustomEvent('petpal:native-back',{cancelable:true}));}catch(error){return true;}})()", value -> {
+                if (rendererUnavailable) return;
                 String local = getBridge() == null ? null : getBridge().getLocalUrl();
                 BackNavigationPolicy.Result result = backNavigation.complete(request, local, view.getUrl(), activeLocalPage(view), value);
                 if (result == BackNavigationPolicy.Result.FALLBACK) defaultBack();
@@ -168,10 +195,11 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void openRequestedChat(Intent intent) {
-        if (intent != null && intent.getBooleanExtra(OPEN_CHAT, false) && getBridge() != null && getBridge().getWebView() != null) {
+        if (!rendererUnavailable && intent != null && intent.getBooleanExtra(OPEN_CHAT, false) && getBridge() != null && getBridge().getWebView() != null) {
             intent.removeExtra(OPEN_CHAT);
             var webView = getBridge().getWebView();
             webView.post(() -> {
+                if (rendererUnavailable || isDestroyed() || isFinishing() || getBridge() == null || getBridge().getWebView() != webView) return;
                 android.net.Uri current = android.net.Uri.parse(webView.getUrl() == null ? "about:blank" : webView.getUrl());
                 if (!current.isHierarchical() || !"1".equals(current.getQueryParameter("chat"))) {
                     String local = getBridge().getLocalUrl();
