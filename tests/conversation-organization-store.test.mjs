@@ -5,7 +5,7 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { JsonStore } from '../server/store.mjs';
-import { organizationPatch, organizationText } from '../server/conversation-organization.mjs';
+import { organizationPatch, organizationText, createOrganizationPersistence } from '../server/conversation-organization.mjs';
 
 const at = () => new Date().toISOString();
 const conversation = userId => ({ id: randomUUID(), userId, mode: 'chat', title: '自动名称', providerId: null, messages: [], createdAt: at(), updatedAt: at(), projectId: null, archivedAt: null });
@@ -84,6 +84,26 @@ test('new conversations committed before an older captured save remain durable',
   let release; f.store.queue = new Promise(resolve => { release = resolve; });
   const create = f.act({ kind: 'conversation-create', conversation: item }), stale = f.store.save(); release(); await Promise.all([create, stale]);
   assert.equal(f.store.state.conversations[0].id, item.id); assert.equal(JSON.parse(await readFile(f.store.file, 'utf8')).conversations[0].id, item.id);
+});
+
+test('multiple committed creations retain live append order in older captured snapshots', async t => {
+  const f = await fixture(t), first = conversation(f.userId), second = conversation(f.userId);
+  let release; f.store.queue = new Promise(resolve => { release = resolve; });
+  const a = f.act({ kind: 'conversation-create', conversation: first });
+  const b = f.act({ kind: 'conversation-create', conversation: second }), stale = f.store.save();
+  release(); await Promise.all([a, b, stale]);
+  assert.deepEqual(f.store.state.conversations.map(item => item.id), [second.id, first.id]);
+  assert.deepEqual(JSON.parse(await readFile(f.store.file, 'utf8')).conversations.map(item => item.id), [second.id, first.id]);
+});
+
+test('commit indexing preserves first matching identity for duplicate live ids', () => {
+  const id = randomUUID(), firstUser = randomUUID(), secondUser = randomUUID();
+  const first = { ...conversation(firstUser), id }, duplicate = { ...first }, otherUser = { ...conversation(secondUser), id };
+  const store = { state: { projects: [], conversations: [first, duplicate, otherUser] } };
+  const extension = createOrganizationPersistence(store);
+  extension.commit({ projects: [], conversations: [{ ...first, customTitle: 'First identity' }, { ...otherUser, customTitle: 'Other identity' }] });
+  assert.equal(first.customTitle, 'First identity'); assert.equal(duplicate.customTitle, undefined);
+  assert.equal(otherUser.customTitle, 'Other identity');
 });
 
 test('failed writes publish no partial project, archive, title or delete state and can retry', async t => {

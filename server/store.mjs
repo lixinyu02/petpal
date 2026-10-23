@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile, chmod, unlink, open } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile, chmod, unlink, open, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { defaultVoiceSettings } from './voice.mjs';
@@ -25,6 +25,7 @@ const initialState = () => {
 
 export class JsonStore {
   #chatAssistantHosts = null;
+  #durableWrite = null;
 
   constructor(directory) { this.directory = path.resolve(directory); this.file = path.join(this.directory, 'state.json'); this.queue = Promise.resolve(); }
 
@@ -144,6 +145,34 @@ export class JsonStore {
     }
   }
 
+  async #unchangedFile(contents) {
+    const cached = this.#durableWrite, file = this.file;
+    if (!cached || cached.file !== file || cached.contents !== contents) return false;
+    try {
+      const current = await lstat(file, { bigint: true });
+      // An in-memory match cannot hide an externally removed/replaced file or
+      // a link. Any uncertainty falls back to the normal durable replacement.
+      return this.file === file && current.isFile() && !current.isSymbolicLink() &&
+        ['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs'].every(key => current[key] === cached.stamp[key]);
+    } catch { return false; }
+  }
+
+  async #rememberWrite(file, contents, written) {
+    this.#durableWrite = null;
+    if (!written) return;
+    try {
+      const stamp = await lstat(file, { bigint: true });
+      // Verify this is still our written file, rather than an external
+      // replacement between rename and the cache probe. Rename can change
+      // ctime, so compare the opened file's identity and content timestamps.
+      if (stamp.isFile() && !stamp.isSymbolicLink() && stamp.ino > 0n &&
+          ['dev', 'ino', 'size', 'mtimeNs', 'mode', 'uid', 'gid'].every(key => typeof stamp[key] === 'bigint' && stamp[key] === written[key]) && typeof stamp.ctimeNs === 'bigint') this.#durableWrite = { file, contents, stamp };
+    } catch {
+      // Replacement has already succeeded. A failed cache probe must not turn
+      // a durable save into an error or prevent its live commit hooks running.
+    }
+  }
+
   save(operation) {
     // Capture the state now. Serial atomic replacements prevent older writes winning.
     const captured = JSON.stringify(this.state);
@@ -157,22 +186,37 @@ export class JsonStore {
       this.agentRecoveryPersistence?.prepare(snapshot, operation?.agentRecovery);
       this.notificationPersistence?.prepare(snapshot, operation);
       await this.automationPersistence?.prepare(snapshot, operation);
-      const contents = `${JSON.stringify(snapshot, null, 2)}\n`;
-      const temporary = `${this.file}.${randomBytes(8).toString('hex')}.tmp`;
-      try {
-        const handle = await open(temporary, 'wx', 0o600);
-        try { await handle.writeFile(contents, 'utf8'); await handle.sync(); } finally { await handle.close(); }
-        await chmod(temporary, 0o600).catch(error => { if (process.platform !== 'win32') throw error; });
+      const contents = `${JSON.stringify(snapshot)}\n`;
+      if (await this.#unchangedFile(contents)) {
         this.organizationPersistence?.beforeCommit(snapshot);
         this.agentRecoveryPersistence?.beforeCommit(snapshot);
-        await rename(temporary, this.file);
-        // Only an atomically replaced file can become the public default.
-        this.#commitChatAssistantHosts(snapshot);
-        this.organizationPersistence?.commit(snapshot);
-        this.agentRecoveryPersistence?.commit(snapshot);
-        this.automationPersistence?.commit(snapshot.automations, snapshot);
-        this.notificationPersistence?.commit(snapshot.notifications);
-      } finally { await unlink(temporary).catch(() => {}); }
+      } else {
+        const temporary = `${this.file}.${randomBytes(8).toString('hex')}.tmp`;
+        try {
+          const handle = await open(temporary, 'wx', 0o600);
+          let written;
+          try {
+            await handle.writeFile(contents, 'utf8'); await handle.sync();
+            try { written = await handle.stat({ bigint: true }); } catch { /* Optional cache metadata only. */ }
+          } finally { await handle.close(); }
+          await chmod(temporary, 0o600).catch(error => { if (process.platform !== 'win32') throw error; });
+          this.organizationPersistence?.beforeCommit(snapshot);
+          this.agentRecoveryPersistence?.beforeCommit(snapshot);
+          const file = this.file;
+          await rename(temporary, file);
+          await this.#rememberWrite(file, contents, written);
+        } finally { await unlink(temporary).catch(() => {}); }
+      }
+      // Every logical save still prepares and commits independently, including
+      // notification events and authorization checks on an unchanged snapshot.
+      this.#commitChatAssistantHosts(snapshot);
+      this.organizationPersistence?.commit(snapshot);
+      this.agentRecoveryPersistence?.commit(snapshot);
+      this.automationPersistence?.commit(snapshot.automations, snapshot);
+      this.notificationPersistence?.commit(snapshot.notifications);
+    }).catch(error => {
+      this.#durableWrite = null;
+      throw error;
     });
     this.queue = task;
     return task;

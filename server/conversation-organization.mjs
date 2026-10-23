@@ -68,9 +68,13 @@ export function createOrganizationPersistence(store) {
       check(action);
       snapshot.projects = structuredClone(projects);
       snapshot.conversations = snapshot.conversations.filter(item => !removed.has(item.id));
+      const presentIds = new Set(snapshot.conversations.map(item => item.id));
       // Saves captured before creation precede every save with the new body.
       // Retain the committed creation body without copying live streaming data.
-      for (const live of store.state.conversations) if (createdBodies.has(live.id) && !removed.has(live.id) && !snapshot.conversations.some(item => item.id === live.id)) snapshot.conversations.push(structuredClone(createdBodies.get(live.id)));
+      for (const live of store.state.conversations) if (createdBodies.has(live.id) && !removed.has(live.id) && !presentIds.has(live.id)) {
+        snapshot.conversations.push(structuredClone(createdBodies.get(live.id)));
+        presentIds.add(live.id);
+      }
       for (const item of snapshot.conversations) {
         const committed = metadata.get(item.id);
         if (committed && committed.userId !== item.userId) throw fail(500, '对话整理归属发生变化。');
@@ -119,14 +123,27 @@ export function createOrganizationPersistence(store) {
       const { deleted, action } = prepared.get(snapshot) ?? { deleted: [] };
       for (const id of deleted) { removed.add(id); metadata.delete(id); createdBodies.delete(id); }
       projects = structuredClone(snapshot.projects); store.state.projects = structuredClone(projects);
+      // Preserve find(id && userId)'s first-match behavior, including when a
+      // creation is inserted during this commit, without scanning every body.
+      const liveById = new Map();
+      const rememberLive = live => {
+        if (!liveById.has(live.id)) liveById.set(live.id, new Map());
+        const users = liveById.get(live.id);
+        if (!users.has(live.userId)) users.set(live.userId, live);
+      };
+      for (const live of store.state.conversations) rememberLive(live);
       for (const item of snapshot.conversations) {
         if (action?.kind === 'conversation-create' && action.conversation.id === item.id) createdBodies.set(item.id, structuredClone(item));
         const before = metadata.get(item.id), touched = before && (before.projectId !== item.projectId || before.archivedAt !== item.archivedAt || before.customTitle !== item.customTitle);
         const next = { userId: item.userId, projectId: item.projectId, archivedAt: item.archivedAt, ...(item.customTitle !== undefined ? { customTitle: item.customTitle } : {}), ...(touched || action?.kind === 'conversation-update' && action.id === item.id ? { touchedAt: item.updatedAt } : before?.touchedAt ? { touchedAt: before.touchedAt } : {}) };
         metadata.set(item.id, next);
-        const live = store.state.conversations.find(live => live.id === item.id && live.userId === item.userId);
+        const live = liveById.get(item.id)?.get(item.userId);
         if (live) { Object.assign(live, next); if (next.touchedAt) live.updatedAt = latest(live.updatedAt, next.touchedAt); delete live.touchedAt; }
-        else if (action?.kind === 'conversation-create' && action.conversation.id === item.id) store.state.conversations.unshift(structuredClone(item));
+        else if (action?.kind === 'conversation-create' && action.conversation.id === item.id) {
+          const created = structuredClone(item);
+          store.state.conversations.unshift(created);
+          rememberLive(created);
+        }
       }
       store.state.conversations = store.state.conversations.filter(item => !removed.has(item.id));
       prepared.delete(snapshot);
