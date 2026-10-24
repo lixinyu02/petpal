@@ -61,6 +61,16 @@ export function openUIActionText(event) {
     check({ text: event.params.text ?? '', form });
     const encoded = JSON.stringify({ text: event.params.text ?? '', form });
     if (new TextEncoder().encode(encoded).length > 16384) return null;
-    return [event.params.text?.trim(), Object.keys(form).length ? `表单内容：\n${JSON.stringify(form, null, 2)}` : ''].filter(Boolean).join('\n\n') || null;
+    // The SDK stores unbound control values with component metadata. Only the
+    // exact known scalar wrappers are presentation metadata; retain other data.
+    const values = Object.fromEntries(Object.entries(form).map(([key, field]) => {
+      const wrapper = field && typeof field === 'object' && !Array.isArray(field)
+        && Object.keys(field).length === 2 && Object.hasOwn(field, 'value') && Object.hasOwn(field, 'componentType');
+      const scalarField = wrapper && (field.componentType === 'Field' && (field.value === null || typeof field.value === 'string' || typeof field.value === 'number')
+        || field.componentType === 'Select' && typeof field.value === 'string'
+        || field.componentType === 'Checkbox' && typeof field.value === 'boolean');
+      return [key, scalarField ? field.value : field];
+    }));
+    return [event.params.text?.trim(), Object.keys(values).length ? `表单内容：\n${JSON.stringify(values, null, 2)}` : ''].filter(Boolean).join('\n\n') || null;
   } catch { return null; }
 }

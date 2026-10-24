@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { OPENUI_LIMITS, openUIExample, openUICardExample, openUIPrompt } from '../src/openui/library.mjs';
+import { createParser, createStore, evaluateElementProps, resolveStateField } from '@openuidev/lang-core';
+import { OPENUI_LIMITS, normalizeOpenUITableRows, openUILibrary, openUIExample, openUICardExample, openUIOhmExample, openUIPrompt } from '../src/openui/library.mjs';
 import { copyBoundedData, validateOpenUI } from '../src/openui/validate.mjs';
 
 // Actual official parser and PetPal's controlled library; no parser or model doubles.
@@ -15,6 +16,9 @@ test('the generated model guide describes the same restricted PetPal library', (
   assert.match(openUIPrompt, /@UseInPrompt\(text\?\)/);
   assert.match(openUIPrompt, /Never emit only a patch/);
   assert.doesNotMatch(openUIPrompt, /Example — simple nav|@OpenUrl\(url:|@ToAssistant\(message:/);
+  assert.doesNotMatch(openUIPrompt, /available steps[^\n]*(?:@ToAssistant|@OpenUrl)/);
+  assert.match(openUIPrompt, /empty numeric inputs produce an empty string/);
+  assert.ok(openUIPrompt.includes(openUIOhmExample));
 });
 
 test("official SDK validates the published library example and all component types", () => {
@@ -23,6 +27,101 @@ test("official SDK validates the published library example and all component typ
   assert.ok(openUIPrompt.includes(openUICardExample));
   const source = '$choice = "A"\nroot = Panel("检查", [Heading("结果", 2), Stack([Text("证据"), Field("note", "备注", "", true), Select("choice", "方案", ["A", "B"], $choice), Checkbox("ok", "确认", false)]), Table(["项目", "结果"], [["引脚", true], ["数值", 12], ["空值", null]]), Button("重置", @Reset($choice))])';
   assert.deepEqual(validateOpenUI(source), { valid: true, errors: [] });
+});
+
+test('local teaching examples accept numeric bindings and bounded computed text leaves', () => {
+  assert.deepEqual(validateOpenUI(openUIOhmExample), { valid: true, errors: [] });
+  // Same failure shape as an existing reply, with no account or message data.
+  const numeric = '$U = 5\n$R = 10\n$detail = false\ndetails = $detail ? "Calculation details" : ""\nroot = Panel("Local calculation", [Field("u", "Voltage", $U), Field("r", "Resistance", $R), Text("I = " + ($U / $R)), details, Checkbox("detail", "Show steps", $detail), Button("Preset", Action([@Set($U, 10), @Set($R, 5)]))])';
+  assert.deepEqual(validateOpenUI(numeric), { valid: true, errors: [] });
+  const scalars = 'root = Panel("Escaped values", ["Plain <script>text</script>", 2, true, false, null, Stack(["Nested text", Text(3), Text(false), Text(null)])])';
+  assert.deepEqual(validateOpenUI(scalars), { valid: true, errors: [] });
+  assert.deepEqual(validateOpenUI('$n = null\nroot = Panel("Empty input", [Field("n", "Value", $n)])'), { valid: true, errors: [] });
+});
+
+test('the portable teaching example computes from valid input and rejects invalid or nonfinite values', () => {
+  const parsed=createParser(openUILibrary.toJSONSchema(),openUILibrary.root).parse(openUIOhmExample);
+  for (const [voltage,resistance,expected] of [
+    ['5','10','电流 I = 5 / 10 = 0.5 A'],
+    ['10','5','电流 I = 10 / 5 = 2 A'],
+    ['0','10','电流 I = 0 / 10 = 0 A'],
+    ['','10',null], ['abc','10',null], ['NaN','10',null],
+    ['5','',null], ['5','0',null], ['5','-1',null], ['5','abc',null],
+    ['1e309','10',null], ['5','1e309',null], ['1e308','1e-308',null],
+  ]) {
+    const values={...parsed.stateDeclarations,$U:voltage,$R:resistance},errors=[];
+    const tree=evaluateElementProps(parsed.root,{ctx:{getState:key=>values[key],resolveRef:()=>null,actions:openUILibrary.toJSONSchema().actions},library:openUILibrary,store:null,errors});
+    assert.deepEqual(errors,[],`${voltage}/${resistance}`);
+    const result=tree.props.children.find(node=>node?.typeName==='Text'&&/^(电流 I =|请输入有效电压)/.test(node.props.text));
+    assert.ok(result,`${voltage}/${resistance}`);
+    assert.equal(result.props.text,expected??'请输入有效电压，并将电阻设为大于 0 的数值。');
+  }
+});
+
+test('official reactive state retains a safe empty-string edit and can accept numbers again', () => {
+  const parsed=createParser(openUILibrary.toJSONSchema(),openUILibrary.root).parse('$U = 5\nroot = Panel("Numeric edit", [Field("voltage", "Voltage", $U), Text("U = " + $U)])');
+  const store=createStore();store.initialize(parsed.stateDeclarations,{});
+  const context={getState:key=>store.get(key),resolveRef:()=>null,actions:openUILibrary.toJSONSchema().actions};
+  const initial=evaluateElementProps(parsed.root,{ctx:context,library:openUILibrary,store,errors:[]});
+  const binding=initial.props.children.find(node=>node.typeName==='Field').props.value;
+  const field=()=>resolveStateField('voltage',binding,store,context,()=>undefined,()=>assert.fail('Expected a reactive field'));
+  for(const value of [12,'',4]){
+    field().setValue(value);
+    assert.equal(field().value,value);
+    assert.deepEqual(copyBoundedData(store.getSnapshot()),{$U:value});
+    const errors=[];
+    evaluateElementProps(parsed.root,{ctx:context,library:openUILibrary,store,errors});
+    assert.deepEqual(errors,[]);
+  }
+});
+
+test('scalar compatibility does not admit objects, nested child arrays or nonfinite numbers', () => {
+  for (const source of [
+    'root = Panel("Object child", [{text: "not a component"}])',
+    'root = Panel("Array child", [[Text("nested array")]])',
+    'root = Panel("Object text", [Text({value: "not scalar"})])',
+    'root = Panel("Object field", [Field("n", "Value", {value: 2})])',
+    'root = Panel("Boolean field", [Field("n", "Value", true)])',
+    'root = Panel("Nonfinite text", [Text(1e309)])',
+    'root = Panel("Nonfinite field", [Field("n", "Value", 1e309)])',
+    `root = Panel("Long scalar", ["${'x'.repeat(OPENUI_LIMITS.text + 1)}"])`,
+    `root = Panel("Too many leaves", [${Array.from({length: OPENUI_LIMITS.nodes + 1}, ()=>'null').join(',')}])`,
+  ]) assert.equal(validateOpenUI(source).valid, false, source.slice(0, 100));
+});
+
+test('a complete flat table row is normalized without mutating model output', () => {
+  const columns=['Voltage','Resistance','Current'],row=['10 V','5 Ω','2 A'];
+  assert.deepEqual(normalizeOpenUITableRows(columns,row),[row]);
+  assert.deepEqual(row,['10 V','5 Ω','2 A']);
+  assert.deepEqual(normalizeOpenUITableRows(['n','empty','flag'],[2,null,false]),[[2,null,false]]);
+  assert.deepEqual(normalizeOpenUITableRows(columns,[]),[]);
+  for (const rows of [row,[row]]) {
+    const source=`root = Panel("Table", [Table(${JSON.stringify(columns)}, ${JSON.stringify(rows)})])`;
+    assert.deepEqual(validateOpenUI(source),{valid:true,errors:[]});
+  }
+  assert.match(openUIPrompt,/Always emit Table rows as a two-dimensional array/);
+  assert.ok(openUIPrompt.includes('Table(["A", "B"], [["a", "b"]])'));
+});
+
+test('flat-row compatibility rejects incomplete, mixed, object and excessive table data', () => {
+  const invalid=[
+    [['a','b'],['only one']],
+    [['a'],['one','extra']],
+    [['a'],[{value:'object'}]],
+    [['a'],[['valid'],'mixed']],
+    [['a'],[[['nested']]]],
+    [['a'],[Infinity]],
+    [new Array(1),['value']],
+    [['a'],new Array(1)],
+    [['a'],[new Array(1)]],
+    [['a'],['x'.repeat(OPENUI_LIMITS.text+1)]],
+    [Array.from({length:21},(_,i)=>String(i)),Array.from({length:21},()=>1)],
+    [['a'],Array.from({length:201},()=>['row'])],
+  ];
+  for(const [columns,rows] of invalid)assert.equal(normalizeOpenUITableRows(columns,rows),null);
+  for(const rows of ['["only one"]','["one", "two", "extra"]','[{value: "object"}, "b"]','[["a", "b"], "mixed"]','[[["nested"]]]','[1e309, 2]']){
+    assert.equal(validateOpenUI(`root = Panel("Bad table", [Table(["a", "b"], ${rows})])`).valid,false,rows);
+  }
 });
 
 test("strict final validation rejects dropped nodes, unsafe calls and invalid data", () => {

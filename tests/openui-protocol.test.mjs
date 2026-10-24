@@ -70,3 +70,15 @@ test('host actions are bounded JSON converted only to plain draft text', () => {
   const form={};form.loop=form;assert.equal(openUIActionText({type:'UseInPrompt',params:{},formState:form}),null);
   assert.equal({}.polluted,undefined);
 });
+
+test('SDK control metadata stays out of the user draft without discarding other data', () => {
+  const draft = openUIActionText({type:'UseInPrompt',params:{text:'继续'},formState:{
+    goal:{value:'生活中的例子',componentType:'Field'},
+    style:{value:'详细',componentType:'Select'},
+    confirmed:{value:true,componentType:'Checkbox'},
+  }});
+  assert.equal(draft, '继续\n\n表单内容：\n{\n  "goal": "生活中的例子",\n  "style": "详细",\n  "confirmed": true\n}');
+  const custom={value:'保留',componentType:'Unknown',extra:'用户数据'};
+  assert.match(openUIActionText({type:'UseInPrompt',params:{},formState:{custom}}), /"extra": "用户数据"/);
+  assert.equal(openUIActionText({type:'UseInPrompt',params:{},formState:{field:{componentType:'Field',value:Infinity}}}),null);
+});

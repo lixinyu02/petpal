@@ -3,7 +3,7 @@ import {
   autoClose, createParser, evaluateElementProps, isReactiveAssign,
   parseExpression, split, tokenize,
 } from "@openuidev/lang-core";
-import { OPENUI_LIMITS, openUILibrary } from "./library.mjs";
+import { OPENUI_LIMITS, normalizeOpenUITableRows, openUILibrary } from "./library.mjs";
 
 const forbiddenKeys = new Set(["__proto__", "prototype", "constructor"]);
 const actions = new Set(["UseInPrompt", "Set", "Reset", "Action"]);
@@ -181,6 +181,11 @@ export function validateOpenUI(source, { streaming = false } = {}) {
       if (++count > OPENUI_LIMITS.nodes || depth > OPENUI_LIMITS.depth) {
         errors.push(error("tree-limit", "OpenUI rendered tree is too large")); break;
       }
+      if (node === null || typeof node === "boolean" || typeof node === "number" && Number.isFinite(node)) continue;
+      if (typeof node === "string") {
+        if (node.length > OPENUI_LIMITS.text) errors.push(error("text-limit", "OpenUI text exceeds 12000 characters"));
+        continue;
+      }
       const definition = Object.hasOwn(openUILibrary.components, node?.typeName) ? openUILibrary.components[node.typeName] : null;
       if (node?.type !== "element" || !definition || node.partial) {
         errors.push(error("invalid-node", "OpenUI contains an invalid or incomplete component")); continue;
@@ -200,7 +205,7 @@ export function validateOpenUI(source, { streaming = false } = {}) {
         if (fieldNames.has(props.name)) errors.push(error("duplicate-field", `Duplicate field name: ${props.name}`));
         fieldNames.add(props.name);
       }
-      if (node.typeName === "Table" && Array.isArray(props.rows) && props.rows.some(row => !Array.isArray(row) || row.length !== props.columns?.length)) {
+      if (node.typeName === "Table" && normalizeOpenUITableRows(props.columns, props.rows) === null) {
         errors.push(error("table-shape", "Every Table row must match the column count"));
       }
       if (node.typeName === "Button" && props.action !== undefined) {

@@ -39,6 +39,24 @@ test('automatic presentation honors read-only card requests without replacing th
   assert.doesNotMatch(policy.guide, /Choose OpenUI only when interactive controls/);
 });
 
+test('automatic presentation prefers supported interactions and cards beyond explicit UI requests', () => {
+  const task = '介绍下欧姆定律';
+  const policy = prepareOutputRendering(task, {outputRendering:'auto'});
+  assert.equal(policy.outputRendering, 'auto');
+  assert.match(policy.guide, /interaction-first preference/);
+  assert.match(policy.guide, /Prefer compact OpenUI whenever the supported components can reasonably present the answer/);
+  assert.match(policy.guide, /concept explanations, calculations with adjustable values, comparisons, plans, and step-by-step workflows/);
+  assert.match(policy.guide, /without waiting for the user to name OpenUI or request an interface/);
+  assert.match(policy.guide, /Read-only cards are also appropriate; an interface does not need a form or button/);
+  assert.match(policy.guide, /Ohm's law.*voltage and resistance.*updates locally/);
+  assert.match(policy.guide, /Do not add empty forms, meaningless buttons, or pretend actions/);
+  assert.match(policy.guide, /Use ordinary Markdown for greetings, very short conversational replies/);
+  assert.match(policy.guide, /Explicit requests for plain text also keep that format/);
+  assert.match(policy.guide, /Preserve any exact text, code, JSON or other machine-readable format/);
+  assert.doesNotMatch(policy.guide, /prefer Markdown for questions, explanations|Use Markdown when a concise answer, definition|otherwise use ordinary Markdown unless interaction materially helps/i);
+  assert.ok(withOutputGuide(task, policy).endsWith('\n\n' + task));
+});
+
 test('missing optional guide falls back and inherited native guidance is explicitly disabled', () => {
   const fallback = prepareOutputRendering('原始任务', {outputRendering:'auto', guide:null, previousHasGuide:true});
   assert.equal(fallback.outputRendering, 'markdown'); assert.equal(fallback.guide, MARKDOWN_TURN_GUIDE); assert.equal(fallback.resetThread, false);
