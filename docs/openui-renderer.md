@@ -14,4 +14,4 @@ SDK 与组件库按需加载，共享应用 React。普通消息不下载 SDK；
 
 组件库变更后运行 `node scripts/generate-openui-resources.mjs`，更新服务端静态提示词和许可清单，并运行 `node --test tests/openui-*.test.mjs`。部署包含 `server/openui/prompt.txt` 和前端构建；该功能不需要修改本机执行权限。
 
-来源及许可见 `openui-reference.json`、仓库 `NOTICE` 和 `public/third-party/openui/`。本轮仅源码集成与隔离验收，客户端发布、真实模型输出质量和各实体终端的验收另行进行。
+来源及许可见 `openui-reference.json`、仓库 `NOTICE` 和 `public/third-party/openui/`。2026-10-24网页与后端修复已上线，并通过同一Qwen的自动选择/显式交互/明确纯文字采样、Chrome隔离回放和正式网页原对话操作验收；原历史不改写。63项定向回归、类型检查、生产构建及两端HTTP字节核验通过。本次未重打客户端，实体终端验收另行进行；详情见 `docs/workflow/2026-10-24-openui-teaching-repair-verification.md`。
