@@ -4,6 +4,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+import uuid
 
 path = pathlib.Path(__file__).resolve().parents[1] / 'server/memobase-assets/petpal_runtime.py'
 spec = importlib.util.spec_from_file_location('petpal_memory_router', path)
@@ -43,6 +44,17 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(RuntimeError):
                 await work('a')
             self.assertEqual(active, 0)
+
+    async def test_pydantic_uuid_objects_match_serialized_route_keys(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file = pathlib.Path(directory) / 'routes.json'
+            uid = uuid.uuid4()
+            file.write_text(json.dumps({'schema':'petpal-memory-models.v1','maxConcurrency':3,'routes':{str(uid):{'allowed':True,'providerId':None,'concurrency':3}}}))
+            async def complete(*args):
+                return 'OK'
+            router = module.Router(file, complete)
+            async with router.scope(uid):
+                self.assertEqual(await router.call('model','test'), 'OK')
 
     async def test_revocation_after_queueing_and_failure_release(self):
         with tempfile.TemporaryDirectory() as directory:

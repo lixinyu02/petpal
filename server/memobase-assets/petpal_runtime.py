@@ -30,6 +30,7 @@ class Router:
 
     @asynccontextmanager
     async def scope(self, uid):
+        uid = str(uid)  # FastAPI/Pydantic passes UUID objects to Memobase controllers.
         route = self.routes().get(uid)
         if not route or route.get("allowed") is not True or type(route.get("concurrency")) is not int or not 1 <= route["concurrency"] <= 3:
             raise RuntimeError("PETPAL_MEMORY_MODEL_UNAUTHORIZED")
