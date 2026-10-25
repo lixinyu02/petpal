@@ -100,7 +100,7 @@ function normalizeTransport({ wslDistro, imageMirror, networkSubnet = '' }, plat
 /** Optional Docker sidecar. No Docker command, image pull or network request runs at construction. */
 export async function createMemobaseRuntime({ directory, assetDirectory = DEFAULT_ASSETS, fetchImpl = globalThis.fetch,
   spawnImpl = spawn, platform = process.platform, arch = process.arch, canBindPort = portIsFree,
-  wslDistro, imageMirror, networkSubnet,
+  wslDistro, imageMirror, networkSubnet, userModelsDirectory,
   commandTimeoutMs = 30000, pullTimeoutMs = 600000, startTimeoutMs = 120000, healthTimeoutMs = 45000,
   // This delay belongs to an active, bounded start operation. Keep it referenced
   // so headless callers can await startup without another server/window handle.
@@ -152,17 +152,18 @@ export async function createMemobaseRuntime({ directory, assetDirectory = DEFAUL
   } catch { state = 'error'; error = messages.STORAGE; storageInvalid = true; }
 
   const status = () => ({ supported, platform, arch, version: VERSION, state, running: running && state === 'running', prepared, configured: Boolean(model), needsModel: !model,
-    autoStart: settings.autoStart, port: 8019, dockerAvailable, daemonAvailable, error });
+    extractionModel: model?.model ?? null, autoStart: settings.autoStart, port: 8019, dockerAvailable, daemonAvailable, error });
   const queue = work => { const task = pending.catch(() => {}).then(work); pending = task.catch(() => {}); return task; };
   const assertOpen = () => { if (closed) throw fail('CLOSED', messages.CLOSED); if (storageInvalid) throw fail('STORAGE', messages.STORAGE); if (!supported) throw fail('UNSUPPORTED', '本机记忆暂不支持此系统或处理器。'); };
   const publicFailure = (failure, fallback) => /^PETPAL_MEMOBASE_/.test(failure?.code || '') ? failure : fail(fallback, messages[fallback]);
+  if(userModelsDirectory!==undefined&&!path.isAbsolute(userModelsDirectory))throw new TypeError('Private model directory must be absolute');
   async function assets() {
     const bytes = await privateRead(path.join(assetDirectory, 'PROVENANCE.json'), 16384);
     let value; try { value = JSON.parse(bytes); } catch { throw fail('ASSETS', messages.ASSETS); }
     if (value?.version !== 1 || value?.upstream?.version !== VERSION || !plain(value.images) || Object.keys(value.images).length !== 3 ||
         !['api', 'db', 'redis'].every(key => typeof value.images[key] === 'string' && /^[a-z0-9./:_-]+@sha256:[a-f0-9]{64}$/.test(value.images[key])) ||
         !plain(value.files) || !['env.py', 'open_telemetry.py', 'LICENSE'].every(key => /^[a-f0-9]{64}$/.test(value.files[key] || ''))) throw fail('ASSETS', messages.ASSETS);
-    for (const name of ['env.py', 'open_telemetry.py', 'LICENSE']) { const content = await privateRead(path.join(assetDirectory, name)); if (!content || digest(content) !== value.files[name]) throw fail('ASSETS', messages.ASSETS); }
+    for (const name of ['env.py', 'open_telemetry.py', 'LICENSE',...(userModelsDirectory?['petpal_runtime.py']:[])]) { const content = await privateRead(path.join(assetDirectory, name)); if (!content || digest(content) !== value.files[name]) throw fail('ASSETS', messages.ASSETS); }
     manifest = value; return value;
   }
 
@@ -207,7 +208,7 @@ export async function createMemobaseRuntime({ directory, assetDirectory = DEFAUL
     await privateWrite(directory, 'runtime.env', `PETPAL_MEMOBASE_ACCESS_TOKEN=${secrets.accessToken}\nPETPAL_MEMOBASE_DATABASE_PASSWORD=${secrets.databasePassword}\nPETPAL_MEMOBASE_REDIS_PASSWORD=${secrets.redisPassword}\n`, authorize);
     // Assets may live in Electron ASAR. Docker cannot mount archive members, so
     // copy verified adapters to ordinary private files before constructing binds.
-    for (const name of ['env.py', 'open_telemetry.py']) await privateWrite(directory, name, await privateRead(path.join(assetDirectory, name)), authorize);
+    for (const name of ['env.py', 'open_telemetry.py',...(userModelsDirectory?['petpal_runtime.py']:[])]) await privateWrite(directory, name, await privateRead(path.join(assetDirectory, name)), authorize);
     const mount = (source, target) => ({ type: 'bind', source: dockerPath(source), target, read_only: true, bind: { create_host_path: false } });
     const configFile = path.join(directory, 'config.yaml');
     const document = { name: project, services: {
@@ -216,12 +217,12 @@ export async function createMemobaseRuntime({ directory, assetDirectory = DEFAUL
       redis: { image: images.redis, restart: 'no', environment: { REDIS_PASSWORD: '${PETPAL_MEMOBASE_REDIS_PASSWORD}' },
         command: ['redis-server', '--requirepass', '${PETPAL_MEMOBASE_REDIS_PASSWORD}', '--appendonly', 'yes'], volumes: ['redis:/data'],
         healthcheck: { test: ['CMD-SHELL', 'redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG'], interval: '3s', timeout: '3s', retries: 20 } },
-      api: { image: images.api, restart: 'no', environment: {
+      api: { image: images.api, restart: 'no', ...(userModelsDirectory?{command:['/app/.venv/bin/python','/app/petpal_runtime.py']}:{ }), environment: {
         DATABASE_URL: 'postgresql://memobase:${PETPAL_MEMOBASE_DATABASE_PASSWORD}@db:5432/memobase', REDIS_URL: 'redis://:${PETPAL_MEMOBASE_REDIS_PASSWORD}@redis:6379/0',
         ACCESS_TOKEN: '${PETPAL_MEMOBASE_ACCESS_TOKEN}', PROJECT_ID: project, API_HOSTS: 'http://127.0.0.1:8019', USE_CORS: 'false', OTEL_SDK_DISABLED: 'true', PYTHONDONTWRITEBYTECODE: '1',
       }, extra_hosts: ['host.docker.internal:host-gateway'], depends_on: { db: { condition: 'service_healthy' }, redis: { condition: 'service_healthy' } },
       ports: [{ target: 8000, published: '8019', host_ip: '127.0.0.1', protocol: 'tcp' }],
-      volumes: [mount(configFile, '/app/config.yaml'), mount(path.join(directory, 'env.py'), '/app/memobase_server/env.py'), mount(path.join(directory, 'open_telemetry.py'), '/app/memobase_server/telemetry/open_telemetry.py')],
+      volumes: [mount(configFile, '/app/config.yaml'), mount(path.join(directory, 'env.py'), '/app/memobase_server/env.py'), mount(path.join(directory, 'open_telemetry.py'), '/app/memobase_server/telemetry/open_telemetry.py'),...(userModelsDirectory?[mount(path.join(directory,'petpal_runtime.py'),'/app/petpal_runtime.py'),mount(userModelsDirectory,'/app/petpal-models')]:[])],
       logging: { driver: 'local', options: { 'max-size': '2m', 'max-file': '2' } } },
     }, volumes: { database: {}, redis: {} }, ...(networkSubnet ? { networks: { default: { ipam: { config: [{ subnet: networkSubnet }] } } } } : {}) };
     await privateWrite(directory, 'compose.json', `${JSON.stringify(document, null, 2)}\n`, authorize);

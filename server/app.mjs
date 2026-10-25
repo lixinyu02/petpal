@@ -43,6 +43,7 @@ import { createOfficialProviderScope, isOfficialProvider, publicOfficialProvider
 import { MobileOfficialAccounts, combineOfficialAccounts } from './mobile-official.mjs';
 import { AppProxyProfiles } from './app-proxy-profiles.mjs';
 import { mountAppProxyProfileRoutes } from './app-proxy-profile-routes.mjs';
+import {createMemoryModels} from './memory-models.mjs';
 import { createMemoryService } from './memory-service.mjs';
 import { createReplyMemoryJobs, replyMemoryPrivacyGuard } from './reply-memory-jobs.mjs';
 import { createMemobaseRuntime } from './memobase-runtime.mjs';
@@ -96,8 +97,9 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const companionRoutines=await createCompanionRoutineService({...companionOptions,directory:path.resolve(dataDir),instanceId:state.instanceId,users:()=>state.users,autoStart:false,buildContent:companionOptions.buildContent??((settings,context)=>personalizedCompanion(settings,context))});
   const serviceLinks=serviceLinksOptions.service??await createServiceLinks({...serviceLinksOptions,dataDir:path.resolve(dataDir)});
   const serviceModels=createServiceModels({store,links:serviceLinks});await serviceModels.synchronize();
-  const memoryRuntime = memoryRuntimeOptions.runtime ?? await createMemobaseRuntime({ ...memoryRuntimeOptions, directory: path.join(path.resolve(dataDir), 'memobase-runtime') });
-  const memory = memoryOptions.service ?? await createMemoryService({ ...memoryOptions, dataDir: path.resolve(dataDir), instanceId: state.instanceId, runtime: memoryRuntime, scopeForUser: userId => { const user = state.users.find(item => item.id === userId && !item.disabled); if (!user) throw failure(401, '记忆账号已停用或不存在。'); return { instanceId: state.instanceId, userId }; } });
+  const memoryModels=await createMemoryModels({dataDir:path.resolve(dataDir),getUser:id=>state.users.find(u=>u.id===id),getScope:id=>memory.contextScope(id),choices:id=>state.providers.flatMap(p=>{try{const v=memoryExtractionProvider(id,p.id);return[{id:p.id,name:p.name,model:v.model}];}catch{return[];}}),resolveProvider:memoryExtractionProvider});
+  const memoryRuntime = memoryRuntimeOptions.runtime ?? await createMemobaseRuntime({ ...memoryRuntimeOptions, directory: path.join(path.resolve(dataDir), 'memobase-runtime'),userModelsDirectory:memoryModels.directory });
+  const memory = memoryOptions.service ?? await createMemoryService({ ...memoryOptions, dataDir: path.resolve(dataDir), instanceId: state.instanceId, runtime: memoryRuntime, prepareProjection:(...args)=>memoryModels.prepare(...args),scopeForUser: userId => { const user = state.users.find(item => item.id === userId && !item.disabled); if (!user) throw failure(401, '记忆账号已停用或不存在。'); return { instanceId: state.instanceId, userId }; } });
   const historyArchives = historyOptions.service ?? await createHistoryArchives({...historyOptions,dataDir:path.resolve(dataDir),store,memory});
   const conversationMemory = createConversationMemory({memory,archives:historyArchives});
   const replyMemoryJobs = createReplyMemoryJobs({ ...memoryOptions.replyJobs, memory, authorize: (userId, input) => {
@@ -719,7 +721,16 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     requireCurrentAuth(req);
     if (Object.keys(req.body).some(key => !bodyKeys.includes(key)) || Object.keys(req.query).some(key => !queryKeys.includes(key))) throw failure(400, '记忆请求包含不支持的字段。');
   };
-  const memoryStatus = async req => ({ ...await memory.status(req.user.id, { admin: isAdministrator(req.user) }), ...(isAdministrator(req.user) ? { replyJobs: replyMemoryJobs.status() } : {}) });
+  function memoryExtractionProvider(userId,providerId){
+    const user=state.users.find(u=>u.id===userId&&!u.disabled);if(!user)throw failure(403,'记忆账号不可用。');
+    const configured=state.providers.find(p=>p.id===providerId&&canUseProvider(user,p.id));
+    const candidate=configured&&serviceModels.forProtocol('chat',{model:configured.model});
+    const harbor=candidate&&(!Array.isArray(candidate.capabilities?.inputModalities)||candidate.capabilities.inputModalities.includes('text'))&&(!Array.isArray(candidate.capabilities?.outputModalities)||candidate.capabilities.outputModalities.includes('text'))?candidate:undefined;
+    const provider=harbor??(configured&&!serviceModels.isManaged(configured.id)?configured:undefined);
+    if(!provider?.apiKey||!['responses','chat-completions'].includes(configured?.protocol))throw failure(403,'请选择已授权且支持 Chat Completions 的 API 模型。');
+    return provider;
+  }
+  const memoryStatus = async req => ({ ...await memory.status(req.user.id, { admin: isAdministrator(req.user) }),extraction:memoryModels.status(req.user.id), ...(isAdministrator(req.user) ? { replyJobs: replyMemoryJobs.status() } : {}) });
   app.get('/api/memory/status', async (req, res) => {
     memoryRequest(req); const value = await memoryStatus(req); requireCurrentAuth(req); res.json({ memory: value });
   });
@@ -753,6 +764,11 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   });
   app.post('/api/memory/flush', async (req, res) => {
     memoryRequest(req); await memory.sync(req.user.id); requireCurrentAuth(req); res.json({ memory: await memoryStatus(req) });
+  });
+  app.patch('/api/memory/model',async(req,res)=>{
+    memoryRequest(req,['providerId','concurrency']);requireCurrentAuth(req);
+    const extraction=await memoryModels.select(req.user.id,req.body);requireCurrentAuth(req);
+    res.json({extraction,memory:await memoryStatus(req)});
   });
   app.patch('/api/memory/config', async (req, res) => {
     memoryRequest(req, ['providerId', 'enabled', 'baseUrl', 'apiKey']); requireAdmin(req.user);
@@ -1675,7 +1691,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     // foreground response or execution lock, and cancellation guards late writes.
     await replyMemoryJobs.close();
     for (const service of [cloudDocker,serviceModels,serviceLinks]) results.push(...await Promise.allSettled([service.close()]));
-    results.push(...await Promise.allSettled([archiveStop,historyArchives.close(),memory.close()]));
+    results.push(...await Promise.allSettled([archiveStop,historyArchives.close(),memory.close(),memoryModels.close()]));
     results.push(...await Promise.allSettled([memoryRuntime.close()]));
     let saveError;
     try { await store.queue; } catch (error) { saveError = error; }

@@ -25,6 +25,7 @@ const runtimeMessages = new Set(MEMOBASE_RUNTIME_PUBLIC_MESSAGES);
 const runtimeStatus = value => {
   const state = runtimeStates.has(value.state) ? value.state : 'error';
   const result = { supported: value.supported === true, prepared: value.prepared === true, configured: value.configured === true, state, running: value.running === true && state === 'running', autoStart: value.autoStart !== false, needsModel: value.needsModel === true || value.configured === false };
+  if (typeof value.extractionModel === 'string' && value.extractionModel.length <= 160 && !/[\x00-\x1f\x7f]/.test(value.extractionModel)) result.extractionModel = value.extractionModel;
   if (['win32','linux','darwin','freebsd','openbsd','aix','sunos','android'].includes(value.platform)) result.platform = value.platform;
   if (['x64','arm64','ia32','arm','ppc64','riscv64','s390x','mipsel','mips','loong64'].includes(value.arch)) result.arch = value.arch;
   if (typeof value.version === 'string' && /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]{1,40})?$/.test(value.version)) result.version = value.version;
@@ -68,7 +69,7 @@ export function memobaseProjectionUserId(instanceId, userId, epoch) {
   return epoch === 1 ? memobaseUserId(instanceId,userId) : scopedUuid(JSON.stringify([instanceId,userId,{ epoch }]));
 }
 
-export async function createMemoryService({ dataDir, instanceId, runtime, fetchImpl = globalThis.fetch, clock = Date.now, autoStart = true, scopeForUser, autoPoll = true, syncIntervalMs = 30000, closeGraceMs = 1000 }) {
+export async function createMemoryService({ dataDir, instanceId, runtime, fetchImpl = globalThis.fetch, clock = Date.now, autoStart = true, scopeForUser, prepareProjection, autoPoll = true, syncIntervalMs = 30000, closeGraceMs = 1000 }) {
   if (!validIdentity(instanceId) || typeof dataDir !== 'string') throw fail(400, 'MEMORY_INVALID_SCOPE');
   await mkdir(dataDir, { recursive: true, mode: 0o700 });
   const directory = path.join(await realpath(dataDir), 'memory');
@@ -253,6 +254,7 @@ export async function createMemoryService({ dataDir, instanceId, runtime, fetchI
     if (!await current()) return;
     const epoch = state.value.epoch;
     const upstreamUserId = memobaseProjectionUserId(state.value.scope.instanceId,state.value.scope.userId,epoch);
+    if(prepareProjection){await prepareProjection(state.value.localUserId,{upstreamUserId,epoch});if(!await current())return;}
     try { await resetProjection(state, client, epoch); if (!await current()) return; await client.ensureUser(upstreamUserId, { signal }); }
     catch (error) {
       if (!await current()) return;
@@ -470,7 +472,8 @@ export async function createMemoryService({ dataDir, instanceId, runtime, fetchI
       else if (remote && !value.connected && value.context) result.mode = 'cached';
       result.deletionPending = value.needsReset;
       if (config.blockedUserId === userId) { result.mode = 'remote-auth-required'; result.connected = false; result.error = 'MEMORY_REMOTE_AUTH_REQUIRED'; }
-      if (admin) { result.baseUrl = config.baseUrl; result.hasApiKey = Boolean(config.apiKey); try { const status = await runtime?.status?.(); if (object(status)) result.runtime = runtimeStatus(status); } catch {} }
+      if (admin) { result.baseUrl = config.baseUrl; result.hasApiKey = Boolean(config.apiKey); }
+      try { const status = await runtime?.status?.(); if (object(status)) { const safe = runtimeStatus(status); if ((!remote || value.fallbackActive) && safe.extractionModel) result.extractionModel = safe.extractionModel; if (admin) result.runtime = safe; } } catch {}
       return result;
     },
     async getContext(userId, { signal } = {}) {

@@ -561,7 +561,7 @@ test('administrator runtime status preserves the actual manager shape and ordina
   assert.deepEqual(status.runtime,{ supported: true,prepared: false,configured: false,state: 'stopped',running: false,autoStart: true,needsModel: true,platform: 'linux',arch: 'arm64',version: '0.0.42',port: 8019,error: '' });
   await manager.configureModel({ baseUrl: 'https://provider.example.test/v1',apiKey: 'synthetic-private-provider-key',model: 'synthetic-model' });
   status = await f.service.status('one',{ admin: true }); assert.equal(status.runtime.configured,true); assert.equal(status.runtime.needsModel,false); assert.equal(status.runtime.state,'stopped');
-  assert.equal(Object.hasOwn(await f.service.status('one'),'runtime'),false); assert.equal(invoked,0); assert.doesNotMatch(JSON.stringify(status),/synthetic-private-provider-key|available|installed/);
+  const ordinary=await f.service.status('one');assert.equal(Object.hasOwn(ordinary,'runtime'),false);assert.equal(ordinary.extractionModel,'synthetic-model');assert.doesNotMatch(JSON.stringify(ordinary),/synthetic-private-provider-key|provider\.example/); assert.equal(invoked,0); assert.doesNotMatch(JSON.stringify(status),/synthetic-private-provider-key|available|installed/);
 });
 
 test('runtime status exposes only validated public metadata and fixed known errors', async t => {

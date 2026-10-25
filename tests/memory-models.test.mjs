@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm,readFile} from 'node:fs/promises';
+import path from 'node:path';
+import {tmpdir} from 'node:os';
+import {randomUUID} from 'node:crypto';
+import {createMemoryModels} from '../server/memory-models.mjs';
+import {memobaseProjectionUserId} from '../server/memory-service.mjs';
+test('per-account authorized model selection, restart, revoked permissions and old epochs stay isolated',async t=>{
+ const dataDir=await mkdtemp(path.join(tmpdir(),'petpal-models-'));t.after(()=>rm(dataDir,{recursive:true,force:true}));
+ const a=randomUUID(),b=randomUUID(),providerId=randomUUID(),epochs={[a]:1,[b]:1};let authorized=true;
+ const p={id:providerId,name:'Qwen',model:'qwen',baseUrl:'http://private.invalid/v1',apiKey:'private-fixture-key'};
+ const options={dataDir,getUser:id=>[a,b].includes(id)?{id}:null,choices:id=>id===a&&authorized?[p]:[],resolveProvider(id,pid){if(id!==a||pid!==providerId||!authorized)throw Error('forbidden');return p;},getScope:async id=>({enabled:true,epoch:epochs[id],scope:{instanceId:'server',userId:id}}),refreshMs:0};
+ let service=await createMemoryModels(options);t.after(()=>service.close());
+ await assert.rejects(service.select(b,{providerId,concurrency:3}));assert.equal(service.status(b).providerId,null);
+ await service.select(a,{providerId,concurrency:3});let file=JSON.parse(await readFile(path.join(service.directory,'routes.json'))),uid=memobaseProjectionUserId('server',a,1);
+ assert.equal(file.routes[uid].provider.model,'qwen');assert.equal(file.routes[uid].concurrency,3);assert.doesNotMatch(JSON.stringify(service.status(a)),/private-fixture-key|private.invalid/);assert.equal(service.status(b).model,null);
+ await service.close();service=await createMemoryModels(options);assert.equal(service.status(a).providerId,providerId);
+ authorized=false;await service.refresh();file=JSON.parse(await readFile(path.join(service.directory,'routes.json')));assert.equal(file.routes[uid].allowed,false);assert.equal(service.status(a).available,false);
+ authorized=true;epochs[a]=2;await service.refresh();file=JSON.parse(await readFile(path.join(service.directory,'routes.json')));assert.equal(file.routes[uid].allowed,false);
+ const next=memobaseProjectionUserId('server',a,2);await service.prepare(a,{upstreamUserId:next,epoch:2});file=JSON.parse(await readFile(path.join(service.directory,'routes.json')));assert.equal(file.routes[uid],undefined);assert.equal(file.routes[next].provider.model,'qwen');
+ for(const value of [{concurrency:4},{concurrency:'3'},{apiKey:'x'},{providerId:'wrong'}])await assert.rejects(service.select(a,value));
+ await assert.rejects(service.prepare(b,{upstreamUserId:next,epoch:1}));
+});

@@ -150,3 +150,11 @@ test('the upstream empty memory scaffold displays the friendly empty state', asy
   const f=fixture({request:call=>call.path==='/memory/context'?{context:'<petpal_user_memory>\n---\n# 记忆\n除非用户有相关的需求，否则不要主动在对话中提到这些记忆.\n## 用户当前状态：\n- \n\n## 过去事件：\n\n---\n</petpal_user_memory>'}:undefined});t.after(()=>f.close());await f.flush();f.click('查看我的记忆');await f.flush();
   assert.match(f.text(),/还没有提炼好的记忆/);assert.doesNotMatch(f.text(),/petpal_user_memory|过去事件|除非用户/);
 });
+
+test('ordinary users select only an advertised extraction model and up to three model calls',async t=>{
+ const extraction={providerId:null,model:null,concurrency:3,maxConcurrency:3,available:true,providers:providers.slice(0,2)};
+ const f=fixture({status:{...initialStatus,extraction}});t.after(()=>f.close());await f.flush();
+ assert.ok(f.field('我的记忆提炼模型'));assert.equal(f.field('记忆模型请求并发').props.value,3);
+ f.change('我的记忆提炼模型',providers[1].id);f.change('记忆模型请求并发','2');f.submit();await f.flush();
+ const call=f.requests.find(c=>c.path==='/memory/model');assert.deepEqual(call.body,{providerId:providers[1].id,concurrency:2});assert.equal(f.requests.some(c=>c.path==='/memory/config'),false);
+});

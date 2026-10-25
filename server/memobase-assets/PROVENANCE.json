@@ -17,7 +17,8 @@
   "files": {
     "env.py": "d098794f0d77e9af1ced2f7fa937c4505cc11f061e20940eb6987e7e73264da8",
     "open_telemetry.py": "1c8279f5313bfb906fc65f144bb3acbf090e308ee435f01a757bede6bf48c4c4",
-    "LICENSE": "fa7f07ac6c5f017206e25c3ccced5949e2878de50055ca2495485bd8bece01d7"
+    "LICENSE": "fa7f07ac6c5f017206e25c3ccced5949e2878de50055ca2495485bd8bece01d7",
+    "petpal_runtime.py": "a8e21289be45dee678dce4304cc479889239b4acf815ae25116c5ab92d58b516"
   },
   "patches": [
     {
@@ -31,6 +32,10 @@
       "upstreamPath": "src/server/api/memobase_server/telemetry/open_telemetry.py",
       "upstreamSha256": "e9952d044794c574760bf4c4472dc3c454f409dcec8b9819da162b5527692303",
       "change": "No-op metrics implementation; no Prometheus listener or OpenTelemetry provider."
+    },
+    {
+      "file": "petpal_runtime.py",
+      "description": "PetPal-owned account model ContextVar adapter and global/per-account LLM permits; upstream database/profile update order unchanged."
     }
   ]
 }
