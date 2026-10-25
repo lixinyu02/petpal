@@ -2,7 +2,7 @@
 
 - Date: 2026-10-25
 - Complexity: L2
-- Status: implementation
+- Status: completed (web/backend Harbor; PC package work deferred by user)
 
 ## 目标与授权范围
 
