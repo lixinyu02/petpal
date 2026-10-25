@@ -1,6 +1,7 @@
 const memory=new Map(),prefix='petpal.cloud-create.';
 const uuid=value=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-const valid=value=>value&&uuid(value.requestId)&&value.body&&typeof value.body.name==='string'&&value.body.name.length<=80&&['local','platform'].includes(value.body.source)&&['desktop','agent'].includes(value.body.bundle)&&Object.keys(value.body).every(key=>['name','source','bundle','nodeId'].includes(key))&&(value.body.nodeId===undefined||typeof value.body.nodeId==='string'&&value.body.nodeId.length<=160);
+const resources=r=>r===undefined||r&&typeof r==='object'&&!Array.isArray(r)&&Object.keys(r).every(k=>['cpus','memoryMiB','pids'].includes(k))&&Number.isFinite(r.cpus)&&r.cpus>=.1&&r.cpus<=128&&Number.isSafeInteger(r.memoryMiB)&&r.memoryMiB>=256&&r.memoryMiB<=1048576&&(r.pids===undefined||Number.isSafeInteger(r.pids)&&r.pids>=32&&r.pids<=8192);
+const valid=value=>value&&uuid(value.requestId)&&value.body&&typeof value.body.name==='string'&&value.body.name.length<=80&&resources(value.body.resources)&&['local','platform'].includes(value.body.source)&&['desktop','agent'].includes(value.body.bundle)&&Object.keys(value.body).every(key=>['name','source','bundle','nodeId','resources'].includes(key))&&(value.body.nodeId===undefined||typeof value.body.nodeId==='string'&&value.body.nodeId.length<=160);
 const storage=()=>{try{return globalThis.window?.localStorage;}catch{return undefined;}};
 const copy=value=>value?JSON.parse(JSON.stringify(value)):null;
 export function pendingCloudCreate(scope){

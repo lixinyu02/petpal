@@ -112,7 +112,7 @@ test('create freezes platform node and bundle, and synchronous duplicate submits
   const gate=deferred(),f=fixture('cloud',{request:call=>call.path==='/cloud-docker'&&call.method==='POST'?gate.promise:undefined});t.after(()=>{gate.resolve({});f.close();});await f.flush();
   f.click('新建环境');f.change('环境名称','写作工作区');f.change('Docker 运行位置','platform');f.change('运行节点','node-a');f.change('环境类型','agent');
   const submit=f.find('form').props.onSubmit;submit({preventDefault(){}});submit({preventDefault(){}});f.render();
-  const writes=f.requests.filter(call=>call.method==='POST');assert.equal(writes.length,1);const {requestId,...body}=clone(writes[0].body);assert.match(requestId,/^[a-f0-9-]{36}$/);assert.deepEqual(body,{name:'写作工作区',source:'platform',bundle:'agent',nodeId:'node-a'});
+  const writes=f.requests.filter(call=>call.method==='POST');assert.equal(writes.length,1);const {requestId,...body}=clone(writes[0].body);assert.match(requestId,/^[a-f0-9-]{36}$/);assert.deepEqual(body,{name:'写作工作区',source:'platform',bundle:'agent',resources:{cpus:2,memoryMiB:4096},nodeId:'node-a'});
   gate.resolve({});await f.flush();assert.equal(f.calls.filter(call=>call==='changed').length,1);
 });
 
@@ -236,4 +236,15 @@ test('desktop URLs reject arbitrary proxy destinations, expired tickets and malf
   assert.throws(()=>remoteDesktopUrl('https://petpal.example',own.id,{...ticket,expiresAt:Date.now()-1}));
   assert.throws(()=>remoteDesktopUrl('https://petpal.example',own.id,{...ticket,ticket:'credential?token=forever'}));
   assert.throws(()=>remoteDesktopUrl('https://user:password@petpal.example',own.id,ticket));
+});
+
+test('K3s selection forces CLI, submits resources, and unready nodes remain visibly blocked',async t=>{
+ const node={id:'k3s-node',name:'K3s',available:true,ready:false,runtimeKind:'kubernetes',message:'K3s 节点待配置',kubernetesConstraints:{pidsLimit:256}};
+ const f=fixture('cloud',{catalog:{sources,nodes:[node]},hosts:[]});t.after(()=>f.close());await f.flush();
+ f.click('新建环境');f.change('Docker 运行位置','platform');f.change('运行节点','k3s-node');
+ assert.equal(f.field('环境类型').props.value,'agent');assert.equal(f.button('创建环境').props.disabled,true);assert.match(f.text(),/K3s 节点待配置/);
+ f.submit();await f.flush();assert.equal(f.requests.filter(c=>c.method==='POST').length,0);
+ const ready=fixture('cloud',{catalog:{sources,nodes:[{...node,ready:true}]},hosts:[],identity:{userId:'k3s-user'}});t.after(()=>ready.close());await ready.flush();
+ ready.click('新建环境');ready.change('Docker 运行位置','platform');ready.change('运行节点','k3s-node');ready.change('CPU 核数','1');ready.change('内存（MiB）','1024');ready.submit();await ready.flush();
+ const post=ready.requests.find(c=>c.method==='POST');assert.equal(post.body.bundle,'agent');assert.deepEqual(clone(post.body.resources),{cpus:1,memoryMiB:1024});
 });
