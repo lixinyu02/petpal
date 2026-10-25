@@ -7,9 +7,15 @@ export function mergeConversationOrganization(before, incoming, preserve) {
   return {...snapshot,title:before.title,customTitle:before.customTitle,projectId:before.projectId??null,archivedAt:before.archivedAt??null};
 }
 
-export function mergeOrganizationSnapshot(before, incoming, preserve, deletedIds) {
+export function mergeOrganizationSnapshot(before, incoming, preserve, deletedIds, pendingChatIds=new Set()) {
   const previous=new Map(before.conversations.map(item=>[item.id,item]));
-  return {...incoming,...(preserve?{projects:before.projects??[]} : {}),conversations:incoming.conversations.filter(item=>!deletedIds.has(item.id)).map(item=>mergeConversationOrganization(previous.get(item.id),item,preserve))};
+  const conversations=incoming.conversations.filter(item=>!deletedIds.has(item.id)).map(item=>{
+    const prior=previous.get(item.id),snapshot=mergeConversationOrganization(prior,item,preserve);
+    return prior&&prior.mode==='chat'&&pendingChatIds.has(item.id)?{...snapshot,messages:prior.messages,assistantTasks:prior.assistantTasks}:snapshot;
+  });
+  const ids=new Set(conversations.map(item=>item.id));
+  for(const prior of before.conversations)if(prior.mode==='chat'&&pendingChatIds.has(prior.id)&&!deletedIds.has(prior.id)&&!ids.has(prior.id))conversations.push(prior);
+  return {...incoming,...(preserve?{projects:before.projects??[]} : {}),conversations};
 }
 
 /** Project classification never changes Agent's filesystem working directory. */
