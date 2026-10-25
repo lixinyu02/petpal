@@ -3,7 +3,7 @@
 - Date: 2026-10-25
 - Complexity: L2
 - Related design: 2026-10-25-memory-edit-design.md
-- Current status: issue-3 in_progress
+- Current status: completed
 
 ## issue-1
 
@@ -25,7 +25,7 @@
 - 验收标准: 编辑/取消/保存、冲突保留草稿、换账号保护和手机布局通过
 - 状态: completed
 - 验证方式: 22 项实际 TSX 处理函数测试通过；取消零写入、失败保留草稿、不自动重试、账号切换、成功后列表失败均覆盖。Chrome 合成账号编辑/保存/实际召回通过，手动标记和未改条目保留，桌面截图已检查。校准 CSS 412×960：documentWidth=407、编辑区 right=338，无横向溢出；该尺寸截图通道超时，无实体机验收。TypeScript 通过。
-- commit: 本 issue 提交
+- commit: 703a423
 
 ## issue-3
 
@@ -34,6 +34,6 @@
 - 范围: 记忆编辑和后台线程的正式网页交付
 - 依赖: issue-2
 - 验收标准: 网页和后端生效，用户数据及下载保留；不改真实记忆、不暂停提炼
-- 状态: in_progress
-- 验证方式: Chrome 合成数据验收、摘要读回、受控服务重载
-- commit: pending
+- 状态: completed
+- 验证方式: 606 通过、1 条条件跳过；Chrome 合成编辑保存和实际召回通过；真实 Memobase 独立 UID 通过。后端受控重载、97 个公网资源摘要、用户/权限/旧记忆事件/63 个下载的保留校验通过。详见 memory-edit-acceptance.md。
+- commit: 本 issue 提交
