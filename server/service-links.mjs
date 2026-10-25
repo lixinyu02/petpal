@@ -201,10 +201,11 @@ export async function createServiceLinks({ dataDir, fetchImpl = globalThis.fetch
   function lock(operation) {
     const job = serial.then(() => { ensureOpen(); return operation(); }); serial = job.catch(() => {}); return job;
   }
-  async function upstream(kind, entry, suffix, { method = 'GET', body, signal, authorized = true } = {}) {
+  async function upstream(kind, entry, suffix, { method = 'GET', body, signal, authorized = true, timeoutMs=15000 } = {}) {
     ensureOpen();
     if (typeof suffix !== 'string' || !suffix.startsWith('/') || suffix.startsWith('//') || suffix.includes('://') || /[\\\x00-\x20#]/.test(suffix) || decodeURIComponent(suffix).split(/[/?]/).includes('..')) throw fail(400, 'SERVICE_LINK_INVALID_PATH');
-    const controller = new AbortController(); active.add(controller); const timeout = setTimeout(() => controller.abort(), 15000);
+    if(!Number.isSafeInteger(timeoutMs)||timeoutMs<1000||timeoutMs>180000)throw fail(400,'SERVICE_LINK_INVALID_TIMEOUT');
+    const controller = new AbortController(); active.add(controller); const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     try {
       const headers = { Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) };

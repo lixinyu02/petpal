@@ -3,6 +3,7 @@ import { PassThrough, Writable } from 'node:stream';
 import { randomUUID, createHash } from 'node:crypto';
 import WebSocket from 'ws';
 import {platformNode, platformOptions} from './cloud-platform-options.mjs';
+import {platformObservation} from './cloud-platform-observation.mjs';
 
 const failure = (message, code = 'cloud_docker_platform_unavailable') => Object.assign(new Error(message), { status: 409, code });
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -18,7 +19,7 @@ export function createPlatformDocker(serviceLinks, { socketFactory = (url, optio
   }
   async function call(record, operation, payload = {}, requestId = randomUUID()) {
     await credential(record);
-    return serviceLinks.request('docker-platform', `/v1/projects/${record.projectId}/call`, { method: 'POST', expectedClientId: record.clientId, body: { owner: owner(record), operation, payload, requestId } });
+    return serviceLinks.request('docker-platform', `/v1/projects/${record.projectId}/call`, { method: 'POST', expectedClientId: record.clientId, timeoutMs:['project.start','project.stop'].includes(operation)?120000:15000,body: { owner: owner(record), operation, payload, requestId } });
   }
   async function stream(record, sessionId) {
     const connection = await credential(record);
@@ -81,7 +82,7 @@ export function createPlatformDocker(serviceLinks, { socketFactory = (url, optio
       await credential(record);
       if(record.runtimeKind){const current=await this.prepare(record,record.resources);if(current.runtimeKind!==record.runtimeKind||JSON.stringify(current.resources)!==JSON.stringify(record.resources))throw failure('节点运行时或固定进程限制已变化，原申请已保留。','cloud_docker_identity_changed');}
       const requestedNodeId = Object.hasOwn(record,'requestedNodeId') ? record.requestedNodeId : record.nodeId;
-      const reply = await serviceLinks.request('docker-platform', '/v1/projects', { method: 'POST', expectedClientId: record.clientId, body: { owner: owner(record), hostId: requestedNodeId || null, projectId: record.projectId, name: record.name, bundle: bundle(record), resources: record.resources ?? {}, network: 'public', requestId: record.requestId } });
+      const reply = await serviceLinks.request('docker-platform', '/v1/projects', { method: 'POST', expectedClientId: record.clientId, timeoutMs:120000,body: { owner: owner(record), hostId: requestedNodeId || null, projectId: record.projectId, name: record.name, bundle: bundle(record), resources: record.resources ?? {}, network: 'public', requestId: record.requestId } });
       if (reply.id !== record.projectId || record.nodeId && reply.hostId !== record.nodeId || !UUID.test(reply.hostId)) throw failure('平台创建回执不匹配，已保留原请求供恢复。', 'cloud_docker_identity_changed');
       return { ...reply, nodeId: reply.hostId };
     },
@@ -93,9 +94,9 @@ export function createPlatformDocker(serviceLinks, { socketFactory = (url, optio
         const host=result.hosts?.find(h=>h.id===record.nodeId), node=host&&platformNode(host);
         if(!node||node.runtimeKind!=='kubernetes'||node.kubernetesConstraints.pidsLimit!==record.resources?.pids||reply.resources?.pids!==record.resources?.pids)throw failure('平台运行时身份或固定进程限制已变化。','cloud_docker_identity_changed');
       }else if(record.runtimeKind==='docker'&&reply.runtimeKind&&reply.runtimeKind!=='docker')throw failure('平台运行时身份已变化。','cloud_docker_identity_changed');
-      return { state: reply.phase === 'running' && reply.dockerState !== 'stopped' ? 'running' : 'stopped', generation: JSON.stringify([reply.revision, reply.generation ?? '', reply.containerId ?? '', reply.observation?.startedAt ?? '']), desktop: record.bundle === 'desktop' && String(reply.desktopProtocol ?? '1') === '1', arch: 'x64' };
+      return platformObservation(reply,record);
     },
-    async action(record, action) { await this.inspect(record); await call(record, `project.${action}`); return this.inspect(record); },
+    async action(record, action) { const observed=await this.inspect(record); await call(record, `project.${action}`,{revision:observed.revision}); return this.inspect(record); },
     async stage(record, home, files) {
       const relative = home.replace(/^\/runtime\//, '');
       for (const [name, contents] of Object.entries(files)) {

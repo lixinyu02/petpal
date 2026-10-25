@@ -75,7 +75,7 @@ export async function createCloudDocker({ dataDir, serviceLinks, authorizeUser, 
   }
   async function observe(r) {
     const before = r.generation;
-    try { const observed = r.source === 'local' ? await local.inspect(r,state.instanceId) : await platform.inspect(r); r.state = observed.state; r.generation = observed.generation; r.desktopAvailable = observed.desktop === true; delete r.errorCode; }
+    try { const observed = r.source === 'local' ? await local.inspect(r,state.instanceId) : await platform.inspect(r); r.state = observed.state; r.generation = observed.generation; r.desktopAvailable = observed.desktop === true; if(observed.state==='running'){delete r.creationPending;delete r.errorCode;}else if(!r.creationPending)delete r.errorCode; }
     catch (error) { r.state = 'offline'; r.desktopAvailable = false; r.errorCode = error.code === 'cloud_docker_identity_changed' ? error.code : 'cloud_docker_unavailable'; }
     if(r.executionUncertain){r.state='unknown';r.desktopAvailable=false;r.errorCode='execution_unknown';}
     r.updatedAt = stamp();

@@ -284,6 +284,13 @@ test('private request cannot send credential to another origin or traversal endp
   for (const suffix of ['https://evil.example', '//evil.example', '/v1/../bad', '/v1/%2e%2e/bad']) await assert.rejects(h.service.request(DP, suffix), /INVALID_PATH/);
   assert.deepEqual(await h.service.request(DP, '/v1/hosts'), { hosts: [] });
 });
+
+test('platform deadlines are explicitly bounded and invalid overrides never send a request',async t=>{
+ const h=await setup(t);await h.service.pair(DP,{baseUrl:'http://localhost:9780',code:code(DP)});
+ const before=h.f.calls.length;
+ for(const timeoutMs of [0,999,180001,Infinity,'120000'])await assert.rejects(h.service.request(DP,'/v1/hosts',{timeoutMs}),{code:'SERVICE_LINK_INVALID_TIMEOUT'});
+ assert.equal(h.f.calls.length,before);assert.deepEqual(await h.service.request(DP,'/v1/hosts',{timeoutMs:120000}),{hosts:[]});
+});
 test('fixed Docker protocol error codes remain usable without reflecting diagnostic bodies', async t => {
   const h = await setup(t); await h.service.pair(DP, { baseUrl: 'http://localhost:9780', code: code(DP) });
   h.f.setBroken(() => new Response(JSON.stringify({ errorCode: 'file_exists', message: 'secret native path' }), { status: 409 }));

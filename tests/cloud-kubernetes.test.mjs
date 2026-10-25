@@ -7,6 +7,7 @@ import path from 'node:path';
 import {platformNode,platformOptions,cloudResources} from '../server/cloud-platform-options.mjs';
 import {createPlatformDocker} from '../server/cloud-docker-platform.mjs';
 import {createCloudDocker} from '../server/cloud-docker.mjs';
+import {platformObservation} from '../server/cloud-platform-observation.mjs';
 const host=()=>({id:randomUUID(),name:'K3s 专用节点',status:'online',runtimeKind:'kubernetes',templates:['full'],kubernetesConstraints:{pidsLimit:256,pidsConfigured:true,pidsVerifiedAtCreate:true,persistentStorage:true,graphical:false,gpu:false,publishedPorts:false}});
 test('bounded K3s metadata and resource defaults retain the fixed PID ceiling',()=>{
  const h=host();h.secret='never-copy';const n=platformNode(h);
@@ -15,6 +16,21 @@ test('bounded K3s metadata and resource defaults retain the fixed PID ceiling',(
  for(const value of [{cpus:NaN},{cpus:'2'},{memoryMiB:255},{pids:true},{gpu:1}])assert.throws(()=>cloudResources(value),{status:400});
  for(const kind of ['unknown',false,''])assert.throws(()=>platformNode({...h,runtimeKind:kind}));
  assert.throws(()=>platformNode({...h,kubernetesConstraints:{...h.kubernetesConstraints,pidsConfigured:'true'}}));
+});
+
+test('creating and recovery phases cannot be reported as stopped or ready merely because pods exist',()=>{
+ const record={bundle:'desktop'};
+ for(const phase of ['creating','recovery_required','pending']){const value=platformObservation({phase,dockerState:'unknown',revision:8},record);assert.equal(value.state,phase==='creating'?'creating':'unknown');assert.equal(value.desktop,false);assert.equal(value.revision,8);}
+ assert.equal(platformObservation({phase:'running',dockerState:'unknown',revision:8},record).state,'unknown');
+ assert.equal(platformObservation({phase:'running',dockerState:'running',revision:8},record).state,'running');
+});
+
+test('platform lifecycle uses the latest inspected revision and a bounded cold-start deadline',async()=>{
+ const clientId=randomUUID(),r={clientId,userId:randomUUID(),nodeId:randomUUID(),bundle:'agent',projectId:randomUUID(),requestId:randomUUID(),name:'synthetic'},calls=[];
+ const driver=createPlatformDocker({credential:async()=>({clientId}),request:async(_kind,route,options)=>{calls.push({route,options});if(route==='/v1/projects')return{id:r.projectId,hostId:r.nodeId};return{id:r.projectId,hostId:r.nodeId,revision:17,bundle:'full',phase:'stopped'};}});
+ await driver.create(r);await driver.action(r,'start');
+ assert.equal(calls.find(c=>c.route==='/v1/projects').options.timeoutMs,120000);
+ const start=calls.find(c=>c.options.body?.operation==='project.start');assert.deepEqual(start.options.body.payload,{revision:17});assert.equal(start.options.timeoutMs,120000);
 });
 test('unready and unsupported K3s requests cannot be admitted',()=>{
  const h=host(),r={nodeId:h.id,bundle:'agent'},n=platformNode(h);
