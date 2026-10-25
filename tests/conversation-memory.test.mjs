@@ -7,6 +7,13 @@ test('ordinary memory remains unchanged when there is no imported evidence',asyn
  const service=createConversationMemory({memory,archives:{getContext:async()=>''}});
  assert.equal(await service.getContext('one'),content);assert.deepEqual(await service.status(),{enabled:true});
 });
+
+test('manual correction revisions fence a combined memory response even when forget count is unchanged',async()=>{
+ let correctionRevision=1;
+ const memory={contextScope:async()=>({enabled:true,epoch:1,forgetRevision:1,correctionRevision,scope:{userId:'one'}}),getContext:async()=>{correctionRevision++;return 'stale corrected fact';}};
+ const result=await createConversationMemory({memory,archives:{getContext:async()=>''}}).getContext('one');
+ assert.equal(result,'');
+});
 test('profile and archive receive the same current account/query/signal and bounded dated context',async()=>{
  const calls=[],controller=new AbortController(),options={query:'my latest preference',signal:controller.signal};
  const service=createConversationMemory({memory:{getContext:async(...args)=>{calls.push(args);return 'p'.repeat(6000);}},archives:{getContext:async(...args)=>{calls.push(args);return 'dated-self-evidence '.repeat(400);}}});

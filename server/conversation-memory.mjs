@@ -12,7 +12,7 @@ export function createConversationMemory({memory,archives}) {
     try{
       const value=await Promise.race([Promise.resolve().then(()=>read.call(memory,userId)),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Memory status unavailable')),200);})]);
       if(value?.enabled!==true)throw new Error('Memory disabled');
-      return JSON.stringify([value.epoch??null,value.bindingRevision??value.revision??null,value.forgetRevision??0,...['instanceId','userId','memobaseUserId'].map(key=>value.scope?.[key]??null)]);
+      return JSON.stringify([value.epoch??null,value.bindingRevision??value.revision??null,value.forgetRevision??0,value.correctionRevision??0,...['instanceId','userId','memobaseUserId'].map(key=>value.scope?.[key]??null)]);
     }finally{clearTimeout(timer);}
   };
   return {

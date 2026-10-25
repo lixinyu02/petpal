@@ -33,6 +33,7 @@ async function fixture(t, options = {}) {
   const memory = {
     async entries(userId,value){memoryCalls.push({name:'entries',userId,value});return{epoch:1,entries:[],total:0,nextCursor:null,pending:0};},
     async forgetEntries(userId,value,control){await control.authorize();memoryCalls.push({name:'forgetEntries',userId,value});return{epoch:1,accepted:value.entries.length,pending:1};},
+    async editEntry(userId,value,control){await control.authorize();memoryCalls.push({name:'editEntry',userId,value});return{epoch:1,entry:value,correctionRevision:1};},
     async status(userId, value) { memoryCalls.push({ name: 'status', userId, value }); return { enabled: true, scope: { instanceId: store.state.instanceId, userId }, ...(value?.admin ? { runtime: await runtime.status() } : {}) }; },
     async getContext(userId, value) { memoryCalls.push({ name: 'context', userId, value }); if (options.slowMemory) return new Promise(() => {}); return `账号${userId}喜欢轻音乐`; },
     async remember(userId, value, control) { writes.push({ userId, ...value, control }); if (options.journalGate) await options.journalGate.promise; await control?.authorize?.(); if (options.journalError) throw new Error('Synthetic journal failure'); committed.push({ userId, id: value.id }); return { queued: true }; },
@@ -71,6 +72,11 @@ test('memory entry routes require a session, use only its account, reject extra 
  assert.equal((await f.request('/memory/entries/delete',{token:one.token,method:'POST',body:{...value,userId:two.id}})).status,400);
  assert.equal((await f.request('/memory/entries/delete',{token:one.token,method:'POST',body:value})).status,202);
  assert.deepEqual(f.memoryCalls.at(-1),{name:'forgetEntries',userId:one.id,value});
+ const edit={epoch:1,...value.entries[0],content:'修正后的事实'};
+ assert.equal((await f.request('/memory/entries/edit',{token:null,method:'PATCH',body:edit})).status,401);
+ assert.equal((await f.request('/memory/entries/edit',{token:one.token,method:'PATCH',body:{...edit,userId:two.id}})).status,400);
+ const saved=await f.request('/memory/entries/edit',{token:one.token,method:'PATCH',body:edit});assert.equal(saved.status,200);assert.equal(saved.headers.get('cache-control'),'no-store');
+ assert.deepEqual(f.memoryCalls.at(-1),{name:'editEntry',userId:one.id,value:edit});
 });
 
 test('imported self evidence reaches Chat and Agent only for the authenticated account and preserves temporal precedence', async t => {

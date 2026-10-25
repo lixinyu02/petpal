@@ -15,7 +15,7 @@ async function fixture(t,{fetchExtra,instance='entries-central',autoStart=false}
   const u=new URL(url),p=u.pathname.replace('/api/v1','');calls.push({path:p,method:options.method||'GET'});
   if(gate.offline)throw Error('private-model-key');
   let m=p.match(/^\/users\/profile\/([a-f0-9-]+)(?:\/([a-f0-9-]+))?$/);
-  if(m){const rows=profiles.get(m[1])||[];if(options.method==='DELETE'){profiles.set(m[1],rows.filter(e=>e.id!==m[2]));return ok(null);}return ok({profiles:rows});}
+  if(m){const rows=profiles.get(m[1])||[];if(options.method==='DELETE'){profiles.set(m[1],rows.filter(e=>e.id!==m[2]));return ok(null);}const snapshot=structuredClone(rows),hold=gate.nextProfiles;gate.nextProfiles=null;await hold?.promise;return ok({profiles:snapshot});}
   m=p.match(/^\/users\/buffer\/capacity\/([a-f0-9-]+)\/chat$/);if(m)return ok({ids:u.searchParams.get('status')==='processing'&&gate.busy?[randomUUID()]:[]});
   if(/^\/users\/buffer\//.test(p))return ok(null);
   if(/^\/users\/context\//.test(p)){if(gate.context)await gate.context.promise;return ok({context:'旧摘要里有喜欢咖啡和喜欢绿茶，旧事件里也有喜欢咖啡。'});}
@@ -115,4 +115,91 @@ test('central deletion markers reach a PC and filter identical content with diff
  centralOffline=true;await pc.service.sync('local');
  const result=await pc.service.getContext('local');assert.doesNotMatch(result,/咖啡/);assert.match(result,/绿茶/);
  await assert.rejects(pc.service.entries('local'),{code:'MEMORY_UNAVAILABLE'});
+});
+
+test('manual corrections survive extraction, restart and stale summaries while keeping dates and account isolation',async t=>{
+ const f=await fixture(t),[source,other]=f.add('one',entry('喜欢咖啡'),entry('喜欢绿茶'));f.add('two',entry('其他账号'));
+ const original=(await f.service.entries('one')).entries.find(e=>e.id===source.id),gate=deferred();f.gate.context=gate;
+ const late=f.service.getContext('one');for(let i=0;i<50&&!f.calls.some(c=>c.path.includes('/users/context/'));i++)await new Promise(r=>setImmediate(r));
+ f.gate.busy=true;
+ const result=await f.service.editEntry('one',{epoch:1,...select(original),content:'现在只喝白水'});
+ gate.resolve();assert.doesNotMatch(await late,/咖啡|旧摘要/);assert.match(await f.service.getContext('one'),/现在只喝白水/);
+ const corrected=(await f.service.entries('one')).entries.find(e=>e.id===source.id);assert.equal(corrected.createdAt,original.createdAt);assert.equal(corrected.manualRevision,1);assert.notEqual(corrected.fingerprint,original.fingerprint);
+ source.content='提炼重写旧咖啡偏好';source.updated_at='2026-10-25T00:00:00Z';
+ assert.equal((await f.service.entries('one')).entries.find(e=>e.id===source.id).content,corrected.content);
+ assert.equal((await f.service.entries('one')).entries.find(e=>e.id===other.id).content,other.content);
+ assert.equal((await f.service.entries('two')).entries.length,1);assert.equal(result.correctionRevision,1);
+ await f.service.close();
+ const restored=await createMemoryService({dataDir:f.directory,instanceId:f.instance,fetchImpl:f.fetchImpl,runtime:f.runtime,autoPoll:false,autoStart:false});t.after(()=>restored.close());
+ f.gate.offline=true;assert.match(await restored.getContext('one'),/现在只喝白水/);assert.doesNotMatch(await restored.getContext('one'),/提炼重写|咖啡/);
+});
+
+test('edit validation, optimistic conflicts, revoked sessions and same-snapshot concurrency never silently overwrite',async t=>{
+ const f=await fixture(t),[source]=f.add('one',entry('旧偏好'));f.add('two',entry('他人偏好'));
+ const original=(await f.service.entries('one')).entries[0],input={epoch:1,...select(original),content:'新偏好'};
+ for(const invalid of [{...input,userId:'two'},{...input,content:'  '},{...input,content:'x'.repeat(6001)}])await assert.rejects(f.service.editEntry('one',invalid),{code:'MEMORY_INVALID_EDIT'});
+ await assert.rejects(f.service.editEntry('one',input,{authorize:()=>false}),{code:'MEMORY_REVOKED'});
+ await assert.rejects(f.service.editEntry('two',input),{code:'MEMORY_ENTRY_NOT_FOUND'});
+ await assert.rejects(f.service.editEntry('one',{...input,epoch:2}),{code:'MEMORY_EPOCH_CONFLICT'});
+ source.content='提炼已变';await assert.rejects(f.service.editEntry('one',input),{code:'MEMORY_ENTRY_CHANGED'});
+ const latest=(await f.service.entries('one')).entries[0];f.gate.busy=true;
+ const writes=await Promise.allSettled(['手改 A','手改 B'].map(content=>f.service.editEntry('one',{epoch:1,...select(latest),content})));
+ assert.equal(writes.filter(e=>e.status==='fulfilled').length,1);assert.equal(writes.find(e=>e.status==='rejected').reason.code,'MEMORY_ENTRY_CHANGED');
+ assert.equal((await f.service.contextScope('one')).correctionRevision,1);
+ await assert.rejects(f.service.forgetEntries('one',{epoch:1,entries:[select(latest)]}),{code:'MEMORY_ENTRY_CHANGED'});
+});
+
+test('manual entries can be re-edited, deleted and cleared without reviving originals',async t=>{
+ const f=await fixture(t);f.add('one',entry('旧偏好'),entry('不变事实'));f.gate.busy=true;
+ const original=(await f.service.entries('one')).entries.find(e=>e.content==='旧偏好');
+ const first=await f.service.editEntry('one',{epoch:1,...select(original),content:'人工修正一'});
+ const second=await f.service.editEntry('one',{epoch:1,...select(first.entry),content:'人工修正二'});
+ assert.equal(second.correctionRevision,2);assert.equal(second.forgotten.length,1);assert.doesNotMatch(await f.service.getContext('one'),/人工修正一|旧偏好/);
+ assert.match(await f.service.getContext('one'),/人工修正二/);
+ await f.service.forgetEntries('one',{epoch:1,entries:[select(second.entry)]});
+ assert.equal((await f.service.entries('one')).total,1);assert.doesNotMatch(await f.service.getContext('one'),/人工修正|旧偏好/);
+ const snap=await f.service.exportSync('one');assert.equal(snap.corrections.length,0);assert.equal(snap.correctionRevision,3);
+ await f.service.clear('one');assert.equal((await f.service.contextScope('one')).correctionRevision,0);
+});
+
+test('a long manual fact is fully recalled and credential-like values are sanitized',async t=>{
+ const f=await fixture(t);f.add('one',entry('原文'));f.gate.busy=true;
+ const row=(await f.service.entries('one')).entries[0],content='事实'.repeat(2900)+'结尾事实';
+ await f.service.editEntry('one',{epoch:1,...select(row),content});assert.ok((await f.service.getContext('one')).includes(content));
+ const updated=(await f.service.entries('one')).entries[0];
+ const result=await f.service.editEntry('one',{epoch:1,...select(updated),content:'喜欢音乐；password=synthetic-password'});
+ assert.doesNotMatch(result.entry.content,/synthetic-password/);assert.match(result.entry.content,/已省略凭据/);
+});
+
+test('a delayed profile refresh before a second manual edit cannot commit old context',async t=>{
+ const f=await fixture(t);f.add('one',entry('原偏好'));f.gate.busy=true;
+ const original=(await f.service.entries('one')).entries[0],first=await f.service.editEntry('one',{epoch:1,...select(original),content:'修正一'});await f.service.sync('one');
+ const hold=deferred();f.gate.nextProfiles=hold;const pending=f.service.getContext('one');
+ for(let i=0;i<50&&f.gate.nextProfiles;i++)await new Promise(r=>setImmediate(r));
+ await f.service.editEntry('one',{epoch:1,...select(first.entry),content:'修正二'});hold.resolve();
+ assert.match(await pending,/修正二/);assert.doesNotMatch(await pending,/修正一|原偏好/);
+});
+
+test('PC correction sync preserves the newest revision through offline fallback and stale central snapshots',async t=>{
+ const central=await fixture(t),[source]=central.add('one',entry('旧偏好'),entry('不变事实'));central.gate.busy=true;
+ let offline=false,stale=null;
+ const pc=await fixture(t,{instance:'edit-pc',autoStart:true,fetchExtra:async(url,options)=>{
+  if(offline)throw Error('central unavailable');const u=new URL(url);
+  if(u.pathname==='/api/auth/me')return Response.json({instanceId:central.instance,user:{id:'one'}});
+  if(u.pathname==='/api/memory/sync')return Response.json(stale??await central.service.exportSync('one',{epoch:Number(u.searchParams.get('epoch')),cursor:Number(u.searchParams.get('cursor')),limit:Number(u.searchParams.get('limit'))}));
+  if(u.pathname==='/api/memory/entries')return Response.json(await central.service.entries('one'));
+  if(u.pathname==='/api/memory/entries/edit')return Response.json(await central.service.editEntry('one',JSON.parse(options.body)));
+  throw Error('Unexpected fixture '+u.pathname);
+ }});
+ pc.profiles.set(memobaseUserId(central.instance,'one'),[entry('旧偏好'),entry('不变事实')]);
+ await pc.service.bindRemote({url:'http://edit-central.test',token:'synthetic-user-token',instanceId:central.instance,userId:'one',localUserId:'local'});await pc.service.sync('local');
+ const original=(await pc.service.entries('local')).entries.find(e=>e.id===source.id);
+ await pc.service.setEnabled('local',false);
+ const first=await pc.service.editEntry('local',{epoch:1,...select(original),content:'修正一'});
+ await pc.service.setEnabled('local',true);await pc.service.sync('local');stale=await central.service.exportSync('one');
+ await pc.service.editEntry('local',{epoch:1,...select(first.entry),content:'修正二'});await pc.service.sync('local');
+ assert.match(await pc.service.getContext('local'),/修正二/);assert.doesNotMatch(await pc.service.getContext('local'),/修正一|旧偏好/);
+ offline=true;await pc.service.sync('local');assert.match(await pc.service.getContext('local'),/修正二/);
+ assert.equal((await pc.service.contextScope('local')).correctionRevision,2);
+ await assert.rejects(pc.service.editEntry('local',{epoch:1,...select(first.entry),content:'离线修改'}),{code:'MEMORY_UNAVAILABLE'});
 });
