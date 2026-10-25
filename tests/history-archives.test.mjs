@@ -111,6 +111,14 @@ test('authenticated local staging CLI uses server nonce, publishes and resumes w
  const f=await fixture(t),app=express();app.use(express.json());app.use((req,_res,next)=>{req.user={id:f.other,isAdmin:true};next();});mountHistoryArchiveRoutes({app,archives:f.archives,requireAdmin:user=>{if(!user.isAdmin)throw Object.assign(new Error('Denied'),{status:403});},requireCurrentAuth:()=>{}});app.use((error,_req,res,_next)=>res.status(error.status||500).json({code:error.code||'HISTORY_TEST_ERROR'}));const server=app.listen();server.close();await listenFixture(server);t.after(()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve);}));const b=await makeHistoryBundle(path.join(f.directory,'bundle'),{selfCount:24,longOther:false}),tokenFile=path.join(f.directory,'token');await writeFile(tokenFile,'fixture');const args=['--bundle',b.directory,'--server-url',`http://127.0.0.1:${server.address().port}`,'--token-file',tokenFile,'--user-id',f.account,'--data-dir',f.directory,'--memory-limit','2'];const sample=await runWeChatHistoryImport(args,{pollMs:1});assert.equal(sample.job.pauseReason,'sample-limit');const final=await runWeChatHistoryImport(['--resume',sample.job.id,'--server-url',`http://127.0.0.1:${server.address().port}`,'--token-file',tokenFile,'--user-id',f.account,'--data-dir',f.directory,'--all'],{pollMs:1});assert.equal(final.job.state,'complete');assert.equal(final.privateContentPrinted,false);
 });
 
+test('selective forgetting fences automatic original evidence while retaining the manual archive',async t=>{
+ const f=await fixture(t),b=await makeHistoryBundle(path.join(f.directory,'bundle'),{selfCount:2,longOther:false}),s=await stage(f,b);
+ await f.archives.start(f.account,s.job.id,{});await until(async()=>(await f.archives.job(f.account,s.job.id)).job.state==='complete');
+ f.memory.contextScope=async()=>({enabled:true,epoch:1,forgetRevision:1});
+ assert.equal(await f.archives.getContext(f.account,{query:'喜欢',epoch:1}),'');
+ assert.equal((await f.archives.messages(f.account,(await f.archives.list(f.account)).archives[0].id,{limit:100})).total,b.records.length);
+});
+
 test('delayed buffer flush settles the same batch without importing it twice',async t=>{
  const f=await fixture(t,{settlePollMs:2,settleTimeoutMs:1000}),b=await makeHistoryBundle(path.join(f.directory,'bundle'),{selfCount:2,longOther:false});let attempts=0;
  f.memory.sync=async()=>{attempts++;f.memory.needsFlush=attempts<3;};

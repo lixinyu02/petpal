@@ -92,6 +92,23 @@ export function createMemobaseClient({ baseUrl, apiKey, fetchImpl = globalThis.f
       if (!data || typeof data.context !== 'string') throw memoryFailure(502, 'MEMORY_INVALID_RESPONSE');
       return data.context.slice(0, 6000);
     },
+    async profiles(userId, options = {}) {
+      let data;try { data=await request(`/users/profile/${segment(userId)}`,options); } catch(error) { if(error.status===404)return[];throw error; }
+      if(!data||!Array.isArray(data.profiles)||data.profiles.length>2000)throw memoryFailure(502,'MEMORY_INVALID_RESPONSE');
+      const entries=data.profiles.map(value=>{
+        if(!value||typeof value!=='object'||typeof value.content!=='string'||value.content.length>64000)throw memoryFailure(502,'MEMORY_INVALID_RESPONSE');
+        let id;try{id=segment(value.id);}catch{throw memoryFailure(502,'MEMORY_INVALID_RESPONSE');}
+        const attr=value.attributes, label=key=>typeof attr?.[key]==='string'?attr[key].slice(0,160):'';
+        const date=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))?new Date(value).toISOString():null;
+        return{id,content:value.content,topic:label('topic'),subtopic:label('sub_topic'),createdAt:date(value.created_at),updatedAt:date(value.updated_at)};
+      });
+      if(new Set(entries.map(e=>e.id)).size!==entries.length)throw memoryFailure(502,'MEMORY_INVALID_RESPONSE');
+      return entries;
+    },
+    async deleteProfile(userId, profileId, options = {}) {
+      try { await request(`/users/profile/${segment(userId)}/${segment(profileId)}`,{...options,method:'DELETE'}); }
+      catch(error) { if(error.status!==404)throw error; }
+    },
     async deleteUser(userId, options) { try { await request(`/users/${segment(userId)}`, { ...options, method: 'DELETE' }); } catch (error) { if (error.status !== 404) throw error; } },
     async findEvent(userId, event, { signal, maxPages = 100 } = {}) {
       const uid = segment(userId);

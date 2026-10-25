@@ -45,3 +45,8 @@ test('a same-scope binding revision change discards combined evidence',async()=>
  const memory={contextScope:async()=>({enabled:true,epoch:1,bindingRevision:revision,scope:{userId:'one'}}),getContext:async()=>{revision++;return'old cache';}};
  assert.equal(await createConversationMemory({memory,archives:{getContext:async()=>'old archive'}}).getContext('one'),'');
 });
+test('selective deletion during a combined context read discards pre-delete evidence',async()=>{
+ let forgetRevision=0;
+ const memory={contextScope:async()=>({enabled:true,epoch:1,bindingRevision:0,forgetRevision,scope:{userId:'one'}}),getContext:async()=>{forgetRevision++;return'old cache';}};
+ assert.equal(await createConversationMemory({memory,archives:{getContext:async()=>'old archive'}}).getContext('one'),'');
+});

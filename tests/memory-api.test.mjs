@@ -31,6 +31,8 @@ async function fixture(t, options = {}) {
     ...Object.fromEntries(['prepare', 'start', 'stop', 'configureModel', 'close'].map(name => [name, async value => { runtimeCalls.push({ name, value }); }])),
   };
   const memory = {
+    async entries(userId,value){memoryCalls.push({name:'entries',userId,value});return{epoch:1,entries:[],total:0,nextCursor:null,pending:0};},
+    async forgetEntries(userId,value,control){await control.authorize();memoryCalls.push({name:'forgetEntries',userId,value});return{epoch:1,accepted:value.entries.length,pending:1};},
     async status(userId, value) { memoryCalls.push({ name: 'status', userId, value }); return { enabled: true, scope: { instanceId: store.state.instanceId, userId }, ...(value?.admin ? { runtime: await runtime.status() } : {}) }; },
     async getContext(userId, value) { memoryCalls.push({ name: 'context', userId, value }); if (options.slowMemory) return new Promise(() => {}); return `账号${userId}喜欢轻音乐`; },
     async remember(userId, value, control) { writes.push({ userId, ...value, control }); if (options.journalGate) await options.journalGate.promise; await control?.authorize?.(); if (options.journalError) throw new Error('Synthetic journal failure'); committed.push({ userId, id: value.id }); return { queued: true }; },
@@ -58,6 +60,18 @@ async function fixture(t, options = {}) {
   t.after(async () => { await app.close(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve)); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-memory-api-'))); await rm(directory, { recursive: true, force: true }); });
   return { app, ownerId: store.state.ownerId, instanceId: store.state.instanceId, providers, requests, writes, committed, memoryCalls, runtimeCalls, codexCalls, request, json, member };
 }
+
+test('memory entry routes require a session, use only its account, reject extra fields and disable caching',async t=>{
+ const f=await fixture(t),one=await f.member('entries-one'),two=await f.member('entries-two');
+ assert.equal((await f.request('/memory/entries',{token:null})).status,401);
+ const response=await f.request('/memory/entries?q=tea&limit=10',{token:one.token});assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
+ assert.deepEqual(f.memoryCalls.at(-1),{name:'entries',userId:one.id,value:{q:'tea',cursor:0,limit:10}});
+ assert.equal((await f.request('/memory/entries?userId='+two.id,{token:one.token})).status,400);
+ const value={epoch:1,entries:[{id:randomUUID(),fingerprint:'f'.repeat(64)}]};
+ assert.equal((await f.request('/memory/entries/delete',{token:one.token,method:'POST',body:{...value,userId:two.id}})).status,400);
+ assert.equal((await f.request('/memory/entries/delete',{token:one.token,method:'POST',body:value})).status,202);
+ assert.deepEqual(f.memoryCalls.at(-1),{name:'forgetEntries',userId:one.id,value});
+});
 
 test('imported self evidence reaches Chat and Agent only for the authenticated account and preserves temporal precedence', async t => {
   let subjectId;

@@ -160,7 +160,7 @@ export async function createHistoryArchives({dataDir,store,memory,settlePollMs=1
    try{
     target(userId);if(!await ensure({existing:true}))return'';
     const own=db.prepare('SELECT 1 FROM archives WHERE account_id=? LIMIT 1').get(userId);if(!own)return'';
-    const before=await contextScope(userId);if(!before.enabled||!Number.isSafeInteger(before.epoch)||epoch!==undefined&&epoch!==before.epoch)return'';await stable();
+    const before=await contextScope(userId);if(!before.enabled||before.forgetRevision>0||!Number.isSafeInteger(before.epoch)||epoch!==undefined&&epoch!==before.epoch)return'';await stable();
     const bindings=db.prepare('SELECT person_name,min(source_start) AS source_start,max(source_end) AS source_end FROM archives WHERE account_id=? AND memory_epoch=? GROUP BY person_name ORDER BY person_name LIMIT 9').all(userId,before.epoch);if(!bindings.length)return'';
     const identity=bindings.length===1?{accountSubject:bindings[0].person_name,identitySource:'用户确认绑定',sourceStart:bindings[0].source_start,sourceEnd:bindings[0].source_end}:{accountSubject:null,identitySource:'历史档案主体存在歧义，需用户确认',subjectCount:bindings.length};
     const input=String(query).slice(0,600).toLowerCase(),stop=new Set(['什么','怎么','怎样','一下','可以','知道','觉得','现在','最近','我的','你的','的是','帮我','我想','想要','请问','一下子']);let tokens=[];

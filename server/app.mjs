@@ -734,6 +734,19 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.get('/api/memory/status', async (req, res) => {
     memoryRequest(req); const value = await memoryStatus(req); requireCurrentAuth(req); res.json({ memory: value });
   });
+  const memoryEntryOperation=async action=>{try{return await action();}catch(error){const messages={MEMORY_ENTRY_NOT_FOUND:'条目已不存在，请刷新记忆列表。',MEMORY_ENTRY_CHANGED:'这条记忆在提炼中发生了变化，请刷新后重新选择。',MEMORY_EPOCH_CONFLICT:'记忆已更新或清空，请刷新后重新选择。',MEMORY_INVALID_ENTRIES:'请选择有效的记忆条目。',MEMORY_INVALID_CURSOR:'记忆搜索或分页参数无效。',MEMORY_RESET_PENDING:'整库清理尚未完成，请稍后管理条目。'};if(messages[error.code])throw failure(error.status,messages[error.code]);throw error;}};
+  app.get('/api/memory/entries',async(req,res)=>{
+    memoryRequest(req,[],['q','cursor','limit']);
+    const {q='',cursor='0',limit='30'}=req.query;
+    if(typeof q!=='string'||typeof cursor!=='string'||typeof limit!=='string'||!/^\d{1,8}$/.test(cursor)||!/^\d{1,2}$/.test(limit))throw failure(400,'记忆查询格式无效。');
+    const result=await memoryEntryOperation(()=>memory.entries(req.user.id,{q,cursor:Number(cursor),limit:Number(limit)}));requireCurrentAuth(req);
+    res.setHeader('Cache-Control','no-store');res.json(result);
+  });
+  app.post('/api/memory/entries/delete',async(req,res)=>{
+    memoryRequest(req,['epoch','entries']);
+    const result=await memoryEntryOperation(()=>memory.forgetEntries(req.user.id,req.body,{authorize:()=>requireCurrentAuth(req)}));requireCurrentAuth(req);
+    res.setHeader('Cache-Control','no-store');res.status(202).json(result);
+  });
   app.patch('/api/memory/preferences', async (req, res) => {
     memoryRequest(req, ['enabled']);
     if (typeof req.body.enabled !== 'boolean') throw failure(400, '记忆开关必须为 boolean。');

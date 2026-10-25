@@ -6,6 +6,18 @@ import { createMemobaseClient, memoryJson, normalizeMemobaseUrl } from '../serve
 const ok = data => Response.json({ errno: 0, errmsg: '', data });
 const token = 'synthetic-only-memory-key';
 
+test('profile reads validate rows and only expose allowed fields; deletion is scoped and idempotent',async()=>{
+ const user=randomUUID(),id=randomUUID(),calls=[];let malformed=false;
+ const client=createMemobaseClient({baseUrl:'http://memory.test',apiKey:token,fetchImpl:async(url,options)=>{
+  calls.push({url,options});if(options.method==='DELETE')return Response.json({errno:404,errmsg:'private'});
+  return ok({profiles:[{id:malformed?'../other':id,content:'合成偏好',attributes:{topic:'偏好',sub_topic:'饮品',private:'not exposed'},created_at:'2025-01-01T00:00:00Z',updated_at:'2025-01-02T00:00:00Z',internal:'not exposed'}]});
+ }});
+ assert.deepEqual(await client.profiles(user),[{id,content:'合成偏好',topic:'偏好',subtopic:'饮品',createdAt:'2025-01-01T00:00:00.000Z',updatedAt:'2025-01-02T00:00:00.000Z'}]);
+ await client.deleteProfile(user,id);assert.equal(new URL(calls[1].url).pathname,`/api/v1/users/profile/${user}/${id}`);assert.equal(calls[1].options.method,'DELETE');assert.equal(calls[1].options.redirect,'error');
+ malformed=true;await assert.rejects(client.profiles(user),{code:'MEMORY_INVALID_RESPONSE'});
+ await assert.rejects(client.deleteProfile(user,'../other'),{code:'MEMORY_INVALID_ID'});
+});
+
 test('Memobase URL and Bearer configuration reject credential-bearing or non-HTTP URLs', () => {
   assert.equal(normalizeMemobaseUrl('http://127.0.0.1:8019/api/v1/'), 'http://127.0.0.1:8019');
   for (const value of ['file:///tmp/private', 'https://user:password@example.test', 'https://example.test/?api_key=private', 'https://example.test/#token']) assert.throws(() => normalizeMemobaseUrl(value), { code: 'MEMORY_INVALID_URL' });
