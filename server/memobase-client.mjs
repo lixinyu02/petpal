@@ -68,14 +68,25 @@ export function createMemobaseClient({ baseUrl, apiKey, fetchImpl = globalThis.f
       }
     },
     async insert(userId, event, options) {
-      const messages = [{ role: 'user', content: event.userText }, ...(event.assistantText ? [{ role: 'assistant', content: event.assistantText }] : [])];
-      const data = await request(`/blobs/insert/${segment(userId)}?wait_process=false`, {
-        ...options, method: 'POST', body: { blob_type: 'chat', blob_data: { messages }, fields: { source: 'petpal', eventId: event.id, epoch: event.epoch, payloadHash: event.fingerprint } },
+      const dated = typeof event.createdAt === 'string' && Number.isFinite(Date.parse(event.createdAt)) ? { created_at: event.createdAt } : {};
+      const messages = [{ role: 'user', content: event.userText, ...dated }, ...(event.assistantText ? [{ role: 'assistant', content: event.assistantText, ...dated }] : [])];
+      const historical = event.id.startsWith('history.wechat:');
+      const data = await request(`/blobs/insert/${segment(userId)}?wait_process=${historical}`, {
+        ...(historical ? { timeoutMs: 120000 } : {}), ...options, method: 'POST', body: { blob_type: 'chat', blob_data: { messages }, fields: { source: 'petpal', eventId: event.id, epoch: event.epoch, payloadHash: event.fingerprint, ...(dated.created_at ? { sourceCreatedAt: dated.created_at } : {}) } },
       });
       if (!data || typeof data.id !== 'string') throw memoryFailure(502, 'MEMORY_INVALID_RESPONSE');
       return data.id;
     },
     async flush(userId, options) { return request(`/users/buffer/${segment(userId)}/chat?wait_process=true`, { ...options, timeoutMs: 120000, method: 'POST' }); },
+    async bufferStatus(userId, options) {
+      const uid = segment(userId), result = {};
+      for (const status of ['idle', 'processing', 'failed']) {
+        const data = await request(`/users/buffer/capacity/${uid}/chat?status=${status}`, options);
+        if (!data || !Array.isArray(data.ids) || data.ids.length > 10000 || new Set(data.ids).size !== data.ids.length || data.ids.some(id => { try { segment(id); return false; } catch { return true; } })) throw memoryFailure(502, 'MEMORY_INVALID_RESPONSE');
+        result[status] = data.ids.length;
+      }
+      return result;
+    },
     async context(userId, options = {}) {
       const data = await request(`/users/context/${segment(userId)}?max_token_size=1000`, { timeoutMs: 750, ...options });
       if (!data || typeof data.context !== 'string') throw memoryFailure(502, 'MEMORY_INVALID_RESPONSE');

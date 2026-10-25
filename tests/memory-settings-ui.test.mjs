@@ -45,6 +45,9 @@ function fixture(options = {}) {
   const element = (type, elementProps) => typeof type === 'function' ? type(elementProps) : ({ type, props: elementProps });
   const modules = { react, 'react/jsx-runtime': { jsx: element, jsxs: element }, 'lucide-react': new Proxy({}, { get: (_target, name) => Symbol.for(String(name)) }), './api': { api, getSessionEpoch: () => epoch, isSessionChanged: error => error?.name === 'SessionChangedError' }, './platform/memory': labelsModule.exports,
     './MessageMarkdown': props => element('div', { children: props.content }),
+    // Archive handlers have their own real-hook coverage; keep this fixture's
+    // request ledger scoped to the surrounding memory controls.
+    './HistoryArchives': props => element('section', { 'data-history-account': props.user?.id, 'data-connected': props.connected }),
     './platform/visible-poll.mjs': { createVisiblePoll: value => createVisiblePoll({ ...value, setTimeoutFn(callback) { const id = ++sequence; timers.set(id, callback); return id; }, clearTimeoutFn: id => timers.delete(id) }) } };
   const module = { exports: {} }; vm.runInNewContext(source, { module, exports: module.exports, window, document, AbortController, DOMException, Promise, require: name => { if (name.endsWith('.css')) return {}; assert.ok(Object.hasOwn(modules, name), `Unexpected dependency ${name}`); return modules[name]; } });
   const render = () => { index = 0; dirty = false; effects.length = 0; tree = module.exports.default(props); for (const node of nodes(tree)) if (node.props?.ref) node.props.ref.current = { focus: () => focuses.push(true) }; for (const effect of effects) effect(); return tree; };

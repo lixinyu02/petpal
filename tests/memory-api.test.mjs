@@ -45,7 +45,7 @@ async function fixture(t, options = {}) {
   };
   const serviceLinks = options.serviceLinks?.(providers);
   if (options.configureModel) runtime.configureModel = (value, control) => options.configureModel(value, control, runtimeCalls);
-  const app = await createPetServer({ dataDir: directory, token: bootstrap, codex, memoryOptions: options.realMemory ? { autoStart: false, autoPoll: false } : { service: memory, replyJobs: options.replyJobs }, memoryRuntimeOptions: { runtime }, ...(serviceLinks ? { serviceLinksOptions: { service: serviceLinks } } : {}) });
+  const app = await createPetServer({ dataDir: directory, token: bootstrap, codex, memoryOptions: options.realMemory ? { autoStart: false, autoPoll: false } : { service: memory, replyJobs: options.replyJobs }, memoryRuntimeOptions: { runtime }, ...(options.archives ? { historyOptions: { service: options.archives } } : {}), ...(serviceLinks ? { serviceLinksOptions: { service: serviceLinks } } : {}) });
   await listenFixture(app.server);
   const request = (route, { token = bootstrap, method = 'GET', body } = {}) => fetch(`http://127.0.0.1:${app.server.address().port}/api${route}`, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const json = async (route, value) => { const response = await request(route, value); return { status: response.status, data: await response.json() }; };
@@ -58,6 +58,32 @@ async function fixture(t, options = {}) {
   t.after(async () => { await app.close(); upstream.closeAllConnections(); await new Promise(resolve => upstream.close(resolve)); assert.ok(directory.startsWith(path.join(tmpdir(), 'petpal-memory-api-'))); await rm(directory, { recursive: true, force: true }); });
   return { app, ownerId: store.state.ownerId, instanceId: store.state.instanceId, providers, requests, writes, committed, memoryCalls, runtimeCalls, codexCalls, request, json, member };
 }
+
+test('imported self evidence reaches Chat and Agent only for the authenticated account and preserves temporal precedence', async t => {
+  let subjectId;
+  const calls=[], archives={
+    async getContext(userId,{query}) { calls.push({userId,query}); return userId===subjectId ? '<petpal_history_evidence>2025-02-01 本人：过去喜欢合成偏好A。</petpal_history_evidence>' : ''; },
+    async list(userId) { return {archives:userId===subjectId?[{id:'synthetic-archive'}]:[]}; },
+    async stopAccepting() {}, async close() {},
+  };
+  const f=await fixture(t,{archives}); subjectId=f.ownerId;
+  const other=await f.member('history-context-other');
+  assert.equal((await f.json('/history-archives',{token:null})).status,401);
+  assert.equal((await f.json('/history-archives',{token:other.token})).data.archives.length,0);
+  assert.equal((await f.json('/history-archives')).data.archives.length,1);
+  const ask=async(mode,token=bootstrap)=>{
+    const conversation=await f.json('/conversations',{token,method:'POST',body:{mode,providerId:f.providers[0].id}});
+    assert.equal(conversation.status,201);
+    const response=await f.request(`/conversations/${conversation.data.id}/messages`,{token,method:'POST',body:{content:'现在我改为合成偏好B，请按现在的为准。'}});
+    assert.equal(response.status,200);assert.match(await response.text(),/event: done/);
+  };
+  await ask('chat');
+  const instructions=f.requests.at(-1).messages[0].content;
+  assert.match(instructions,/过去喜欢合成偏好A/);assert.match(instructions,/当前本人表述和更近的明确更新优先/);
+  await ask('codex');assert.match(f.codexCalls.at(-1).prompt,/2025-02-01/);assert.match(f.codexCalls.at(-1).prompt,/当前本人表述和更近的明确更新优先/);
+  await ask('chat',other.token);assert.doesNotMatch(f.requests.at(-1).messages[0].content,/合成偏好A/);
+  assert.ok(calls.some(call=>call.userId===subjectId));assert.ok(calls.some(call=>call.userId===other.id));
+});
 
 test('a durably completed Chat sends done and accepts the next message without waiting for memory', async t => {
   let release;
