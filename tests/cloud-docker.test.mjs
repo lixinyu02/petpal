@@ -24,9 +24,11 @@ async function fixture(t, options={}) {
   let revoked=false;
   const settings={dataDir,authorizeUser:id=>users[id],authorizeEntry(){if(revoked)throw Object.assign(Error('revoked'),{status:403});},getConfig:()=>({mode:'api',model:'gpt-6-luna',baseUrl:'https://upstream.invalid/v1',apiKey:'upstream-private-fixture',revision:'87c326d2-506f-42cb-95d4-b239a344e9ea'}),publicOrigin:()=> 'https://petpal.example.test',localDriver:local,platformDriver:platform,refreshMs:0,...options};
   const cloud=await createCloudDocker(settings);t.after(()=>cloud.close());
-  const create=(user='alice',value={})=>cloud.create(user,{name:'测试环境',source:'local',...value});
+  // Seed pre-policy owned environments through a temporary administrator identity.
+  const asAdmin=async(user,run)=>{const prior=users[user].isAdmin;users[user].isAdmin=true;try{return await run();}finally{users[user].isAdmin=prior;}};
+  const create=(user='alice',value={})=>asAdmin(user,()=>cloud.create(user,{name:'测试环境',source:'local',...value}));
   const entry=hostId=>({id:randomUUID(),auth:{userId:'alice'},hostId,permissions:{access:'full',approval:'on-request'},projectAccess:'workspace',model:'gpt-6-luna',attachmentIds:[]});
-  return{cloud,dataDir,settings,users,local,platform,machines,effects,create,entry,revoke:()=>{revoked=true;}};
+  return{cloud,dataDir,settings,users,asAdmin,local,platform,machines,effects,create,entry,revoke:()=>{revoked=true;}};
 }
 
 test('accounts see only owned Docker hosts; administrators list all without reassigning ownership',async t=>{
@@ -37,6 +39,42 @@ test('accounts see only owned Docker hosts; administrators list all without reas
   assert.throws(()=>f.cloud.hostFor('alice',b.id),{status:404});assert.equal(f.cloud.hostFor('admin',b.id).userId,'bob');
   const state=await readFile(path.join(f.dataDir,'cloud-docker','state.json'),'utf8');assert(!state.includes('upstream-private-fixture'));
 });
+
+test('ordinary users cannot allocate central Docker or Platform resources, and their creation catalog is hidden',async t=>{
+ const f=await fixture(t),before=await readFile(path.join(f.dataDir,'cloud-docker/state.json'),'utf8');
+ for(const source of ['local','platform'])await assert.rejects(f.cloud.create('alice',{name:'forbidden',source,bundle:'agent',requestId:randomUUID()}),{status:403,code:'cloud_docker_create_forbidden'});
+ assert.equal(f.effects.length,0);assert.equal(await readFile(path.join(f.dataDir,'cloud-docker/state.json'),'utf8'),before);
+ f.local.status=()=>assert.fail('ordinary catalog must not probe the central engine');f.platform.catalog=()=>assert.fail('ordinary catalog must not probe paired infrastructure');
+ assert.deepEqual(await f.cloud.catalog('alice'),{canCreate:false,sources:[],nodes:[],bundles:[]});
+});
+
+test('an unfinished owned create cannot bypass policy through start; an administrator can recover it without reassigning ownership',async t=>{
+ const f=await fixture(t),original=f.local.create;f.local.create=async()=>{throw Object.assign(Error('synthetic allocation failed'),{code:'kubernetes_pids_limit_unconfirmed'});};
+ await assert.rejects(f.create());const record=f.cloud.list('alice')[0],before=f.effects.length;
+ await assert.rejects(f.cloud.action('alice',record.id,'start'),{status:403,code:'cloud_docker_create_forbidden'});assert.equal(f.effects.length,before);
+ await f.cloud.refresh('alice');assert.equal(f.cloud.hostFor('alice',record.id).docker.errorCode,'kubernetes_pids_limit_unconfirmed');
+ f.local.create=original;const ready=await f.cloud.action('admin',record.id,'start');assert.equal(ready.userId,'alice');assert.equal(ready.online,true);assert.equal(ready.docker.creationPending,false);
+ await f.cloud.action('alice',record.id,'stop');await f.cloud.action('alice',record.id,'start');assert.equal(f.cloud.list('alice')[0].online,true);
+});
+
+test('administrator revocation during credential lookup prevents allocation or journal reservation',async t=>{
+ const f=await fixture(t);let release;f.users.alice.isAdmin=true;f.platform.credential=()=>new Promise(resolve=>release=()=>resolve({clientId:randomUUID()}));
+ const pending=f.cloud.create('alice',{name:'revoked',source:'platform',bundle:'agent',requestId:randomUUID()});await new Promise(r=>setImmediate(r));
+ f.users.alice.isAdmin=false;release();await assert.rejects(pending,{status:403});assert.equal(f.effects.length,0);assert.equal(f.cloud.list('alice').length,0);
+});
+
+test('administrator revocation during image preparation prevents the later create',async t=>{
+ const f=await fixture(t);let release,entered;const reached=new Promise(resolve=>entered=resolve);f.users.alice.isAdmin=true;f.local.status=async()=>({available:true,imageAvailable:false});f.local.prepare=()=>new Promise(resolve=>{release=resolve;entered();});
+ const pending=f.cloud.create('alice',{name:'revoked prepare',source:'local',bundle:'agent',requestId:randomUUID()});
+ await reached;f.users.alice.isAdmin=false;release();
+ await assert.rejects(pending,{status:403});assert.equal(f.effects.filter(e=>e[0]==='create').length,0);assert.equal(f.cloud.list('alice')[0].docker.creationPending,true);
+});
+
+test('a ready receipt after a lost create reply is adopted on refresh without a second allocation',async t=>{
+ const f=await fixture(t),original=f.local.create;f.local.create=async(...args)=>{await original(...args);throw Error('reply lost');};
+ await assert.rejects(f.create());assert.equal(f.cloud.list('alice')[0].docker.creationPending,true);
+ await f.cloud.refresh('alice');assert.equal(f.cloud.list('alice')[0].online,true);assert.equal(f.cloud.list('alice')[0].docker.creationPending,false);assert.equal(f.effects.filter(e=>e[0]==='create').length,1);
+});
 test('durable create request is idempotent and mismatching payload cannot claim an existing operation',async t=>{
   const f=await fixture(t), requestId=randomUUID(), first=await f.create('alice',{requestId});
   assert.equal((await f.create('alice',{requestId})).id,first.id);assert.equal(f.effects.filter(e=>e[0]==='create').length,1);
@@ -46,16 +84,16 @@ test('failed create survives refresh and restart, then the same request complete
   const f=await fixture(t),requestId=randomUUID(),original=f.local.create;let count=0;
   f.local.create=async(...args)=>{count++;if(count===1)throw Object.assign(Error('transient engine failure'),{code:'cloud_docker_unavailable'});return original(...args);};
   await assert.rejects(f.create('alice',{requestId}));const failed=f.cloud.list('alice')[0];assert.equal(failed.docker.creationPending,true);await f.cloud.refresh('alice');assert.equal(f.cloud.hostFor('alice',failed.id).docker.state,'offline');
-  await f.cloud.close();const next=await createCloudDocker(f.settings);t.after(()=>next.close());const recovered=await next.create('alice',{name:'测试环境',source:'local',requestId});assert.equal(recovered.id,failed.id);assert.equal(recovered.online,true);assert.equal(recovered.docker.creationPending,false);assert.equal(count,2);assert.equal(next.list('alice').length,1);
-  await next.action('alice',recovered.id,'stop');const stopped=await next.create('alice',{name:'测试环境',source:'local',requestId});assert.equal(stopped.online,false);assert.equal(stopped.docker.state,'stopped');assert.equal(count,2);
+  await f.cloud.close();const next=await createCloudDocker(f.settings);t.after(()=>next.close());const recovered=await f.asAdmin('alice',()=>next.create('alice',{name:'测试环境',source:'local',requestId}));assert.equal(recovered.id,failed.id);assert.equal(recovered.online,true);assert.equal(recovered.docker.creationPending,false);assert.equal(count,2);assert.equal(next.list('alice').length,1);
+  await next.action('alice',recovered.id,'stop');const stopped=await f.asAdmin('alice',()=>next.create('alice',{name:'测试环境',source:'local',requestId}));assert.equal(stopped.online,false);assert.equal(stopped.docker.state,'stopped');assert.equal(count,2);
 });
 test('explicit start recovers an unfinished creation after observation overwrites its phase',async t=>{
-  const f=await fixture(t),original=f.local.create;let count=0;f.local.create=async(...args)=>{if(++count===1)throw Error('failed');return original(...args);};await assert.rejects(f.create());const failed=f.cloud.list('alice')[0];await f.cloud.refresh('alice');const host=await f.cloud.action('alice',failed.id,'start');assert.equal(host.online,true);assert.equal(host.docker.creationPending,false);
+  const f=await fixture(t),original=f.local.create;let count=0;f.local.create=async(...args)=>{if(++count===1)throw Error('failed');return original(...args);};await assert.rejects(f.create());const failed=f.cloud.list('alice')[0];await f.cloud.refresh('alice');const host=await f.asAdmin('alice',()=>f.cloud.action('alice',failed.id,'start'));assert.equal(host.online,true);assert.equal(host.docker.creationPending,false);
 });
 test('old never-started Docker receipts migrate without treating a successfully stopped host as pending',async t=>{
   const f=await fixture(t),a=await f.create(),b=await f.create();await f.cloud.action('alice',b.id,'stop');await f.cloud.close();
   const file=path.join(f.dataDir,'cloud-docker','state.json'),state=JSON.parse(await readFile(file,'utf8')),old=state.records.find(r=>r.id===a.id);delete old.creationPending;old.state='offline';old.generation='container:0001-01-01T00:00:00Z';f.machines.delete(a.id);await writeFile(file,JSON.stringify(state));
-  const next=await createCloudDocker(f.settings);t.after(()=>next.close());assert.equal(next.hostFor('alice',a.id).docker.creationPending,true);assert.equal(next.hostFor('alice',b.id).docker.creationPending,false);assert.equal((await next.action('alice',a.id,'start')).online,true);
+  const next=await createCloudDocker(f.settings);t.after(()=>next.close());assert.equal(next.hostFor('alice',a.id).docker.creationPending,true);assert.equal(next.hostFor('alice',b.id).docker.creationPending,false);assert.equal((await f.asAdmin('alice',()=>next.action('alice',a.id,'start'))).online,true);
 });
 test('simultaneous first requests cannot allocate twice during platform credential await',async t=>{
   const f=await fixture(t),requestId=randomUUID(),clientId=randomUUID();let release,creates=0;f.platform.credential=()=>new Promise(resolve=>release=()=>resolve({clientId}));f.platform.create=async r=>{creates++;f.machines.set(r.id,{state:'running',generation:'platform1',desktop:true});return{nodeId:randomUUID()};};
@@ -124,7 +162,7 @@ test('unconfirmed process cleanup durably pauses admission until the environment
   await assert.rejects(bridge.run({prompt:'test'}),{code:'execution_unknown'});await bridge.close();assert.throws(()=>f.cloud.target('alice',a.id),{code:'executor_offline'});
   await f.cloud.refresh('alice');assert.equal(f.cloud.hostFor('alice',a.id).docker.state,'unknown');await assert.rejects(f.cloud.action('alice',a.id,'start'),{code:'execution_unknown'});
   await f.cloud.close();const next=await createCloudDocker(f.settings);t.after(()=>next.close());await next.refresh('alice');assert.equal(next.hostFor('alice',a.id).online,false);
-  await next.action('alice',a.id,'stop');await next.action('alice',a.id,'start');assert.equal(next.hostFor('alice',a.id).online,true);
+  await next.action('alice',a.id,'stop');await f.asAdmin('alice',()=>next.action('alice',a.id,'start'));assert.equal(next.hostFor('alice',a.id).online,true);
 });
 test('closing a bridge remains busy until the exact same cleanup promise settles',async t=>{
   let release;const f=await fixture(t,{bridgeFactory:()=>({run:async()=>({text:'done'}),close:()=>new Promise(resolve=>release=resolve)})}),a=await f.create(),bridge=f.cloud.bind(f.entry(a.id));

@@ -27,12 +27,12 @@ async function fixture(t,{capabilities={inputModalities:['text']},providers=[],m
  const upload=async()=>{const response=await fetch(base+'/api/attachments',{method:'POST',headers:{Authorization:`Bearer ${bootstrap}`,'Content-Type':'image/webp'},body:Buffer.from('UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA','base64')});assert.equal(response.status,201);return response.json();};
  async function member(name){const created=await request('/admin/users',{method:'POST',body:{username:name,password:'cloud-fixture-password',providerIds:[],agentAccess:'full'}});assert.equal(created.status,201);const login=await request('/auth/login',{method:'POST',token:null,body:{username:name,password:'cloud-fixture-password'}});return{id:created.data.user.id,token:login.data.token};}
  t.after(async()=>{await app.close();assert.ok(dir.startsWith(path.join(tmpdir(),'petpal-cloud-api-')));await rm(dir,{recursive:true,force:true});});
- return{request,upload,member,calls,dir,records,catalog,agentCalls,centralAgentCalls,bridgeConfigs,configuredAtStart,failAction(value){failedAction=value;},setLinkState(value){linkState=value;},get centralCalls(){return centralCalls;}};
+ return{request,upload,member,seedCloud:async(id,body)=>{const host=await cloud.create(id,body);await request('/cloud-docker');return host;},calls,dir,records,catalog,agentCalls,centralAgentCalls,bridgeConfigs,configuredAtStart,failAction(value){failedAction=value;},setLinkState(value){linkState=value;},get centralCalls(){return centralCalls;}};
 }
 test('cloud APIs require login, keep service pairing administrator-only and isolate targets',async t=>{
  const f=await fixture(t),a=await f.member('cloud-a'),b=await f.member('cloud-b');
  assert.equal((await f.request('/cloud-docker',{token:null})).status,401);assert.equal((await f.request('/service-links',{token:a.token})).status,403);
- const created=await f.request('/cloud-docker',{token:a.token,method:'POST',body:{name:'owned cloud',source:'local',bundle:'agent',requestId:randomUUID()}});assert.equal(created.status,201);const id=created.data.instance.id;
+ assert.equal((await f.request('/cloud-docker',{token:a.token,method:'POST',body:{name:'forbidden cloud',source:'local',bundle:'agent',requestId:randomUUID()}})).status,403);const id=(await f.seedCloud(a.id,{name:'existing owned cloud',requestId:randomUUID()})).id;
  assert.equal((await f.request('/cloud-docker',{token:b.token})).data.instances.length,0);assert.equal((await f.request('/cloud-docker/'+id+'/stop',{token:b.token,method:'POST',body:{}})).status,403);
  const targets=(await f.request('/agent/hosts',{token:a.token})).data.hosts;assert.equal(targets.some(h=>h.id==='central'),false);assert.equal(targets.find(h=>h.id===id).kind,'docker');
  assert.equal((await f.request('/cloud-docker/'+id+'/desktop-ticket',{token:b.token,method:'POST',body:{}})).status,403);
@@ -41,12 +41,23 @@ test('cloud APIs require login, keep service pairing administrator-only and isol
  const restored=await new JsonStore(f.dir).init();assert.equal(restored.state.users.find(u=>u.id===a.id).settings.chatAssistantHostId,id,'Docker default target survives store reload');
  assert.equal((await f.request('/settings',{token:b.token,method:'PATCH',body:{chatAssistantHostId:id}})).status,403);
 });
+
+test('administrator creation works while unauthenticated, member creation and pending-start bypasses are rejected',async t=>{
+ const f=await fixture(t),member=await f.member('restricted-cloud-user');
+ const body={name:'synthetic admin environment',source:'local',bundle:'agent',requestId:randomUUID()};
+ assert.equal((await f.request('/cloud-docker',{token:null,method:'POST',body})).status,401);
+ for(const source of ['local','platform'])assert.equal((await f.request('/cloud-docker',{token:member.token,method:'POST',body:{...body,source}})).status,403);
+ assert.equal(f.records.length,0);
+ const created=await f.request('/cloud-docker',{method:'POST',body});assert.equal(created.status,201);assert.equal(f.records.length,1);
+ const own=await f.seedCloud(member.id,{name:'pre-policy pending',requestId:randomUUID()});const record=f.records.find(r=>r.id===own.id);record.online=false;record.docker.creationPending=true;record.docker.state='creating';
+ const before=JSON.stringify(f.records);assert.equal((await f.request('/cloud-docker/'+own.id+'/start',{token:member.token,method:'POST',body:{}})).status,403);assert.equal(JSON.stringify(f.records),before);
+});
 test('Agent dispatch keeps the selected Docker target and never falls back to central',async t=>{
  const f=await fixture(t),a=await f.member('cloud-agent');
  await f.request('/service-links/api-harbor/pair',{method:'POST',body:{baseUrl:'https://harbor.invalid',code:'synthetic'}});
  const provider=(await f.request('/state')).data.providers.find(p=>p.source==='api-harbor');
  await f.request('/admin/users/'+a.id,{method:'PATCH',body:{providerIds:[provider.id],agentAccess:'full'}});
- const host=(await f.request('/cloud-docker',{token:a.token,method:'POST',body:{name:'fixed cloud',source:'local',bundle:'agent',requestId:randomUUID()}})).data.instance;
+ const host=await f.seedCloud(a.id,{name:'fixed cloud',requestId:randomUUID()});
  const conversation=(await f.request('/conversations',{token:a.token,method:'POST',body:{mode:'codex'}})).data;
  const body={submissionId:randomUUID(),content:'Run only inside the selected container.',providerId:provider.id,hostId:host.id,permissions:{access:'read-only',approval:'ask'}};
  const result=await f.request(`/conversations/${conversation.id}/agent/submit`,{token:a.token,method:'POST',body});assert.equal(result.status,200);

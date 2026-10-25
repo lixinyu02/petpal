@@ -56,7 +56,7 @@ test('cloud creation persists resources across restart and never reassigns an un
  const dataDir=await mkdtemp(path.join(tmpdir(),'petpal-k3s-'));t.after(()=>rm(dataDir,{recursive:true,force:true}));
  const nodeId=randomUUID(),clientId=randomUUID(),requestId=randomUUID(),calls=[];let first=true;
  const platform={credential:async()=>({clientId}),prepare:async()=>({runtimeKind:'kubernetes',resources:{cpus:1,memoryMiB:1024,pids:256}}),catalog:async()=>({available:true,nodes:[]}),create:async r=>{calls.push(structuredClone(r));if(first){first=false;throw Error('lost receipt');}return{nodeId};},inspect:async()=>({state:'running',generation:'pod-uid',desktop:false})};
- const opts={dataDir,authorizeUser:id=>({id,enabled:true}),getConfig:()=>({}),publicOrigin:()=>'',localDriver:{status:async()=>({available:false})},platformDriver:platform,refreshMs:0};
+ const opts={dataDir,authorizeUser:id=>({id,enabled:true,isAdmin:id==='u'}),getConfig:()=>({}),publicOrigin:()=>'',localDriver:{status:async()=>({available:false})},platformDriver:platform,refreshMs:0};
  const body={name:'K3s',source:'platform',nodeId,bundle:'agent',requestId,resources:{cpus:1,memoryMiB:1024}};
  const a=await createCloudDocker(opts);await assert.rejects(a.create('u',body));await a.close();
  const b=await createCloudDocker(opts);t.after(()=>b.close());const live=await b.create('u',body);

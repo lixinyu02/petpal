@@ -103,13 +103,13 @@ test('unverified login cannot request environments, pair services or request a d
 
 test('only administrators prepare local Docker images; ordinary users see the truthful pending state',async t=>{
   const pending={sources:[{id:'local',available:true,imageAvailable:false}],local:{available:true,imageAvailable:false}};
-  const f=fixture('cloud',{catalog:pending,hosts:[]});t.after(()=>f.close());await f.flush();assert.equal(f.button('准备 Docker 环境'),undefined);assert.equal(f.button('新建环境').props.disabled,true);assert.match(f.text(),/管理员尚未准备/);
+  const f=fixture('cloud',{catalog:pending,hosts:[]});t.after(()=>f.close());await f.flush();assert.equal(f.button('准备 Docker 环境'),undefined);assert.equal(f.button('新建环境'),undefined);assert.doesNotMatch(f.text(),/中央服务器 Docker/);
   const gate=deferred(),admin=fixture('cloud',{catalog:pending,hosts:[],props:{user:{...user,isAdmin:true}},request:call=>call.path==='/cloud-docker/prepare'?gate.promise:undefined});t.after(()=>{gate.resolve({});admin.close();});await admin.flush();
   const prepare=admin.button('准备 Docker 环境').props.onClick;prepare();prepare();admin.render();assert.equal(admin.requests.filter(call=>call.path==='/cloud-docker/prepare').length,1);gate.resolve({});await admin.flush();
 });
 
 test('create freezes platform node and bundle, and synchronous duplicate submits create once',async t=>{
-  const gate=deferred(),f=fixture('cloud',{request:call=>call.path==='/cloud-docker'&&call.method==='POST'?gate.promise:undefined});t.after(()=>{gate.resolve({});f.close();});await f.flush();
+  const gate=deferred(),f=fixture('cloud',{props:{user:{...user,isAdmin:true}},request:call=>call.path==='/cloud-docker'&&call.method==='POST'?gate.promise:undefined});t.after(()=>{gate.resolve({});f.close();});await f.flush();
   f.click('新建环境');f.change('环境名称','写作工作区');f.change('Docker 运行位置','platform');f.change('运行节点','node-a');f.change('环境类型','agent');
   const submit=f.find('form').props.onSubmit;submit({preventDefault(){}});submit({preventDefault(){}});f.render();
   const writes=f.requests.filter(call=>call.method==='POST');assert.equal(writes.length,1);const {requestId,...body}=clone(writes[0].body);assert.match(requestId,/^[a-f0-9-]{36}$/);assert.deepEqual(body,{name:'写作工作区',source:'platform',bundle:'agent',resources:{cpus:2,memoryMiB:4096},nodeId:'node-a'});
@@ -118,7 +118,7 @@ test('create freezes platform node and bundle, and synchronous duplicate submits
 
 test('a lost creation reply keeps requestId and frozen configuration for a later retry',async t=>{
   const created=new Map();let attempts=0;
-  const f=fixture('cloud',{hosts:[],request:call=>{
+  const f=fixture('cloud',{props:{user:{...user,isAdmin:true}},hosts:[],request:call=>{
     if(call.path!=='/cloud-docker'||call.method!=='POST')return;
     attempts++;if(!created.has(call.body.requestId))created.set(call.body.requestId,clone(call.body));
     if(attempts===1)throw new TypeError('Network reply lost after server committed');
@@ -131,7 +131,7 @@ test('a lost creation reply keeps requestId and frozen configuration for a later
 
 test('refresh confirms an earlier committed request by requestId instead of issuing another create',async t=>{
   let committed=null;
-  const f=fixture('cloud',{hosts:[],request:call=>{
+  const f=fixture('cloud',{props:{user:{...user,isAdmin:true}},hosts:[],request:call=>{
     if(call.path!=='/cloud-docker')return;
     if(call.method==='GET')return {instances:committed?[{...own,requestId:committed.requestId}]:[]};
     committed=clone(call.body);throw new TypeError('Creation reply was lost');
@@ -141,7 +141,7 @@ test('refresh confirms an earlier committed request by requestId instead of issu
 
 test('a matching but stopped instance retains its frozen create body until that exact request is running',async t=>{
   let committed=null,record=null,attempts=0;
-  const f=fixture('cloud',{hosts:[],request:call=>{
+  const f=fixture('cloud',{props:{user:{...user,isAdmin:true}},hosts:[],request:call=>{
     if(call.path!=='/cloud-docker')return;
     if(call.method==='GET')return {instances:record?[record]:[]};
     attempts++;committed??=clone(call.body);
@@ -240,11 +240,31 @@ test('desktop URLs reject arbitrary proxy destinations, expired tickets and malf
 
 test('K3s selection forces CLI, submits resources, and unready nodes remain visibly blocked',async t=>{
  const node={id:'k3s-node',name:'K3s',available:true,ready:false,runtimeKind:'kubernetes',message:'K3s 节点待配置',kubernetesConstraints:{pidsLimit:256}};
- const f=fixture('cloud',{catalog:{sources,nodes:[node]},hosts:[]});t.after(()=>f.close());await f.flush();
+ const f=fixture('cloud',{props:{user:{...user,isAdmin:true}},catalog:{sources,nodes:[node]},hosts:[]});t.after(()=>f.close());await f.flush();
  f.click('新建环境');f.change('Docker 运行位置','platform');f.change('运行节点','k3s-node');
  assert.equal(f.field('环境类型').props.value,'agent');assert.equal(f.button('创建环境').props.disabled,true);assert.match(f.text(),/K3s 节点待配置/);
  f.submit();await f.flush();assert.equal(f.requests.filter(c=>c.method==='POST').length,0);
- const ready=fixture('cloud',{catalog:{sources,nodes:[{...node,ready:true}]},hosts:[],identity:{userId:'k3s-user'}});t.after(()=>ready.close());await ready.flush();
+ const ready=fixture('cloud',{props:{user:{...user,isAdmin:true}},catalog:{sources,nodes:[{...node,ready:true}]},hosts:[],identity:{userId:'k3s-user'}});t.after(()=>ready.close());await ready.flush();
  ready.click('新建环境');ready.change('Docker 运行位置','platform');ready.change('运行节点','k3s-node');ready.change('CPU 核数','1');ready.change('内存（MiB）','1024');ready.submit();await ready.flush();
  const post=ready.requests.find(c=>c.method==='POST');assert.equal(post.body.bundle,'agent');assert.deepEqual(clone(post.body.resources),{cpus:1,memoryMiB:1024});
+});
+
+test('ordinary users cannot see create controls even with a legacy permissive catalog and pending host',async t=>{
+ const pending={...own,online:false,docker:{...own.docker,state:'creating',creationPending:true,errorCode:'kubernetes_pids_limit_unconfirmed'}};
+ const f=fixture('cloud',{hosts:[pending]});t.after(()=>f.close());await f.flush();
+ assert.equal(f.button('新建环境'),undefined);assert.equal(f.button('确认上次创建'),undefined);assert.equal(f.button('启动 '+own.name).props.disabled,true);
+ assert.match(f.text(),/创建未完成/);assert.match(f.text(),/实际进程数隔离校验未通过/);assert.doesNotMatch(f.text(),/中央服务器 Docker/);
+ f.click('启动 '+own.name);await f.flush();assert.equal(f.requests.some(c=>c.method==='POST'),false);
+});
+
+test('captured create and submit handlers are retired after an administrator loses that role',async t=>{
+ const current={...user,isAdmin:true},f=fixture('cloud',{props:{user:current}});t.after(()=>f.close());await f.flush();
+ const open=f.button('新建环境').props.onClick;f.click('新建环境');const submit=f.find('form').props.onSubmit;
+ current.isAdmin=false;f.render();await f.flush();assert.equal(f.button('新建环境'),undefined);assert.equal(f.find('form'),undefined);
+ open();submit({preventDefault(){}});await f.flush();assert.equal(f.requests.some(c=>c.method==='POST'),false);
+});
+
+test('known PID validation failures show the concrete cause while preserving the original request',async t=>{
+ const f=fixture('cloud',{props:{user:{...user,isAdmin:true}},hosts:[],request:c=>{if(c.path==='/cloud-docker'&&c.method==='POST')throw Object.assign(Error('private upstream diagnostic'),{status:409,code:'kubernetes_pids_limit_unconfirmed'});}});t.after(()=>f.close());await f.flush();f.click('新建环境');f.submit();await f.flush();
+ assert.match(f.text(),/实际进程数隔离校验未通过/);assert.doesNotMatch(f.text(),/private upstream|创建结果尚未确认/);assert.ok(f.button('确认上次创建'));assert.equal(f.requests.filter(c=>c.method==='POST').length,1);
 });

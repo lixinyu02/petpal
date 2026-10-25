@@ -46,6 +46,7 @@ export async function createCloudDocker({ dataDir, serviceLinks, authorizeUser, 
   let closed = false, saving = Promise.resolve(), refreshing;
   const operations = new Set(), creationRequests = new Set(), bindings = new Set(), tokens = new Map(), desktops = new Set();
   const checkUser = userId => { if (closed) throw failure(503, '云端环境后台已关闭。'); const user = authorizeUser(userId); if (!user || user.disabled || user.enabled === false) throw failure(403, '账号不可用。', 'cloud_docker_forbidden'); return user; };
+  const requireCreator=userId=>{const user=checkUser(userId);if(!user.isAdmin)throw failure(403,'只有管理员可以创建或恢复中央服务器的云端环境。','cloud_docker_create_forbidden');return user;};
   const get = (userId, id) => { const user = checkUser(userId), record = state.records.find(r => r.id === id); if (!record || record.userId !== userId && !user.isAdmin) throw failure(404, '云端环境不存在或不属于当前账号。', 'cloud_docker_forbidden'); return record; };
   async function save() {
     const bytes = JSON.stringify(state) + '\n';
@@ -76,7 +77,7 @@ export async function createCloudDocker({ dataDir, serviceLinks, authorizeUser, 
   async function observe(r) {
     const before = r.generation;
     try { const observed = r.source === 'local' ? await local.inspect(r,state.instanceId) : await platform.inspect(r); r.state = observed.state; r.generation = observed.generation; r.desktopAvailable = observed.desktop === true; if(observed.state==='running'){delete r.creationPending;delete r.errorCode;}else if(!r.creationPending)delete r.errorCode; }
-    catch (error) { r.state = 'offline'; r.desktopAvailable = false; r.errorCode = error.code === 'cloud_docker_identity_changed' ? error.code : 'cloud_docker_unavailable'; }
+    catch (error) { r.state = 'offline'; r.desktopAvailable = false; r.errorCode = error.code === 'cloud_docker_identity_changed' ? error.code : r.creationPending&&r.errorCode?r.errorCode:'cloud_docker_unavailable'; }
     if(r.executionUncertain){r.state='unknown';r.desktopAvailable=false;r.errorCode='execution_unknown';}
     r.updatedAt = stamp();
     for (const d of desktops) if (d.record === r && (r.state !== 'running' || before && before !== r.generation)) void d.close();
@@ -87,24 +88,28 @@ export async function createCloudDocker({ dataDir, serviceLinks, authorizeUser, 
     await Promise.all(selected.filter(r => !operations.has(r.id)).map(r => observe(r))); checkUser(userId); await save(); return list(userId);
   }
   async function catalog(userId) {
-    checkUser(userId); const [engine, remote] = await Promise.all([local.status(), platform.catalog()]); checkUser(userId);
-    return { sources: [{ id:'local',name:'中央服务器 Docker',available:engine.available === true,imageAvailable:engine.imageAvailable === true,...(engine.message ? {message:engine.message}: {}) }, {id:'platform',name:'Docker Platform',available:remote.available === true,...(remote.message?{message:remote.message}:{})}], nodes: (remote.nodes ?? []).map(n=>({...n,source:'platform'})), bundles:[{id:'agent',name:'Agent 命令行'},{id:'desktop',name:'Agent 与图形桌面'}] };
+    if(!checkUser(userId).isAdmin)return{canCreate:false,sources:[],nodes:[],bundles:[]};
+    const [engine, remote] = await Promise.all([local.status(), platform.catalog()]);
+    if(!checkUser(userId).isAdmin)return{canCreate:false,sources:[],nodes:[],bundles:[]};
+    return { canCreate:true,sources: [{ id:'local',name:'中央服务器 Docker',available:engine.available === true,imageAvailable:engine.imageAvailable === true,...(engine.message ? {message:engine.message}: {}) }, {id:'platform',name:'Docker Platform',available:remote.available === true,...(remote.message?{message:remote.message}:{})}], nodes: (remote.nodes ?? []).map(n=>({...n,source:'platform'})), bundles:[{id:'agent',name:'Agent 命令行'},{id:'desktop',name:'Agent 与图形桌面'}] };
   }
-  async function recoverCreate(r) {
+  async function recoverCreate(r,userId) {
+    requireCreator(userId);
     if (r.source === 'local') {
       let existing; try { existing = await local.inspect(r,state.instanceId); } catch {}
+      requireCreator(userId);
       if (existing) { if (existing.state !== 'running') await local.action(r,state.instanceId,'start'); }
-      else { const engine = await local.status(); if (!engine.available) throw failure(409,'本机 Docker 尚未就绪。'); if (!engine.imageAvailable) await local.prepare(); await local.create(r,state.instanceId); }
+      else { const engine = await local.status();requireCreator(userId);if (!engine.available) throw failure(409,'本机 Docker 尚未就绪。'); if (!engine.imageAvailable){await local.prepare();requireCreator(userId);}await local.create(r,state.instanceId); }
     } else {
-      const reply = await platform.create(r); r.nodeId = reply.nodeId; await save();
-      const actual = await platform.inspect(r); if (actual.state !== 'running') await platform.action(r,'start');
+      const reply = await platform.create(r); r.nodeId = reply.nodeId; await save();requireCreator(userId);
+      const actual = await platform.inspect(r);requireCreator(userId);if (actual.state !== 'running') await platform.action(r,'start');
     }
-    await observe(r);
+    requireCreator(userId);await observe(r);requireCreator(userId);
     if (r.state !== 'running') throw failure(409,'创建回执已保留，但环境尚未运行；请刷新后启动恢复。');
     delete r.creationPending;
   }
   async function create(userId, options) {
-    checkUser(userId);
+    requireCreator(userId);
     if (!fields(options,['name','source','nodeId','bundle','requestId','resources']) || !text(options.name,120) || !['local','platform'].includes(options.source) || options.bundle !== undefined && !['agent','desktop'].includes(options.bundle) || options.nodeId !== undefined && !UUID.test(options.nodeId) || options.requestId !== undefined && !UUID.test(options.requestId)) throw failure(400,'云端环境配置无效。');
     if(options.resources!==undefined){if(options.source!=='platform')throw failure(400,'自定义资源仅适用于平台环境。');cloudResources(options.resources);}
     const requestId=options.requestId??randomUUID(),key=`${userId}:${requestId}`;
@@ -115,11 +120,12 @@ export async function createCloudDocker({ dataDir, serviceLinks, authorizeUser, 
   async function completeCreation(userId,r) {
     if(operations.has(r.id))throw failure(409,'环境正在恢复，请等待原请求。','executor_busy');
     operations.add(r.id);
-    try { await save(); get(userId,r.id); await recoverCreate(r); get(userId,r.id); await save(); return publicHost(r,userId); }
+    try { requireCreator(userId);await save();requireCreator(userId);get(userId,r.id);await recoverCreate(r,userId);get(userId,r.id);await save();return publicHost(r,userId); }
     catch(error) { r.creationPending=true;r.state='create_failed'; r.errorCode=error.code??'cloud_docker_unavailable'; await save(); throw error; }
     finally { operations.delete(r.id); }
   }
   async function createReserved(userId,options,requestId) {
+    requireCreator(userId);
     const existing=state.records.find(r=>r.userId===userId&&r.requestId===requestId);
     if(existing){
       const originalNode=Object.hasOwn(existing,'requestedNodeId')?existing.requestedNodeId:existing.nodeId;
@@ -130,15 +136,16 @@ export async function createCloudDocker({ dataDir, serviceLinks, authorizeUser, 
     if (state.records.filter(r=>r.userId===userId).length >= 8) throw failure(409,'每个账号最多创建 8 个云端环境。');
     const r = { id:randomUUID(),userId,name:options.name.trim(),source:options.source,bundle:options.bundle??'desktop',creationPending:true,state:'creating',generation:'',desktopAvailable:false,createdAt:stamp(),updatedAt:stamp(),requestId };
     if (r.source === 'local') r.containerName = `petpal-${state.instanceId.slice(0,8)}-${r.id}`;
-    else { const connection=await platform.credential(); checkUser(userId); r.clientId=connection.clientId; r.projectId=randomUUID(); r.requestedNodeId=options.nodeId??null; if(options.nodeId)r.nodeId=options.nodeId;if(options.resources!==undefined)r.requestedResources=cloudResources(options.resources);if(platform.prepare){Object.assign(r,await platform.prepare(r,options.resources));checkUser(userId);} }
-    state.records.push(r);return completeCreation(userId,r);
+    else { const connection=await platform.credential();requireCreator(userId);r.clientId=connection.clientId;r.projectId=randomUUID();r.requestedNodeId=options.nodeId??null;if(options.nodeId)r.nodeId=options.nodeId;if(options.resources!==undefined)r.requestedResources=cloudResources(options.resources);if(platform.prepare){Object.assign(r,await platform.prepare(r,options.resources));requireCreator(userId);} }
+    requireCreator(userId);state.records.push(r);return completeCreation(userId,r);
   }
   async function action(userId,id,action) {
     if(!['start','stop'].includes(action))throw failure(400,'仅支持启动或停止云端环境。');
     const r=get(userId,id); if(isBusy(userId,id))throw failure(409,'环境正在执行任务或变更，请等待完成。','executor_busy');
+    if(action==='start'&&r.creationPending)requireCreator(userId);
     if(action==='start'&&r.executionUncertain)throw failure(409,'上次任务停止状态未知，请先停止整个环境确认收尾，再重新启动。','execution_unknown');
     operations.add(id);
-    try { if(action==='start' && r.creationPending) await recoverCreate(r); else { if(action==='stop') for(const d of [...desktops])if(d.record===r)await d.close(); const observed=r.source==='local'?await local.action(r,state.instanceId,action):await platform.action(r,action); if(action==='stop'&&observed?.state==='stopped')delete r.executionUncertain; await observe(r); } get(userId,id); await save(); return publicHost(r,userId); }
+    try { if(action==='start' && r.creationPending) await recoverCreate(r,userId); else { if(action==='stop') for(const d of [...desktops])if(d.record===r)await d.close(); const observed=r.source==='local'?await local.action(r,state.instanceId,action):await platform.action(r,action); if(action==='stop'&&observed?.state==='stopped')delete r.executionUncertain; await observe(r); } get(userId,id); await save(); return publicHost(r,userId); }
     finally { operations.delete(id); }
   }
   function bind(entry) {

@@ -30,9 +30,9 @@ export function mountCloudRoutes({app,cloud,links,desktop,auth,admin,executorAut
  app.get('/api/cloud-docker',async(req,res)=>{auth(req);fields(req);await cloud.refresh?.(req.user.id);await syncHosts();auth(req);res.json({instances:cloud.list(req.user.id)});});
  app.get('/api/cloud-docker/catalog',async(req,res)=>{auth(req);fields(req);const value=await cloud.catalog(req.user.id);auth(req);res.json(value);});
  app.post('/api/cloud-docker/prepare',async(req,res)=>{admin(req);fields(req);const value=await cloud.prepare(req.user.id);admin(req);res.json(value);});
- app.post('/api/cloud-docker',async(req,res)=>{auth(req);fields(req,['name','source','nodeId','bundle','requestId','resources']);let instance;try{instance=await cloud.create(req.user.id,req.body);}finally{await syncHosts();}auth(req);res.status(201).json({instance});});
+ app.post('/api/cloud-docker',async(req,res)=>{auth(req);admin(req);fields(req,['name','source','nodeId','bundle','requestId','resources']);let instance;try{instance=await cloud.create(req.user.id,req.body);}finally{await syncHosts();}auth(req);admin(req);res.status(201).json({instance});});
  for(const action of ['start','stop'])app.post(`/api/cloud-docker/:id/${action}`,async(req,res)=>{
-  auth(req);fields(req);cloud.hostFor(req.user.id,req.params.id);
+  auth(req);fields(req);const host=cloud.hostFor(req.user.id,req.params.id);if(action==='start'&&host.docker?.creationPending)admin(req);
   if(action==='stop')await stopHostWork(req.params.id);
   const instance=await cloud.action(req.user.id,req.params.id,action);auth(req);res.json({instance});
  });
