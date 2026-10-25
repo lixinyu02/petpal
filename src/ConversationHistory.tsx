@@ -4,11 +4,13 @@ import {Archive,ArchiveRestore,Check,ChevronLeft,Folder,FolderInput,Loader2,Mess
 import {getSessionEpoch,isSessionChanged,type Conversation,type ConversationProject} from './api';
 import {useUiEntrance} from './platform/ui-motion.ts';
 import './conversation-history.css';
+import type {ChatRunPhase} from './chat-runs.mjs';
 
 type HistoryItem=Pick<Conversation,'id'|'title'|'mode'|'projectId'|'archivedAt'|'backgroundParentId'>;
 export type ConversationOrganizationPatch={title?:string;projectId?:string|null;archived?:boolean};
 export type ConversationHistoryProps={
   conversations:HistoryItem[];projects:ConversationProject[];selectedId:string|null;active:boolean;busy:boolean;
+  activity?:Record<string,ChatRunPhase>;
   projectFilter:string;archived:boolean;onFilter(projectFilter:string,archived:boolean):void;
   onSelect(id:string):void;onDelete(id:string):void;
   onOrganize(id:string,patch:ConversationOrganizationPatch):Promise<void>;
@@ -26,15 +28,16 @@ export function historyProjectCounts(conversations:HistoryItem[],projects:Conver
   return result;
 }
 
-export const ConversationHistoryRow=memo(function ConversationHistoryRow({id,title,mode,selected,onSelect,onMore}:Pick<HistoryItem,'id'|'title'|'mode'>&{selected:boolean;onSelect(id:string):void;onMore(id:string):void}) {
+export const ConversationHistoryRow=memo(function ConversationHistoryRow({id,title,mode,selected,activity,onSelect,onMore}:Pick<HistoryItem,'id'|'title'|'mode'>&{selected:boolean;activity?:ChatRunPhase;onSelect(id:string):void;onMore(id:string):void}) {
   return <div className={`history-row${selected?' selected':''}`}>
-    <button type="button" className="history-item" title={title} aria-current={selected?'page':undefined} onClick={()=>onSelect(id)}>{mode==='codex'?<Terminal size={15} aria-hidden="true"/>:<MessageCircle size={15} aria-hidden="true"/>}<span>{title||'新对话'}</span></button>
+    <button type="button" className="history-item" title={title} aria-current={selected?'page':undefined} onClick={()=>onSelect(id)}>{mode==='codex'?<Terminal size={15} aria-hidden="true"/>:<MessageCircle size={15} aria-hidden="true"/>}<span>{title||'新对话'}</span>{activity&&<span className={`history-chat-state ${activity}`} role="status" aria-label={activity==='running'?'正在回复':activity==='complete'?'有新回复':activity==='cancelled'?'回复已停止':'回复出现错误'} title={activity==='running'?'正在后台回复':activity==='complete'?'新回复已完成':activity==='cancelled'?'回复已停止':'打开查看错误'}>{activity==='running'?<Loader2 size={12} className="spin" aria-hidden="true"/>:activity==='error'?'!':<i aria-hidden="true"/>}</span>}</button>
     <button type="button" className="history-more icon-button" aria-label={`对话 ${title||'新对话'} 的更多操作`} aria-haspopup="dialog" onClick={()=>onMore(id)}><MoreHorizontal size={16} aria-hidden="true"/></button>
   </div>;
 });
 
 /** Message content, timestamps and Agent receipts do not change the navigation labels. */
 export function sameConversationHistory(before:ConversationHistoryProps,after:ConversationHistoryProps) {
+  if(before.activity!==after.activity){const a=before.activity??{},b=after.activity??{};if(Object.keys(a).length!==Object.keys(b).length||Object.entries(a).some(([id,phase])=>b[id]!==phase))return false;}
   return before.selectedId===after.selectedId&&before.active===after.active&&before.busy===after.busy&&before.projectFilter===after.projectFilter&&before.archived===after.archived
     &&before.onFilter===after.onFilter&&before.onSelect===after.onSelect&&before.onDelete===after.onDelete&&before.onOrganize===after.onOrganize&&before.onCreateProject===after.onCreateProject&&before.onRenameProject===after.onRenameProject&&before.onDeleteProject===after.onDeleteProject
     &&(before.projects===after.projects||before.projects.length===after.projects.length&&before.projects.every((item,index)=>item.id===after.projects[index].id&&item.name===after.projects[index].name))
@@ -43,7 +46,7 @@ export function sameConversationHistory(before:ConversationHistoryProps,after:Co
     }));
 }
 
-export default memo(function ConversationHistory({conversations,projects,selectedId,active,busy,projectFilter,archived,onFilter,onSelect,onDelete,onOrganize,onCreateProject,onRenameProject,onDeleteProject}:ConversationHistoryProps) {
+export default memo(function ConversationHistory({conversations,projects,selectedId,active,busy,activity,projectFilter,archived,onFilter,onSelect,onDelete,onOrganize,onCreateProject,onRenameProject,onDeleteProject}:ConversationHistoryProps) {
   const id=useId(),[dialog,setDialog]=useState<Dialog|null>(null),[value,setValue]=useState(''),[pending,setPending]=useState(false),[error,setError]=useState('');
   const sequence=useRef(0),mounted=useRef(false),pendingRef=useRef(false);
   const projectSelector=useRef<HTMLSelectElement>(null),currentTab=useRef<HTMLButtonElement>(null),archiveTab=useRef<HTMLButtonElement>(null),wasDialogOpen=useRef(false);
@@ -96,7 +99,7 @@ export default memo(function ConversationHistory({conversations,projects,selecte
       <option value="all">全部对话 · {counts.all}</option><option value="unassigned">未分类 · {counts.unassigned}</option>{projects.map(item=><option key={item.id} value={item.id}>{item.name} · {counts[item.id]||0}</option>)}
     </select><button type="button" className="history-project-button" aria-label="新建项目" aria-haspopup="dialog" disabled={projects.length>=50} title={projects.length>=50?'最多创建 50 个项目':'新建项目'} onClick={()=>open({kind:'create-project'})}><Plus size={16} aria-hidden="true"/></button><button type="button" className="history-project-button" aria-label="管理项目" aria-haspopup="dialog" onClick={()=>open({kind:'projects'})}><Settings2 size={14} aria-hidden="true"/></button></div>
     <div className="history-tabs" role="group" aria-label="对话状态"><button ref={currentTab} type="button" aria-pressed={!archived} onClick={()=>onFilter(projectFilter,false)}>当前<span>{currentCount}</span></button><button ref={archiveTab} type="button" aria-pressed={archived} onClick={()=>onFilter(projectFilter,true)}><Archive size={12} aria-hidden="true"/>归档<span>{archiveCount}</span></button></div>
-    <div className="history-list" aria-label={archived?'已归档对话':'当前对话'}>{items.length===0?<p className="history-empty">{archived?'这里还没有归档的对话。':projectFilter==='all'?'我们的故事，从一句你好开始。':'这个分类还没有对话。'}</p>:items.map(item=><ConversationHistoryRow key={item.id} id={item.id} title={item.title} mode={item.mode} selected={active&&selectedId===item.id} onSelect={onSelect} onMore={more}/>)}</div>
+    <div className="history-list" aria-label={archived?'已归档对话':'当前对话'}>{items.length===0?<p className="history-empty">{archived?'这里还没有归档的对话。':projectFilter==='all'?'我们的故事，从一句你好开始。':'这个分类还没有对话。'}</p>:items.map(item=><ConversationHistoryRow key={item.id} id={item.id} title={item.title} mode={item.mode} selected={active&&selectedId===item.id} activity={activity?.[item.id]} onSelect={onSelect} onMore={more}/>)}</div>
     {dialog&&typeof document!=='undefined'&&createPortal(<div ref={layer} className="modal-backdrop history-dialog-layer" data-ui-layer="dialog" onClick={event=>{if(event.target===event.currentTarget)close();}}><section className="modal history-dialog" role={dialog.kind==='delete-project'?'alertdialog':'dialog'} aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={dialog.kind==='delete-project'?`${id}-description`:undefined} aria-busy={pending||undefined}>
       <div className="modal-heading"><h2 id={`${id}-title`}>{title}</h2><button type="button" className="history-dialog-close" data-ui-dismiss="dialog" aria-label="关闭对话整理窗口" disabled={pending} onClick={()=>close()}><X size={19} aria-hidden="true"/></button></div>
       {dialog.kind==='conversation'&&conversation&&<><p className="history-dialog-context" title={conversation.title}>{conversation.title}</p><div className="history-action-list">

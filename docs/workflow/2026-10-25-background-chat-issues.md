@@ -3,7 +3,7 @@
 - Date: 2026-10-25
 - Complexity: L2
 - Related design: 2026-10-25-background-chat-design.md
-- Current status: issue-2 in_progress
+- Current status: issue-3 in_progress
 
 ## issue-1
 
@@ -14,7 +14,7 @@
 - 验收标准: A/B 互不覆盖；同线程新一轮废弃旧恢复；关闭全部与删除有效；普通刷新不能覆盖运行中文字
 - 状态: completed
 - 验证方式: 注册表/合并 10 项通过；覆盖双线程、停止隔离、同线程恢复淘汰、临时 ID、账号退休、资源关闭、迟到全量读取及新线程保留。自审通过，无后端修改。
-- commit: 本 issue 提交
+- commit: 11ce0c5
 
 ## issue-2
 
@@ -23,9 +23,9 @@
 - 范围: App Chat、导航、附件、语音、Agent 导航和历史侧栏
 - 依赖: issue-1
 - 验收标准: 发消息后可切线程/新建并发送；只停止当前线程；后台不清空他人草稿/附件、不朗读抢焦点；完成可见
-- 状态: in_progress
-- 验证方式: 真实函数交错流、侧栏与既有交互回归、TypeScript/构建、自审
-- commit: pending
+- 状态: completed
+- 验证方式: 605 项相关回归通过；自审补强 Agent 选择切换前的迟到帧/语音屏障，并对丢弃后失败草稿复活问题修复，最新 Chat/Agent 专项 32 项通过。TypeScript、Vite/OpenUI 候选构建通过。真实 App send/stop/navigation 函数覆盖双线程、返回、停止、迟到 meta、草稿图片、恢复、账号与 Agent 导航，侧栏 SSR 验证活动与未读状态。
+- commit: 本 issue 提交
 
 ## issue-3
 
@@ -34,6 +34,6 @@
 - 范围: 隔离慢速模型、真实双线程与正式网页只读检查
 - 依赖: issue-2
 - 验收标准: 后台文本实际持续生成，返回后完整，另一线程可并发回复；网页上线且业务/记忆/下载保持
-- 状态: todo
+- 状态: in_progress
 - 验证方式: Chrome、协议回归、发布摘要与保留回执
 - commit: pending

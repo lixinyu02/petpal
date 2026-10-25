@@ -19,6 +19,14 @@ test('voice ticks and streaming content do not invalidate navigation labels',()=
   assert.equal(sameConversationHistory(base,next),true);
 });
 
+test('running and unread completion badges are accessible and invalidate only their activity change',()=>{
+ const running={...base,activity:{one:'running'}};
+ const html=renderToStaticMarkup(createElement(ConversationHistory,running));assert.ok(html.includes('aria-label="正在回复"'));assert.ok(html.includes('history-chat-state running'));assert.equal(sameConversationHistory(base,running),false);
+ assert.equal(sameConversationHistory(running,{...running,activity:{one:'running'}}),true);
+ const complete={...base,activity:{one:'complete'}};assert.equal(sameConversationHistory(running,complete),false);assert.ok(renderToStaticMarkup(createElement(ConversationHistory,complete)).includes('aria-label="有新回复"'));
+ assert.equal(sameConversationHistory(complete,{...base,activity:{}}),false);
+});
+
 test('selection, title, mode, order, deletion and current callback guards remain observable',()=>{
   for(const next of [
     {...base,selectedId:'two'}, {...base,active:false}, {...base,busy:true},

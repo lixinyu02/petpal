@@ -46,7 +46,7 @@ function fixture(t,{hidden=false,online=true,automation=false,selected='agent-on
     };
     if(deferUpdates)queued.push(apply);else apply();
   };
-  const context={document,window,AbortController,DOMException,JSON,Set,SessionChangedError,selected,currentMode:mode,accountEpoch:1,
+  const context={document,window,AbortController,DOMException,JSON,Set,SessionChangedError,selected,currentMode:mode,accountEpoch:1,selectedChatRef:{current:selected},chatVisibleRef:{current:true},
     getSessionEpoch:()=>epoch,isSessionChanged:error=>error?.name==='SessionChangedError',approvalAlive:{current:true},deletedConversationIds:{current:new Set()},organizationRevision:{current:0},
     loadedAutomationConversationRef:{current:loaded},setLoadedAutomationConversation:value=>update('loaded',value),setState:value=>update('state',value),
     reuseConversationMessages,mergeConversationOrganization,
@@ -84,6 +84,14 @@ test('Agent uses 800ms running and 2500ms idle reads, suppressing initial comple
   await f.resolve(1,snapshot({agent:{revision:2,run:{status:'completed'},submissions:[]},messages:[reply('new-completion')]}));
   assert.deepEqual(f.spoken.map(value=>value.text),['new-completion']);
   await f.advance(2499);assert.equal(f.requests.length,2);await f.advance(1);assert.equal(f.requests.length,3);
+});
+
+test('switching selection fences a late Agent frame before effect cleanup, and settings suppress speech',async t=>{
+ const switched=fixture(t),before=switched.state;switched.context.selectedChatRef.current='other-chat';
+ await switched.resolve(0,snapshot({messages:[reply('must-not-leak')]}));assert.equal(switched.state,before);assert.equal(switched.spoken.length,0);assert.equal(switched.phases.length,0);
+ const settings=fixture(t);await settings.resolve(0,snapshot());await settings.advance(800);settings.context.chatVisibleRef.current=false;
+ await settings.resolve(1,snapshot({messages:[reply('background-finished')],agent:{revision:2,run:{status:'completed'},submissions:[]}}));
+ assert.equal(settings.spoken.length,0);assert.equal(settings.phases.length,0);
 });
 
 test('Agent read failures recover their own error without clearing an action error or replaying work',async t=>{

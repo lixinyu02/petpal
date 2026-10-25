@@ -52,3 +52,5 @@ html[data-theme="night"] .history-dialog .history-action-danger{color:#e4b79a}
   .history-dialog-footer>button{min-height:44px}
 }
 @media(prefers-reduced-motion:reduce){.conversation-history button,.history-dialog button{transition:none}}
+
+.history-item .history-chat-state{display:inline-flex;align-items:center;justify-content:center;flex:0 0 16px;width:16px;height:16px;margin-left:4px;overflow:visible;color:var(--green);font-size:12px}.history-chat-state>i{display:block;width:6px;height:6px;border-radius:50%;background:currentColor}.history-chat-state.error{color:var(--theme-muted)}.history-chat-state.cancelled{opacity:.6}
