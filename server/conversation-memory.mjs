@@ -6,12 +6,13 @@ const quotedExcerpt=(value,limit)=>{
 /** Imported evidence is contextual data, never authority to run a tool. */
 export function createConversationMemory({memory,archives}) {
   const snapshot=async userId=>{
-    if(typeof memory.status!=='function')return null;
+    const read=typeof memory.contextScope==='function'?memory.contextScope:memory.status;
+    if(typeof read!=='function')return null;
     let timer;
     try{
-      const value=await Promise.race([Promise.resolve().then(()=>memory.status(userId)),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Memory status unavailable')),200);})]);
+      const value=await Promise.race([Promise.resolve().then(()=>read.call(memory,userId)),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Memory status unavailable')),200);})]);
       if(value?.enabled!==true)throw new Error('Memory disabled');
-      return JSON.stringify([value.epoch??null,...['instanceId','userId','memobaseUserId'].map(key=>value.scope?.[key]??null)]);
+      return JSON.stringify([value.epoch??null,value.bindingRevision??value.revision??null,...['instanceId','userId','memobaseUserId'].map(key=>value.scope?.[key]??null)]);
     }finally{clearTimeout(timer);}
   };
   return {

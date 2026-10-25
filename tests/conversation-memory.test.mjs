@@ -35,3 +35,13 @@ for(const first of ['profile','archive'])test(`${first} returning before a clear
  const archives={getContext:async()=>{if(first==='profile')await gate;else arrived();return 'old archive';}};
  const service=createConversationMemory({memory,archives}),result=service.getContext('one');await reached;epoch=2;enabled=false;release();assert.equal(await result,'');
 });
+test('offline cached profile uses the local scope fence without probing network health',async()=>{
+ const memory={contextScope:async()=>({enabled:true,epoch:1,bindingRevision:0,scope:{instanceId:'offline',userId:'one'}}),status:()=>assert.fail('No health probe'),getContext:async()=>'cached profile'};
+ const service=createConversationMemory({memory,archives:{getContext:async()=>''}});
+ assert.equal(await service.getContext('one'),'cached profile');
+});
+test('a same-scope binding revision change discards combined evidence',async()=>{
+ let revision=0;
+ const memory={contextScope:async()=>({enabled:true,epoch:1,bindingRevision:revision,scope:{userId:'one'}}),getContext:async()=>{revision++;return'old cache';}};
+ assert.equal(await createConversationMemory({memory,archives:{getContext:async()=>'old archive'}}).getContext('one'),'');
+});

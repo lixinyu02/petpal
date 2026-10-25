@@ -452,6 +452,14 @@ export async function createMemoryService({ dataDir, instanceId, runtime, fetchI
       const count = states => events.filter(event => states.includes(event.projection.status)).length;
       return { epoch, total: events.length, acked: count(['acked']), unknown: count(['unknown','submitted']), pending: count(['pending']), failed: count(['failed']), needsFlush: Boolean(state.value.needsFlush), lastError: state.value.lastError, connected: state.value.connected, contextUpdatedAt: state.value.contextUpdatedAt };
     },
+    async contextScope(userId) {
+      const revision = bindingRevision, state = await getState(userId);
+      if (revision !== bindingRevision) throw fail(409,'MEMORY_SYNC_BINDING_CHANGED');
+      if (!await liveAccount(userId,state,{enabled:false})) throw fail(403,'MEMORY_REVOKED');
+      assertOpen();
+      if (revision !== bindingRevision) throw fail(409,'MEMORY_SYNC_BINDING_CHANGED');
+      return { enabled: isEnabled(state), epoch: state.value.epoch, scope: clone(state.value.scope), bindingRevision: revision };
+    },
     async status(userId, { admin = false } = {}) {
       const revision = bindingRevision, state = await getState(userId), value = state.value;
       let configured = false; try { configured = Boolean(await connection()); } catch {}

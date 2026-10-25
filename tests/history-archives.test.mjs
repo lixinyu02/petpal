@@ -65,6 +65,13 @@ test('yielded atomic publication exposes either no archive or the complete archi
 test('source evidence is bounded, self-only, dated, account isolated and fenced on epoch or disabled memory',async t=>{
  const f=await fixture(t),b=await makeHistoryBundle(path.join(f.directory,'bundle'),{selfCount:2,longOther:false}),s=await stage(f,b);await f.archives.start(f.account,s.job.id,{});await until(async()=>(await f.archives.job(f.account,s.job.id)).job.state==='complete');const context=await f.archives.getContext(f.account,{query:'合成资料',epoch:1});assert.ok(context.includes('2025-02-01'));assert.ok(context.includes(b.records[1].msg_id));assert.ok(!context.includes('另一位真人'));assert.ok(context.length<=3300);assert.equal(await f.archives.getContext(f.other,{query:'合成资料',epoch:1}),'');f.memory.enabled=false;assert.equal(await f.archives.getContext(f.account,{query:'合成资料',epoch:1}),'');assert.equal((await f.archives.list(f.account)).archives.length,1);f.memory.enabled=true;f.memory.epoch=2;assert.equal(await f.archives.getContext(f.account,{query:'合成资料',epoch:2}),'');await assert.rejects(f.archives.start(f.account,s.job.id,{}),{code:'HISTORY_EPOCH_CHANGED'});
 });
+test('offline archive reads use local scope gates and never require a runtime health probe',async t=>{
+ const f=await fixture(t),b=await makeHistoryBundle(path.join(f.directory,'bundle'),{selfCount:2,longOther:false}),s=await stage(f,b);await f.archives.start(f.account,s.job.id,{});await until(async()=>(await f.archives.job(f.account,s.job.id)).job.state==='complete');
+ f.memory.contextScope=async userId=>({enabled:f.memory.enabled,epoch:f.memory.epoch,bindingRevision:0,scope:{userId}});
+ f.memory.status=()=>assert.fail('Offline archive reads must not probe runtime health');
+ assert.equal((await f.archives.list(f.account)).archives.length,1);assert.match(await f.archives.getContext(f.account,{query:'合成资料'}),/petpal_history_evidence/);
+ f.memory.enabled=false;assert.equal(await f.archives.getContext(f.account,{query:'合成资料'}),'');assert.equal((await f.archives.list(f.account)).archives[0].memory.state,'disabled');
+});
 
 test('manifest hashes, fixed file set, symlink and hardlink staging refuse unsafe materials',async t=>{
  const f=await fixture(t),b=await makeHistoryBundle(path.join(f.directory,'bundle'),{selfCount:1,longOther:false});await writeFile(path.join(b.directory,'README.md'),'changed');await assert.rejects(validateHistoryBundle(b.directory),{code:'HISTORY_BUNDLE_CHANGED'});

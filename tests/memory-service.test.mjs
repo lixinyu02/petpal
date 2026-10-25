@@ -58,6 +58,32 @@ async function fixture(t, options = {}) {
 
 const historyEvent = (id, text = '历史本人自述', createdAt = '2020-01-01T00:00:00.000Z') => ({ id: `history.wechat:${id}`, source: 'chat', conversationId: 'history-source', userText: text, assistantText: '', createdAt });
 
+test('contextScope reads a cached scope immediately without probing an indefinitely unavailable runtime or changing the journal',async t=>{
+  let connections=0,network=0;const runtime={async connection(){connections++;return null;},async status(){assert.fail('Context scope must not probe runtime status');}};
+  const f=await fixture(t,{runtime,autoStart:false,fetchImpl:async()=>{network++;assert.fail('Context scope must not contact an upstream');}});await f.service.importSync('one',{epoch:1,events:[event('cached-scope')]});await f.service.sync('one');await f.reopen();connections=0;
+  const initial=await f.service.contextScope('one');assert.equal(connections,0);const status=await f.service.status('one');assert.equal(connections,1);assert.equal(status.configured,false);assert.equal(Object.hasOwn(status,'bindingRevision'),false,'ordinary status shape remains unchanged');
+  const files=await readdir(path.join(f.directory,'memory')),before=await Promise.all(files.map(name=>readFile(path.join(f.directory,'memory',name),'utf8')));runtime.connection=()=>{connections++;return new Promise(()=>{});};
+  let timer;const snapshot=await Promise.race([f.service.contextScope('one'),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Local scope waited on an unavailable runtime')),300);})]).finally(()=>clearTimeout(timer));
+  assert.deepEqual(snapshot,initial);assert.equal(connections,1);assert.equal(network,0);snapshot.scope.userId='mutated-clone';assert.equal((await f.service.contextScope('one')).scope.userId,'one');
+  assert.deepEqual(await readdir(path.join(f.directory,'memory')),files);assert.deepEqual(await Promise.all(files.map(name=>readFile(path.join(f.directory,'memory',name),'utf8'))),before);
+});
+
+test('contextScope follows local enablement, clear epochs and binding revisions while keeping accounts separate',async t=>{
+  const f=await fixture(t);const one=await f.service.contextScope('one'),two=await f.service.contextScope('two');assert.notEqual(one.scope.memobaseUserId,two.scope.memobaseUserId);assert.equal(one.epoch,1);assert.equal(one.bindingRevision,0);
+  await f.service.setEnabled('one',false);assert.equal((await f.service.contextScope('one')).enabled,false);assert.equal((await f.service.contextScope('two')).enabled,true);
+  await f.service.clear('one');const cleared=await f.service.contextScope('one');assert.equal(cleared.epoch,2);assert.equal(cleared.enabled,false);assert.equal((await f.service.contextScope('two')).epoch,1);
+  await f.service.unbindRemote();assert.equal((await f.service.contextScope('one')).bindingRevision,1);assert.equal((await f.service.contextScope('two')).bindingRevision,1);
+  await f.service.configure({enabled:false});assert.equal((await f.service.contextScope('two')).enabled,false);await f.service.configure({enabled:true});assert.equal((await f.service.contextScope('two')).enabled,true);
+  await f.service.close();await assert.rejects(f.service.contextScope('one'),{code:'MEMORY_CLOSED'});
+});
+
+test('contextScope rejects a mid-read binding revision change and an account that has been revoked',async t=>{
+  const reached=deferred(),release=deferred();let block=false,active=true;
+  const f=await fixture(t,{scopeForUser:async userId=>{if(!active)throw Object.assign(new Error('Synthetic account revoked'),{status:403});if(block){reached.resolve();await release.promise;}return{instanceId:'central-one',userId};}});await f.service.contextScope('one');
+  block=true;const reading=f.service.contextScope('one'),rejected=assert.rejects(reading,{code:'MEMORY_SYNC_BINDING_CHANGED'});await reached.promise;await f.service.unbindRemote();block=false;release.resolve();await rejected;assert.equal((await f.service.contextScope('one')).bindingRevision,1);
+  active=false;await assert.rejects(f.service.contextScope('one'),{status:403});
+});
+
 test('whole historical preflight is pure for 625 events and inspects only the requested account IDs', async t => {
   let calls = 0;
   const f = await fixture(t, { autoStart: false, fetchImpl: async () => { calls++; throw new Error('unexpected upstream'); } });
