@@ -2,7 +2,7 @@ import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
 import {mkdir,lstat,realpath,chmod,open} from 'node:fs/promises';
 import {constants} from 'node:fs';
-import {setImmediate as yieldLoop} from 'node:timers/promises';
+import {setImmediate as yieldLoop,setTimeout as delay} from 'node:timers/promises';
 import {Worker} from 'node:worker_threads';
 import {sanitizeMemoryText} from './memory-service.mjs';
 
@@ -74,8 +74,10 @@ function* historyMemoryPlan(bundle,{accountId,archiveId,epoch,excludeMessageIds=
 export function buildHistoryMemoryEvents(bundle,options){const iterator=historyMemoryPlan(bundle,options);let step;do{step=iterator.next();}while(!step.done);return step.value;}
 async function buildHistoryMemoryEventsAsync(bundle,options,checkpoint){const iterator=historyMemoryPlan(bundle,options);let step;while(!(step=iterator.next()).done)await cooperate(checkpoint);return step.value;}
 
-export async function createHistoryArchives({dataDir,store,memory}={}){
+export async function createHistoryArchives({dataDir,store,memory,settlePollMs=1500,settleTimeoutMs=300000}={}){
  if(!path.isAbsolute(dataDir||'')||!store?.state||!memory)throw new TypeError('Invalid history archive dependencies');
+ if(!Number.isSafeInteger(settlePollMs)||settlePollMs<1||settlePollMs>10000||!Number.isSafeInteger(settleTimeoutMs)||settleTimeoutMs<1||settleTimeoutMs>600000)throw new TypeError('Invalid history settlement limits');
+ const shutdown=new AbortController();
  const root=path.join(dataDir,'history-archives'),dbFile=path.join(root,'archives.sqlite3'),workers=new Map();let db,opening,closed=false,accepting=true,serial=Promise.resolve(),publishing=null;
  const contextScope=userId=>(typeof memory.contextScope==='function'?memory.contextScope(userId):memory.status(userId));
  const active=userId=>{const user=store.state.users.find(u=>u.id===userId);if(!user||user.disabled)throw fail(403,'HISTORY_ACCOUNT_UNAVAILABLE');return user;};
@@ -129,7 +131,17 @@ export async function createHistoryArchives({dataDir,store,memory}={}){
     if(inspection.unknown||inspection.failed){await memory.sync(userId);await assertLive(job,authorize);inspection=await memory.inspectImport(userId,{epoch:job.epoch,eventIds:ids});if(inspection.unknown||inspection.failed)throw fail(409,'HISTORY_MEMORY_UNCONFIRMED');}
     if(inspection.total!==batch.length||inspection.acked!==batch.length){await assertLive(job,authorize);await memory.importSync(userId,{epoch:job.epoch,events:batch});await memory.sync(userId);}
     else if(inspection.needsFlush)await memory.sync(userId);
-    await assertLive(job,authorize);inspection=await memory.inspectImport(userId,{epoch:job.epoch,eventIds:ids});if(inspection.unknown||inspection.failed)throw fail(409,'HISTORY_MEMORY_UNCONFIRMED');if(inspection.total!==batch.length||inspection.acked!==batch.length||inspection.needsFlush)throw fail(409,'HISTORY_MEMORY_PENDING');
+    // Extraction and buffer flush may finish after a sync reports BUSY. Wait
+    // and reconcile these same IDs; never append or replay the batch here.
+    const deadline=Date.now()+settleTimeoutMs;
+    while(true){
+     await assertLive(job,authorize);inspection=await memory.inspectImport(userId,{epoch:job.epoch,eventIds:ids});
+     if(inspection.unknown||inspection.failed)throw fail(409,'HISTORY_MEMORY_UNCONFIRMED');
+     if(inspection.total===batch.length&&inspection.acked===batch.length&&!inspection.needsFlush)break;
+     if(inspection.lastError&&inspection.lastError!=='MEMORY_BUFFER_BUSY'||Date.now()>=deadline)throw fail(409,'HISTORY_MEMORY_PENDING');
+     await delay(Math.min(settlePollMs,Math.max(1,deadline-Date.now())),undefined,{signal:shutdown.signal});
+     await assertLive(job,authorize);await memory.sync(userId);
+    }
     await update(id,{memoryAcked:until,state:'working',pauseReason:null,errorCode:null});
    }
   }catch(error){if(!closed)await update(id,{state:error.code==='HISTORY_EPOCH_CHANGED'||error.code==='MEMORY_EPOCH_CONFLICT'?'epoch_changed':error.code==='HISTORY_MEMORY_UNCONFIRMED'?'unknown':'paused',pauseReason:null,errorCode:safeError(error)});}
@@ -172,7 +184,7 @@ export async function createHistoryArchives({dataDir,store,memory}={}){
    }catch{return'';}
   },
   stopAccepting(){accepting=false;},
-  async close(){if(closed)return;accepting=false;closed=true;await serial.catch(()=>{});let timer;await Promise.race([Promise.allSettled([...workers.values()]),new Promise(resolve=>{timer=setTimeout(resolve,2000);})]);clearTimeout(timer);db?.close();db=null;},
+  async close(){if(closed)return;accepting=false;closed=true;shutdown.abort();await serial.catch(()=>{});let timer;await Promise.race([Promise.allSettled([...workers.values()]),new Promise(resolve=>{timer=setTimeout(resolve,2000);})]);clearTimeout(timer);db?.close();db=null;},
  };
  return service;
 }
