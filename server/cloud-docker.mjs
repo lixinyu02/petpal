@@ -5,6 +5,7 @@ import { CodexBridge } from './codex.mjs';
 import { codexToml, codexApprovalCatalog } from './codex-config.mjs';
 import { createLocalDocker, validateLocalTransport } from './cloud-docker-local.mjs';
 import { createPlatformDocker } from './cloud-docker-platform.mjs';
+import {cloudResources} from './cloud-platform-options.mjs';
 import { approvalReviewCapability } from './approval-review.mjs';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -38,7 +39,7 @@ export async function createCloudDocker({ dataDir, serviceLinks, authorizeUser, 
   catch (error) { if (error.code !== 'ENOENT') throw failure(503, '云端环境状态需要恢复，请保留原文件。', 'cloud_docker_storage_invalid'); state = { schema: 'petpal-cloud-docker.v1', instanceId: randomUUID(), localTransport: validateLocalTransport(localTransport), records: [] }; }
   if (state.schema !== 'petpal-cloud-docker.v1' || !UUID.test(state.instanceId) || !Array.isArray(state.records) || state.records.length > 4096) throw failure(503, '云端环境状态无效。', 'cloud_docker_storage_invalid');
   const ids = new Set();
-  for (const r of state.records) { if (!fields(r, ['id','userId','name','source','nodeId','requestedNodeId','bundle','state','generation','desktopAvailable','createdAt','updatedAt','containerName','projectId','requestId','clientId','errorCode','executionUncertain','creationPending']) || !UUID.test(r.id) || ids.has(r.id) || !text(r.userId,160) || !text(r.name,120) || !['local','platform'].includes(r.source) || !['agent','desktop'].includes(r.bundle) || !UUID.test(r.requestId) || r.source === 'local' && r.containerName !== `petpal-${state.instanceId.slice(0,8)}-${r.id}` || r.source === 'platform' && (!UUID.test(r.projectId) || !UUID.test(r.clientId) || r.nodeId && !UUID.test(r.nodeId))) throw failure(503, '云端环境归属无效。', 'cloud_docker_storage_invalid'); ids.add(r.id); if(r.creationPending===undefined && (['creating','create_failed'].includes(r.state)||!r.generation||r.source==='local'&&String(r.generation).includes(':0001-01-01')))r.creationPending=true; r.state = 'unknown'; r.desktopAvailable = false; }
+  for (const r of state.records) { if (!fields(r, ['id','userId','name','source','nodeId','requestedNodeId','bundle','state','generation','desktopAvailable','createdAt','updatedAt','containerName','projectId','requestId','clientId','errorCode','executionUncertain','creationPending','runtimeKind','resources','requestedResources']) || !UUID.test(r.id) || ids.has(r.id) || !text(r.userId,160) || !text(r.name,120) || !['local','platform'].includes(r.source) || !['agent','desktop'].includes(r.bundle) || !UUID.test(r.requestId) || r.source === 'local' && r.containerName !== `petpal-${state.instanceId.slice(0,8)}-${r.id}` || r.source === 'platform' && (!UUID.test(r.projectId) || !UUID.test(r.clientId) || r.nodeId && !UUID.test(r.nodeId))) throw failure(503, '云端环境归属无效。', 'cloud_docker_storage_invalid'); if(r.runtimeKind!==undefined&&(!['docker','kubernetes'].includes(r.runtimeKind)||r.source!=='platform'||!r.resources||r.runtimeKind==='kubernetes'&&(r.bundle!=='agent'||!r.nodeId)))throw failure(503,'云端运行时状态无效。','cloud_docker_storage_invalid');if(r.resources)cloudResources(r.resources);if(r.requestedResources)cloudResources(r.requestedResources);ids.add(r.id); if(r.creationPending===undefined && (['creating','create_failed'].includes(r.state)||!r.generation||r.source==='local'&&String(r.generation).includes(':0001-01-01')))r.creationPending=true; r.state = 'unknown'; r.desktopAvailable = false; }
   if (localTransport !== undefined) state.localTransport = validateLocalTransport(localTransport);
   state.localTransport = validateLocalTransport(state.localTransport);
   const local = localDriver ?? createLocalDocker({ transport: state.localTransport, contextRoot: directory }), platform = platformDriver ?? createPlatformDocker(serviceLinks);
@@ -58,7 +59,7 @@ export async function createCloudDocker({ dataDir, serviceLinks, authorizeUser, 
     const online=r.state==='running'&&!r.creationPending;
     return { id: r.id, requestId: r.requestId, userId: r.userId, isOwn: r.userId === viewerUserId, name: r.name, kind: 'docker', platform: 'linux', arch: 'unknown', online, capabilities,
       codex: { available: online, authenticated: online, configured: true, supportsSteer: true, images: false, independentReviewModel: false, approvalReview: approvalReviewCapability(true,online,false) },
-      docker: { state: r.state, source: r.source, bundle: r.bundle, creationPending: r.creationPending === true, desktopAvailable: r.desktopAvailable === true && r.state === 'running', generation: r.generation ?? '', ...(r.errorCode ? { errorCode: r.errorCode } : {}) } };
+      docker: { state: r.state, source: r.source, bundle: r.bundle, runtimeKind:r.runtimeKind??'docker', ...(r.resources?{resources:{...r.resources}}:{}), creationPending: r.creationPending === true, desktopAvailable: r.desktopAvailable === true && r.state === 'running', generation: r.generation ?? '', ...(r.errorCode ? { errorCode: r.errorCode } : {}) } };
   }
   const list = userId => { const u = checkUser(userId); return state.records.filter(r => r.userId === userId || u.isAdmin).map(r=>publicHost(r,userId)); };
   const hostFor = (userId, id) => publicHost(get(userId, id),userId);
@@ -104,7 +105,8 @@ export async function createCloudDocker({ dataDir, serviceLinks, authorizeUser, 
   }
   async function create(userId, options) {
     checkUser(userId);
-    if (!fields(options,['name','source','nodeId','bundle','requestId']) || !text(options.name,120) || !['local','platform'].includes(options.source) || options.bundle !== undefined && !['agent','desktop'].includes(options.bundle) || options.nodeId !== undefined && !UUID.test(options.nodeId) || options.requestId !== undefined && !UUID.test(options.requestId)) throw failure(400,'云端环境配置无效。');
+    if (!fields(options,['name','source','nodeId','bundle','requestId','resources']) || !text(options.name,120) || !['local','platform'].includes(options.source) || options.bundle !== undefined && !['agent','desktop'].includes(options.bundle) || options.nodeId !== undefined && !UUID.test(options.nodeId) || options.requestId !== undefined && !UUID.test(options.requestId)) throw failure(400,'云端环境配置无效。');
+    if(options.resources!==undefined){if(options.source!=='platform')throw failure(400,'自定义资源仅适用于平台环境。');cloudResources(options.resources);}
     const requestId=options.requestId??randomUUID(),key=`${userId}:${requestId}`;
     if(creationRequests.has(key))throw failure(409,'此创建请求仍在执行，请等待结果后恢复原请求。','executor_busy');
     creationRequests.add(key);
@@ -121,13 +123,14 @@ export async function createCloudDocker({ dataDir, serviceLinks, authorizeUser, 
     const existing=state.records.find(r=>r.userId===userId&&r.requestId===requestId);
     if(existing){
       const originalNode=Object.hasOwn(existing,'requestedNodeId')?existing.requestedNodeId:existing.nodeId;
+      if(JSON.stringify(existing.requestedResources??null)!==JSON.stringify(options.resources===undefined?null:cloudResources(options.resources)))throw failure(409,'该申请已绑定另一份资源配置。');
       if(existing.name!==options.name.trim()||existing.source!==options.source||existing.bundle!==(options.bundle??'desktop')||existing.source==='platform'&&(originalNode??null)!==(options.nodeId??null))throw failure(409,'该创建请求已绑定另一份配置。');
       return existing.creationPending?completeCreation(userId,existing):hostFor(userId,existing.id);
     }
     if (state.records.filter(r=>r.userId===userId).length >= 8) throw failure(409,'每个账号最多创建 8 个云端环境。');
     const r = { id:randomUUID(),userId,name:options.name.trim(),source:options.source,bundle:options.bundle??'desktop',creationPending:true,state:'creating',generation:'',desktopAvailable:false,createdAt:stamp(),updatedAt:stamp(),requestId };
     if (r.source === 'local') r.containerName = `petpal-${state.instanceId.slice(0,8)}-${r.id}`;
-    else { const connection=await platform.credential(); checkUser(userId); r.clientId=connection.clientId; r.projectId=randomUUID(); r.requestedNodeId=options.nodeId??null; if(options.nodeId)r.nodeId=options.nodeId; }
+    else { const connection=await platform.credential(); checkUser(userId); r.clientId=connection.clientId; r.projectId=randomUUID(); r.requestedNodeId=options.nodeId??null; if(options.nodeId)r.nodeId=options.nodeId;if(options.resources!==undefined)r.requestedResources=cloudResources(options.resources);if(platform.prepare){Object.assign(r,await platform.prepare(r,options.resources));checkUser(userId);} }
     state.records.push(r);return completeCreation(userId,r);
   }
   async function action(userId,id,action) {
