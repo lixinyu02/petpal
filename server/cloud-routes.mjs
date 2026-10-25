@@ -24,9 +24,9 @@ export function mountCloudModelRoute(app,getCloud){
 
 export function mountCloudRoutes({app,cloud,links,desktop,auth,admin,executorAuth,syncModels,syncHosts=async()=>{},stopHostWork}){
  app.get('/api/service-links',async(req,res)=>{admin(req);fields(req);const value=await links.status();admin(req);res.json(publicLinks(value));});
- app.post('/api/service-links/:kind/pair',async(req,res)=>{admin(req);fields(req,['baseUrl','code']);await links.pair(req.params.kind,req.body);admin(req);await syncModels();admin(req);res.json(publicLinks(await links.status()));});
- app.post('/api/service-links/:kind/refresh',async(req,res)=>{admin(req);fields(req);await links.refresh(req.params.kind);admin(req);await syncModels();admin(req);res.json(publicLinks(await links.status()));});
- app.delete('/api/service-links/:kind',async(req,res)=>{admin(req);fields(req);await links.disconnect(req.params.kind);await syncModels();admin(req);res.json(publicLinks(await links.status()));});
+ app.post('/api/service-links/:kind/pair',async(req,res)=>{admin(req);fields(req,['baseUrl','code']);try{await links.pair(req.params.kind,req.body);}finally{await syncModels();}admin(req);res.json(publicLinks(await links.status()));});
+ app.post('/api/service-links/:kind/refresh',async(req,res)=>{admin(req);fields(req);try{await links.refresh(req.params.kind);}finally{await syncModels();}admin(req);res.json(publicLinks(await links.status()));});
+ app.delete('/api/service-links/:kind',async(req,res)=>{admin(req);fields(req);try{const pending=links.disconnect(req.params.kind);pending.catch(()=>{});await syncModels();await pending;}finally{await syncModels();}admin(req);res.json(publicLinks(await links.status()));});
  app.get('/api/cloud-docker',async(req,res)=>{auth(req);fields(req);await cloud.refresh?.(req.user.id);await syncHosts();auth(req);res.json({instances:cloud.list(req.user.id)});});
  app.get('/api/cloud-docker/catalog',async(req,res)=>{auth(req);fields(req);const value=await cloud.catalog(req.user.id);auth(req);res.json(value);});
  app.post('/api/cloud-docker/prepare',async(req,res)=>{admin(req);fields(req);const value=await cloud.prepare(req.user.id);admin(req);res.json(value);});

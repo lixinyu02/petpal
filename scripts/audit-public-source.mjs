@@ -92,14 +92,18 @@ const syntheticSecrets = new Map([
   ['tests/task-notification-controller.test.mjs', new Set(['foreground-only-secret', "new-session-token"])],
   ['tests/users.test.mjs', new Set(['isolated-test-owner-token', 'test-password-123', 'fixture-provider-private-key', 'new-desktop-bootstrap-token', 'alice-private-voice-key', 'alice-private-asr-key', 'replacement-password', 'owner-new-password', 'incorrect-password', 'replacement-local-owner-token'])],
   ['tests/android-official-root-ready.test.mjs', new Set(["synthetic-restored-session"])],
-  ['tests/cloud-api.test.mjs', new Set(["cloud-fixture-password"])],
+  // Harbor priority, revocation and capacity fixtures use only .invalid or
+  // loopback issuers. Keep each reviewed literal bound to this exact test file.
+  ['tests/cloud-api.test.mjs', new Set(["cloud-fixture-password", "retained-original-private-key", "retained-original-key", "synthetic-fixture-password", "synthetic-retained-capacity-key", "retained-global-agent-key"])],
   ['tests/cloud-docker-ui.test.mjs', new Set(["never-include-permanent-token"])],
   ['tests/cloud-docker.test.mjs', new Set(["upstream-private-fixture", "private-loopback"])],
   ['tests/companion-routines-api.test.mjs', new Set(["companion-api-owner-fixture", "SyntheticDaily123a"])],
   ['tests/desktop-memory.test.mjs', new Set(["private-login-token"])],
   ['tests/memobase-client.test.mjs', new Set(["synthetic-only-memory-key"])],
+  ['tests/memory-sync-depth.test.mjs', new Set(["synthetic-central-memobase-key", "synthetic-local-memobase-key"])],
+  ['tests/service-models.test.mjs', new Set(["retained-old-key"])],
   ['tests/memobase-runtime.test.mjs', new Set(["private-model-key"])],
-  ['tests/memory-api.test.mjs', new Set(["synthetic-memory-model-key", "synthetic-memory-password", "synthetic-memobase-key", "synthetic-remote-token"])],
+  ['tests/memory-api.test.mjs', new Set(["synthetic-memory-model-key", "synthetic-memory-password", "synthetic-memobase-key", "synthetic-remote-token", "synthetic-harbor-memory-credential"])],
   ['tests/memory-service.test.mjs', new Set(["synthetic-private-token-123", "synthetic-secret-key", "synthetic-login-token", "private-test-token", "private-original", "must-not-be-written", "synthetic-private-provider-key", "private-runtime-token", "local-synthetic-only", "synthetic-account-token"])],
 ]);
 /** Pure inspection: diagnostics include only the path and fixed reason, never matched values. */

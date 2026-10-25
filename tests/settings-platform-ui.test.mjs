@@ -18,7 +18,7 @@ function settings({platform='android',native=platform==='android',desktop=false,
  const modules={react,'react/jsx-runtime':{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})},'lucide-react':new Proxy({},{get:(_target,name)=>Symbol.for(name)}),'@capacitor/core':{Capacitor:{isNativePlatform:()=>native,getPlatform:()=>platform,isPluginAvailable:name=>official&&name==='PetOfficialAccount'}},'./api':api,'./platform/music-mcp':{nativeMusicMcp:()=>undefined},'./platform/computer-use':{nativeComputerUse:()=>undefined},'./platform/ui-motion.ts':{useUiEntrance:()=>({current:null})}};
  const module={exports:{}};vm.runInNewContext(source,{module,exports:module.exports,window,URLSearchParams,Intl,require:name=>{if(name.endsWith('.css'))return {};return modules[name]||{__esModule:true,default:Symbol(name)};}});
  const state={instanceId:'settings-server',user:{id:'settings-user',isAdmin:admin,isOwner:false,canUseCodex:true,agentAccess:'full'},settings:{petName:'小伴',persona:'保持陪伴',defaultProviderId:'official'},providers:[{id:'official',name:'ChatGPT',model:'official',source:'official-account',supportsImages:true}]};
- const tree=module.exports.fixtureSettingsView({state,connected:true,refresh:async()=>state,notice(){},connect(){},initialTab:tab,hasDraft:false,onDownload(){},onPrepareBrowser(){},prepareBrowserDisabled:false});
+ const tree=module.exports.fixtureSettingsView({state,connected:true,refresh:async()=>{calls.push('refresh');return state;},notice(){},connect(){},initialTab:tab,hasDraft:false,onDownload(){},onPrepareBrowser(){},prepareBrowserDisabled:false});
  const containsLazy=name=>nodes(tree).some(node=>node.type?.fixtureLazy&&node.type.loader.toString().includes(`./${name}`));
  return {tree,text:()=>text(tree),containsLazy,calls};
 }
@@ -38,4 +38,9 @@ test('a browser user-agent cannot impersonate native Android device settings',()
 
 test('desktop settings retain their native central-server and desktop proxy entry points',()=>{
  for(const platform of ['win32','linux']){const f=settings({platform,native:false,desktop:true});assert.equal(f.containsLazy('CentralServerSettings'),true);assert.equal(f.containsLazy('AppProxySettings'),true);assert.equal(f.containsLazy('AndroidAppProxySettings'),false);assert.match(f.text(),/桌面客户端/);}
+});
+
+test('service pairing receives the global provider refresh callback from SettingsView',async()=>{
+ const f=settings({tab:'services'}),child=nodes(f.tree).find(node=>node.type?.fixtureLazy&&node.type.loader.toString().includes('./ServiceLinksSettings'));
+ assert.ok(child);assert.equal(typeof child.props.onChanged,'function');assert.equal(f.calls.length,0);await child.props.onChanged();assert.deepEqual(f.calls,['refresh']);
 });

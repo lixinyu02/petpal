@@ -79,3 +79,9 @@ test('memory/model failures degrade without raw memory and model authorization c
  const unavailable=createCompanionPersonalizer({buildContent:async()=>structuredClone(base),recall:async()=> 'PRIVATE_MEMORY',getProvider:()=>{throw Error('PRIVATE_PROVIDER');}});
  const fallback=await unavailable(settings,ctx);assert.equal(fallback.content,base.content);assert.ok(fallback.warnings.length>0);assert.ok(!JSON.stringify(fallback).includes('PRIVATE_'));
 });
+
+test('personalization preserves the server-only model authorizer across its structured snapshot',async()=>{
+ const provider={id:'runtime-harbor',protocol:'responses',model:'fixture'},authorize=()=>{throw new Error('revoked runtime link');};Object.defineProperty(provider,'authorize',{value:authorize});let inspected=false;
+ const build=createCompanionPersonalizer({buildContent:async()=>structuredClone(base),recall:async()=> '喜欢阅读',getProvider:()=>provider,generate:async request=>{inspected=true;assert.equal(request.provider.authorize,authorize);assert.equal(Object.keys(request.provider).includes('authorize'),false);request.provider.authorize();}});
+ const result=await build(routineDefaults(),{userId:randomUUID(),now:new Date()});assert.equal(inspected,true);assert.equal(result.content,base.content);assert.ok(result.warnings.length>0);assert.equal(JSON.stringify(result).includes('revoked runtime link'),false);
+});

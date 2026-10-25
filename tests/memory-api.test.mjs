@@ -43,7 +43,9 @@ async function fixture(t, options = {}) {
     async run(args) { codexCalls.push(args); return { text: '任务完成', threadId: 'synthetic-memory-thread' }; },
     async close() {},
   };
-  const app = await createPetServer({ dataDir: directory, token: bootstrap, codex, memoryOptions: options.realMemory ? { autoStart: false, autoPoll: false } : { service: memory, replyJobs: options.replyJobs }, memoryRuntimeOptions: { runtime } });
+  const serviceLinks = options.serviceLinks?.(providers);
+  if (options.configureModel) runtime.configureModel = (value, control) => options.configureModel(value, control, runtimeCalls);
+  const app = await createPetServer({ dataDir: directory, token: bootstrap, codex, memoryOptions: options.realMemory ? { autoStart: false, autoPoll: false } : { service: memory, replyJobs: options.replyJobs }, memoryRuntimeOptions: { runtime }, ...(serviceLinks ? { serviceLinksOptions: { service: serviceLinks } } : {}) });
   await listenFixture(app.server);
   const request = (route, { token = bootstrap, method = 'GET', body } = {}) => fetch(`http://127.0.0.1:${app.server.address().port}/api${route}`, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const json = async (route, value) => { const response = await request(route, value); return { status: response.status, data: await response.json() }; };
@@ -164,6 +166,57 @@ test('only administrators configure or start Memobase and model credentials are 
   assert.equal((await f.json('/memory/config', { method: 'PATCH', body: { baseUrl: 'https://example.test', route: '/arbitrary' } })).status, 400);
   await f.app.memory.bindRemote({ url: 'https://central.example', token: 'synthetic-remote-token', instanceId: 'remote-fixture', userId: member.id, localUserId: 'forged-local-id' });
   assert.equal(f.memoryCalls.find(item => item.name === 'bindRemote').args[0].localUserId, f.ownerId);
+});
+
+function memoryHarbor(providers, { protocols, ready = { value: true }, modalities = ['text'] }) {
+  const model = providers.find(provider => provider.protocol === 'responses').model;
+  const connection = { baseUrl: 'https://memory-harbor.invalid', credential: 'synthetic-harbor-memory-credential', connectionId: 'synthetic-memory-connection', instanceId: 'synthetic-memory-receiver' };
+  return {
+    async status() { return { instanceId: connection.instanceId, links: { 'api-harbor': { state: ready.value ? 'ready' : 'offline', issuerInstanceId: 'synthetic-memory-issuer', catalog: { models: [{ id: model, protocols, capabilities: Object.fromEntries(protocols.map(protocol => [protocol, { inputModalities: modalities, outputModalities: ['text'], stream: true }])) }] } } } }; },
+    async credential(kind) { assert.equal(kind, 'api-harbor'); return connection; },
+    isReady(kind) { return kind === 'api-harbor' && ready.value; },
+    async close() {},
+  };
+}
+
+test('memory configuration keeps the original API when a same-model Harbor grant only supports Responses', async t => {
+  const f = await fixture(t, { serviceLinks: providers => memoryHarbor(providers, { protocols: ['responses'] }) });
+  const provider = f.providers.find(item => item.protocol === 'responses');
+  const configured = await f.json('/memory/config', { method: 'PATCH', body: { providerId: provider.id } });
+  assert.equal(configured.status, 200);
+  assert.deepEqual(f.runtimeCalls.find(item => item.name === 'configureModel').value, { baseUrl: provider.baseUrl, model: provider.model, apiKey: provider.apiKey });
+  assert.equal(JSON.stringify(configured.data).includes('synthetic-harbor-memory-credential'), false);
+});
+
+test('memory configuration prefers the exact Harbor Chat protocol and never exposes its credential', async t => {
+  const f = await fixture(t, { serviceLinks: providers => memoryHarbor(providers, { protocols: ['responses', 'chat'] }) });
+  const provider = f.providers.find(item => item.protocol === 'responses');
+  const configured = await f.json('/memory/config', { method: 'PATCH', body: { providerId: provider.id } });
+  assert.equal(configured.status, 200);
+  assert.deepEqual(f.runtimeCalls.find(item => item.name === 'configureModel').value, { baseUrl: 'https://memory-harbor.invalid/v1', model: provider.model, apiKey: 'synthetic-harbor-memory-credential' });
+  assert.equal(JSON.stringify(configured.data).includes('synthetic-harbor-memory-credential'), false);
+  const member = await f.member('memory-harbor-member');
+  assert.equal((await f.json('/memory/config', { token: member.token, method: 'PATCH', body: { providerId: provider.id } })).status, 403);
+});
+
+test('a Harbor-only Responses model cannot be saved as a Chat Completions memory model', async t => {
+  const f = await fixture(t, { serviceLinks: providers => memoryHarbor(providers, { protocols: ['responses'] }) });
+  const snapshot = await f.json('/state');
+  const managed = snapshot.data.providers.find(item => item.id.startsWith('harbor-'));
+  assert.ok(managed);
+  assert.equal((await f.json('/memory/config', { method: 'PATCH', body: { providerId: managed.id } })).status, 400);
+  assert.equal(f.runtimeCalls.filter(item => item.name === 'configureModel').length, 0);
+});
+
+test('revoking Harbor during queued memory configuration prevents its credential from being saved', async t => {
+  const ready = { value: true };
+  const f = await fixture(t, {
+    serviceLinks: providers => memoryHarbor(providers, { protocols: ['responses', 'chat'], ready }),
+    async configureModel(value, { authorize }, calls) { ready.value = false; await authorize(); calls.push({ name: 'configureModel', value }); },
+  });
+  const provider = f.providers.find(item => item.protocol === 'responses');
+  assert.equal((await f.json('/memory/config', { method: 'PATCH', body: { providerId: provider.id } })).status, 409);
+  assert.equal(f.runtimeCalls.filter(item => item.name === 'configureModel').length, 0);
 });
 
 test('both Chat protocols receive only their account memory and journal completed assistant messages once', async t => {

@@ -42,7 +42,7 @@ export function validateAsrAudio(bytes) {
 }
 
 /** One shared upstream slot; all capabilities remain bound to the creating login. */
-export function createAsrService({ store, authorizeSession, webSocketFactory = (url, options) => new WebSocket(url, options), fetchImpl = globalThis.fetch, now = Date.now,
+export function createAsrService({ store, authorizeSession, resolveTransport, webSocketFactory = (url, options) => new WebSocket(url, options), fetchImpl = globalThis.fetch, now = Date.now,
   connectTimeoutMs = 8000, attachTimeoutMs = 8000, idleTimeoutMs = 8000, endTimeoutMs = 30000, timeoutMs = 120000,
   authPollMs = 1000, drainTimeoutMs = 5000, closeTimeoutMs = 5000, errorCloseTimeoutMs = 500, terminalCacheMs = 5000, testTimeoutMs = 5000, rateLimit = 30 } = {}) {
   const state = store.state;
@@ -55,11 +55,15 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = (
   let slot = null, closed = false, changing = false, mutation;
   const authorize = auth => { try { return authorizeSession(auth); } catch { throw unavailable(); } };
   const live = () => { if (closed) throw failure(503, '识别服务正在退出。', 'closed'); if (changing) throw failure(409, '识别配置正在保存。', 'config_changing'); };
-  const publicConfig = (editable = false) => ({ editable, configured: Boolean(state.asrConfig.baseUrl), baseUrl: editable ? state.asrConfig.baseUrl : '', hasApiKey: false, revision: state.asrConfig.revision, busy: Boolean(slot), audio: { ...ASR_AUDIO } });
+  const publicConfig = (editable = false, auth) => {
+    const transport = resolveTransport?.(auth);
+    return { editable, configured: Boolean(transport || state.asrConfig.baseUrl), baseUrl: editable ? state.asrConfig.baseUrl : '', hasApiKey: false, revision: state.asrConfig.revision, busy: Boolean(slot), audio: { ...(transport?.audio ?? ASR_AUDIO) }, ...(transport ? { source: transport.source } : {}) };
+  };
   const clear = (session, key) => { clearTimeout(session[key]); session[key] = null; };
   const current = session => {
     authorize(session.auth);
     if (session.revision !== state.asrConfig.revision) throw failure(409, '识别配置已变化，请重新开始。', 'config_changed');
+    if (session.transport) { try { session.transport.assertCurrent(); } catch { throw failure(409, 'API Harbor 连接或模型已变化，请重新开始。', 'source_changed'); } }
   };
   const releaseSocket = session => {
     clear(session, 'closeTimer');
@@ -103,7 +107,7 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = (
     try { current(session); } catch { failSubscriber(session); return; }
     if (sub.res.destroyed || sub.res.writableEnded) { failSubscriber(session); return; }
     const frames = [];
-    if (session.ready && !sub.readySent) frames.push({ type: 'ready', id: session.id, ...ASR_AUDIO });
+    if (session.ready && !sub.readySent) frames.push({ type: 'ready', id: session.id, ...session.audio, ...(session.transport ? { source: session.transport.source } : {}) });
     if (!session.terminal && session.version > sub.version) frames.push({ type: 'transcript', text: session.text, chunks: session.chunks });
     if (session.terminal) frames.push(session.terminal);
     for (const frame of frames) {
@@ -149,14 +153,15 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = (
   const renewIdle = session => { clear(session, 'idleTimer'); session.idleTimer = timer(() => finish(session, failure(408, '没有及时收到音频，请重新开始。', 'audio_timeout')), idleTimeoutMs); };
   const create = auth => {
     live(); const identity = authorize(auth);
-    if (!state.asrConfig.baseUrl) throw failure(409, '管理员尚未配置共享识别服务。', 'not_configured');
+    const transport = resolveTransport?.(auth);
+    if (!transport && !state.asrConfig.baseUrl) throw failure(409, '管理员尚未配置共享识别服务。', 'not_configured');
     if (slot) throw failure(429, '识别服务忙，请稍后再试。', 'busy');
     const time = now();
     for (const [user, entries] of rates) if (!entries.some(value => value > time - 60000)) rates.delete(user);
     const recent = (rates.get(auth.userId) ?? []).filter(value => value > time - 60000);
     if (recent.length >= rateLimit) throw failure(429, '识别请求过于频繁，请稍后再试。', 'rate_limited');
     recent.push(time); rates.set(auth.userId, recent);
-    const session = { id: randomUUID(), auth: { ...auth }, revision: state.asrConfig.revision, text: '', chunks: 0, version: 0, messages: 0, sequence: 0, samples: 0, ready: false, ended: false, terminal: null };
+    const session = { id: randomUUID(), auth: { ...auth }, revision: state.asrConfig.revision, transport, audio: { ...(transport?.audio ?? ASR_AUDIO) }, text: '', chunks: 0, version: 0, messages: 0, sequence: 0, samples: 0, ready: false, ended: false, terminal: null };
     session.socketDone = new Promise(resolve => { session.resolveSocketDone = resolve; });
     slot = session; sessions.set(session.id, session);
     const expire = () => { try { current(session); } catch (error) { finish(session, error); } };
@@ -165,14 +170,15 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = (
     session.connectTimer = timer(() => finish(session, failure(504, '识别服务连接超时。', 'connect_timeout')), connectTimeoutMs);
     session.attachTimer = timer(() => finish(session, failure(408, '识别事件流没有及时连接。', 'attach_timeout')), attachTimeoutMs);
     session.totalTimer = timer(() => finish(session, failure(504, '识别请求超时，请重新开始。', 'session_timeout')), timeoutMs);
-    const url = new URL(`${state.asrConfig.baseUrl}/ws/asr`); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = new URL(transport?.url ?? `${state.asrConfig.baseUrl}/ws/asr`); url.protocol = url.protocol === 'https:' ? 'wss:' : url.protocol === 'http:' ? 'ws:' : url.protocol;
     try {
       session.proxyAgent = createAppProxyWebSocketAgent(url);
-      session.ws = webSocketFactory(url.toString(), { perMessageDeflate: false, maxPayload: MAX_MESSAGE, handshakeTimeout: connectTimeoutMs,
+      session.ws = webSocketFactory(url.toString(), { perMessageDeflate: false, followRedirects: false, maxPayload: MAX_MESSAGE, handshakeTimeout: connectTimeoutMs,
+        ...(transport ? { headers: transport.headers } : {}),
         ...(session.proxyAgent ? { agent: session.proxyAgent } : {}) });
       session.ws.addEventListener('open', () => {
         if (session.terminal) { closeSocket(session); return; }
-        try { current(session); session.ws.send('{}'); session.ready = true; clear(session, 'connectTimer'); renewIdle(session); pump(session); }
+        try { current(session); session.ws.send(JSON.stringify(transport?.config ?? {})); session.ready = true; clear(session, 'connectTimer'); renewIdle(session); pump(session); }
         catch (error) { finish(session, safeAsrError(error)); }
       });
       session.ws.addEventListener('message', event => {
@@ -191,6 +197,7 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = (
             session.errorTimer = timer(() => finish(session, upstreamFailure()), errorCloseTimeoutMs);
             return;
           }
+          if (transport) { try { value = transport.parse(value, { ended: session.ended, samples: session.samples }); } catch { throw failure(502, 'API Harbor 识别数据无效。', 'invalid_response'); } }
           if (typeof value.text !== 'string' || value.text.length > MAX_TEXT || /[\u0000-\u0008\u000b-\u001f\u007f]/u.test(value.text) || !Number.isSafeInteger(value.chunks) || value.chunks < session.chunks || value.chunks > MAX_FRAMES || (value.done !== undefined && typeof value.done !== 'boolean')) throw failure(502, '识别服务返回的数据无效。', 'invalid_response');
           session.text = value.text; session.chunks = value.chunks; session.version++;
           if (value.done === true) {
@@ -205,7 +212,7 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = (
         if (!session.terminal) finish(session, event.code === 1013 ? busy() : session.upstreamError ? upstreamFailure() : failure(502, '识别连接提前结束，未收到完整结果。', 'incomplete'));
       });
     } catch { releaseSocket(session); finish(session, failure(502, '无法连接识别服务。', 'upstream_error')); }
-    return { id: session.id, ...ASR_AUDIO };
+    return { id: session.id, ...session.audio, ...(transport ? { source: transport.source } : {}) };
   };
   const attach = (id, auth, res) => {
     const session = check(id, auth, { terminal: true });
@@ -240,9 +247,11 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = (
         check(id, auth);
         if (session.upload !== lease || session.ws.readyState !== 1 || session.ended) throw failure(409, '识别音频连接已结束。', 'session_ended');
         const samples = validateAsrAudio(bytes);
-        if (session.samples + samples > ASR_AUDIO.sampleRate * ASR_AUDIO.maxSeconds || session.sequence >= MAX_FRAMES) throw failure(413, '单轮识别最多接收 60 秒音频。', 'audio_limit');
+        if (session.samples + samples > session.audio.sampleRate * session.audio.maxSeconds || session.sequence >= MAX_FRAMES) throw failure(413, `单轮识别最多接收 ${session.audio.maxSeconds} 秒音频。`, 'audio_limit');
         if (session.ws.bufferedAmount + bytes.length > ASR_AUDIO.maxFrameBytes * 4) throw failure(429, '识别音频发送过快，请重新开始。', 'upstream_backpressure');
-        session.ws.send(bytes); session.samples += samples; session.sequence++; session.upload = null; renewIdle(session);
+        const frameBytes = session.transport?.maxFrameBytes ?? ASR_AUDIO.maxFrameBytes;
+        for (let offset = 0; offset < bytes.length; offset += frameBytes) { current(session); session.ws.send(bytes.subarray(offset, offset + frameBytes)); }
+        session.samples += samples; session.sequence++; session.upload = null; renewIdle(session);
         return { ok: true, nextSequence: session.sequence, receivedSamples: session.samples };
       } catch (error) { finish(session, safeAsrError(error)); throw safeAsrError(error); }
     } };
@@ -281,13 +290,19 @@ export function createAsrService({ store, authorizeSession, webSocketFactory = (
   };
   const test = async (auth, signal) => {
     live(); authorize(auth);
-    const config = state.asrConfig;
-    if (!config.baseUrl) throw failure(409, '管理员尚未配置共享识别服务。', 'not_configured');
+    const config = state.asrConfig, transport = resolveTransport?.(auth);
+    if (!transport && !config.baseUrl) throw failure(409, '管理员尚未配置共享识别服务。', 'not_configured');
+    if (transport && slot) throw busy();
     if (probes.size) throw failure(429, '识别服务正在检测，请稍后再试。', 'busy');
     const controller = new AbortController(), probe = { auth, controller }; probes.add(probe);
     const combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     const deadline = timer(() => controller.abort(), testTimeoutMs);
     try {
+      if (transport) {
+        const current = () => { authorize(auth); if (state.asrConfig.revision !== config.revision) throw failure(409, '识别配置已变化。', 'config_changed'); transport.assertCurrent(); };
+        const result = await transport.probe({ signal: combined, authorize: current, webSocketFactory, timeoutMs: testTimeoutMs });
+        current(); combined.throwIfAborted(); return { ...result, busy: Boolean(slot) };
+      }
       const readJson = async (route, optional = false) => {
         authorize(auth); combined.throwIfAborted();
         const url = `${config.baseUrl}${route}`;

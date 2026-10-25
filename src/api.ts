@@ -59,9 +59,9 @@ export type VoiceConfig = {
   tts:VoiceConnectionFields & {mode:'system'|'remote'|'cosyvoice';voice:string;speed:number;emotion:'original'|'auto'|'neutral'|'happy'|'sad'|'angry'|'gentle';emotionIntensity:'natural'|'strong'};
   asr:VoiceConnectionFields & {mode:'disabled'|'browser'|'remote';language:string};
   wake?:WakeSettings;
-  runtime?:{tts:string;asr:string;remoteConfiguredOnly:boolean};
+  runtime?:{tts:string;asr:string;remoteConfiguredOnly:boolean;ttsSource?:'api-harbor'|'cosyvoice';streamingAvailable?:boolean};
 };
-export type CosyVoiceConfig = {configured:boolean;hasReference:boolean;referenceName:string;referenceText:string;baseUrl:string;hasApiKey:boolean;editable:boolean;revision:string};
+export type CosyVoiceConfig = {configured:boolean;hasReference:boolean;referenceName:string;referenceText:string;baseUrl:string;hasApiKey:boolean;editable:boolean;revision:string;source?:'api-harbor'|'cosyvoice';streamingAvailable?:boolean;streamingSource?:'cosyvoice'|null};
 export type AsrConfig = {configured:boolean;editable:boolean;baseUrl:string;hasApiKey:boolean;revision:string;busy:boolean;audio:{format:'pcm_f32le';sampleRate:number;channels:number;maxFrameBytes:number;maxSeconds:number}};
 type CredentialKind = 'pairing'|'session'|'none';
 export type SavedLoginConnection = Connection & {credentialKind:CredentialKind;target:'local'|'remote'};
@@ -419,7 +419,7 @@ export async function apiBlob(path:string, options:RequestInit = {}):Promise<Blo
   }finally{request.close();}
 }
 /** Keep optional speaking intention paired with the audio and its auth snapshot. */
-export async function apiSpeechAudio(text:string, signal:AbortSignal):Promise<{blob:Blob;emotion:SpeechEmotion|null}> {
+export async function apiSpeechAudio(text:string, signal:AbortSignal):Promise<{blob:Blob;emotion:SpeechEmotion|null;source?:'api-harbor'|'cosyvoice'}> {
   const request=requests.begin(signal);
   try {
     request.assertCurrent();
@@ -432,7 +432,9 @@ export async function apiSpeechAudio(text:string, signal:AbortSignal):Promise<{b
     let emotion:SpeechEmotion|null;
     try { const {normalizeSpeechEmotion}=await import('./avatar/speech-emotion.mjs');request.assertCurrent();emotion=normalizeSpeechEmotion(fields.every(value=>value===null)?null:{emotion:fields[0],intensity:fields[1],source:fields[2]}); }
     catch(error){void response.body?.cancel().catch(()=>{});throw error;}
-    const blob=await response.blob();request.assertCurrent();return {blob,emotion};
+    const label=response.headers.get('x-petpal-audio-source');
+    const source=label==='api-harbor'||label==='cosyvoice'?label:undefined;
+    const blob=await response.blob();request.assertCurrent();return {blob,emotion,...(source?{source}:{})};
   }finally{request.close();}
 }
 /** Keep the credential snapshot and cancellation scope alive until playback consumes the stream. */

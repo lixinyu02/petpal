@@ -26,6 +26,7 @@ export function useSpeech(allowed: boolean, scope = 'guest', options: { separate
     setState(snapshot);
   };
   const [streaming, setStreaming] = useState(false);
+  const [audioSource, setAudioSource] = useState<'api-harbor'|'cosyvoice'>('cosyvoice');
   const [engine, setEngine] = useState<Engine>('loading');
   const [supported, setSupported] = useState(false);
   const [hasChineseVoice, setChineseVoice] = useState(false);
@@ -48,7 +49,7 @@ export function useSpeech(allowed: boolean, scope = 'guest', options: { separate
       const previous = controller.current; controller.current = null;
       previous?.dispose();
     };
-    function install(mode:VoiceConfig['tts']['mode'],speed:number) {
+    function install(mode:VoiceConfig['tts']['mode'],speed:number,streamingAvailable=true,source:'api-harbor'|'cosyvoice'='cosyvoice') {
       disposePlayer(); publishState(initial); setEngine(mode); setConfigError('');
       const installedRevision = playerRevision;
       const onState = (next:PlaybackState) => {
@@ -57,9 +58,9 @@ export function useSpeech(allowed: boolean, scope = 'guest', options: { separate
         // even when that update does not need to render workspace controls.
         completion.current.observe(next); publishState(next);
       };
-      setStreaming(mode==='cosyvoice'&&speed===1);
+      setStreaming(mode==='cosyvoice'&&speed===1&&streamingAvailable);setAudioSource(speed===1&&streamingAvailable?'cosyvoice':source);
       if(mode === 'cosyvoice') {
-        const useStream=speed===1;
+        const useStream=speed===1&&streamingAvailable;
         const available = useStream ? typeof AudioContext === 'function' : typeof Audio === 'function' && typeof URL.createObjectURL === 'function';
         setSupported(available);
         const getSpeakerId=()=>{
@@ -68,7 +69,11 @@ export function useSpeech(allowed: boolean, scope = 'guest', options: { separate
           try{return preferences.read().speakerId;}finally{preferences.dispose();}
         };
         if(available)controller.current = useStream ? createStreamingSpeechController({keepAlive:true,requestStream:apiSpeechStream,createContext:()=>new AudioContext({latencyHint:'interactive'}),getSpeakerId,onState}) : createRemoteSpeechController({
-            requestAudio:apiSpeechAudio,
+            requestAudio:async(text,signal)=>{
+              const result=await apiSpeechAudio(text,signal);
+              if(current()&&installedRevision===playerRevision&&!signal.aborted&&result.source)setAudioSource(result.source);
+              return result;
+            },
             createAudio:()=>new Audio(),createObjectURL:blob=>URL.createObjectURL(blob),revokeObjectURL:url=>URL.revokeObjectURL(url),getSpeakerId,onState,
           });
       } else if(mode === 'system') {
@@ -82,7 +87,7 @@ export function useSpeech(allowed: boolean, scope = 'guest', options: { separate
       const request=new AbortController();loading=request;setEngine('loading');setSupported(false);setConfigError('');
       try{
         const saved=await api<VoiceConfig>('/voice',{signal:request.signal});
-        if(current()&&!request.signal.aborted&&requestRevision===revision)install(saved.tts.mode,saved.tts.speed);
+        if(current()&&!request.signal.aborted&&requestRevision===revision)install(saved.tts.mode,saved.tts.speed,saved.runtime?.streamingAvailable!==false,saved.runtime?.ttsSource==='api-harbor'?'api-harbor':'cosyvoice');
       }catch(error){if(current()&&!request.signal.aborted&&!isSessionChanged(error)&&requestRevision===revision){setConfigError('读取朗读设置失败，请在语音与设备中重新读取。');setSupported(false);}}
     }
     const hidden = () => { if (document.hidden) controller.current?.stop(); };
@@ -135,6 +140,6 @@ export function useSpeech(allowed: boolean, scope = 'guest', options: { separate
     if(!speak(text,utteranceId,true))completion.current.cancel(new Error(controller.current?.snapshot().error||'当前语音尚未就绪。'));
     return done;
   },[speak]);
-  const feedback=state.error||configError||(engine==='loading'?'正在读取已保存的朗读设置…':engine==='remote'?'远程 TTS 仍为预备配置，请选择系统语音或 CosyVoice。':!supported?'此环境无法播放所选语音，请检查设备或浏览器。':engine==='cosyvoice'?(streaming?(state.buffering?'正在缓冲 CosyVoice 音频…':state.pending?'正在接收首段 CosyVoice 音频…':state.active?'CosyVoice 边生成边播放 · 口型跟随声音起伏':'CosyVoice 流式朗读已就绪 · 1.0 倍速，边生成边播放。'):(state.pending?'正在合成完整 CosyVoice 音频…':state.active?'CosyVoice 播放中 · 口型按播放时间近似同步':'当前语速使用完整合成；设为 1.0 倍可边生成边播放。')):!hasChineseVoice?'未检测到本地中文音色；可安装系统中文语音包或选择 CosyVoice。':state.pending?'正在准备本地语音…':state.active?`正在朗读 · ${state.voiceName}`:'使用本地系统音色，跟随系统默认输出。');
+  const feedback=state.error||configError||(engine==='loading'?'正在读取已保存的朗读设置…':engine==='remote'?'远程 TTS 仍为预备配置，请选择系统语音或 CosyVoice。':!supported?'此环境无法播放所选语音，请检查设备或浏览器。':engine==='cosyvoice'?(streaming?(state.buffering?'正在缓冲 CosyVoice 音频…':state.pending?'正在接收首段 CosyVoice 音频…':state.active?'CosyVoice 边生成边播放 · 口型跟随声音起伏':'CosyVoice 流式朗读已就绪 · 1.0 倍速，边生成边播放。'):(audioSource==='api-harbor'?(state.pending?'正在合成完整 API Harbor 音频…':state.active?'API Harbor 音频播放中 · 口型按播放时间近似同步':'API Harbor 完整音频已就绪；此接口不提供实时 PCM 流。'):(state.pending?'正在合成完整 CosyVoice 音频…':state.active?'CosyVoice 播放中 · 口型按播放时间近似同步':'当前语速使用完整合成；设为 1.0 倍可边生成边播放。'))):!hasChineseVoice?'未检测到本地中文音色；可安装系统中文语音包或选择 CosyVoice。':state.pending?'正在准备本地语音…':state.active?`正在朗读 · ${state.voiceName}`:'使用本地系统音色，跟随系统默认输出。');
   return{...state,progress:presentation.source,enabled,supported,hasChineseVoice,engine,feedback,streamingEnabled:streaming,playing:state.active||state.pending,setEnabled,stop,speak,speakIfEnabled,prepare,unlock,speakAsync};
 }

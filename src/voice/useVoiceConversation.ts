@@ -52,7 +52,7 @@ export function useVoiceConversation(options:{allowed:boolean;scope:string;provi
       createCapture:createVoiceCapture,
       unlock:()=>{const active=refs.current.speech;if(active.engine!=='cosyvoice'||!active.streamingEnabled||!active.supported)throw new Error('请先在“语音与设备”中选择 CosyVoice，并将语速设为 1.0 倍，再开始语音聊天。');void wakeCue.unlock().catch(()=>{});return active.unlock();},
       wakeCue:signal=>voiceCurrent()?wakeCue.play(signal):false,stopWakeCue:()=>wakeCue.stop(),releaseWakeCue:()=>wakeCue.release(),
-      verify:async signal=>{const [config,voice]=await Promise.all([api<{configured:boolean}>('/voice/asr',{signal}),api<VoiceConfig>('/voice',{signal})]);if(!config.configured)throw new Error('尚未连接语音识别服务，请联系管理员在“语音与设备”中配置。');return {wake:voice.wake};},
+      verify:async signal=>{const [config,voice]=await Promise.all([api<{configured:boolean;audio?:{maxSeconds?:number}}>('/voice/asr',{signal}),api<VoiceConfig>('/voice',{signal})]);if(!config.configured)throw new Error('尚未连接语音识别服务，请联系管理员在“语音与设备”中配置。');return {wake:voice.wake,maxSeconds:config.audio?.maxSeconds};},
       stopSpeech:()=>refs.current.speech.stop(),openAsr:openAsrSession,
       stopChat:(id,signal,expectedRequestId)=>api(`/conversations/${encodeURIComponent(id)}/stop`,{method:'POST',body:JSON.stringify({expectedRequestId}),signal:AbortSignal.any([signal,AbortSignal.timeout(10000)])}),
       createChat:async(providerId,signal)=>{const conversation=await api<Conversation>('/conversations',{method:'POST',body:JSON.stringify({mode:'chat',providerId}),signal});if(!conversation.id)throw new Error('未能创建语音聊天记录。');return conversation.id;},

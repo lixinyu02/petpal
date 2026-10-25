@@ -108,7 +108,12 @@ test('reviewed cloud, memory and lifecycle credentials require their exact file 
   [
     "tests/cloud-api.test.mjs",
     [
-      "cloud-fixture-password"
+      "cloud-fixture-password",
+      "retained-original-private-key",
+      "retained-original-key",
+      "synthetic-fixture-password",
+      "synthetic-retained-capacity-key",
+      "retained-global-agent-key"
     ]
   ],
   [
@@ -149,13 +154,16 @@ test('reviewed cloud, memory and lifecycle credentials require their exact file 
       "private-model-key"
     ]
   ],
+  ["tests/memory-sync-depth.test.mjs", ["synthetic-central-memobase-key", "synthetic-local-memobase-key"]],
+  ["tests/service-models.test.mjs", ["retained-old-key"]],
   [
     "tests/memory-api.test.mjs",
     [
       "synthetic-memory-model-key",
       "synthetic-memory-password",
       "synthetic-memobase-key",
-      "synthetic-remote-token"
+      "synthetic-remote-token",
+      "synthetic-harbor-memory-credential"
     ]
   ],
   [

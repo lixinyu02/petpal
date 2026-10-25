@@ -161,6 +161,54 @@ test('pairing has one request, clears the secret immediately and old-account han
   const write=f.requests.find(call=>call.method==='POST');assert.deepEqual(clone(write.body),{baseUrl:'https://harbor.example',code:'private-single-use-code'});assert.equal(f.requests.filter(call=>call.method==='POST').length,1);assert.equal(f.field('一次性配对码').props.value,'');
   f.session({...user,id:'second-account',role:'admin',isAdmin:true});submit({preventDefault(){}});gate.resolve({});await f.flush();
   assert.equal(write.signal.aborted,true);assert.equal(f.requests.filter(call=>call.method==='POST').length,1);assert.doesNotMatch(f.text(),/配对成功/);
+  assert.equal(f.calls.includes('changed'),false,'a former account must not refresh the current account model catalog');
+});
+
+test('successful pairing, catalog refresh and disconnect refresh global model state once per mutation',async t=>{
+ for(const action of ['pair','refresh','disconnect']){
+  const f=fixture('links',{props:{user:{...user,role:'admin',isAdmin:true}},links:action==='pair'?[]:[{kind:'api-harbor',state:'ready',baseUrl:'https://harbor.example'}]});t.after(()=>f.close());await f.flush();
+  if(action==='pair'){f.change('配对服务类型','api-harbor');f.change('配对服务地址','https://harbor.example');f.change('一次性配对码','single-use-code');f.submit();}
+  else if(action==='refresh')f.click('同步目录');else{f.click('断开API Harbor');f.click('确认断开');}
+  await f.flush();assert.equal(f.calls.filter(call=>call==='changed').length,1,action);assert.equal(f.requests.filter(call=>call.method!=='GET').length,1,action);
+ }
+});
+
+test('a failed global model refresh after successful pairing preserves the confirmed operation and reports only stale UI state',async t=>{
+ let paired=false;
+ const f=fixture('links',{props:{user:{...user,role:'admin',isAdmin:true},onChanged:async()=>{throw new Error('state unavailable');}},request:call=>{
+  if(call.path==='/service-links')return{links:paired?[{kind:'api-harbor',state:'ready',baseUrl:'https://harbor.example'}]:[]};
+  if(call.path.endsWith('/pair')){paired=true;return{};}
+ }});t.after(()=>f.close());await f.flush();f.change('配对服务类型','api-harbor');f.change('配对服务地址','https://harbor.example');f.change('一次性配对码','single-use-code');f.submit();await f.flush();
+ assert.match(f.text(),/配对成功/);assert.match(f.text(),/模型列表暂未同步/);assert.doesNotMatch(f.text(),/配对结果尚未确认/);assert.ok(f.button('同步目录'));assert.equal(f.field('一次性配对码'),undefined);assert.equal(f.requests.filter(call=>call.path.endsWith('/pair')).length,1);
+});
+
+test('lost pairing reply reloads the pending operation and offers continuation without a replacement code',async t=>{
+  let pending=false;
+  const f=fixture('links',{props:{user:{...user,role:'admin',isAdmin:true}},request:call=>{
+    if(call.path==='/service-links')return {links:pending?[{kind:'api-harbor',state:'confirming',baseUrl:'https://harbor.example'}]:[]};
+    if(call.path.endsWith('/pair')){pending=true;throw new TypeError('Reply lost after exchange');}
+  }});t.after(()=>f.close());await f.flush();
+  f.change('配对服务类型','api-harbor');f.change('配对服务地址','https://harbor.example');f.change('一次性配对码','private-single-use-code');f.submit();await f.flush();
+  assert.ok(f.button('继续配对'));assert.equal(f.field('一次性配对码'),undefined);assert.match(f.text(),/无需新的配对码/);assert.doesNotMatch(f.text(),/获取新的配对码/);
+  f.click('继续配对');await f.flush();assert.equal(f.requests.filter(call=>call.path.endsWith('/pair')).length,1);assert.equal(f.requests.filter(call=>call.path==='/service-links/api-harbor/refresh'&&call.method==='POST').length,1);
+});
+
+test('revoking links resume the original disconnect and cannot start a fresh pairing',async t=>{
+  const f=fixture('links',{props:{user:{...user,role:'admin',isAdmin:true}},links:[{kind:'api-harbor',state:'revoking',baseUrl:'https://harbor.example'}]});t.after(()=>f.close());await f.flush();
+  f.change('配对服务类型','api-harbor');assert.ok(f.button('继续断开'));assert.equal(f.field('一次性配对码'),undefined);assert.match(f.text(),/继续原断开操作/);
+  f.click('继续断开');await f.flush();assert.equal(f.requests.filter(call=>call.path==='/service-links/api-harbor/refresh'&&call.method==='POST').length,1);assert.equal(f.requests.some(call=>call.path.endsWith('/pair')),false);
+});
+
+test('unknown pairing delivery survives failed status reads without offering another code',async t=>{
+  let pending=false,recovered=false;
+  const f=fixture('links',{props:{user:{...user,role:'admin',isAdmin:true}},request:call=>{
+    if(call.path==='/service-links'){if(pending&&!recovered)throw new TypeError('Status also unavailable');return {links:pending?[{kind:'api-harbor',state:'ready',baseUrl:'https://harbor.example'}]:[]};}
+    if(call.path.endsWith('/pair')){pending=true;throw new TypeError('Pairing reply lost');}
+    if(call.path.endsWith('/refresh')){recovered=true;return {};}
+  }});t.after(()=>f.close());await f.flush();
+  f.change('配对服务类型','api-harbor');f.change('配对服务地址','https://harbor.example');f.change('一次性配对码','private-single-use-code');f.submit();await f.flush();
+  assert.equal(f.field('一次性配对码'),undefined);assert.ok(f.button('继续配对'));assert.match(f.text(),/操作结果尚未确认/);
+  f.click('继续配对');await f.flush();assert.equal(f.requests.filter(call=>call.path.endsWith('/pair')).length,1);assert.equal(f.requests.filter(call=>call.path.endsWith('/refresh')).length,1);assert.ok(f.button('同步目录'));assert.equal(f.field('一次性配对码'),undefined);
 });
 
 test('late catalogs are not shown after logout and unmount aborts all outstanding requests',async t=>{

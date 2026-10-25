@@ -6,6 +6,8 @@ export async function openAsrTransport(options) {
   const abort = new AbortController();
   let id = '', sequence = 0, pendingBytes = 0, closed = false, ending = false, removed = false;
   let timer, pumping = false;
+  let maxSeconds;
+  const adoptLimit = value => { if (typeof value === 'number' && Number.isFinite(value) && value >= .001 && value <= 60) maxSeconds = Math.min(maxSeconds ?? 60, value); };
   const queued = [], pending = new Set();
   let readyResolve, readyReject;
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
@@ -38,13 +40,14 @@ export async function openAsrTransport(options) {
     if (typeof created.id !== 'string' || !created.id) throw new Error('识别服务返回了不支持的音频格式。');
     id = created.id;
     if (created.sampleRate !== 24000) throw new Error('识别服务返回了不支持的音频格式。');
+    adoptLimit(created.maxSeconds);
     check();
     const result = (async () => {
       const response = await options.openEvents(id, abort.signal); check();
       if (!response.ok) throw new Error(`识别字幕连接失败 (${response.status})。`);
       return readAsrEvents(response, {
         signal: abort.signal, assertCurrent: check,
-        onReady() { clearTimeout(timer); timer = undefined; readyResolve(); },
+        onReady(value) { adoptLimit(value?.maxSeconds); clearTimeout(timer); timer = undefined; readyResolve(); },
         onTranscript: options.onTranscript,
       });
     })();
@@ -79,6 +82,7 @@ export async function openAsrTransport(options) {
       finally { pumping = false; }
     }
     return {
+      ...(maxSeconds === undefined ? {} : { maxSeconds }),
       send(samples) {
         try {
           check(); if (closed || ending) throw new Error('识别语句已经结束。');

@@ -35,7 +35,8 @@ export function audioLevel(samples) {
 export function createVoiceGate({ threshold = .028, silenceMs = 900, preRollMs = 200, minSpeechMs = 360, maxSeconds = 45, noiseRatio = 2 } = {}) {
   if (![threshold,silenceMs,preRollMs,minSpeechMs,maxSeconds,noiseRatio].every(Number.isFinite) || !(threshold > 0 && threshold < 1 && silenceMs >= 250 && silenceMs <= 3000 && preRollMs >= 0 && preRollMs <= 500 && minSpeechMs >= 0 && minSpeechMs <= 1000 && maxSeconds > 0 && maxSeconds <= 45 && noiseRatio >= 1 && noiseRatio <= 4)) throw new Error('Invalid voice gate configuration.');
   let active = false, silence = 0, total = 0, voicedSamples = 0, consecutiveVoiced = 0, candidateSpan = 0, quietGap = 0, history = [], noiseFloor = 0, onsetThreshold = threshold;
-  const preLimit = Math.floor(VOICE_RATE * preRollMs / 1000), maxSamples = Math.floor(VOICE_RATE * maxSeconds);
+  const preLimit = Math.floor(VOICE_RATE * preRollMs / 1000), configuredMaxSamples = Math.floor(VOICE_RATE * maxSeconds);
+  let maxSamples = configuredMaxSamples;
   const minSpeechSamples = Math.floor(VOICE_RATE * minSpeechMs / 1000), gapLimit = Math.floor(VOICE_RATE * .12), sliceSize = Math.floor(VOICE_RATE * .02);
   const candidateLimit = Math.max(minSpeechSamples * 2, minSpeechSamples + gapLimit);
   // Reset per-utterance audio, not the room's learned noise floor.
@@ -94,11 +95,12 @@ export function createVoiceGate({ threshold = .028, silenceMs = 900, preRollMs =
       }
       if (!started) incoming = [frame];
       const samples = [];
-      for (const input of incoming) { const size = Math.min(input.length, maxSamples - total); if(size)samples.push(input.slice(0,size)); total += size; }
+      for (const input of incoming) { const size = Math.min(input.length, Math.max(0, maxSamples - total)); if(size)samples.push(input.slice(0,size)); total += size; }
       const reason = total >= maxSamples ? 'limit' : silence >= silenceMs ? 'silence' : '';
       return { started, ended: Boolean(reason), samples, level, reason };
     },
     reset,
+    setMaxSeconds(value) { if (typeof value === 'number' && Number.isFinite(value) && value >= .001 && value <= 60) maxSamples = Math.min(configuredMaxSamples, Math.floor(VOICE_RATE * value)); },
     get active() { return active; },
     get noiseFloor() { return noiseFloor; },
   };

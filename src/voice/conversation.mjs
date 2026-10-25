@@ -50,15 +50,22 @@ export function createVoiceConversation(options) {
   function sendFrames(job,utterance,frames){
     if(!validUtterance(job,utterance))return;
     for(const frame of frames){
-      if(utterance.session){void utterance.session.send(frame).catch(error=>{if(validUtterance(job,utterance))fail(job,error);});}
+      if(utterance.session){
+        const samples=frame.subarray(0,Math.max(0,Math.min(frame.length,utterance.maxSamples-utterance.sentSamples)));
+        if(samples.length){utterance.sentSamples+=samples.length;void utterance.session.send(samples).catch(error=>{if(validUtterance(job,utterance))fail(job,error);});}
+        if(utterance.sentSamples>=utterance.maxSamples){void finishUtterance();return;}
+      }
       else{utterance.pendingSamples+=frame.length;if(utterance.pendingSamples>24000*3){fail(job,new Error('识别连接较慢，录音已停止以避免积压，请重试。'));return;}utterance.pending.push(frame);}
     }
   }
   function beginUtterance(job){
-    const utterance={abort:new AbortController(),pending:[],pendingSamples:0,session:null,ready:null,finishing:false,wakeCandidate:state.awaitingWake};
+    const utterance={abort:new AbortController(),pending:[],pendingSamples:0,sentSamples:0,maxSamples:24000*45,session:null,ready:null,finishing:false,wakeCandidate:state.awaitingWake};
     job.utterance=utterance;clearTimeout(job.idleTimer);publish({...(utterance.wakeCandidate?{}:{transcript:'',reply:''}),error:'',hasUtterance:true});
     utterance.ready=options.openAsr(utterance.abort.signal,text=>{if(validUtterance(job,utterance)&&!utterance.wakeCandidate)publish({transcript:cleanTranscript(text)});}).then(session=>{
       if(!validUtterance(job,utterance)){session.cancel();throw cancelled();}
+      const limit=value=>typeof value==='number'&&Number.isFinite(value)&&value>=.001&&value<=60?value:undefined;
+      const maxSeconds=Math.min(job.listeningMaxSeconds,limit(session.maxSeconds)??limit(job.asrMaxSeconds)??45);
+      utterance.maxSamples=Math.floor(24000*maxSeconds);job.gate.setMaxSeconds(maxSeconds);
       utterance.session=session;const pending=utterance.pending;utterance.pending=[];utterance.pendingSamples=0;sendFrames(job,utterance,pending);return session;
     });
     void utterance.ready.catch(error=>{if(validUtterance(job,utterance))fail(job,error);});return utterance;
@@ -191,7 +198,7 @@ export function createVoiceConversation(options) {
     if(!options.isAllowed()){publish({phase:'error',error:'请先登录并选择可用的聊天模型。'});return;}
     let profile;
     try{profile=voiceGateProfile(options.getSensitivity?.());}catch{publish({phase:'error',error:'未能读取麦克风检测设置，请重新开始。'});return;}
-    const job={id:options.id(),providerId:options.getProviderId(),abort:new AbortController(),capture:null,gate:createVoiceGate(profile.listening),monitor:createVoiceGate(profile.interruption),utterance:null,turn:null,idleTimer:null,conversationId:'',sequence:0,chatPending:null,chatRelease:null,chatStopFor:null,reports:[],reportIds:new Set(),wake:defaultWakeSettings()};
+    const job={id:options.id(),providerId:options.getProviderId(),abort:new AbortController(),capture:null,listeningMaxSeconds:profile.listening.maxSeconds??45,asrMaxSeconds:undefined,gate:createVoiceGate(profile.listening),monitor:createVoiceGate(profile.interruption),utterance:null,turn:null,idleTimer:null,conversationId:'',sequence:0,chatPending:null,chatRelease:null,chatStopFor:null,reports:[],reportIds:new Set(),wake:defaultWakeSettings()};
     job.capture=options.createCapture({onFrame:(frame,level)=>feed(job,frame,level),onError:error=>fail(job,error)});current=job;
     publish({...empty(),phase:'starting',active:true});
     try{
@@ -201,6 +208,7 @@ export function createVoiceConversation(options) {
       const [ready,,config]=await Promise.all([unlocked,capture,options.verify(job.abort.signal)]);
       if(!valid(job)||job.sequence!==0)return;if(!ready)throw new Error('未能解锁声音播放，请再次点击开始语音。');
       job.wake=normalizeWakeSettings(config?.wake);publish({wake:normalizeWakeSettings(job.wake)});
+      job.asrMaxSeconds=config?.maxSeconds;job.gate.setMaxSeconds(job.asrMaxSeconds);
       if(job.wake.enabled)arm(job);else await listen(job);
     }catch(error){if(valid(job)&&job.sequence===0)fail(job,error);}
   }

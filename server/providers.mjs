@@ -168,6 +168,10 @@ async function providerRequest({ provider, body, combined, onEvent }) {
   const headers = { 'Content-Type': 'application/json', Accept: 'text/event-stream, application/json' };
   if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`;
   let response;
+  // Service-link credentials are admitted again for every tool continuation.
+  // The authorizer is a server-created non-enumerable runtime property.
+  provider.authorize?.();
+  combined.throwIfAborted();
   try { response = await fetch(endpointFor(provider), { method: 'POST', headers, body: JSON.stringify(body), signal: combined, redirect: 'error' }); }
   catch (error) {
     if (combined.aborted) throw combined.reason;

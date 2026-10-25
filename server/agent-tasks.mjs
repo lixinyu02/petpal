@@ -226,7 +226,7 @@ export function createAgentTasks({ store, active, approvals, userInputs, getBrid
     const hostId = body.hostId ?? (kind === 'steer' ? running?.hostId ?? 'central' : 'central');
     const projectDirectory = kind === 'steer' && body.projectDirectory === undefined ? running?.projectDirectory : value.projectDirectory;
     const entry = { id: randomUUID(), conversationId: conversation.id, submissionId: body.submissionId, revision: 1, content: value.content, attachmentIds: value.attachmentIds, permissions, providerId, ...resolveHost(auth.userId, hostId),
-      ...resolveProject(auth.userId, hostId, projectDirectory), ...resolveModel(auth.userId, providerId), ...resolveReview(auth.userId, permissions), ...(options?.outputRendering === 'auto' ? { outputRendering: 'auto' } : {}), auth: { ...auth, generation: epoch(auth) }, createdAt: now() };
+      ...resolveProject(auth.userId, hostId, projectDirectory), ...resolveModel(auth.userId, providerId, {images:[...conversation.messages,{attachmentIds:value.attachmentIds}].some(message=>message.attachmentIds?.length||message.images?.length)}), ...resolveReview(auth.userId, permissions), ...(options?.outputRendering === 'auto' ? { outputRendering: 'auto' } : {}), auth: { ...auth, generation: epoch(auth) }, createdAt: now() };
     check(entry);
     return entry;
   };

@@ -14,6 +14,7 @@ import { createDesktopTools } from './desktop-tools.mjs';
 import { createUpdateService } from './updates.mjs';
 import { createCosyVoiceService, safeCosyVoiceError, REFERENCE_LIMIT } from './cosyvoice.mjs';
 import { createAsrService, safeAsrError, ASR_AUDIO } from './asr.mjs';
+import { createHarborAudioService, safeHarborAudioError } from './harbor-audio.mjs';
 import { createAgentTasks } from './agent-tasks.mjs';
 import { createAgentUserInputs, approvalMetadata } from './agent-user-inputs.mjs';
 import { normalizeAgentPermissions } from './agent-permissions.mjs';
@@ -46,13 +47,14 @@ import { createMemoryService } from './memory-service.mjs';
 import { createReplyMemoryJobs, replyMemoryPrivacyGuard } from './reply-memory-jobs.mjs';
 import { createMemobaseRuntime } from './memobase-runtime.mjs';
 import {createServiceLinks} from './service-links.mjs';
-import {createServiceModels} from './service-models.mjs';
+import {createServiceModels,serviceModelSupportsAgent} from './service-models.mjs';
 import {createCloudDocker} from './cloud-docker.mjs';
 import {createCloudDesktop} from './cloud-desktop.mjs';
 import {mountCloudRoutes,mountCloudModelRoute} from './cloud-routes.mjs';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const now = () => new Date().toISOString();
+const needsImages = messages => messages.some(message=>message.attachmentIds?.length||message.images?.length);
 const failure = (status, message, code) => Object.assign(new Error(message), { status, ...(code ? { code } : {}) });
 
 function hostingPublicOrigin(value) {
@@ -137,7 +139,8 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const updates = createUpdateService({ ...updatesOptions, store });
   const downloads = createDownloadsCatalog({localDirectory:staticDir?path.join(path.resolve(staticDir),'downloads'):undefined,...downloadsOptions});
   const cosyvoice = await createCosyVoiceService({ ...cosyvoiceOptions, store, dataDir });
-  const asr = createAsrService({ ...asrOptions, store, authorizeSession: auth => authorizeAsrIdentity(auth) });
+  const harborAudio = createHarborAudioService({ ...cosyvoiceOptions, serviceModels, cosyvoice });
+  const asr = createAsrService({ ...asrOptions, store, authorizeSession: auth => authorizeAsrIdentity(auth), resolveTransport: auth => harborAudio.resolveAsrTransport({ model: state.users.find(user => user.id === auth?.userId)?.voice?.asr?.model || undefined }) });
   await store.save();
   let automations;
   const trustedAutomationEntry = call => {
@@ -258,7 +261,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   const isOwner = user => user.id === state.ownerId;
   const settingsFor = user => isOwner(user) ? state.settings : user.settings;
   const canUseProvider = (user, id) => isAdministrator(user) || user.providerIds.includes(id);
-  const visibleProvider = (provider, user) => isOfficialProvider(provider) ? publicOfficialProvider(provider) : ({ ...publicProvider(provider), editable: isAdministrator(user)&&!serviceModels.isManaged(provider.id), testable: true, ...(provider.source==='api-harbor'?{source:'api-harbor'}:{}) });
+  const visibleProvider = (provider, user) => isOfficialProvider(provider) ? publicOfficialProvider(provider) : ({ ...publicProvider(state.providers.find(record=>record.id===provider.id&&!serviceModels.isManaged(record.id))||provider), editable: isAdministrator(user)&&!serviceModels.isManaged(provider.id), testable: true, ...(provider.source==='api-harbor'?{source:'api-harbor'}:{}) });
   const visibleUser = user => publicUser(user, state.ownerId);
   const managedUser = user => ({ ...visibleUser(user), disabled: user.disabled, providerIds: isAdministrator(user) ? state.providers.map(provider => provider.id) : [...user.providerIds], hasPassword: Boolean(user.password), createdAt: user.createdAt });
   const requireAdmin = user => { if (!isAdministrator(user)) throw failure(403, '仅管理员可管理账号和模型。'); };
@@ -285,7 +288,8 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     return { userId: user.id, sessionHash, bootstrap };
   };
   const conversationById = (id, user) => { const result = state.conversations.find(item => item.id === id && item.userId === user.id); if (!result) throw failure(404, '会话不存在。'); return result; };
-  const providersFor = user => [...state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider=>serviceModels.resolve(provider)).filter(Boolean), ...officialProviders.forUser(user.id)];
+  const providersFor = (user,{tools=false,images=false}={}) => [...state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider=>serviceModels.resolve(provider,{tools,images})).filter(Boolean), ...officialProviders.forUser(user.id)];
+  const agentProvidersFor = (user,{images=false}={}) => [...state.providers.filter(provider => canUseProvider(user, provider.id)).map(provider=>serviceModels.resolve(provider,{agent:true,images})).filter(Boolean), ...officialProviders.forUser(user.id)];
   personalizedCompanion=createCompanionPersonalizer({
     recall:memoryContext,
     isActive:userId=>!shuttingDown&&state.users.some(user=>user.id===userId&&!user.disabled),
@@ -297,24 +301,37 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       return selected&&!isOfficialProvider(selected)?selected:null;
     },
   });
-  const providerById = (id, user, { existing = false } = {}) => {
-    const result = providersFor(user).find(item => item.id === id) ?? (existing ? officialAccounts?.providerFor?.(user.id, id) : undefined);
+  const providerById = (id, user, { existing = false, agent = false, tools = false, images = false } = {}) => {
+    const result = (agent?agentProvidersFor(user,{images}):providersFor(user,{tools,images})).find(item => item.id === id) ?? (existing ? officialAccounts?.providerFor?.(user.id, id) : undefined);
     if (!result) throw failure(404, '模型连接不存在或未获授权。');
     if (isOfficialProvider(result) && result.apiKey) officialProviders.secrets.add(result.apiKey);
     return result;
   };
-  const eligibleProviders = user => providersFor(user).filter(provider => isOfficialProvider(provider) || provider.protocol==='responses'&&provider.source==='api-harbor' || state.codexConfig.mode === 'api' && state.codexConfig.baseUrl && provider.protocol === 'responses' && normalizeBaseUrl(provider.baseUrl, 'responses') === normalizeBaseUrl(state.codexConfig.baseUrl, 'responses')).map(provider => provider.id);
-  const reviewProviders = user => providersFor(user).filter(provider => provider.protocol === 'responses').map(provider => provider.id);
-  const agentConfigFor = (userId, providerId, { existing = false } = {}) => {
+  const configuredProviderById = (id, user) => {
+    const resolved=providerById(id,user);
+    return state.providers.find(provider=>provider.id===resolved.id)||resolved;
+  };
+  const eligibleProviders = (user,{images=false}={}) => agentProvidersFor(user,{images}).filter(provider => serviceModelSupportsAgent(provider) && (isOfficialProvider(provider) || provider.source==='api-harbor' || state.codexConfig.mode === 'api' && state.codexConfig.baseUrl && normalizeBaseUrl(provider.baseUrl, 'responses') === normalizeBaseUrl(state.codexConfig.baseUrl, 'responses'))).map(provider => provider.id);
+  const reviewProviders = user => agentProvidersFor(user).filter(serviceModelSupportsAgent).map(provider => provider.id);
+  const defaultAgentConfig = ({images=false}={}) => {
+    const configured=state.codexConfig;
+    if(configured.mode!=='api'||!configured.baseUrl||!configured.model)return configured;
+    // A synthetic server-only provider preserves the configured default while
+    // its runtime revision includes both global config and Harbor identity.
+    const selected=serviceModels.resolve({...configured,id:'global-agent-default',name:'默认 Agent 模型',protocol:'responses'},{agent:true,images});
+    return selected.source==='api-harbor'?{...configured,baseUrl:selected.baseUrl,apiKey:selected.apiKey,model:selected.model,reasoningEffort:selected.reasoningEffort,supportsImages:selected.supportsImages,revision:selected.linkRevision,source:'api-harbor'}:configured;
+  };
+  const agentConfigFor = (userId, providerId, { existing = false, images = false } = {}) => {
     const person=state.users.find(user=>user.id===userId);
-    const managed=providerId&&person&&providersFor(person).find(provider=>provider.id===providerId&&provider.source==='api-harbor');
+    if(providerId==null&&person&&isAdministrator(person))return defaultAgentConfig({images});
+    const managed=providerId&&person&&agentProvidersFor(person,{images}).find(provider=>provider.id===providerId&&provider.source==='api-harbor');
     if(managed)return{mode:'api',protocol:'responses',baseUrl:managed.baseUrl,apiKey:managed.apiKey,model:managed.model,reasoningEffort:managed.reasoningEffort,revision:managed.linkRevision};
     const provider = providerId && (officialProviders.forUser(userId).find(item => item.id === providerId) ?? (existing ? officialAccounts?.providerFor?.(userId, providerId) : undefined));
     return provider ? officialProviders.config(provider, userId, state.codexConfig.revision) : state.codexConfig;
   };
-  const getAgentConfig = entry => agentConfigFor(entry?.auth?.userId, entry?.providerId, { existing: true });
+  const getAgentConfig = entry => agentConfigFor(entry?.auth?.userId, entry?.providerId, { existing: true, images:needsImages([...(state.conversations.find(conversation=>conversation.id===entry?.conversationId)?.messages||[]),entry||{}]) });
   const getConfigForUser = userId => {
-    if (state.codexConfig.mode === 'api' && state.codexConfig.model && state.codexConfig.baseUrl) return state.codexConfig;
+    if (state.codexConfig.mode === 'api' && state.codexConfig.model && state.codexConfig.baseUrl) return agentConfigFor(userId,null);
     const provider = officialProviders.forUser(userId)[0];
     return provider ? officialProviders.config(provider, userId, state.codexConfig.revision) : state.codexConfig;
   };
@@ -326,6 +343,8 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     return scoped.bridge;
   };
   const statusScope = user => {
+    const effective=isAdministrator(user)?defaultAgentConfig():state.codexConfig;
+    if(effective!==state.codexConfig)return{bridge:getAgentBridge({auth:{userId:user.id},providerId:null}),publicConfig:{...publicCodexConfig(state.codexConfig),source:'api-harbor',effectiveConfig:{...publicCodexConfig(effective),source:'api-harbor'}}};
     const configuredApi = state.codexConfig.mode === 'api' && state.codexConfig.model && state.codexConfig.baseUrl;
     const provider = !configuredApi && officialProviders.forUser(user.id)[0];
     return provider ? { bridge: getAgentBridge({ auth: { userId: user.id }, providerId: provider.id }), publicConfig: { ...publicCodexConfig(state.codexConfig), mode: 'api', baseUrl: 'https://api.openai.com/v1', model: provider.model, reasoningEffort: provider.reasoningEffort || '', hasApiKey: false, configured: true, source: 'official-account' } } : { bridge, publicConfig: publicCodexConfig(state.codexConfig) };
@@ -373,17 +392,17 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     for (const task of tasks) task.controller.abort(new DOMException('登录或模型权限已撤销。', 'AbortError'));
     await Promise.all([agentStopped, notificationsStopped, chatAssistant.revoke(predicate), ...[...tasks, ...stoppedProbes].map(task => task.done)]);
   };
-  const resolveAgentModel = (userId, providerId, { existing = false } = {}) => {
+  const resolveAgentModel = (userId, providerId, { existing = false, images = false } = {}) => {
     const user = state.users.find(item => item.id === userId); if (!user) throw failure(401, '账号不可用。');
     if (configChanging) throw failure(409, 'Agent 配置正在切换。');
-    const config = state.codexConfig;
+    const config = agentConfigFor(userId,null,{images});
     if (providerId === null) {
       if (!isAdministrator(user)) throw failure(403, '请选择管理员已分配给此账号的 Agent 模型。');
       return { model: config.model || '', effort: config.reasoningEffort || '', codexRevision: config.revision };
     }
-    const provider = providerById(providerId, user, { existing });
-    if (!isOfficialProvider(provider) && !eligibleProviders(user).includes(provider.id)) throw failure(400, 'Agent 模型必须来自当前同一 Responses 服务；其他连接仍可用于 Chat。');
-    return { model: provider.model, effort: provider.reasoningEffort || '', codexRevision: agentConfigFor(user.id, provider.id, { existing }).revision };
+    const provider = providerById(providerId, user, { existing, agent: true, images });
+    if (!isOfficialProvider(provider) && !eligibleProviders(user,{images}).includes(provider.id)) throw failure(400, 'Agent 模型必须来自当前同一 Responses 服务；其他连接仍可用于 Chat。');
+    return { model: provider.model, effort: provider.reasoningEffort || '', codexRevision: agentConfigFor(user.id, provider.id, { existing, images }).revision };
   };
   // Persist only an opaque configuration fingerprint. Provider credentials are
   // resolved again at dispatch and every native reviewer request.
@@ -429,8 +448,9 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       if (!conversation || conversation.mode !== 'codex' || conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Agent 会话已删除或配置已变化，请新建会话。');
       assertAvailable(conversation.id);
       imageAttachments.metadata(user.id, entry.attachmentIds);
-      assertImageSupport(entry.providerId ? providerById(entry.providerId, user, { existing: true }) : state.codexConfig, [...conversation.messages, entry]);
-      const current = resolveAgentModel(user.id, entry.providerId, { existing: true });
+      const images=needsImages([...conversation.messages,entry]);
+      assertImageSupport(entry.providerId ? providerById(entry.providerId, user, { existing: true, agent: true, images }) : agentConfigFor(user.id,null,{images}), [...conversation.messages, entry]);
+      const current = resolveAgentModel(user.id, entry.providerId, { existing: true, images });
       if (entry.codexRevision !== current.codexRevision || entry.model !== current.model || entry.effort !== current.effort) throw failure(409, 'Agent 模型配置已变化，请重新提交。');
       if (entry.permissions.approval === 'review' && entry.permissions.reviewProviderId && getAgentConfig(entry).mode !== 'api') throw failure(400, '独立命令审查模型需要所选 Agent 使用 Responses API 模式。');
       const review = resolveAgentReview(user.id, entry.permissions, { existing: true });
@@ -615,7 +635,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       return expiresAt;
     }, redact: redactCodex });
   const providerIds = value => {
-    if (!Array.isArray(value) || value.length > 32 || value.some(id => typeof id !== 'string' || !state.providers.some(provider => provider.id === id))) throw failure(400, '模型授权列表无效。');
+    if (!Array.isArray(value) || value.length > state.providers.length || new Set(value).size !== value.length || value.some(id => typeof id !== 'string' || !state.providers.some(provider => provider.id === id))) throw failure(400, '模型授权列表无效。');
     return [...new Set(value)];
   };
 
@@ -734,9 +754,19 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (!Object.keys(req.body).length || req.body.enabled !== undefined && typeof req.body.enabled !== 'boolean') throw failure(400, '记忆服务配置无效。');
     if (req.body.providerId !== undefined) {
       if (Object.keys(req.body).length !== 1 || typeof req.body.providerId !== 'string') throw failure(400, '请选择单个已保存的记忆抽取模型。');
-      const provider = providersFor(req.user).find(item => item.id === req.body.providerId);
-      if (!provider || !provider.apiKey || !['responses', 'chat-completions'].includes(provider.protocol)) throw failure(400, '记忆抽取需要已保存 API Key 的 API 模型，不能使用官方账号授权模型。');
-      await memoryRuntime.configureModel({ baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: provider.model }, { authorize: () => { requireCurrentAuth(req); requireAdmin(req.user); } });
+      const configured = state.providers.find(item => item.id === req.body.providerId && canUseProvider(req.user, item.id));
+      const candidate = configured && serviceModels.forProtocol('chat', { model: configured.model });
+      // Memobase uses Chat Completions even when the selected conversational
+      // provider uses Responses. Do not persist a Responses-only Harbor key.
+      const harbor = candidate && (!Array.isArray(candidate.capabilities?.inputModalities) || candidate.capabilities.inputModalities.includes('text'))
+        && (!Array.isArray(candidate.capabilities?.outputModalities) || candidate.capabilities.outputModalities.includes('text')) ? candidate : undefined;
+      const provider = harbor ?? (configured && !serviceModels.isManaged(configured.id) ? configured : undefined);
+      if (!provider || !provider.apiKey || !['responses', 'chat-completions'].includes(configured?.protocol)) throw failure(400, '记忆抽取需要支持 Chat Completions 的 API 模型，不能使用仅 Responses 的 Harbor 模型或官方账号授权模型。');
+      const authorize = () => {
+        requireCurrentAuth(req); requireAdmin(req.user);
+        if (state.providers.find(item => item.id === configured.id) !== configured || harbor && serviceModels.forProtocol('chat', { model: configured.model })?.linkRevision !== harbor.linkRevision) throw failure(409, '记忆抽取模型来源已变化，请刷新后重试。');
+      };
+      await memoryRuntime.configureModel({ baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: provider.model }, { authorize });
     } else {
       await memory.configure(req.body);
     }
@@ -771,16 +801,20 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (Object.keys(req.query).length || Object.keys(req.body).length) throw failure(400, '通知设备撤销不接受附加字段。');
     res.json(await notifications.remove(executorAuth(req), req.params.deviceId));
   });
+  let defaultServiceRevision=defaultAgentConfig().revision;
   const syncServiceModels=async()=>{
     if(shuttingDown)return{changed:[],models:0};
-    const result=await serviceModels.synchronize();
-    if(result.changed.length)await stopTasks(task=>result.changed.includes(task.providerId));
-    return result;
+    let result;
+    try{result=await serviceModels.synchronize();return result;}
+    finally{
+      const revision=defaultAgentConfig().revision,defaultChanged=revision!==defaultServiceRevision;defaultServiceRevision=revision;
+      if(result?.changed.length||defaultChanged)await stopTasks(task=>result?.changed.includes(task.providerId)||defaultChanged&&(task.providerId===null&&(task.mode==='codex'||!!task.auth)||Object.hasOwn(task,'assistantProviderId')&&task.assistantProviderId===null));
+    }
   };
   let refreshingServiceLinks=false;
   const serviceLinkTimer=setInterval(async()=>{
     if(shuttingDown||refreshingServiceLinks)return;refreshingServiceLinks=true;
-    try{const status=await serviceLinks.status();if(['ready','offline'].includes(status.links?.['api-harbor']?.state)){try{await serviceLinks.refresh('api-harbor');}finally{await syncServiceModels();}}}catch{}finally{refreshingServiceLinks=false;}
+    try{const status=await serviceLinks.status();for(const kind of ['docker-platform','api-harbor'])if(['pending','confirming','ready','offline','revoking'].includes(status.links?.[kind]?.state)){try{await serviceLinks.refresh(kind);}catch{}finally{await syncServiceModels();}}}catch{}finally{refreshingServiceLinks=false;}
   },60000);serviceLinkTimer.unref?.();
   mountCloudRoutes({app,cloud:cloudDocker,links:serviceLinks,desktop:cloudDesktop,
     auth:req=>{requireCurrentAuth(req);requireCodex(req.user);},admin:req=>{requireCurrentAuth(req);requireAdmin(req.user);},executorAuth,
@@ -927,15 +961,19 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const clearHost = settings.chatAssistantHostId !== null && !targets.canAccess(user.id, settings.chatAssistantHostId);
     await store.save(clearHost ? { chatAssistantDefaultHost: { userId: user.id, hostId: null } } : undefined); res.json({ user: managedUser(user) });
   });
-  app.get('/api/voice', (req, res) => res.json(publicVoiceSettings(req.user.voice)));
+  const voiceSnapshot = user => {
+    const saved = publicVoiceSettings(user.voice), audio = harborAudio.publicConfig(false, saved.tts);
+    return { ...saved, runtime: { ...saved.runtime, ttsSource: audio.source, streamingAvailable: audio.streamingAvailable } };
+  };
+  app.get('/api/voice', (req, res) => res.json(voiceSnapshot(req.user)));
   app.patch('/api/voice', async (req, res) => {
     patchVoiceSettings(req.user.voice, req.body);
     await stopTasks(task => task.mode === 'voice' && task.userId === req.user.id);
     requireCurrentAuth(req);
     const updated = patchVoiceSettings(req.user.voice, req.body);
-    req.user.voice = updated; await store.save(); res.json(publicVoiceSettings(updated));
+    req.user.voice = updated; await store.save(); res.json(voiceSnapshot(req.user));
   });
-  app.get('/api/voice/cosyvoice', (req, res) => res.json(cosyvoice.publicConfig(isAdministrator(req.user))));
+  app.get('/api/voice/cosyvoice', (req, res) => res.json(harborAudio.publicConfig(isAdministrator(req.user), publicVoiceSettings(req.user.voice).tts)));
   const asrRoute = handler => async (req, res) => {
     try { await handler(req, res); }
     catch (error) {
@@ -945,7 +983,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     }
   };
   const emptyAsrBody = req => { if (Object.keys(req.body).length) throw failure(400, '此识别操作不接受附加字段。'); };
-  app.get('/api/voice/asr', (req, res) => res.json(asr.publicConfig(isAdministrator(req.user))));
+  app.get('/api/voice/asr', (req, res) => res.json(asr.publicConfig(isAdministrator(req.user), executorAuth(req))));
   app.patch('/api/voice/asr', (req, res, next) => { requireAdmin(req.user); next(); }, asrRoute(async (req, res) => {
     const config = await asr.configure(req.body, { authorize: () => requireCurrentAuth(req) });
     requireCurrentAuth(req); res.json(config);
@@ -996,11 +1034,12 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     try {
       requireCurrentAuth(req);
       const preferences = publicVoiceSettings(req.user.voice).tts;
-      const audio = await cosyvoice.synthesize({ userId: req.user.id, text: req.body.text, speed: preferences.speed, emotion: preferences.emotion, emotionIntensity: preferences.emotionIntensity, signal: controller.signal });
+      const audio = await harborAudio.synthesize({ userId: req.user.id, text: req.body.text, model: preferences.model, voice: preferences.voice, speed: preferences.speed, emotion: preferences.emotion, emotionIntensity: preferences.emotionIntensity, signal: controller.signal, authorize: () => requireCurrentAuth(req) });
       requireCurrentAuth(req); controller.signal.throwIfAborted();
+      res.set('X-PetPal-Audio-Source', audio.audioSource === 'api-harbor' ? 'api-harbor' : 'cosyvoice');
       if (audio.speechEmotion) res.set({ 'X-PetPal-Speech-Emotion': audio.speechEmotion.emotion, 'X-PetPal-Speech-Intensity': audio.speechEmotion.intensity, 'X-PetPal-Speech-Source': audio.speechEmotion.source });
       res.status(200).set({ 'Content-Type': 'audio/wav', 'Content-Length': String(audio.length), 'Cache-Control': 'no-store', 'Content-Disposition': 'inline; filename="speech.wav"' }).send(audio);
-    } catch (error) { const safe = safeCosyVoiceError(error); if (!res.destroyed) res.status(safe.status).json({ error: safe.message }); }
+    } catch (error) { const safe = safeHarborAudioError(error); if (!res.destroyed) res.status(safe.status).json({ error: safe.message }); }
     finally { probes.delete(probe); finish(); }
   });
   app.post('/api/voice/synthesize/stream', async (req, res) => {
@@ -1020,7 +1059,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
         if (res.destroyed || res.writableEnded) throw new DOMException('语音连接已关闭。', 'AbortError');
       };
       authorize();
-      if (!res.headersSent) res.status(200).set({ 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+      if (!res.headersSent) res.status(200).set({ 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', 'X-PetPal-Audio-Source': 'cosyvoice' });
       await new Promise((resolve, reject) => {
         const cleanup = () => { res.off('drain', drain); res.off('close', closed); res.off('error', failed); signal.removeEventListener('abort', cancelled); };
         const failed = error => { cleanup(); reject(error); };
@@ -1041,10 +1080,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     try {
       requireCurrentAuth(req);
       const preferences = publicVoiceSettings(req.user.voice).tts;
-      await cosyvoice.synthesizeStream({ userId: req.user.id, text: req.body.text, speed: preferences.speed, emotion: preferences.emotion, emotionIntensity: preferences.emotionIntensity, signal: controller.signal, onFrame: sendFrame });
+      await harborAudio.synthesizeStream({ userId: req.user.id, text: req.body.text, speed: preferences.speed, emotion: preferences.emotion, emotionIntensity: preferences.emotionIntensity, signal: controller.signal, authorize: () => requireCurrentAuth(req), onFrame: sendFrame });
       if (!res.destroyed && !res.writableEnded) res.end();
     } catch (error) {
-      const safe = safeCosyVoiceError(error);
+      const safe = safeHarborAudioError(error);
       if (!res.destroyed && !res.writableEnded) {
         if (!res.headersSent) res.status(safe.status).json({ error: safe.message });
         else {
@@ -1124,10 +1163,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.post('/api/providers', async (req, res) => {
     requireAdmin(req.user);
     const body = req.body ?? {};
-    const existing = body.id === undefined ? undefined : providerById(string(body.id, '连接 ID', 128), req.user);
+    const existing = body.id === undefined ? undefined : configuredProviderById(string(body.id, '连接 ID', 128), req.user);
     if(existing&&serviceModels.isManaged(existing.id))throw failure(409,'此模型由 API Harbor 管理，请在服务互联中刷新目录。');
     if (isOfficialProvider(existing)) throw failure(400, '官方模型由本人官方账号管理，不能修改为 API 连接。');
-    if (!existing && state.providers.length >= 32) throw failure(400, '最多保存 32 个模型连接。');
+    if (!existing && state.providers.filter(provider => provider.serviceLink !== 'api-harbor').length >= 32) throw failure(400, '最多保存 32 个手动模型连接。');
     const protocol = body.protocol ?? existing?.protocol;
     if (!['chat-completions', 'responses'].includes(protocol)) throw failure(400, '协议必须是 chat-completions 或 responses。');
     let baseUrl, reasoningEffort;
@@ -1148,7 +1187,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
   app.delete('/api/providers/:id', async (req, res) => {
     if(serviceModels.isManaged(req.params.id)){requireAdmin(req.user);throw failure(409,'此模型由 API Harbor 管理，请在 Harbor 侧调整分配。');}
     requireAdmin(req.user);
-    const provider = providerById(req.params.id, req.user);
+    const provider = configuredProviderById(req.params.id, req.user);
     if (isOfficialProvider(provider)) throw failure(400, '请在官方账号设置中退出或切换账号。');
     if ([...active.values()].some(task => task.providerId === provider.id || task.reviewProviderId === provider.id)) throw failure(409, '此模型正在回复或审查，请先停止。');
     state.providers.splice(state.providers.indexOf(provider), 1);
@@ -1217,7 +1256,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     const conversation = conversationById(req.params.id, req.user); assertIdle(conversation.id);
     if (conversation.mode !== 'chat') throw failure(400, 'Codex 工作会话不能切换聊天模型。');
     if (Object.keys(req.body).some(key => key !== 'providerId')) throw failure(400, '会话更新只接受 providerId 字段。');
-    const provider = providerById(string(req.body.providerId, '模型连接', 128), req.user);
+    const provider = providerById(string(req.body.providerId, '模型连接', 128), req.user, {images:needsImages(conversation.messages)});
     assertImageSupport(provider, conversation.messages);
     conversation.providerId = provider.id; conversation.updatedAt = now();
     await store.save(); res.json(visibleConversation(conversation));
@@ -1274,8 +1313,10 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
         state.codexConfig = next;
         await store.save();
         bridge = replacement;
+        defaultServiceRevision=defaultAgentConfig().revision;
       } catch (error) {
         state.codexConfig = previous;
+        defaultServiceRevision=defaultAgentConfig().revision;
         await replacement?.close();
         if (!shuttingDown) bridge = createBridge(previous);
         throw error;
@@ -1378,14 +1419,18 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (conversation.automationId) throw failure(409, '自动化结果会话只能查看或停止，请创建普通对话。');
     const collaborationOptions = normalizeChatAssistant(req.body.assistant, req.body.submissionId);
     if (collaborationOptions && conversation.mode !== 'chat') throw failure(400, 'Chat + Agent 仅用于聊天会话。');
+    let legacyAgentConfig,legacyAgentBridge,legacyAgentImages=false;
     if (conversation.mode === 'codex') {
       requireCodex(req.user);
       targets.hostFor(req.user.id, 'central');
+      const currentAttachments=normalizeAttachmentIds(req.body.attachmentIds);legacyAgentImages=needsImages([...conversation.messages,{attachmentIds:currentAttachments}]);
+      resolveAgentModel(req.user.id,null,{images:legacyAgentImages});
+      legacyAgentConfig=agentConfigFor(req.user.id,null,{images:legacyAgentImages});legacyAgentBridge=getAgentBridge({auth:{userId:req.user.id},providerId:null,conversationId:conversation.id,attachmentIds:currentAttachments});
       if (conversation.agent?.run?.status === 'unknown') throw failure(409, '上次远程执行状态未知，本会话不会开始新任务。');
       if (conversation.agent?.submissions?.some(item => item.status === 'uncertain')) throw failure(409, '仍有指令送达状态未知，请先检查并确认原任务已停止。', 'agent_execution_uncertain');
       if ([conversation.agentHostId, conversation.threadHostId, ...conversation.agent?.queue?.map(entry => entry.hostId) ?? []].some(hostId => hostId && hostId !== 'central')) throw failure(409, '这个会话包含桌面执行任务，请使用支持执行电脑选择的 Agent 客户端。');
       if (req.body.projectDirectory || conversation.agentProjectDirectory || conversation.threadProjectDirectory || conversation.agent?.queue?.some(entry => entry.projectDirectory)) throw failure(409, '这个会话包含项目目录，请使用支持项目目录的 Agent 客户端提交。');
-      if (conversation.threadCodexRevision && conversation.threadCodexRevision !== state.codexConfig.revision) throw failure(409, '这个会话使用个人官方模型，请通过支持模型选择的 Agent 任务入口继续。');
+      if (conversation.threadCodexRevision && conversation.threadCodexRevision !== legacyAgentConfig.revision) throw failure(409, '这个会话的模型来源已变化，请通过 Agent 任务入口继续或新建会话。');
       if (configChanging) throw failure(409, 'Codex 配置正在切换，请稍后重试。');
       if (conversation.codexRevision !== state.codexConfig.revision) throw failure(409, 'Codex 配置已变化；为避免跨接口或凭据恢复旧任务，请新建工作会话。');
     }
@@ -1395,15 +1440,16 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     if (content === null || content.length > 32000 || (!content && !attachmentIds.length)) throw failure(400, '消息需要文字或图片，文字最多 32000 个字符。');
     if (conversation.mode === 'chat') { await chatAssistant.refresh(conversation); requireCurrentAuth(req); assertIdle(conversation.id); }
     if (conversation.messages.length >= 500) throw failure(400, '这个会话已达到 500 条消息，请创建新会话。');
-    const provider = conversation.mode === 'chat' ? providerById(conversation.providerId, req.user) : null;
     const history = conversation.messages.filter(message => message.role === 'user' || message.status === 'complete');
-    assertImageSupport(provider ?? state.codexConfig, [...history, { attachmentIds }]);
+    const requiredImages=needsImages([...history,{attachmentIds}]);
+    const provider = conversation.mode === 'chat' ? providerById(conversation.providerId, req.user, {tools:!!collaborationOptions,images:requiredImages}) : null;
+    assertImageSupport(provider ?? legacyAgentConfig ?? state.codexConfig, [...history, { attachmentIds }]);
     if (provider) imageAttachments.context(req.user.id, [...history, { attachmentIds }]);
     if (history.reduce((total, message) => total + message.content.length, content.length) > 300000) throw failure(400, '这个会话上下文过长，请创建新会话。');
     const controller = new AbortController();
     let finish;
     const done = new Promise(resolve => { finish = resolve; });
-    const task = { controller, done, mode: conversation.mode, userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap, providerId: provider?.id ?? null, approvalIds: new Set(), replyMemoryPrivacy: { sensitiveInput: false, privateInputProtected: false }, ...(conversation.mode === 'chat' ? {clientRequestId} : { bridge }),
+    const task = { controller, done, mode: conversation.mode, userId: req.user.id, sessionHash: req.sessionHash, bootstrap: req.bootstrap, providerId: provider?.id ?? null, approvalIds: new Set(), replyMemoryPrivacy: { sensitiveInput: false, privateInputProtected: false }, ...(conversation.mode === 'chat' ? {clientRequestId} : { bridge:legacyAgentBridge }),
       ...(collaborationOptions ? { assistantProviderId: collaborationOptions.providerId,
         ...(collaborationOptions.permissions.approval === 'review' ? { assistantReviewProviderId: collaborationOptions.permissions.reviewProviderId } : {}) } : {}) };
     active.set(conversation.id, task);
@@ -1425,7 +1471,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     };
     const onEvent = (event, data) => {
       if (controller.signal.aborted || active.get(conversation.id) !== task) return;
-      if (event === 'thread' && !task.sensitiveInput) { conversation.threadId = data.threadId; conversation.threadCodexRevision = state.codexConfig.revision; conversation.threadHostId = 'central'; conversation.agentHostId = 'central'; conversation.threadHasOpenUIGuide = hasThreadGuide; return; }
+      if (event === 'thread' && !task.sensitiveInput) { conversation.threadId = data.threadId; conversation.threadCodexRevision = legacyAgentConfig?.revision??state.codexConfig.revision; conversation.threadHostId = 'central'; conversation.agentHostId = 'central'; conversation.threadHasOpenUIGuide = hasThreadGuide; return; }
       if (event === 'approval' && typeof data?.id === 'string') {
         approvals.set(data.id, { userId: req.user.id, conversationId: conversation.id, task, kind: data.kind, description: data.description, ...approvalMetadata(data) }); task.approvalIds.add(data.id);
       }
@@ -1464,10 +1510,12 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
       const messages = conversation.mode === 'chat' ? await imageAttachments.messages(req.user.id, [...history, user]) : undefined;
       const recalled = await memoryContext(req.user.id, content, controller.signal);
       requireCurrentAuth(req); controller.signal.throwIfAborted();
+      if(provider?.source==='api-harbor'&&providerById(provider.id,req.user,{tools:!!collaborationOptions,images:requiredImages}).linkRevision!==provider.linkRevision)throw failure(409,'模型连接已变化，请重新提交。');
+      if(legacyAgentConfig&&agentConfigFor(req.user.id,null,{images:legacyAgentImages}).revision!==legacyAgentConfig.revision)throw failure(409,'Agent 模型配置已变化，请重新提交。');
       const agentPrompt = withOutputGuide(recalled ? `${recalled}\n\n${content}` : content, outputPolicy);
       const persona = withOutputGuide(basePersona + recalled, outputPolicy);
       const result = conversation.mode === 'codex'
-        ? await bridge.run({ conversationId: conversation.id, permissions: requirePermissions(req.user), prompt: agentPrompt, images, threadId: !outputPolicy.resetThread && (!conversation.threadHostId || conversation.threadHostId === 'central') ? conversation.threadId : undefined, signal: controller.signal, onEvent })
+        ? await legacyAgentBridge.run({ conversationId: conversation.id, permissions: requirePermissions(req.user), prompt: agentPrompt, images, threadId: !outputPolicy.resetThread && (!conversation.threadHostId || conversation.threadHostId === 'central') ? conversation.threadId : undefined, signal: controller.signal, onEvent })
         : await streamProvider({ provider, messages, persona, signal: controller.signal, onEvent,
           ...(collaboration ? { onToolCall: async ({ task: taskText }) => {
             requireCurrentAuth(req); controller.signal.throwIfAborted();
@@ -1484,7 +1532,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
           } } : {}) });
       if (collaboration) await chatAssistant.finishDecision(collaboration.record);
       controller.signal.throwIfAborted();
-      if (result.threadId && !task.sensitiveInput) { conversation.threadId = result.threadId; conversation.threadCodexRevision = state.codexConfig.revision; conversation.threadHostId = 'central'; conversation.agentHostId = 'central'; conversation.threadHasOpenUIGuide = hasThreadGuide; }
+      if (result.threadId && !task.sensitiveInput) { conversation.threadId = result.threadId; conversation.threadCodexRevision = legacyAgentConfig?.revision??state.codexConfig.revision; conversation.threadHostId = 'central'; conversation.agentHostId = 'central'; conversation.threadHasOpenUIGuide = hasThreadGuide; }
       if (!assistant.content && result.text) { assistant.content = result.text; send('delta', { text: result.text }); }
       assistant.status = 'complete'; conversation.updatedAt = now();
       await store.save(); rememberReply(conversation, user, assistant, task); send('done', { conversation: visibleConversation(conversation), assistantMessageId: assistant.id });
@@ -1615,7 +1663,7 @@ export async function createPetServer({ dataDir = process.env.PETPAL_DATA_DIR ||
     for (const probe of probes) probe.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     for (const task of active.values()) task.controller.abort(new DOMException('服务正在退出。', 'AbortError'));
     if (configSwap) await configSwap.catch(() => {});
-    const results = await Promise.allSettled([appProxyProfiles.close(), mobileOfficial.close(), notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), ...[...officialBridges.values()].map(item => item.bridge.close()), codexStatusProbe?.promise.catch(() => {}), localTools.close(), updates.close(), downloads.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
+    const results = await Promise.allSettled([appProxyProfiles.close(), mobileOfficial.close(), notifications.close(), chatAssistant.close(), executors.close(), agentTasks.close(), bridge.close(), ...[...officialBridges.values()].map(item => item.bridge.close()), codexStatusProbe?.promise.catch(() => {}), localTools.close(), updates.close(), downloads.close(), harborAudio.close(), cosyvoice.close(), asr.close(), ...[...active.values(), ...probes].map(task => task.done)]);
     // Reply journals have their own bounded lifetime; they never retain a
     // foreground response or execution lock, and cancellation guards late writes.
     await replyMemoryJobs.close();

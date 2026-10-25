@@ -79,6 +79,13 @@ test('authenticated audio API fences credentials and binary data across account 
       install('fetch',async()=>new Response(new ReadableStream({cancel(){cancelled=true;}}),{headers:{'x-petpal-speech-emotion':'happy'}}));
       await assert.rejects(api.apiSpeechAudio('你好',new AbortController().signal));assert.equal(cancelled,true);
     });
+    await t.test('only fixed public audio-source labels accompany complete WAV results',async()=>{
+      const api=await freshApi();api.setConnection({url:'',token:'current'});
+      for(const [label,expected]of [['api-harbor','api-harbor'],['cosyvoice','cosyvoice'],['private upstream key and URL',undefined]]){
+        install('fetch',async()=>new Response('WAV',{headers:{'x-petpal-audio-source':label}}));
+        assert.equal((await api.apiSpeechAudio('你好',new AbortController().signal)).source,expected);
+      }
+    });
     await t.test('a late WAV with emotion cannot enter a replacement account or outlive cancellation',async()=>{
       for(const action of ['account','stop']){
         const api=await freshApi();api.setConnection({url:'',token:'old'});
