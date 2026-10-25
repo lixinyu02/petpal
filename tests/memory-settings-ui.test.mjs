@@ -14,12 +14,14 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
 const user = { id: 'memory-ui-user-one', username: 'memoryuser', role: 'user', isAdmin: false, isOwner: false };
 const providers = [{ id: 'memory-ui-provider-one', name: 'API model one', protocol: 'responses', model: 'fixture-one' }, { id: 'memory-ui-provider-two', name: 'API model two', protocol: 'chat-completions', model: 'fixture-two' }, { id: 'official-fixture', name: 'Official account', source: 'official-account', model: 'fixture-official' }];
 const initialStatus = { enabled: true, configured: true, connected: true, mode: 'central-sync', epoch: 1, pending: 0, unknown: 0, scope: { instanceId: 'memory-ui-central', userId: user.id }, runtime: { supported: true, configured: true, running: false, state: 'stopped', autoStart: true } };
+const entryRows=[{id:'11111111-1111-4111-8111-111111111111',fingerprint:'a'.repeat(64),content:'喜欢绿茶',topic:'偏好',subtopic:'饮品',updatedAt:'2026-01-01T00:00:00Z'},{id:'22222222-2222-4222-8222-222222222222',fingerprint:'b'.repeat(64),content:'喜欢看科幻',topic:'偏好',subtopic:'阅读',updatedAt:null}];
 
 /** Run the real TSX handlers and visible-poll lifecycle. HTTP, native IPC and
  * the React scheduler are fixtures; authorization and mutation choices are not. */
 function fixture(options = {}) {
   let epoch = 1, index = 0, tree, dirty = false, mounted = true, afterUnmountUpdates = 0, sequence = 0;
   let actual = clone(options.status ?? initialStatus), nativeStatus = { supported: true, configured: true, prepared: true, running: false, state: 'stopped', autoStart: true };
+  let entries=clone(options.entryRows??entryRows);
   const hooks = [], effects = [], requests = [], ipc = [], timers = new Map(), focuses = [];
   const props = { connected: true, user, providers, ...options.props };
   const same = (left, right) => left && right && left.length === right.length && left.every((value, at) => Object.is(value, right[at]));
@@ -34,6 +36,8 @@ function fixture(options = {}) {
     const snapshot = clone(actual);
     if (options.request) { const result = await options.request(call, { status: snapshot }); if (result !== undefined) return result; }
     if (path === '/memory/status') return { memory: snapshot };
+    if(path.startsWith('/memory/entries?')){const q=new URL('http://fixture'+path).searchParams,query=q.get('q'),cursor=Number(q.get('cursor')),filtered=entries.filter(e=>!query||e.content.includes(query));return{epoch:actual.epoch,entries:filtered.slice(cursor,cursor+30),total:filtered.length,nextCursor:cursor+30<filtered.length?cursor+30:null,pending:0,changed:0,selectiveForgetting:false};}
+    if(path==='/memory/entries/delete'){entries=entries.filter(e=>!call.body.entries.some(v=>v.id===e.id&&v.fingerprint===e.fingerprint));return{epoch:actual.epoch,accepted:call.body.entries.length,pending:call.body.entries.length};}
     if (path === '/memory/context') return { context: `只属于${call.userId}的音乐偏好` };
     if (path === '/memory/preferences') { actual.enabled = call.body.enabled; return { memory: clone(actual) }; }
     if (path === '/memory' && call.method === 'DELETE') { actual = { ...actual, epoch: actual.epoch + 1, pending: 0 }; return { memory: clone(actual) }; }
@@ -49,7 +53,7 @@ function fixture(options = {}) {
     // request ledger scoped to the surrounding memory controls.
     './HistoryArchives': props => element('section', { 'data-history-account': props.user?.id, 'data-connected': props.connected }),
     './platform/visible-poll.mjs': { createVisiblePoll: value => createVisiblePoll({ ...value, setTimeoutFn(callback) { const id = ++sequence; timers.set(id, callback); return id; }, clearTimeoutFn: id => timers.delete(id) }) } };
-  const module = { exports: {} }; vm.runInNewContext(source, { module, exports: module.exports, window, document, AbortController, DOMException, Promise, require: name => { if (name.endsWith('.css')) return {}; assert.ok(Object.hasOwn(modules, name), `Unexpected dependency ${name}`); return modules[name]; } });
+  const module = { exports: {} }; vm.runInNewContext(source, { module, exports: module.exports, window, document, AbortController, DOMException, Promise, URLSearchParams, require: name => { if (name.endsWith('.css')) return {}; assert.ok(Object.hasOwn(modules, name), `Unexpected dependency ${name}`); return modules[name]; } });
   const render = () => { index = 0; dirty = false; effects.length = 0; tree = module.exports.default(props); for (const node of nodes(tree)) if (node.props?.ref) node.props.ref.current = { focus: () => focuses.push(true) }; for (const effect of effects) effect(); return tree; };
   const flush = async () => { for (let at = 0; at < 14; at++) { await new Promise(resolve => setImmediate(resolve)); if (mounted && dirty) render(); } };
   const find = (type, check = () => true) => nodes(tree).find(node => node.type === type && check(node.props));
@@ -157,4 +161,39 @@ test('ordinary users select only an advertised extraction model and up to three 
  assert.ok(f.field('我的记忆提炼模型'));assert.equal(f.field('记忆模型请求并发').props.value,3);
  f.change('我的记忆提炼模型',providers[1].id);f.change('记忆模型请求并发','2');f.submit();await f.flush();
  const call=f.requests.find(c=>c.path==='/memory/model');assert.deepEqual(call.body,{providerId:providers[1].id,concurrency:2});assert.equal(f.requests.some(c=>c.path==='/memory/config'),false);
+});
+
+test('entry management is opt-in and ordinary users can search, select one and cancel with zero writes',async t=>{
+ const f=fixture();t.after(()=>f.close());await f.flush();assert.equal(f.requests.some(c=>c.path.startsWith('/memory/entries')),false);
+ f.click('管理记忆');await f.flush();assert.match(f.text(),/喜欢绿茶/);assert.ok(f.field('选择第1条记忆'));
+ f.click('删除第1条记忆');assert.match(f.text(),/删除这 1 条记忆/);f.click('取消删除');assert.equal(f.button('确认删除 1 条记忆'),undefined);
+ f.change('搜索记忆内容','科幻');f.submit();await f.flush();assert.doesNotMatch(f.text(),/喜欢绿茶/);assert.match(f.text(),/喜欢看科幻/);
+ assert.equal(f.requests.filter(c=>c.method!=='GET').length,0);
+});
+
+test('multi-delete binds IDs and fingerprints to the displayed epoch and consumes a confirmation once',async t=>{
+ const gate=deferred(),f=fixture({request:c=>c.path==='/memory/entries/delete'?gate.promise:undefined});t.after(()=>{gate.resolve({});f.close();});await f.flush();
+ f.click('管理记忆');await f.flush();f.click('全选本页');f.click('删除所选');
+ const confirm=f.button('确认删除 2 条记忆').props.onClick;confirm();confirm();f.render();
+ const calls=f.requests.filter(c=>c.path==='/memory/entries/delete');assert.equal(calls.length,1);assert.deepEqual(calls[0].body,{epoch:1,entries:entryRows.map(({id,fingerprint})=>({id,fingerprint}))});
+ gate.resolve({});await f.flush();confirm();await f.flush();assert.equal(f.requests.filter(c=>c.path==='/memory/entries/delete').length,1);
+});
+
+test('pagination uses the applied search and clears old selections and confirmations',async t=>{
+ const rows=Array.from({length:35},(_,i)=>({...entryRows[0],id:'synthetic-'+i,content:'合成条目 '+i}));
+ const f=fixture({entryRows:rows});t.after(()=>f.close());await f.flush();f.click('管理记忆');await f.flush();f.change('选择第1条记忆',true);f.click('删除所选');
+ const stale=f.button('确认删除 1 条记忆').props.onClick;f.click('取消删除');f.change('搜索记忆内容','未提交的搜索');f.click('下一页');await f.flush();
+ assert.match(f.text(),/31–35/);assert.equal(f.button('删除所选').props.disabled,true);assert.ok(f.field('选择第31条记忆'));stale();await f.flush();assert.equal(f.requests.some(c=>c.path==='/memory/entries/delete'),false);
+ const page=f.requests.filter(c=>c.path.startsWith('/memory/entries?')).at(-1);const query=new URL('http://fixture'+page.path).searchParams;assert.equal(query.get('q'),'');assert.equal(query.get('cursor'),'30');
+});
+
+test('unknown selective-delete delivery never retries on polling, and changed sessions fence captured confirms',async t=>{
+ const f=fixture({request:c=>{if(c.path==='/memory/entries/delete')throw Error('删除送达状态未知，请刷新列表确认');}});t.after(()=>f.close());await f.flush();
+ f.click('管理记忆');await f.flush();f.click('删除第1条记忆');const confirm=f.button('确认删除 1 条记忆').props.onClick;confirm();await f.flush();assert.match(f.text(),/送达状态未知/);f.tick();await f.flush();confirm();await f.flush();assert.equal(f.requests.filter(c=>c.path==='/memory/entries/delete').length,1);
+ f.click('删除第1条记忆');const retired=f.button('确认删除 1 条记忆').props.onClick;f.session();retired();await f.flush();assert.equal(f.requests.filter(c=>c.path==='/memory/entries/delete').length,1);
+});
+
+test('late memory entry lists cannot expose a previous session after unmount',async t=>{
+ const gate=deferred(),f=fixture({request:c=>c.path.startsWith('/memory/entries?')?gate.promise:undefined});t.after(()=>{gate.resolve({epoch:1,entries:entryRows});f.close();});await f.flush();
+ f.click('管理记忆');f.session();f.close();gate.resolve({epoch:1,entries:entryRows});await f.flush();assert.equal(f.afterUnmountUpdates,0);
 });
