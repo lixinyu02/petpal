@@ -3,7 +3,7 @@
 - Date: 2026-10-25
 - Complexity: L2
 - Related design: 2026-10-25-cloud-admin-design.md
-- Current status: issue-3 in_progress
+- Current status: completed (权限/状态修复；K3s PID 阻塞见验收报告)
 
 ## issue-1
 - ID: issue-1
@@ -23,7 +23,7 @@
 - 验收标准: 普通账号隐藏新建且POST/恢复start被拒绝，管理员正常，已有环境保留
 - 状态: completed
 - 验证方式: 111 项服务/API/实际 TSX/平台/互联/桌面回归：110 通过、1 条条件跳过。涵盖两种来源直接创建403、未完成start403、降权异步边界、旧事件、未知回执恢复、已有环境启停、PID错误可见和隐藏入口。TypeScript 通过；Chrome 在 issue-3 验收。
-- commit: 本 issue 提交
+- commit: 8ac16bc
 
 ## issue-3
 - ID: issue-3
@@ -31,6 +31,6 @@
 - 范围: 网页/服务、Github提交、正式接口只读和拒绝验收
 - 依赖: issue-2
 - 验收标准: 正式策略生效且用户/记忆/下载/旧云端资料保留
-- 状态: in_progress
-- 验证方式: 类型/构建/公网摘要、备份与业务检查
-- commit: pending
+- 状态: completed
+- 验证方式: 110通过/1条件跳过，TypeScript/Vite/OpenUI通过；正式zut创建和pending-start403、匿名401、管理员400无副作用，Chrome0创建入口且pending启动disabled；48公网资源完整SHA，用户/记忆/63下载/原云端身份保留。K3s PID仍未通过，未创建/启动资源，详见 cloud-admin-acceptance.md。
+- commit: 本 issue 提交
